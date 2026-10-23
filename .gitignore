@@ -10,3 +10,5 @@ build-tests/
 *.sqlite-*
 *.log
 coverage/
+__pycache__/
+*.pyc

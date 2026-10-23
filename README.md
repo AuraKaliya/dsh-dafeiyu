@@ -31,6 +31,8 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 
 - [架构与开发决策](docs/architecture.md)
 - [记忆、行为时间线、压缩和检索](docs/memory.md)
+- [记忆能力插件完整开发方案（2026-10-23）](docs/memory-plugin-plan.md)
+- [中文记忆 embedding 本机实测与选型](docs/embedding-benchmark-2026-10-23.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)

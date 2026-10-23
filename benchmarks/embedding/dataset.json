@@ -1,0 +1,1174 @@
+{
+  "version": 1,
+  "notice": "全部人物、项目、事件和数据均为本次评测虚构。标签在模型运行前冻结；不是线上记忆。",
+  "documents": [
+    {
+      "id": "m01",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户希望收到结论后再看解释，回复开头直接给结果，避免先铺垫很长背景。"
+    },
+    {
+      "id": "d01",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户写小说时喜欢先铺陈环境，再慢慢揭示故事的结果。"
+    },
+    {
+      "id": "m02",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户晚上十点以后通常休息，非紧急的主动提醒应留到次日上午。"
+    },
+    {
+      "id": "d02",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户早上十点开始处理工作邮件，紧急故障仍需要即时提醒。"
+    },
+    {
+      "id": "m03",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户喝咖啡后容易失眠，晚餐后更愿意选择温水。"
+    },
+    {
+      "id": "d03",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户认为咖啡香气适合做甜点，但没有表示要在睡前喝咖啡。"
+    },
+    {
+      "id": "m04",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "活动报名材料必须先保存为草稿，用户核对名单以后才允许正式发布。"
+    },
+    {
+      "id": "d04",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "活动结束后可以发布合影，照片不需要使用报名草稿模板。"
+    },
+    {
+      "id": "m05",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户希望调试期间先在独立目录复现问题，验证后再考虑替换实际使用的插件。"
+    },
+    {
+      "id": "d05",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "正式插件的安装目录每天做备份，用于发生故障后恢复。"
+    },
+    {
+      "id": "m06",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户不希望每次普通记忆更新都被询问确认；明确且有证据的信息可自动整理。"
+    },
+    {
+      "id": "d06",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "涉及删除整个项目时必须核对目标，不能把普通整理当作删除授权。"
+    },
+    {
+      "id": "m07",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "文本能力测试已通过，但图片内容理解没有接入；只能记录图片到达，不能描述画面。"
+    },
+    {
+      "id": "d07",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "测试图片成功发送到机器人，所以传输层已经能够接收附件。"
+    },
+    {
+      "id": "m08",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "执行器报告文件已写入，但平台发送接口超时，是否交付给用户仍然未知。"
+    },
+    {
+      "id": "d08",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "执行器成功生成报告文件，文件位于本地输出目录，可以稍后查看。"
+    },
+    {
+      "id": "m09",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "字幕读取只得到文字内容，不能证明系统看过视频中的画面或听过声音。"
+    },
+    {
+      "id": "d09",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "视频页面提供字幕下载，同时显示分辨率与视频时长。"
+    },
+    {
+      "id": "m10",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "青禾说“我再也不写代码啦”是在编程比赛失利后开玩笑，随后仍继续修改程序。"
+    },
+    {
+      "id": "d10",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "青禾认真决定不再参加下周的编程比赛，已退出报名。"
+    },
+    {
+      "id": "m11",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "黎星转述朋友喜欢辛辣食物；黎星本人明确说自己不吃辣。"
+    },
+    {
+      "id": "d11",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "黎星推荐了一家川菜馆给朋友，因为朋友喜欢辣味。"
+    },
+    {
+      "id": "m12",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "机器人此前猜测用户住在海边，这没有得到用户确认，不能写成已证实的居住信息。"
+    },
+    {
+      "id": "d12",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户分享了一张海边照片，说照片拍于旅行期间。"
+    },
+    {
+      "id": "m13",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "项目代号棠雨427对应中文索引适配；验收要求两字人名能够命中。"
+    },
+    {
+      "id": "d13",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "项目代号棠雨472对应图片下载缓存；验收要求断点续传成功。"
+    },
+    {
+      "id": "m14",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "错误 E_CONN_214 表示连接握手超时，处理方式是检查端口和本地代理。"
+    },
+    {
+      "id": "d14",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "错误 E_AUTH_214 表示账号鉴权失败，处理方式是重新检查授权状态。"
+    },
+    {
+      "id": "m15",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "插件 memo-index 的配置键 refresh_interval 控制后台增量索引的刷新间隔。"
+    },
+    {
+      "id": "d15",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "插件 memo-cache 的配置键 expire_interval 控制缓存条目的失效时间。"
+    },
+    {
+      "id": "m16",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "任务单 R-8306 的目标是修复引用消息定位，任务单 R-8360 则负责群成员列表刷新。"
+    },
+    {
+      "id": "d16",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "任务单 R-8308 修复引用附件预览，R-8368 修复群成员头像显示。"
+    },
+    {
+      "id": "m17",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "10月12日的首次连接测试失败；10月13日调整端口后复测通过，连接故障已修复。"
+    },
+    {
+      "id": "d17",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "10月12日记录显示连接失败，建议检查端口并安排后续复测。"
+    },
+    {
+      "id": "m18",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "周三发布计划已改到周五下午，周三仅进行内部演示，不对外发布。"
+    },
+    {
+      "id": "d18",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "最初的活动计划写着周三下午发布，并准备了宣传海报。"
+    },
+    {
+      "id": "m19",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "上周用户喜欢收到详细步骤，本周用户更正：日常问题只要简短结论，复杂故障再展开。"
+    },
+    {
+      "id": "d19",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "上周聊天中用户要求每个回答都附完整操作步骤。"
+    },
+    {
+      "id": "m20",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "蓝铃任务仍未结束：下载已完成，但校验和核对尚未执行，下一步应进行完整性校验。"
+    },
+    {
+      "id": "d20",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "蓝铃任务的下载日志已经打印 completed，下载速度正常。"
+    },
+    {
+      "id": "m21",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "周一缓存清理后延迟下降，但周二故障再次出现；周三确认根因是重复的后台扫描。"
+    },
+    {
+      "id": "d21",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "周一记录称清理缓存后问题消失，因此当时暂时判断缓存是原因。"
+    },
+    {
+      "id": "m22",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "备份计划由每日一次调整为每周三一次，变更只影响资料库，不改变聊天记录保存方式。"
+    },
+    {
+      "id": "d22",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "旧资料库配置写着每天晚上执行一次备份。"
+    },
+    {
+      "id": "m23",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "把连续的相同事件合并排队，等短暂停顿再提炼记忆，可以减少碎片分析和重复工作。"
+    },
+    {
+      "id": "d23",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "同一消息的重复投递使用消息标识去重，避免机器人发送多次回复。"
+    },
+    {
+      "id": "m24",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "记忆条目保存 sourceRefs，里面记录原始会话编号和事件序号；摘要可据此回查原话。"
+    },
+    {
+      "id": "d24",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "记忆条目保存 embedding，用于根据语义相似度排序候选。"
+    },
+    {
+      "id": "m25",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "长时间未使用的知识可以降低当前召回优先级，但其来源证据不会因此变得不可信。"
+    },
+    {
+      "id": "d25",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "错误知识应标记失效，不能只把相关性分数调低后继续作为事实使用。"
+    },
+    {
+      "id": "m26",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "当前用户正在排查消息引用故障，应优先检索引用定位、消息编号和关联操作记录。"
+    },
+    {
+      "id": "d26",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户长期喜欢桂花香气，这是一条稳定偏好，来源已验证。"
+    },
+    {
+      "id": "m27",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "下载失败事件和重试成功事件通过同一个 operationId 关联，时间接近的其他操作不属于这次重试。"
+    },
+    {
+      "id": "d27",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "两次图片上传相隔一秒，但分别来自不同任务，时间接近并不代表存在因果。"
+    },
+    {
+      "id": "m28",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户说“上次那个表格”时，工作状态中的当前任务指向茶会报名表；餐费表属于另一已完成任务。"
+    },
+    {
+      "id": "d28",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "最近修改时间最新的表格是餐费表，但它与正在讨论的茶会名单无关。"
+    },
+    {
+      "id": "m29",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "群聊开关 mentionRequired=true 表示必须被真正提及才触发；普通文本里的相似名字不保证满足该条件。"
+    },
+    {
+      "id": "d29",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "日志中的 mentions 数组保存实际提及对象，displayName 保存群成员显示名称。"
+    },
+    {
+      "id": "m30",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "索引 worker 采用幂等 job key，同一批次重复消费只更新一次版本。"
+    },
+    {
+      "id": "d30",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "聊天 worker 按 conversation key 串行执行，避免同一会话并发回答。"
+    },
+    {
+      "id": "m31",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "context packet 绑定 scope 和 revision，后台迟到结果必须重新验证，不能覆盖用户刚给出的更正。"
+    },
+    {
+      "id": "d31",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "context window 表示模型输入容量，达到阈值后需要执行压缩。"
+    },
+    {
+      "id": "m32",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "向量缓存键包含模型版本和文本哈希；切换 embedding 模型后需要重新计算，旧向量不能直接混用。"
+    },
+    {
+      "id": "d32",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "检索结果缓存键包含 query 和 scope，避免不同会话共享同一份候选。"
+    },
+    {
+      "id": "m33",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "阿岚负责整理会议纪要，阿澜负责核对报销单；两人是不同成员。"
+    },
+    {
+      "id": "d33",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "阿岚与阿澜都参加了会议，签到表把他们列在相邻两行。"
+    },
+    {
+      "id": "m34",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "小满是项目中的测试环境名称；同名群成员小满是摄影爱好者，两者不可合并。"
+    },
+    {
+      "id": "d34",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "测试环境小雨负责演示新功能，小满负责回归检查。"
+    },
+    {
+      "id": "m35",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "月舟负责检查日志缺失，岳舟负责修改界面颜色，二者职责不同。"
+    },
+    {
+      "id": "d35",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "月舟和岳舟都拥有项目查看权限，可访问设计文档。"
+    },
+    {
+      "id": "m36",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "团队约定“桥”指 QQ 接入插件，“库”指记忆存储模块，不是实际建筑。"
+    },
+    {
+      "id": "d36",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "资料里有一张古桥照片，被保存到旅行图库中。"
+    },
+    {
+      "id": "chain_a_0",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "04月03日银杏插件发消息失败，错误码为 SEND_QUEUE_FULL。"
+    },
+    {
+      "id": "chain_a_1",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "04月04日银杏插件改为按会话排队，04月05日连续三次发送验收通过。"
+    },
+    {
+      "id": "chain_b_0",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户为晨露计划提出要求：导出的报告必须包含原文出处。"
+    },
+    {
+      "id": "chain_b_1",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "晨露计划的验收记录显示标题和日期正确，但缺少来源引用，因此未通过。"
+    },
+    {
+      "id": "chain_c_0",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "落叶索引后台任务每小时重建一次，曾导致大量无变化资料重复向量化。"
+    },
+    {
+      "id": "chain_c_1",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "落叶优化方案增加内容哈希缓存，只为变化的条目重新生成向量。"
+    },
+    {
+      "id": "chain_d_0",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "星桥活动原计划周日晚举行，用户随后要求优先考虑室外天气。"
+    },
+    {
+      "id": "chain_d_1",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "天气预报显示周日晚有暴雨，活动负责人因此将星桥活动改到周六上午。"
+    },
+    {
+      "id": "f0",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "茶会的杯子采用淡绿色陶瓷，已经摆放在储物架第二层。"
+    },
+    {
+      "id": "f1",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "天文小组记录了昨晚的月相和云量，望远镜没有发生故障。"
+    },
+    {
+      "id": "f2",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "乐团排练改用电子节拍器，鼓手正在练习慢速乐句。"
+    },
+    {
+      "id": "f3",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "植物角的薄荷需要浇水，仙人掌本周不必补水。"
+    },
+    {
+      "id": "f4",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "旅行清单包含雨伞、充电器和纸质地图。"
+    },
+    {
+      "id": "f5",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "读书会本月讨论侦探小说，下月讨论历史传记。"
+    },
+    {
+      "id": "f6",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "桌面壁纸换成了山间日出，图标位置保持不变。"
+    },
+    {
+      "id": "f7",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "用户把旧键盘送去维修，暂时使用备用键盘。"
+    },
+    {
+      "id": "f8",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "快递已到驿站，收件时间可以安排在下午。"
+    },
+    {
+      "id": "f9",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "棋社对局采用十五分钟限时，平局双方各得一分。"
+    },
+    {
+      "id": "f10",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "餐厅的桂花糕已经售完，仍然供应红豆汤。"
+    },
+    {
+      "id": "f11",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "展览门票需要提前预约，儿童票享受折扣。"
+    },
+    {
+      "id": "f12",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "音乐播放列表新增三首钢琴曲，原有曲目没有删除。"
+    },
+    {
+      "id": "f13",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "天台的灯泡需要更换，维修人员明天下午到场。"
+    },
+    {
+      "id": "f14",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "文件夹里的秋游照片按拍摄日期排列，封面使用树林图片。"
+    },
+    {
+      "id": "f15",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "剪辑项目采用每秒三十帧，音轨包含背景音乐和旁白。"
+    },
+    {
+      "id": "secret",
+      "scope": "other",
+      "status": "active",
+      "deleted": false,
+      "text": "霜湾计划的私人暗号是珊瑚522，只在另一个私聊中约定。"
+    },
+    {
+      "id": "deleted",
+      "scope": "test",
+      "status": "active",
+      "deleted": true,
+      "text": "琉璃计划的旧约定是每晚发送提醒，用户已逻辑删除这条记忆。"
+    },
+    {
+      "id": "old",
+      "scope": "test",
+      "status": "superseded",
+      "deleted": false,
+      "text": "青苔项目的代号原为雾松314，该版本已被新约定替代。"
+    },
+    {
+      "id": "new",
+      "scope": "test",
+      "status": "active",
+      "deleted": false,
+      "text": "青苔项目的当前代号是暮川926，替代先前的雾松314。"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q01",
+      "category": "paraphrase",
+      "text": "回答之前需要先铺很多背景吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m01"
+      ]
+    },
+    {
+      "id": "q02",
+      "category": "paraphrase",
+      "text": "夜里十一点想到一件不着急的事，什么时候告诉用户合适？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m02"
+      ]
+    },
+    {
+      "id": "q03",
+      "category": "paraphrase",
+      "text": "饭后给用户选饮料，哪种不会影响他睡觉？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m03"
+      ]
+    },
+    {
+      "id": "q04",
+      "category": "paraphrase",
+      "text": "报名表整理完就能直接发出去吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m04"
+      ]
+    },
+    {
+      "id": "q05",
+      "category": "paraphrase",
+      "text": "修复代码应该先在哪里试，才能不影响正在用的版本？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m05"
+      ]
+    },
+    {
+      "id": "q06",
+      "category": "paraphrase",
+      "text": "每记住一个普通偏好都要打断用户问一次吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m06"
+      ]
+    },
+    {
+      "id": "q07",
+      "category": "negation",
+      "text": "收到图片后，现在是否能辨认里面画的东西？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m07"
+      ]
+    },
+    {
+      "id": "q08",
+      "category": "negation",
+      "text": "报告生成成功就能说明用户已经收到吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m08"
+      ]
+    },
+    {
+      "id": "q09",
+      "category": "negation",
+      "text": "拿到字幕之后能说自己看懂了视频画面吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m09"
+      ]
+    },
+    {
+      "id": "q10",
+      "category": "negation",
+      "text": "青禾是否真的决定永久停止编程？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m10"
+      ]
+    },
+    {
+      "id": "q11",
+      "category": "negation",
+      "text": "黎星本人的饮食口味是什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m11"
+      ]
+    },
+    {
+      "id": "q12",
+      "category": "negation",
+      "text": "能把用户常住海滨城市当作确定事实吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m12"
+      ]
+    },
+    {
+      "id": "q13",
+      "category": "identifier",
+      "text": "棠雨427的验收关注什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m13"
+      ]
+    },
+    {
+      "id": "q14",
+      "category": "identifier",
+      "text": "E_CONN_214 应该从哪里开始排查？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m14"
+      ]
+    },
+    {
+      "id": "q15",
+      "category": "identifier",
+      "text": "memo-index 里哪个配置决定多久补一次索引？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m15"
+      ]
+    },
+    {
+      "id": "q16",
+      "category": "identifier",
+      "text": "R-8306 处理的具体问题是什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m16"
+      ]
+    },
+    {
+      "id": "q17",
+      "category": "temporal",
+      "text": "连接问题后来解决了吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m17"
+      ]
+    },
+    {
+      "id": "q18",
+      "category": "temporal",
+      "text": "正式发布现在安排在哪天？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m18"
+      ]
+    },
+    {
+      "id": "q19",
+      "category": "temporal",
+      "text": "处理今天的日常小问题，应该按哪种回复长度？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m19"
+      ]
+    },
+    {
+      "id": "q20",
+      "category": "temporal",
+      "text": "蓝铃现在算全部完成了吗，接着做什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m20"
+      ]
+    },
+    {
+      "id": "q21",
+      "category": "temporal",
+      "text": "最终查明延迟反复出现的原因是什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m21"
+      ]
+    },
+    {
+      "id": "q22",
+      "category": "temporal",
+      "text": "资料库目前多久备份一次？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m22"
+      ]
+    },
+    {
+      "id": "q23",
+      "category": "association",
+      "text": "用户连续发很多补充句子时，怎样避免记忆分析反复重做？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m23"
+      ]
+    },
+    {
+      "id": "q24",
+      "category": "association",
+      "text": "想核对某条总结是不是曲解原话，需要用哪个信息？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m24"
+      ]
+    },
+    {
+      "id": "q25",
+      "category": "association",
+      "text": "一条事实半年没用过，就代表它的可信度下降了吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m25"
+      ]
+    },
+    {
+      "id": "q26",
+      "category": "association",
+      "text": "同样是真实记忆，为什么排错时不该把香味偏好一起塞进上下文？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m26"
+      ]
+    },
+    {
+      "id": "q27",
+      "category": "association",
+      "text": "要判断某次重试是不是修复了原来的失败，应沿什么标识找？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m27"
+      ]
+    },
+    {
+      "id": "q28",
+      "category": "association",
+      "text": "继续讨论茶会名单时提到上次的表格，应联系哪份材料？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m28"
+      ]
+    },
+    {
+      "id": "q29",
+      "category": "mixed",
+      "text": "mentionRequired 开着时，只写一个昵称就一定会回复吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m29"
+      ]
+    },
+    {
+      "id": "q30",
+      "category": "mixed",
+      "text": "index worker 崩溃重试后，如何避免把一批记忆写两遍？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m30"
+      ]
+    },
+    {
+      "id": "q31",
+      "category": "mixed",
+      "text": "为什么异步分析结果返回后不能直接塞进当前 context？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m31"
+      ]
+    },
+    {
+      "id": "q32",
+      "category": "mixed",
+      "text": "升级 embedding 后，原来存好的数字数组还能直接拿来比相似度吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m32"
+      ]
+    },
+    {
+      "id": "q33",
+      "category": "short_name",
+      "text": "报销单应该找阿澜还是阿岚？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m33"
+      ]
+    },
+    {
+      "id": "q34",
+      "category": "short_name",
+      "text": "聊天里出现小满，就能认为是在指那个测试环境吗？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m34"
+      ]
+    },
+    {
+      "id": "q35",
+      "category": "short_name",
+      "text": "谁在查漏掉的日志记录？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m35"
+      ]
+    },
+    {
+      "id": "q36",
+      "category": "short_name",
+      "text": "这次开发讨论说桥断了，优先检查哪个模块？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "m36"
+      ]
+    },
+    {
+      "id": "chain_a",
+      "category": "multi_evidence",
+      "text": "银杏插件当时出了什么问题，后来采取了什么措施，有没有验证结果？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "chain_a_0",
+        "chain_a_1"
+      ]
+    },
+    {
+      "id": "chain_b",
+      "category": "multi_evidence",
+      "text": "晨露报告为什么没通过验收，违反了哪项约定？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "chain_b_0",
+        "chain_b_1"
+      ]
+    },
+    {
+      "id": "chain_c",
+      "category": "multi_evidence",
+      "text": "落叶索引为什么浪费计算，后续优化怎样解决？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "chain_c_0",
+        "chain_c_1"
+      ]
+    },
+    {
+      "id": "chain_d",
+      "category": "multi_evidence",
+      "text": "星桥活动为什么提前，新的安排是什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "chain_d_0",
+        "chain_d_1"
+      ]
+    },
+    {
+      "id": "scope_guard",
+      "category": "no_answer",
+      "text": "霜湾计划在其他私聊里约定的暗号是什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": []
+    },
+    {
+      "id": "deleted_guard",
+      "category": "no_answer",
+      "text": "琉璃计划目前是否要求每晚发送提醒？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": []
+    },
+    {
+      "id": "missing_weather",
+      "category": "no_answer",
+      "text": "明天南汐岛的准确气温是多少？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": []
+    },
+    {
+      "id": "missing_account",
+      "category": "no_answer",
+      "text": "用户银行账户的余额是多少？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": []
+    },
+    {
+      "id": "current_version",
+      "category": "state_filter",
+      "text": "青苔项目现在的代号是什么？",
+      "scope": "test",
+      "mode": "normal",
+      "relevant": [
+        "new"
+      ]
+    },
+    {
+      "id": "deleted_lookup",
+      "category": "state_filter",
+      "text": "找回琉璃计划那条被删除的提醒约定，只查看不恢复。",
+      "scope": "test",
+      "mode": "deleted",
+      "relevant": [
+        "deleted"
+      ]
+    },
+    {
+      "id": "historical_lookup",
+      "category": "state_filter",
+      "text": "青苔项目更名前用过哪个旧代号？",
+      "scope": "test",
+      "mode": "history",
+      "relevant": [
+        "old"
+      ]
+    }
+  ]
+}

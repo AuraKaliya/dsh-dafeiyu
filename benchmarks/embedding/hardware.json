@@ -1,0 +1,7 @@
+{
+  "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor          ",
+  "cores": 16,
+  "logicalProcessors": 32,
+  "memoryBytes": 33447636992,
+  "gpu": "NVIDIA GeForce RTX 5070 Ti, 610.88, 16303 MiB"
+}
