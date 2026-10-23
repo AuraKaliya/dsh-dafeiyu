@@ -76,6 +76,19 @@ export class DafeiyuService extends Service {
     context.signal.throwIfAborted();
     return scope;
   }
+  /** Host-only durable authorization for read/analyze/commit work, never an ActionContext. */
+  issueAnalysisGrant(context: ActionContext): string { return this.journal.issueAnalysisGrant(this.scopeFor(context)); }
+  analysisScope(grantId: string): OperationScope {
+    this.assertOpen();
+    const scope = this.journal.analysisGrant(this.config.agentId,grantId);
+    if (!scope || !this.journal.sessionFor(scope)) throw new Error('Analysis authorization unavailable');
+    return Object.freeze(scope);
+  }
+  revokeAnalysisGrant(grantId: string): void { this.journal.revokeAnalysisGrant(this.config.agentId,grantId); }
+  analysisModelRoute() {
+    return Object.freeze({provider:this.config.provider,model:this.config.model,
+      ...(this.config.reasoningEffort ? {reasoningEffort:this.config.reasoningEffort} : {})});
+  }
   registerExtension(extension: Extension): ExtensionHandle {
     this.assertOpen();
     if (extension.apiVersion !== API_VERSION || extension.agentId !== this.config.agentId) throw new Error('Incompatible extension interface or agent binding');

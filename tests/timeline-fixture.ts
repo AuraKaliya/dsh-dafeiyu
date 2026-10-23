@@ -12,13 +12,15 @@ import type { Response } from './harness.js';
 export async function timelineFixture(existingRoot?: string) {
   const root=existingRoot??await mkdtemp(join(tmpdir(),'dafeiyu-timeline-'));
   let response:Response=()=>textReply('正常回复');
-  const h=await harness(root,options=>response(options));
+  let analysisResponse:Response=()=>textReply(JSON.stringify({schemaVersion:1,overview:'没有候选',gaps:[],claims:[]}));
+  const h=await harness(root,options=>String(options.sessionId).startsWith('memory-analysis-')?analysisResponse(options):response(options));
   const queryFiber=await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});
   const timelineFiber=await h.ctx.plugin(Timeline,{agentId:'dafeiyu',maxPageChars:2000});
   const timeline=h.ctx.dafeiyuTimeline;
   let id=0;
   return {...h,root,timeline,timelineFiber,
     setResponse:(next:Response)=>{response=next;},
+    setAnalysisResponse:(next:Response)=>{analysisResponse=next;},
     seed:async(room:string,text='一条原始消息')=>{
       response=()=>textReply('原始最终回复');
       const receipt=h.simulator.send(room,text,{id:crypto.randomUUID()});await h.core.whenIdle();return h.core.journal.get(receipt.id);

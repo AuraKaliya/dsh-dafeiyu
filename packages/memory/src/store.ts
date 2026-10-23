@@ -82,6 +82,15 @@ export class MemoryStore {
     const row = this.db.prepare('SELECT generation FROM scope_generations WHERE agent_id=? AND route=?').get(scope.agentId, scope.route);
     return row ? integer(row.generation) : 0;
   }
+  /** Conservative tombstone barrier: automatic extraction cannot resurrect deleted source material. */
+  suppressedEvidence(scope: TimelineScope, contentHash: string): boolean {
+    for(const row of this.db.prepare('SELECT r.id,r.revision,r.body FROM memory_revisions r JOIN memory_items i ON i.id=r.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,scope.route)) {
+      if(!this.lineage(scope,string(row.id),integer(row.revision)).deleted)continue;
+      const revision=revisionSchema.parse(JSON.parse(string(row.body)));
+      if(revision.contentHash===contentHash||revision.sources.some(source=>source.contentHash===contentHash))return true;
+    }
+    return false;
+  }
   /** Trusted indexer enumeration: sources and tombstones are checked before any text is yielded. */
   *current(scope: TimelineScope): Generator<MemoryView> {
     for (const row of this.db.prepare('SELECT id FROM memory_items WHERE agent_id=? AND route=? ORDER BY ordinal')
@@ -149,6 +158,13 @@ export class MemoryStore {
       if (!parent || parent.contentHash !== source.contentHash) throw new MemoryError('source_unavailable');
     }
   }
+  /** Recover a cross-store commit acknowledgement without disclosing a remembered text. */
+  receipt(scope: TimelineScope, command: Command): MutationReceipt | null {
+    const row=this.db.prepare('SELECT fingerprint,receipt FROM requests WHERE agent_id=? AND route=? AND request_id=?').get(scope.agentId,scope.route,command.requestId);
+    if(!row)return null;
+    if(row.fingerprint!==hash(command))throw new MemoryError('idempotency_conflict');
+    return receiptSchema.parse(JSON.parse(string(row.receipt)));
+  }
   mutate(scope: OperationScope, command: Command): MutationReceipt & { duplicate: boolean } {
     return this.transaction(() => {
       const fingerprint = hash(command);
@@ -159,6 +175,7 @@ export class MemoryStore {
         // Receipts contain no text. Replaying a request cannot disclose a subsequently deleted version.
         return { ...receiptSchema.parse(JSON.parse(string(old.receipt))), duplicate: true };
       }
+      if(command.expectedGeneration!==undefined && command.expectedGeneration!==this.generation(scope))throw new MemoryError('version_conflict');
       let item: Item;
       if (command.action === 'create') {
         this.validateSources(scope, command.value);
@@ -182,7 +199,7 @@ export class MemoryStore {
       if (command.action === 'create' || command.action === 'revise') {
         const value = command.value;
         const body: Revision = revisionSchema.parse({ ...value, id: item.id, revision: item.head,
-          contentHash: hash(value), createdAt: new Date().toISOString(), analysisStatus: 'not_analyzed' });
+          contentHash: hash(value), createdAt: new Date().toISOString(), analysisStatus: value.analysis ? 'evidence_checked' : 'not_analyzed' });
         this.db.prepare('INSERT INTO memory_revisions(id,revision,body,event_id) VALUES(?,?,?,?)').run(item.id, item.head, JSON.stringify(body), eventId);
         for (const source of value.sources) if (source.kind === 'memory') {
           this.db.prepare('INSERT OR IGNORE INTO dependencies(id,revision,parent_id,parent_revision) VALUES(?,?,?,?)')
@@ -196,11 +213,11 @@ export class MemoryStore {
         data: { memoryId: item.id, revision: item.head, version: item.version, deleted: item.deleted, deletionScope: 'memory-item-and-revisions' } };
       this.db.prepare('INSERT INTO memory_events(id,body,reason) VALUES(?,?,?)').run(eventId, JSON.stringify(event), 'reason' in command ? command.reason : '');
       this.db.prepare('INSERT INTO outbox(event_id) VALUES(?)').run(eventId);
-      const receipt: MutationReceipt = { id: item.id, version: item.version, revision: item.head, eventId };
-      this.db.prepare('INSERT INTO requests(agent_id,route,request_id,fingerprint,receipt) VALUES(?,?,?,?,?)')
-        .run(scope.agentId, scope.route, command.requestId, fingerprint, JSON.stringify(receipt));
       this.db.prepare('INSERT INTO scope_generations(agent_id,route,generation) VALUES(?,?,1) ON CONFLICT(agent_id,route) DO UPDATE SET generation=generation+1')
         .run(scope.agentId, scope.route);
+      const receipt: MutationReceipt = { id: item.id, version: item.version, revision: item.head, eventId, generation:this.generation(scope) };
+      this.db.prepare('INSERT INTO requests(agent_id,route,request_id,fingerprint,receipt) VALUES(?,?,?,?,?)')
+        .run(scope.agentId, scope.route, command.requestId, fingerprint, JSON.stringify(receipt));
       return { ...receipt, duplicate: false };
     });
   }

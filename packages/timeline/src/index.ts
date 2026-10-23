@@ -92,6 +92,20 @@ export class TimelineService extends Service {
   }
   async open(context: ActionContext, raw: unknown) {
     const scope = this.scope(context);
+    return this.openScoped(scope,raw,context.signal,()=>this.scope(context));
+  }
+  /** Only a core-issued durable analysis grant can reach the background reader. */
+  async openForAnalysis(grantId: string, raw: unknown, signal: AbortSignal) {
+    const guard = () => {
+      if(this.closed) throw new Error('Timeline capability is unregistered');
+      signal.throwIfAborted();
+      const scope=this.ctx.dafeiyu.analysisScope(grantId);
+      if(scope.agentId!==this.config.agentId)throw new Error('Wrong timeline agent');
+      return scope;
+    };
+    return this.openScoped(guard(),raw,signal,guard);
+  }
+  private async openScoped(scope: OperationScope, raw: unknown, signal: AbortSignal, guard: () => OperationScope) {
     const input = openSchema.parse(raw);
     const eventMatch = eventPattern.exec(input.ref), sourceMatch = sourcePattern.exec(input.ref);
     if (!eventMatch && !sourceMatch) return { status:'invalid_reference' as const };
@@ -120,14 +134,14 @@ export class TimelineService extends Service {
       } else {
         if (source.seq === undefined) return { status:'not_found' as const };
         try {
-          const window = await this.ctx.sessionQuery.readEvent({ sessionId:SessionId(source.id),seq:SessionSeq(source.seq),before:0,after:0 },context.signal);
-          this.scope(context);
+          const window = await this.ctx.sessionQuery.readEvent({ sessionId:SessionId(source.id),seq:SessionSeq(source.seq),before:0,after:0 },signal);
+          guard();
           const projected = projectSession(window.target);
           if (!projected) return { status:'not_exported' as const };
           content = projected;
         } catch (error) {
-          context.signal.throwIfAborted();
-          this.scope(context);
+          signal.throwIfAborted();
+          guard();
           const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
           return { status: code.endsWith('NOT_FOUND') ? 'not_found' as const : 'source_unavailable' as const };
         }

@@ -45,6 +45,7 @@ export class Journal {
       CREATE INDEX IF NOT EXISTS events_route ON events(route,seq);
       CREATE INDEX IF NOT EXISTS events_trace ON events(trace_id,seq);
       CREATE TABLE IF NOT EXISTS ownership(singleton INTEGER PRIMARY KEY CHECK(singleton=1),pid INTEGER NOT NULL,nonce TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS analysis_grants(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,route TEXT NOT NULL,body TEXT NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
       CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'Events are append-only'); END;
       CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'Events are append-only'); END;
       PRAGMA user_version=1;
@@ -150,6 +151,24 @@ export class Journal {
   scopedEvent(scope: TimelineScope, id: string): EventRecord | null {
     const row = this.db.prepare(`SELECT seq,body FROM events WHERE ${this.scopePredicate()} AND id=?`).get(scope.route, scope.agentId, scope.route, id);
     return row ? this.eventRow(row) : null;
+  }
+  issueAnalysisGrant(scope: import('@dafeiyu/contracts').OperationScope): string {
+    return this.transaction(() => {
+      const id = randomUUID(), operationId = randomUUID();
+      const event = this.append({ agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId,
+        causedBy:scope.startedEventId,type:'analysis.authorized',plugin:'core',pluginVersion:'0.3.0',occurredAt:new Date().toISOString(),sources:[],data:{grantId:id} });
+      const grant = { agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId,startedEventId:event.id };
+      this.db.prepare('INSERT INTO analysis_grants(id,agent_id,route,body) VALUES(?,?,?,?)').run(id,scope.agentId,scope.route,JSON.stringify(grant));
+      return id;
+    });
+  }
+  analysisGrant(agentId: string, id: string) {
+    const row = this.db.prepare('SELECT body FROM analysis_grants WHERE id=? AND agent_id=? AND revoked=0').get(id,agentId);
+    if (!row) return null;
+    return z.strictObject({agentId:z.string(),route:z.string(),traceId:z.string(),operationId:z.string(),startedEventId:z.string()}).parse(JSON.parse(text(row.body)));
+  }
+  revokeAnalysisGrant(agentId: string, id: string): void {
+    this.db.prepare('UPDATE analysis_grants SET revoked=1 WHERE id=? AND agent_id=?').run(id,agentId);
   }
   private eventRow(row: Record<string, unknown>): EventRecord {
     const body = z.object({ schemaVersion: z.literal(1), id: z.string(), agentId: z.string(), route: z.string(), traceId: z.string(),

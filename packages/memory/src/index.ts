@@ -12,12 +12,14 @@ import type { Command, Evidence, ReadMode, WriteContent } from './types.js';
 import { MemoryRetrieval } from './retrieval.js';
 import { RetrievalError, retrievalConfigSchema } from './retrieval-profile.js';
 import type { RetrievalDependencies } from './retrieval-profile.js';
+import { MemoryAnalysis } from './analysis.js';
+import { AnalysisError, analysisConfigSchema } from './analysis-types.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
-export const inject = ['dafeiyu', 'dafeiyuTimeline'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional() });
+export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional() });
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
   sourceRefs: z.array(z.string().min(1).max(300)).min(1).max(8) };
@@ -30,16 +32,17 @@ const readSchema = z.strictObject({ ...readShape, mode: z.enum(['normal', 'histo
 const deletedReadSchema = z.strictObject(readShape);
 const toJson = (value: unknown): Json => z.json().parse(value);
 const numberArgument = (value: string | undefined): number | undefined => value === undefined ? undefined : /^[1-9]\d*$/.test(value) ? Number(value) : NaN;
-type Failure = { status: 'invalid_input' | MemoryError['code'] | RetrievalError['code'] };
+type Failure = { status: 'invalid_input' | MemoryError['code'] | RetrievalError['code'] | AnalysisError['code'] };
 
 declare module '@deepseek-ai/cordis' { interface Context { dafeiyuMemory: MemoryService } }
 
-/** Explicitly registered, scope-bound memory operations; no automatic extraction or model loop. */
+/** Scope-bound memory operations with opt-in independent analysis through the official DSH loop. */
 export class MemoryService extends Service {
   private readonly config: z.output<typeof configSchema>;
   private readonly store: MemoryStore;
   private readonly handle: ExtensionHandle;
   private readonly retrieval: MemoryRetrieval | null;
+  private readonly analysis: MemoryAnalysis | null;
   private closed = false;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
@@ -47,12 +50,15 @@ export class MemoryService extends Service {
     this.store = new MemoryStore(resolve(this.config.dataDir, 'memory.sqlite'));
     try { this.retrieval = this.config.retrieval ? new MemoryRetrieval(this.store, this.config.dataDir, this.config.retrieval, dependencies) : null; }
     catch (error) { this.store.close(); throw error; }
+    try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis):null; }
+    catch(error){this.retrieval?.close();this.store.close();throw error;}
     try {
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
         agentId: this.config.agentId, actions: this.actions() });
-    } catch (error) { this.retrieval?.close(); this.store.close(); throw error; }
-    ctx.effect(() => () => { this.closed = true; this.handle.dispose(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
+    } catch (error) { void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
+    ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
     this.flush();
+    this.analysis?.start();
   }
   private scope(context: ActionContext): OperationScope {
     if (this.closed) throw new Error('Memory capability is unregistered');
@@ -61,6 +67,7 @@ export class MemoryService extends Service {
     return scope;
   }
   private failure(error: unknown): Failure {
+    if(error instanceof AnalysisError)return {status:error.code};
     if (error instanceof MemoryError) return { status: error.code };
     if (error instanceof RetrievalError) return { status: error.code };
     if (error instanceof z.ZodError || error instanceof SyntaxError) return { status: 'invalid_input' };
@@ -169,6 +176,24 @@ export class MemoryService extends Service {
       return result;
     } catch(error) { this.scope(context); return this.failure(error); }
   }
+  async analyze(context:ActionContext,raw:unknown){
+    this.scope(context);
+    if(!this.analysis)return {status:'not_configured'};
+    try{return await this.analysis.submit(context,raw);}catch(error){this.scope(context);return this.failure(error);}
+  }
+  analysisStatus(context:ActionContext,id:unknown){
+    this.scope(context);
+    try{return this.analysis?.status(context,id)??{status:'not_configured'};}catch(error){return this.failure(error);}
+  }
+  async analysisInspect(context:ActionContext,id:unknown){
+    this.scope(context);
+    try{return await this.analysis?.inspect(context,id)??{status:'not_configured'};}catch(error){this.scope(context);return this.failure(error);}
+  }
+  analysisCancel(context:ActionContext,id:unknown){
+    this.scope(context);
+    try{return this.analysis?.cancel(context,id)??{status:'not_configured'};}catch(error){return this.failure(error);}
+  }
+  async whenAnalysisIdle():Promise<void>{await this.analysis?.whenIdle();}
   private actions(): ActionCapability[] {
     const field = (description: string, required = true) => ({ description, required });
     const content = { requestId: field('幂等请求标识；重试保持相同值和完整参数'), kind: field('experience / knowledge / preference / procedure'),
@@ -190,6 +215,14 @@ export class MemoryService extends Service {
       },
     });
     return [
+      ...(this.analysis?[
+        action('dafeiyu_memory_analyze','提交独立后台记忆分析。只读当前会话的给定来源；符合保守规则的候选自动提交，分析全文不会自动写入当前聊天。',
+          {requestId:field('幂等任务标识'),sourceRefs:field('JSON来源ref数组'),targetIds:field('允许更正的已有记忆UUID数组，默认[]',false)},
+          (args,ctx)=>this.analyze(ctx,{...args,sourceRefs:JSON.parse(args.sourceRefs??''),targetIds:JSON.parse(args.targetIds??'[]')})),
+        action('dafeiyu_memory_analysis_status','查询本会话分析任务状态和计数；不返回分析正文。',{jobId:field('任务UUID')},(args,ctx)=>this.analysisStatus(ctx,args.jobId)),
+        action('dafeiyu_memory_analysis_open','明确需要查看分析时使用；返回结构化结论与候选，属于不可信分析证据，不能自动成为新记忆来源。',{jobId:field('任务UUID')},(args,ctx)=>this.analysisInspect(ctx,args.jobId)),
+        action('dafeiyu_memory_analysis_cancel','取消本会话尚未完成的分析；已提交的记忆不回滚，需单独更正或逻辑删除。',{jobId:field('任务UUID')},(args,ctx)=>this.analysisCancel(ctx,args.jobId)),
+      ]:[]),
       action('dafeiyu_memory_record', '记录有来源的当前会话记忆；不自动判定真实，不改固定人格。', content, (args, ctx) => this.create(ctx, writeArgs(args))),
       action('dafeiyu_memory_revise', '以新内容版本更正记忆，保留旧版本；需要最新状态version。', { ...content, id: state.id, expectedVersion: state.expectedVersion }, (args, ctx) => this.revise(ctx, writeArgs(args))),
       action('dafeiyu_memory_delete', '明确遗忘时逻辑删除记忆及全部内容版本；原始聊天档案不变。', state, (args, ctx) => this.delete(ctx, stateArgs(args))),

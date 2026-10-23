@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const MEMORY_VERSION = '0.2.0';
+export const MEMORY_VERSION = '0.3.0';
 
 export const kindSchema = z.enum(['experience', 'knowledge', 'preference', 'procedure']);
 export const claimSchema = z.enum(['observation', 'self_report', 'reported_claim', 'inference']);
@@ -16,10 +16,11 @@ export const revisionSchema = z.strictObject({
   id: z.uuid(), revision: versionSchema, kind: kindSchema, claimType: claimSchema,
   content: z.string().min(1).max(8000), contentHash: hashSchema,
   sources: z.array(evidenceSchema).min(1).max(8), createdAt: z.iso.datetime(),
-  analysisStatus: z.literal('not_analyzed'),
+  analysisStatus: z.enum(['not_analyzed','evidence_checked']),
+  analysis: z.strictObject({jobId:z.uuid(),candidateId:z.uuid(),policyVersion:z.literal('literal-evidence-v1')}).optional(),
 });
 export type Revision = z.infer<typeof revisionSchema>;
-export const receiptSchema = z.strictObject({ id: z.uuid(), version: versionSchema, revision: versionSchema, eventId: z.uuid() });
+export const receiptSchema = z.strictObject({ id: z.uuid(), version: versionSchema, revision: versionSchema, eventId: z.uuid(), generation:versionSchema.optional() });
 export type MutationReceipt = z.infer<typeof receiptSchema>;
 export type ReadMode = 'normal' | 'history' | 'deleted';
 export interface WriteContent {
@@ -27,11 +28,13 @@ export interface WriteContent {
   readonly claimType: z.infer<typeof claimSchema>;
   readonly content: string;
   readonly sources: readonly Evidence[];
+  readonly analysis?: { readonly jobId:string; readonly candidateId:string; readonly policyVersion:'literal-evidence-v1' };
 }
-export type Command =
+type Mutation =
   | { readonly action: 'create'; readonly requestId: string; readonly value: WriteContent }
   | { readonly action: 'revise'; readonly requestId: string; readonly id: string; readonly expectedVersion: number; readonly value: WriteContent }
   | { readonly action: 'delete' | 'restore'; readonly requestId: string; readonly id: string; readonly expectedVersion: number; readonly reason: string };
+export type Command = Mutation & { readonly expectedGeneration?: number };
 export type MemoryErrorCode = 'not_found' | 'version_conflict' | 'idempotency_conflict' | 'deleted' | 'not_deleted' | 'source_unavailable' | 'stale_cursor' | 'invalid_cursor';
 export class MemoryError extends Error {
   constructor(readonly code: MemoryErrorCode) { super(code); }
