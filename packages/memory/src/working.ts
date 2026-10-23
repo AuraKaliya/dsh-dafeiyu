@@ -125,7 +125,7 @@ export class WorkingMemory {
         const value=this.selected(scope,item,true);if(!value)return [];
         return [{id:`${item.id}:${item.start}:${item.end}`,version:`${state.version}:${item.version}`,expiresAt:state.expiresAt,
           text:JSON.stringify({taskId:state.taskId,kind:value.memory.kind,claimType:value.memory.claimType,offset:[item.start,item.end],text:value.text}),
-          sources:[{ref:memoryRef(item.id,item.revision),version:String(item.version),hash:item.contentHash},...value.memory.sources.map(e=>({ref:e.kind==='memory'?memoryRef(e.id,e.revision):e.ref,version:e.kind==='memory'?String(e.revision):'immutable',hash:e.contentHash}))]}];
+          sources:[{ref:memoryRef(item.id,item.revision),version:String(item.version),hash:item.contentHash},...value.memory.sources.map(e=>({ref:e.kind==='memory'?memoryRef(e.id,e.revision):e.ref,version:e.kind==='memory'?String(e.revision):e.kind==='observation'?String(e.version):'immutable',hash:e.contentHash}))]}];
       });
     }
     return state.items.flatMap(item=>{

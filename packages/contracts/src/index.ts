@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { ConversationSchema } from './conversation.js';
+import type { Conversation } from './conversation.js';
+export * from './conversation.js';
 export * from './redaction.js';
 export * from './history.js';
 export * from './context.js';
@@ -6,6 +9,8 @@ export * from './feedback.js';
 export * from './compaction.js';
 export * from './semantic.js';
 export * from './memory-boundary.js';
+export * from './observation.js';
+import type { MemoryObservationProvider,ObservationReceipt } from './observation.js';
 import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
 import type { FeedbackProvider } from './feedback.js';
@@ -13,9 +18,6 @@ import type { FeedbackProvider } from './feedback.js';
 export const API_VERSION = 2 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 const id = z.string().min(1).max(160);
-export const ConversationSchema = z.strictObject({
-  channel: id, account: id, kind: z.enum(['private', 'group', 'local']), id,
-});
 export const MessageSchema = z.strictObject({
   id, occurredAt: z.iso.datetime({ offset: true }),
   conversation: ConversationSchema,
@@ -23,7 +25,6 @@ export const MessageSchema = z.strictObject({
   text: z.string().min(1).max(32_000),
   replyTo: id.optional(),
 });
-export type Conversation = z.infer<typeof ConversationSchema>;
 export type InboundMessage = z.infer<typeof MessageSchema>;
 export const ObservationSchema = z.strictObject({
   conversation: ConversationSchema,
@@ -85,6 +86,7 @@ export interface Extension {
   readonly contexts?: readonly ContextContributor[];
   readonly feedbackProvider?:FeedbackProvider;
   readonly compactionProvider?: CompactionProvider;
+  readonly memoryObservationProvider?:MemoryObservationProvider;
 }
 export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
 export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }
@@ -93,6 +95,10 @@ export interface ExtensionHandle {
   ingest(message: unknown): Receipt;
   /** Records transport/processing facts without opening a model turn. */
   observe(event: Observation): string;
+  /** Completed producer-selected observation; never starts a model turn. */
+  observeMemory(input:unknown,context?:ActionContext):ObservationReceipt;
+  openObservationSource(input:unknown,context?:ActionContext):Record<string,unknown>;
+  changeObservationSource(input:unknown,context?:ActionContext):Record<string,unknown>;
   dispose(): void;
 }
 export interface EventRecord {

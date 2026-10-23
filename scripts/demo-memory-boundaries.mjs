@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir,writeFile } from 'node:fs/promises';
+import { mkdir,writeFile,readFile } from 'node:fs/promises';
 import { resolve,join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -10,7 +10,7 @@ const root=resolve('.runtime/demos',`memory-boundaries-${randomUUID()}`);await m
 const old=legacyMemory(file),before=legacySnapshot(old.db);old.db.close();let store=new MemoryStore(file);
 try{
   const db=new DatabaseSync(file);let migratedRevisions;
-  try{assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get().user_version,2);migratedRevisions=db.prepare('SELECT count(*) AS n FROM memory_boundaries').get().n;}finally{db.close();}
+  try{assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get().user_version,3);migratedRevisions=db.prepare('SELECT count(*) AS n FROM memory_boundaries').get().n;}finally{db.close();}
   const active=store.read(old.scope,old.active.id);assert.ok(active);assert.equal(active.boundary.task.kind,'unassigned');
   assert.deepEqual(store.receipt(old.scope,old.command),old.receipt);assert.equal(store.mutate(old.scope,old.command).duplicate,true);
   const oldFence=legacyHash([[old.parent.id,3],[old.restored.id,3]].sort(([a],[b])=>a.localeCompare(b)));
@@ -21,8 +21,8 @@ try{
   store.close();store=new MemoryStore(file);assert.equal(store.read(old.scope,hidden.id),null);
   store.mutate(old.scope,{action:'restore',requestId:'restore-parent',id:old.parent.id,expectedVersion:3,reason:'虚构恢复测试'});
   assert.equal(store.read(old.scope,old.child.id),null);assert.notEqual(store.sourceFence(old.scope,'a'.repeat(64)),oldFence);
-  const report={at:new Date().toISOString(),projectVersion:'0.14.0',samples:'fictional-local-only',model:'not-used',serverAccess:false,
-    migration:{from:1,to:2,migratedRevisions,legacyTablesPreservedExactly:true,contentAndSourceHashesPreserved:true,stateVersionsAndGenerationsPreserved:true,
+  const report={at:new Date().toISOString(),projectVersion:JSON.parse(await readFile(resolve('package.json'),'utf8')).version,samples:'fictional-local-only',model:'not-used',serverAccess:false,
+    migration:{from:1,to:3,boundarySchema:2,migratedRevisions,legacyTablesPreservedExactly:true,contentAndSourceHashesPreserved:true,stateVersionsAndGenerationsPreserved:true,
       idempotentReceiptsPreserved:true,oldSourceFencesPreserved:true,legacyTasksLeftUnassigned:true,oldAccessNotExpanded:true},
     internalUseSeparatedFromExpression:true,crossConversationDenied:true,restartPassed:true,restoreAdvancesFence:true,oldChangedDescendantNotReactivated:true,
     note:'All seven legacy tables compared before new writes. Restore is a later explicit fictional operation, not a migration effect.'};

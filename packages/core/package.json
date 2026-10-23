@@ -1,5 +1,5 @@
 {
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "types": "./lib/index.d.ts",
   "name": "@dafeiyu/core",
@@ -16,7 +16,7 @@
     "@deepseek-ai/dsh-compaction": "0.2.1-rc.2"
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.10.0",
+    "@dafeiyu/contracts": "0.11.0",
     "@dafeiyu/journal": "0.3.0",
     "zod": "4.4.3"
   },

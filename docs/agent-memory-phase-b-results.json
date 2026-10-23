@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-23T20:45:09.622Z",
+  "projectVersion": "0.15.0",
+  "samples": "fictional-plugin-only",
+  "serverAccess": false,
+  "realModel": false,
+  "forms": [
+    "original",
+    "fragment",
+    "summary",
+    "no-contribution"
+  ],
+  "selectedContributions": 3,
+  "noContributionCreatedMemories": 0,
+  "pluginOwnsFiltering": true,
+  "discardedMessageNotArchived": true,
+  "digestOnlyOriginalNotArchived": true,
+  "digestOnlyLookupReported": true,
+  "internalUseSeparatedFromExpression": true,
+  "activityDoesNotStartModelOrDelivery": true,
+  "sourceDeletionInvalidatesMemory": true,
+  "unrelatedSummaryPreserved": true,
+  "restartAndRetryPassed": true,
+  "restoreDidNotReactivate": true,
+  "staleObservationVersionRejected": true,
+  "sourceAndAuditVersionsPreserved": true
+}

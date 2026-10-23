@@ -18,7 +18,7 @@ async function path(){return join(await mkdtemp(join(tmpdir(),'dafeiyu-boundary-
 test('v1 migration adds conservative five-axis boundaries without changing any legacy row or hash',async t=>{
   const file=await path(),old=legacyMemory(file),before=legacySnapshot(old.db);old.db.close();
   const store=new MemoryStore(file);t.after(()=>store.close());const db=new DatabaseSync(file);t.after(()=>db.close());
-  assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,2);
+  assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,3);
   assert.equal(db.prepare('SELECT count(*) AS n FROM memory_boundaries').get()?.n,6);
   const item=store.read(old.scope,old.active.id)!;
   assert.deepEqual(item.boundary.owner,{kind:'agent',agentId:'fish'});assert.equal(item.boundary.sourceScene.kind,'conversation');
@@ -153,7 +153,7 @@ test('migrating compatible v1 rows preserves existing DSH partial views, and res
   const h=await fragmentFixture(),root=h.root,a=h.a;h.mutate(a,'delete',1);await h.run('迁移前删除A');const ref=h.ref;
   await h.close();
   // Reproduce the pre-boundary layout on this fictional DSH fixture; old rows stay intact.
-  const db=new DatabaseSync(join(root,'memory.sqlite'));db.exec('DROP TRIGGER boundaries_no_update; DROP TRIGGER boundaries_no_delete; DROP TABLE memory_boundaries; DROP TABLE memory_schema_migrations; PRAGMA user_version=1;');db.close();
+  const db=new DatabaseSync(join(root,'memory.sqlite'));db.exec('DROP TABLE observation_contributions; DROP TABLE observation_activities; DROP TABLE observation_sources; DROP TABLE observation_source_requests; DROP TRIGGER boundaries_no_update; DROP TRIGGER boundaries_no_delete; DROP TABLE memory_boundaries; DROP TABLE memory_schema_migrations; PRAGMA user_version=1;');db.close();
   const next=await provenanceFixture(root);try{await next.run('迁移后继续');assert.match(next.visible(),/B_FACT_KEEP/);assert.ok(!next.visible().includes('A_FACT_ONLY'));
     assert.equal((await next.probe('a',c=>next.timeline.open(c,{ref}))).status,'ok');
     next.mutate(a,'restore',2);await next.run('恢复A');assert.ok(!next.visible().includes('A_FACT_ONLY'));assert.match(next.visible(),/B_FACT_KEEP/);

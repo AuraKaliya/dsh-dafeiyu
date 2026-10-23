@@ -16,6 +16,8 @@ import { CORE_VERSION } from './version.js';
 import { capsuleSchema } from './compaction-runtime.js';
 import type { CompactionBinding } from './compaction-runtime.js';
 import { fragmentCapsuleSchema } from './summary-fragments.js';
+import { MemoryObservationSchema,ObservationSourceReadSchema,ObservationSourceChangeSchema } from '@dafeiyu/contracts';
+import type { Conversation,ObservationAuthority } from '@dafeiyu/contracts';
 export type { CompactionBinding } from './compaction-runtime.js';
 export { readCompactionEvents } from './compaction-runtime.js';
 export { readProvenance } from './provenance.js';
@@ -94,6 +96,21 @@ export class DafeiyuService extends Service {
   }
   scopeForContext(request:ContextRequest):OperationScope{this.assertOpen();return this.contexts.scopeFor(request);}
   private feedbackEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.feedbackProvider);}
+  private observationEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.memoryObservationProvider);}
+  private observationAuthority(entry:Registered,conversation:Conversation,context?:ActionContext):ObservationAuthority {
+    this.assertOpen();if(!entry.active)throw new Error('Extension is unregistered');
+    const route=conversationKey(this.config.agentId,conversation);
+    let taskId:string|null=null,ingressPluginId=entry.extension.id;
+    let parent:ObservationAuthority['parent'];
+    if(context){
+      const scope=this.scopeFor(context),event=this.journal.scopedEvent(scope,scope.startedEventId);
+      if(scope.route!==route||event?.plugin!==entry.extension.id)throw new Error('Observation context does not belong to this capability');
+      taskId=this.compactionBinding()?.provider.basis(scope).taskId??null;
+      parent={traceId:scope.traceId,operationId:scope.operationId,eventId:scope.startedEventId};
+      ingressPluginId=this.journal.get(scope.traceId).extensionId;
+    }else if(!entry.extension.channels?.some(c=>c.channel===conversation.channel&&c.account===conversation.account))throw new Error('Observation requires an owned channel or live capability context');
+    return {agentId:this.config.agentId,route,pluginId:entry.extension.id,pluginVersion:entry.extension.version,ingressPluginId,conversation:{...conversation},taskId,...(parent?{parent}:{})};
+  }
   private compactionBinding():CompactionBinding|undefined {
     const entry=[...this.extensions.values()].find(e=>e.active&&e.extension.compactionProvider);
     return entry?.extension.compactionProvider?{owner:entry.extension.id,version:entry.extension.version,provider:entry.extension.compactionProvider}:undefined;
@@ -153,6 +170,7 @@ export class DafeiyuService extends Service {
       if(action.feedback==='archive-view'&&!extension.feedbackProvider)throw new Error('Archive views belong to their feedback provider');
     }
     if(extension.feedbackProvider&&this.feedbackEntry())throw new Error('Feedback provider already registered');
+    if(extension.memoryObservationProvider&&this.observationEntry())throw new Error('Memory observation provider already registered');
     if(extension.compactionProvider&&this.compactionBinding())throw new Error('Compaction provider already registered');
     if(extension.compactionProvider&&this.ctx.get('compaction'))throw new Error('Use one compaction writer per Dafeiyu host');
     // Snapshot registration metadata so caller-side mutations cannot change a running capability.
@@ -166,6 +184,8 @@ export class DafeiyuService extends Service {
         fields: Object.fromEntries(Object.entries(action.fields).map(([key, field]) => [key, { ...field }])) })),
       ...(extension.feedbackProvider?{feedbackProvider:{capture:extension.feedbackProvider.capture.bind(extension.feedbackProvider),
         present:extension.feedbackProvider.present.bind(extension.feedbackProvider),validate:extension.feedbackProvider.validate.bind(extension.feedbackProvider)}}:{}),
+      ...(extension.memoryObservationProvider?{memoryObservationProvider:{submit:extension.memoryObservationProvider.submit.bind(extension.memoryObservationProvider),
+        open:extension.memoryObservationProvider.open.bind(extension.memoryObservationProvider),change:extension.memoryObservationProvider.change.bind(extension.memoryObservationProvider)}}:{}),
       ...(extension.compactionProvider?{compactionProvider:{policy:Object.freeze({...extension.compactionProvider.policy}),
         ...(extension.compactionProvider.sources?{sources:{inbound:extension.compactionProvider.sources.inbound.bind(extension.compactionProvider.sources),
           context:extension.compactionProvider.sources.context.bind(extension.compactionProvider.sources),tool:extension.compactionProvider.sources.tool.bind(extension.compactionProvider.sources),
@@ -181,6 +201,18 @@ export class DafeiyuService extends Service {
       if (item.extensionId === extension.id) this.schedule(item);
     }
     return {
+      observeMemory:(raw,context)=>{
+        const input=MemoryObservationSchema.parse(raw),authority=this.observationAuthority(registered,input.conversation,context),provider=this.observationEntry()?.extension.memoryObservationProvider;
+        if(!provider)throw new Error('Memory observation provider unavailable');return provider.submit(authority,input);
+      },
+      openObservationSource:(raw,context)=>{
+        const input=ObservationSourceReadSchema.parse(raw),authority=this.observationAuthority(registered,input.conversation,context),provider=this.observationEntry()?.extension.memoryObservationProvider;
+        if(!provider)throw new Error('Memory observation provider unavailable');return provider.open(authority,input);
+      },
+      changeObservationSource:(raw,context)=>{
+        const input=ObservationSourceChangeSchema.parse(raw),authority=this.observationAuthority(registered,input.conversation,context),provider=this.observationEntry()?.extension.memoryObservationProvider;
+        if(!provider)throw new Error('Memory observation provider unavailable');return provider.change(authority,input);
+      },
       observe: raw => {
         this.assertOpen();
         if (!registered.active) throw new Error('Extension is unregistered');
