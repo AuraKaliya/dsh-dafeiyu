@@ -11,7 +11,7 @@ const h = await harness(root, () => {
   return textReply(turn === 2 ? '测试能力已经返回，我在本地模拟会话里回复你。' : '这是另一个独立会话。');
 });
 try {
-  h.core.registerExtension({ id: 'demo-echo', version: '0.1.0', apiVersion: 1, agentId: 'dafeiyu', actions: [{
+  h.core.registerExtension({ id: 'demo-echo', version: '0.1.0', apiVersion: 2, agentId: 'dafeiyu', actions: [{
     name: 'demo_echo', description: '本地演示用回显能力', fields: { text: { description: '回显内容', required: true } },
     execute: async args => ({ echo: args.text ?? '' }),
   }] });

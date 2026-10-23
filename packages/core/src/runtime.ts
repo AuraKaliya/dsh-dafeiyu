@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { AgentHandle } from '@deepseek-ai/dsh-agent';
+import type { AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-session-persistence';
@@ -17,9 +17,9 @@ export interface RunResult { readonly text: string; readonly sources: SourceRef[
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
 export class DshRuntime {
   private readonly handles = new Map<string, OwnedSession>();
-  constructor(private readonly ctx: Context, private readonly model: { provider: string; model: string }, private readonly cwd: string) {}
+  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string) {}
 
-  async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal): Promise<RunResult> {
+  async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。'): Promise<RunResult> {
     signal.throwIfAborted();
     let owned = this.handles.get(item.sessionId);
     if (!owned) {
@@ -63,7 +63,7 @@ export class DshRuntime {
       }
       signal.throwIfAborted();
       agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
-        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[消息正文]\n${item.message.text}` }] }));
+        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文]\n${item.message.text}` }] }));
       await agent.whenIdle();
       if (!await this.ctx.sessions.flush(agent.session)) throw new Error('DSH persistence checkpoint unavailable');
       signal.throwIfAborted();

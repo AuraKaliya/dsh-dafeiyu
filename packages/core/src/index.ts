@@ -3,7 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import { API_VERSION, MessageSchema } from '@dafeiyu/contracts';
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
+import { API_VERSION, MessageSchema, ObservationSchema, conversationKey } from '@dafeiyu/contracts';
 import type { ActionCapability, Extension, ExtensionHandle, Json, PendingMessage, PersonaSnapshot, Receipt, Reply } from '@dafeiyu/contracts';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { DshRuntime } from './runtime.js';
@@ -14,6 +15,7 @@ export const inject = ['agents', 'sessions', 'sessionPersistence', 'tools', 'sys
 const ConfigSchema = z.strictObject({
   agentId: z.string().min(1).max(100), dataDir: z.string().min(1), personaFile: z.string().min(1),
   provider: z.string().min(1), model: z.string().min(1),
+  reasoningEffort: z.string().min(1).optional(),
   turnTimeoutMs: z.number().int().min(50).max(3_600_000).default(600_000),
   deliveryTimeoutMs: z.number().int().min(50).max(60_000).default(15_000),
 });
@@ -39,7 +41,8 @@ export class DafeiyuService extends Service {
     this.config = ConfigSchema.parse(config);
     this.persona();
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
-    this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model }, resolve(this.config.dataDir));
+    this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
+      ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir));
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
       this.journal.transition(item.id, item.state, 'uncertain', this.event(item, 'recovery.uncertain', { previousState: item.state }));
@@ -58,7 +61,7 @@ export class DafeiyuService extends Service {
     return { text, version: createHash('sha256').update(text).digest('hex') };
   }
   private event(item: PendingMessage, type: string, data: Record<string, Json> = {}, causedBy: string | null = null) {
-    return eventFor(this.config.agentId, item, type, '@dafeiyu/core', '0.1.0', item.id, causedBy, data);
+    return eventFor(this.config.agentId, item, type, '@dafeiyu/core', '0.2.0', item.id, causedBy, data);
   }
   private assertOpen(): void {
     if (this.controller.signal.aborted) throw new Error('Dafeiyu is closing');
@@ -84,6 +87,7 @@ export class DafeiyuService extends Service {
     // Snapshot registration metadata so caller-side mutations cannot change a running capability.
     extension = { ...extension,
       channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
+        ...(channel.description ? { description: channel.description } : {}),
         deliver: channel.deliver.bind(channel) })),
       actions: (extension.actions ?? []).map(action => ({ name: action.name, description: action.description,
         execute: action.execute.bind(action),
@@ -95,6 +99,16 @@ export class DafeiyuService extends Service {
       if (item.extensionId === extension.id) this.schedule(item);
     }
     return {
+      observe: raw => {
+        this.assertOpen();
+        if (!registered.active) throw new Error('Extension is unregistered');
+        const observed = ObservationSchema.parse(raw);
+        if (!extension.channels?.some(channel => channel.channel === observed.conversation.channel && channel.account === observed.conversation.account)) throw new Error('Extension does not own this channel/account');
+        const id = randomUUID();
+        return this.journal.append({ agentId: this.config.agentId, route: conversationKey(this.config.agentId, observed.conversation),
+          traceId: id, operationId: id, causedBy: null, type: observed.type, plugin: extension.id, pluginVersion: extension.version,
+          occurredAt: new Date().toISOString(), sources: [], data: observed.data }).id;
+      },
       ingest: (raw): Receipt => {
         this.assertOpen();
         if (!registered.active) throw new Error('Extension is unregistered');
@@ -173,7 +187,8 @@ export class DafeiyuService extends Service {
         const persona = this.persona();
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(this.config.turnTimeoutMs)]);
-        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal);
+        const channel = source.extension.channels?.find(capability => capability.channel === item.message.conversation.channel && capability.account === item.message.conversation.account);
+        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description);
       } catch {
         this.journal.transition(item.id, 'processing', 'failed', this.event(item, 'turn.failed', { code: 'TURN_FAILED', note: 'Earlier operations may have effects; no automatic replay' }, started.id));
         return;

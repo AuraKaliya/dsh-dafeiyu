@@ -8,7 +8,7 @@ import { conversationKey } from '@dafeiyu/contracts';
 import type { Extension } from '@dafeiyu/contracts';
 
 const directory = () => mkdtemp(join(tmpdir(), 'dafeiyu-test-'));
-const echo: Extension = { id: 'test-actions', version: '0.1.0', apiVersion: 1, agentId: 'dafeiyu', actions: [{
+const echo: Extension = { id: 'test-actions', version: '0.1.0', apiVersion: 2, agentId: 'dafeiyu', actions: [{
   name: 'test_echo', description: '回显测试文本', fields: { text: { description: '文本', required: true } },
   execute: async (args) => ({ text: args.text ?? '' }),
 }] };
@@ -203,8 +203,23 @@ test('class-backed channel methods retain their receiver during registration', a
     async deliver() { this.count++; return { status: 'sent' as const, receiptId: 'class-receipt' }; }
   }
   const channel = new Channel();
-  const handle = h.core.registerExtension({ id: 'class-extension', version: '0.1.0', apiVersion: 1, agentId: 'dafeiyu', channels: [channel] });
+  const handle = h.core.registerExtension({ id: 'class-extension', version: '0.1.0', apiVersion: 2, agentId: 'dafeiyu', channels: [channel] });
   const receipt = handle.ingest({ id: '1', occurredAt: new Date().toISOString(), conversation: { channel: channel.channel, account: channel.account, kind: 'local', id: 'test' }, sender: { id: 'user', displayName: 'test' }, text: 'hello' });
   await h.core.whenIdle();
   assert.equal(channel.count, 1); assert.equal(h.core.journal.get(receipt.id).state, 'delivered');
+});
+
+test('configured reasoning effort reaches the DSH provider request', async t => {
+  const h = await harness(await directory(), undefined, undefined, 5000, 'max');t.after(h.close);
+  h.simulator.send('a','hello',{id:'1'});await h.core.whenIdle();
+  assert.equal(h.adapter.requests[0]?.reasoningEffort,'max');
+});
+
+test('extension observations are scoped and do not wake a model', async t => {
+  const h=await harness(await directory());t.after(h.close);
+  const conversation={channel:'simulator',account:'local',kind:'local' as const,id:'__transport__'};
+  h.simulator.handle.observe({conversation,type:'connection.opened',data:{code:'TEST'}});
+  assert.equal(h.core.journal.events(conversationKey('dafeiyu',conversation))[0]?.type,'connection.opened');
+  assert.equal(h.adapter.requests.length,0);
+  assert.throws(()=>h.simulator.handle.observe({conversation:{...conversation,account:'someone-else'},type:'connection.opened',data:{}}),/does not own/);
 });

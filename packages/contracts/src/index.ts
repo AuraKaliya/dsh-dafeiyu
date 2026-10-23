@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const API_VERSION = 1 as const;
+export const API_VERSION = 2 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 const id = z.string().min(1).max(160);
 export const ConversationSchema = z.strictObject({
@@ -15,6 +15,12 @@ export const MessageSchema = z.strictObject({
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 export type InboundMessage = z.infer<typeof MessageSchema>;
+export const ObservationSchema = z.strictObject({
+  conversation: ConversationSchema,
+  type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported']),
+  data: z.record(z.string(), z.union([z.string().max(200), z.number().finite(), z.boolean(), z.null()])),
+});
+export type Observation = z.infer<typeof ObservationSchema>;
 
 /** Collision-free identity; group participants share one conversation, never one global transcript. */
 export function conversationKey(agentId: string, c: Conversation): string {
@@ -35,6 +41,8 @@ export type DeliveryResult =
 export interface ChannelCapability {
   readonly channel: string;
   readonly account: string;
+  /** Actual transport capabilities/limits, independent of the model's own modalities. */
+  readonly description?: string;
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
   deliver(reply: Reply, signal: AbortSignal): Promise<DeliveryResult>;
 }
@@ -64,6 +72,8 @@ export interface Receipt { readonly id: string; readonly duplicate: boolean; rea
 /** An opaque handle binds ingestion to the registered extension, never to a claimed payload plugin ID. */
 export interface ExtensionHandle {
   ingest(message: unknown): Receipt;
+  /** Records transport/processing facts without opening a model turn. */
+  observe(event: Observation): string;
   dispose(): void;
 }
 export interface EventRecord {
