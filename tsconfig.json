@@ -18,6 +18,9 @@
     },
     {
       "path": "packages/timeline"
+    },
+    {
+      "path": "packages/memory"
     }
   ]
 }

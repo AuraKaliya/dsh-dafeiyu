@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前源码版本0.3.0：主插件、能力注册、统一事件记录、真实模型与QQ接入，以及按会话隔离的行为时间线检索和来源回查。DSH提供Agent循环、会话、持久化及原文查询。默认测试与演示使用模拟模型；真实接入需显式启动，第三阶段能力需显式启用。
+当前项目版本0.4.0：在既有主插件、QQ接入、事件与来源回查基础上，新增记忆能力插件0.1.0的存储、内容版本、逻辑删除、专门查询及恢复。DSH提供Agent循环、会话、持久化及原文查询。默认测试与演示使用模拟模型；新记忆能力未自动加载到真实QQ或服务器。
 
 ## 开始使用
 
@@ -26,6 +26,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 | `@dafeiyu/channel-simulator` | DSH 关联插件；本机模拟渠道及确定性的发送结果 |
 | `@dafeiyu/channel-qq` | QQ能力插件；本机SnowLuma适配、明确账号范围、事件接入与交付 |
 | `@dafeiyu/timeline` | 当前会话行为检索、可见来源回查、分页和读取审计 |
+| `@dafeiyu/memory` | 会话隔离的记忆存储、不可改写内容版本、逻辑删除／恢复、来源依赖及可靠变更审计 |
 
 ## 文档
 
@@ -34,6 +35,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [记忆能力插件完整开发方案（2026-10-23）](docs/memory-plugin-plan.md)
 - [中文记忆 embedding 本机实测与选型](docs/embedding-benchmark-2026-10-23.md)
 - [现有 FastEmbed＋ONNX 服务的本机兼容验证与2GB预算](docs/fastembed-compatibility-2026-10-23.md)
+- [记忆插件第一阶段实现与验收](docs/memory-phase-1.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)

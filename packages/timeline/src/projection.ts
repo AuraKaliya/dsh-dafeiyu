@@ -2,6 +2,26 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import { redactContent, redactJson } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
 
+/** Derived tool envelopes must be traced to their originals, never promoted as fresh evidence. */
+function derivedToolEnvelope(text: string): boolean {
+  if (text.length > 500_000) return true;
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return false; }
+  const queue: unknown[] = [value];
+  for (let visited = 0; queue.length; visited++) {
+    if (visited > 10_000) return true;
+    const item = queue.pop();
+    if (item && typeof item === 'object') {
+      if (('untrustedEvidence' in item && item.untrustedEvidence === true)
+        || ('useRestriction' in item && item.useRestriction === 'deleted_lookup_only')) return true;
+      const values = Object.values(item);
+      if (queue.length + values.length > 10_000) return true;
+      queue.push(...values);
+    }
+  }
+  return false;
+}
+
 /** An explicit export projection. Never serialize a DSH event wholesale. */
 export function projectSession(event: SessionEvent) {
   let text: string;
@@ -32,7 +52,9 @@ export function projectSession(event: SessionEvent) {
     default: return null;
   }
   const clean = redactContent(text);
-  return { kind, text: clean.value, redacted: clean.redacted, omittedBlocks, interrupted, seq: event.seq, time: event.time };
+  const memoryUse = kind === 'assistant-text' || kind === 'derived-context' || kind === 'tool-error-text'
+    || (kind === 'tool-result-text' && derivedToolEnvelope(text)) ? 'derived-only' as const : 'primary-candidate' as const;
+  return { kind, text: clean.value, redacted: clean.redacted, omittedBlocks, interrupted, seq: event.seq, time: event.time, memoryUse };
 }
 
 export function eventMetadata(input: {

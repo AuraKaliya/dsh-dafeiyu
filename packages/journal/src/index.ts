@@ -2,12 +2,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { MessageSchema, conversationKey, TimelineQuerySchema, redactJson } from '@dafeiyu/contracts';
 import type { TimelineQuery, TimelineScope } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import type { EventRecord, InboundMessage, Json, MessageState, PendingMessage, Receipt, Reply, SourceRef } from '@dafeiyu/contracts';
 
-type NewEvent = Omit<EventRecord, 'seq' | 'id' | 'recordedAt' | 'visibility' | 'schemaVersion'>;
+export type NewEvent = Omit<EventRecord, 'seq' | 'id' | 'recordedAt' | 'visibility' | 'schemaVersion'>;
 const states = new Set<MessageState>(['accepted', 'processing', 'reply-ready', 'sending', 'delivered', 'failed', 'uncertain']);
 function text(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Invalid persisted string');
@@ -92,7 +93,19 @@ export class Journal {
     });
   }
   append(input: NewEvent): EventRecord {
-    const record = { ...input, schemaVersion: 1 as const, id: randomUUID(), recordedAt: new Date().toISOString(),
+    return this.appendOnce(input, randomUUID());
+  }
+  /** Trusted outbox publishers supply a stable UUID; duplicates never create a second event. */
+  appendOnce(input: NewEvent, id: string): EventRecord {
+    z.uuid().parse(id);
+    const previous = this.db.prepare('SELECT seq,body FROM events WHERE id=?').get(id);
+    if (previous) {
+      const existing = this.eventRow(previous);
+      const { seq: _seq, id: _id, recordedAt: _at, schemaVersion: _schema, visibility: _visibility, ...body } = existing;
+      if (!isDeepStrictEqual(body, input)) throw new Error('Event idempotency conflict');
+      return existing;
+    }
+    const record = { ...input, schemaVersion: 1 as const, id, recordedAt: new Date().toISOString(),
       visibility: { kind: 'conversation' as const, route: input.route } };
     const result = this.db.prepare('INSERT INTO events(id,route,trace_id,operation_id,body) VALUES(?,?,?,?,?)')
       .run(record.id, record.route, record.traceId, record.operationId, JSON.stringify(record));

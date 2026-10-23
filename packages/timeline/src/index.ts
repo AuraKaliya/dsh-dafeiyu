@@ -99,7 +99,7 @@ export class TimelineService extends Service {
     if (!anchorId) return { status:'invalid_reference' as const };
     const anchor = this.ctx.dafeiyu.journal.scopedEvent(scope,anchorId);
     if (!anchor) return { status:'not_found' as const };
-    let content: { text:string; kind:string; redacted:boolean; omittedBlocks:number; interrupted:boolean };
+    let content: { text:string; kind:string; redacted:boolean; omittedBlocks:number; interrupted:boolean; memoryUse?: 'primary-candidate' | 'derived-only' };
     let source: SourceRef = { kind:'event',id:anchor.id };
     if (eventMatch) {
       const data = { ...eventMetadata(anchor), causedBy:this.cause(scope,anchor), sources:this.links(scope,anchor) };
@@ -140,6 +140,7 @@ export class TimelineService extends Service {
     this.audit(scope,'history.open',[{kind:'event',id:anchor.id},source],{ ref:input.ref,offset:input.offset,returnedChars:Array.from(text).length,redacted:content.redacted||clean.redacted });
     return { status:'ok' as const,ref:input.ref,untrustedEvidence:true,kind:content.kind,text,offset:input.offset,totalChars:points.length,
       hasMore:nextOffset!==null,nextOffset,redacted:content.redacted||clean.redacted,omittedBlocks:content.omittedBlocks,interrupted:content.interrupted,
+      memoryUse:content.memoryUse ?? 'primary-candidate',
       contentHash:createHash('sha256').update(clean.value).digest('hex') };
   }
 }
