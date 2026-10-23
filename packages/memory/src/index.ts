@@ -15,12 +15,13 @@ import type { RetrievalDependencies } from './retrieval-profile.js';
 import { MemoryAnalysis } from './analysis.js';
 import { AnalysisError, analysisConfigSchema } from './analysis-types.js';
 import { WorkingMemory } from './working.js';
+import { ToolFeedbackArchive,feedbackConfigSchema } from './feedback.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional() });
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional() });
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
   sourceRefs: z.array(z.string().min(1).max(300)).min(1).max(8) };
@@ -45,6 +46,7 @@ export class MemoryService extends Service {
   private readonly retrieval: MemoryRetrieval | null;
   private readonly analysis: MemoryAnalysis | null;
   private readonly working:WorkingMemory|null;
+  private readonly feedbackArchive:ToolFeedbackArchive|null;
   private closed = false;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
@@ -56,11 +58,14 @@ export class MemoryService extends Service {
     catch(error){this.retrieval?.close();this.store.close();throw error;}
     try{this.working=this.config.context?new WorkingMemory(ctx,this.store,this.retrieval,this.config.dataDir,(c,refs)=>this.evidence(c,refs)):null;}
     catch(error){void this.analysis?.close();this.retrieval?.close();this.store.close();throw error;}
+    try{this.feedbackArchive=this.config.feedback?new ToolFeedbackArchive(ctx,this.store,this.config.dataDir,this.config.feedback,(c,refs)=>this.evidence(c,refs)):null;}
+    catch(error){this.working?.close();void this.analysis?.close();this.retrieval?.close();this.store.close();throw error;}
     try {
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
-        agentId: this.config.agentId, actions: this.actions(),contexts:this.working?.contributors()??[] });
-    } catch (error) { this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
-    ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
+        agentId: this.config.agentId, actions: this.actions(),contexts:this.working?.contributors()??[],
+        ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
+    } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
+    ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close();this.feedbackArchive?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
     this.flush();
     this.analysis?.start();
   }
@@ -203,6 +208,10 @@ export class MemoryService extends Service {
   async retrieveContext(context:ActionContext,raw:unknown){this.scope(context);try{return await this.working?.retrieve(context,raw)??{status:'not_configured'};}catch(e){this.scope(context);return this.failure(e);}}
   clearContext(context:ActionContext,raw:unknown){this.scope(context);try{return this.working?.clear(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   contextStatus(context:ActionContext){this.scope(context);return this.working?.status(context)??{status:'not_configured'};}
+  feedbackOpen(context:ActionContext,raw:unknown,deleted=false){this.scope(context);try{return this.feedbackArchive?.open(context,raw,deleted)??{status:'not_configured'};}catch(e){return this.failure(e);}}
+  feedbackList(context:ActionContext,raw:unknown){this.scope(context);try{return this.feedbackArchive?.list(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
+  feedbackDelete(context:ActionContext,raw:unknown){this.scope(context);try{return this.feedbackArchive?.change(context,raw,true)??{status:'not_configured'};}catch(e){return this.failure(e);}}
+  feedbackRestore(context:ActionContext,raw:unknown){this.scope(context);try{return this.feedbackArchive?.change(context,raw,false)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   private actions(): ActionCapability[] {
     const field = (description: string, required = true) => ({ description, required });
     const content = { requestId: field('幂等请求标识；重试保持相同值和完整参数'), kind: field('experience / knowledge / preference / procedure'),
@@ -224,6 +233,20 @@ export class MemoryService extends Service {
       },
     });
     return [
+      ...(this.feedbackArchive?[
+        {...action('dafeiyu_tool_feedback_open','只读回查当前会话的已归档工具原文（已脱敏），不重新执行原工具。history仅用于显式查看过时来源。',
+          {ref:field('反馈归档ref'),expectedVersion:field('归档状态版本'),mode:field('normal/history，默认normal',false),section:field('document/data/diagnostics/receipts，默认document',false),offset:field('Unicode码点偏移，默认0',false),limit:field('每页字符数',false),cursor:field('上页nextCursor；有cursor时不要再传offset',false)},
+          (args,ctx)=>this.feedbackOpen(ctx,{...args,expectedVersion:Number(args.expectedVersion),...(args.offset===undefined?{}:{offset:Number(args.offset)}),...(args.limit===undefined?{}:{limit:Number(args.limit)})})),feedback:'archive-view' as const},
+        {...action('dafeiyu_tool_feedback_deleted_open','仅明确寻找已删除工具反馈时使用；只查本会话，不恢复、不重新执行。本次回查内容不能自动成为新记忆。',
+          {ref:field('反馈归档ref'),expectedVersion:field('最新状态版本'),section:field('document/data/diagnostics/receipts',false),offset:field('Unicode码点偏移',false),limit:field('每页字符数',false),cursor:field('上页nextCursor',false)},
+          (args,ctx)=>this.feedbackOpen(ctx,{...args,expectedVersion:Number(args.expectedVersion),...(args.offset===undefined?{}:{offset:Number(args.offset)}),...(args.limit===undefined?{}:{limit:Number(args.limit)})},true)),feedback:'archive-view' as const},
+        action('dafeiyu_tool_feedback_list','列出本会话最近的工具反馈索引，不返回正文。更早记录通过时间线feedback.archived事件定位。明确查找删除记录时选择deleted；查看过时来源时选择history。',
+          {mode:field('normal/history/deleted，默认normal',false),limit:field('最多1至50条',false)},(args,ctx)=>this.feedbackList(ctx,{...args,...(args.limit===undefined?{}:{limit:Number(args.limit)})})),
+        action('dafeiyu_tool_feedback_delete','逻辑删除反馈归档并撤下受控反馈视图；保留原文，不改变原操作副作用或来源记忆。',
+          {ref:field('反馈归档ref'),expectedVersion:field('状态版本'),requestId:field('幂等标识'),reason:field('删除原因')},(args,ctx)=>this.feedbackDelete(ctx,{...args,expectedVersion:Number(args.expectedVersion)})),
+        action('dafeiyu_tool_feedback_restore','明确恢复归档的自身删除标记；不恢复已删除来源、不重新执行工具。',
+          {ref:field('反馈归档ref'),expectedVersion:field('状态版本'),requestId:field('幂等标识'),reason:field('恢复原因')},(args,ctx)=>this.feedbackRestore(ctx,{...args,expectedVersion:Number(args.expectedVersion)})),
+      ]:[]),
       ...(this.working?[
         action('dafeiyu_memory_working_set','替换当前会话的工作状态。只返回回执，来源校验后由核心在下次请求装配。不会自动提炼分析报告。',
           {requestId:field('幂等标识'),expectedVersion:field('工作区状态版本，首次0'),taskId:field('当前任务标识'),expiresAt:field('有效期ISO时间，24小时以内'),items:field('JSON数组：id、category(goal/constraint/correction/pending/result/gap)、text、sourceRefs')},

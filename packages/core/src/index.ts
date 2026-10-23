@@ -4,11 +4,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
-import { API_VERSION, MessageSchema, ObservationSchema, conversationKey } from '@dafeiyu/contracts';
+import { API_VERSION, MessageSchema, ObservationSchema, conversationKey,ToolFeedbackSchema,FeedbackMetaSchema,FeedbackWitnessSchema,FEEDBACK_RETIRED_TEXT,FeedbackCaptureError } from '@dafeiyu/contracts';
+import type { FeedbackDelivery } from '@dafeiyu/contracts';
 import type { ActionCapability, ActionContext, OperationScope, Extension, ExtensionHandle, Json, PendingMessage, PersonaSnapshot, Receipt, Reply } from '@dafeiyu/contracts';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { DshRuntime, DshRunError } from './runtime.js';
-import type { BoundAction } from './runtime.js';
+import type { BoundAction,ActionResult } from './runtime.js';
 import { ContextCoordinator,contextConfigSchema } from './context.js';
 import type { ContextRequest } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
@@ -49,7 +50,8 @@ export class DafeiyuService extends Service {
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
-      ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts);
+      ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
+      (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text));
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
       this.journal.transition(item.id, item.state, 'uncertain', this.event(item, 'recovery.uncertain', { previousState: item.state }));
@@ -83,6 +85,14 @@ export class DafeiyuService extends Service {
     return scope;
   }
   scopeForContext(request:ContextRequest):OperationScope{this.assertOpen();return this.contexts.scopeFor(request);}
+  private feedbackEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.feedbackProvider);}
+  feedbackViewCurrent(scope:Pick<OperationScope,'agentId'|'route'|'traceId'>,raw:unknown,text:string):boolean{
+    const parsed=FeedbackMetaSchema.safeParse(raw);if(!parsed.success)return false;
+    if(text===FEEDBACK_RETIRED_TEXT)return true;
+    if(scope.agentId!==this.config.agentId||createHash('sha256').update(text).digest('hex')!==parsed.data.viewHash)return false;
+    const entry=this.feedbackEntry();if(!entry||entry.extension.id!==parsed.data.owner)return false;
+    try{return entry.extension.feedbackProvider!.validate(scope,parsed.data.witness);}catch{return false;}
+  }
   /** Host-only durable authorization for read/analyze/commit work, never an ActionContext. */
   issueAnalysisGrant(context: ActionContext): string { return this.journal.issueAnalysisGrant(this.scopeFor(context),CORE_VERSION); }
   analysisScope(grantId: string): OperationScope {
@@ -112,7 +122,10 @@ export class DafeiyuService extends Service {
     for (const action of extension.actions ?? []) {
       if (!/^[a-z][a-z0-9_]{0,63}$/.test(action.name) || actionNames.has(action.name)) throw new Error('Duplicate or invalid action name');
       actionNames.add(action.name);
+      if(action.feedback!==undefined&&!['structured-v1','archive-view'].includes(action.feedback))throw new Error('Invalid feedback contract');
+      if(action.feedback==='archive-view'&&!extension.feedbackProvider)throw new Error('Archive views belong to their feedback provider');
     }
+    if(extension.feedbackProvider&&this.feedbackEntry())throw new Error('Feedback provider already registered');
     // Snapshot registration metadata so caller-side mutations cannot change a running capability.
     extension = { ...extension,
       channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
@@ -120,7 +133,10 @@ export class DafeiyuService extends Service {
         deliver: channel.deliver.bind(channel) })),
       actions: (extension.actions ?? []).map(action => ({ name: action.name, description: action.description,
         execute: action.execute.bind(action),
+        ...(action.feedback?{feedback:action.feedback}:{}),
         fields: Object.fromEntries(Object.entries(action.fields).map(([key, field]) => [key, { ...field }])) })),
+      ...(extension.feedbackProvider?{feedbackProvider:{capture:extension.feedbackProvider.capture.bind(extension.feedbackProvider),
+        present:extension.feedbackProvider.present.bind(extension.feedbackProvider),validate:extension.feedbackProvider.validate.bind(extension.feedbackProvider)}}:{}),
     };
     const registered: Registered = { extension, controller: new AbortController(), active: true };
     const unregisterContexts=this.contexts.register(extension.id,extension.version,extension.contexts??[]);
@@ -175,7 +191,7 @@ export class DafeiyuService extends Service {
   private actions(item: PendingMessage, causedBy: string): BoundAction[] {
     return [...this.extensions.values()].flatMap(entry => (entry.extension.actions ?? []).map(definition => ({
       definition,
-      execute: async (raw: unknown, signal: AbortSignal): Promise<Json> => {
+      execute: async (raw: unknown, signal: AbortSignal): Promise<ActionResult> => {
         if (!entry.active) throw new Error('Capability unavailable');
         const args = this.parseAction(definition, raw);
         const operationId = randomUUID();
@@ -189,11 +205,40 @@ export class DafeiyuService extends Service {
           actionSignal.throwIfAborted();
           this.actionScopes.set(actionContext, Object.freeze({ agentId: this.config.agentId, route: item.route,
             traceId: item.id, operationId, startedEventId: started.id }));
-          const result = await definition.execute(args, actionContext);
+          const feedbackEntry=definition.feedback?this.feedbackEntry():undefined;
+          if(definition.feedback&&(!feedbackEntry||(definition.feedback==='archive-view'&&feedbackEntry!==entry)))throw new Error('Feedback provider unavailable before execution');
+          let validated:Json,origin:'returned'|'exception'='returned';
+          try{validated=z.json().parse(await definition.execute(args, actionContext));}
+          catch(error){
+            if(definition.feedback!=='structured-v1'||actionSignal.aborted)throw error;
+            origin='exception';validated={schemaVersion:1,outcome:'unknown',effects:'unknown',completeness:'unknown',resourceVersion:'unknown',
+              summary:'工具未返回可验证的结果；应核对副作用，不能直接重放。',diagnostics:[{code:'CAPABILITY_EXCEPTION',message:'原始异常不进入反馈或归档。'}],receipts:[],sourceRefs:[],data:null};
+          }
           actionSignal.throwIfAborted();
-          const validated = z.json().parse(result);
-          this.journal.append(event('operation.succeeded', started.id));
-          return validated;
+          if(!definition.feedback){this.journal.append(event('operation.succeeded',started.id));return {value:validated,feedback:null};}
+          const provider=feedbackEntry!.extension.feedbackProvider!;
+          let delivery:FeedbackDelivery;
+          if(definition.feedback==='structured-v1'){
+            const report=ToolFeedbackSchema.safeParse(validated);
+            const outcome=report.success?report.data.outcome:'unknown';
+            this.journal.append(event(`operation.${outcome}`,started.id));
+            try{
+              if(!feedbackEntry!.active)throw new Error('Feedback provider unloaded');
+              const captured=await provider.capture({context:actionContext,pluginId:entry.extension.id,pluginVersion:entry.extension.version,action:definition.name,origin},validated);
+              delivery={value:z.json().parse(captured.value),witness:captured.witness===null?null:FeedbackWitnessSchema.parse(captured.witness)};
+              if(delivery.witness&&(delivery.value===null||typeof delivery.value!=='object'||Array.isArray(delivery.value)))throw new Error('Invalid feedback delivery');
+            }catch(error){
+              actionSignal.throwIfAborted();
+              delivery={value:{kind:'dafeiyu-tool-feedback',outcome,effects:report.success?report.data.effects:'unknown',
+                completeness:report.success?report.data.completeness:'unknown',diagnosticCodes:report.success?report.data.diagnostics.map(d=>d.code):['INVALID_FEEDBACK_REPORT'],
+                archiveStatus:'unavailable',fault:error instanceof FeedbackCaptureError?error.code:'FEEDBACK_ARCHIVE_UNAVAILABLE',untrustedEvidence:true,
+                note:'归档未完成；工具可能已经产生副作用，不能因此重放。'},witness:null};
+              this.journal.append(event('feedback.unavailable',started.id));
+            }
+          }else{delivery=provider.present(actionContext,validated);this.journal.append(event('operation.succeeded',started.id));}
+          actionSignal.throwIfAborted();
+          const value=z.json().parse(delivery.value);
+          return {value,feedback:delivery.witness?{owner:feedbackEntry!.extension.id,witness:delivery.witness,viewHash:createHash('sha256').update(JSON.stringify(value)).digest('hex')}:null};
         } catch (error) {
           this.journal.append(event('operation.failed', started.id));
           // Do not propagate raw extension errors (which may contain credentials) into model context.

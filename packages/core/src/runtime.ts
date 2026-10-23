@@ -8,11 +8,18 @@ import type {} from '@deepseek-ai/dsh-tools';
 import type { ActionCapability, Json, PendingMessage, PersonaSnapshot, SourceRef } from '@dafeiyu/contracts';
 import { ContextRuntime } from './context-runtime.js';
 import type { ContextCoordinator } from './context.js';
+import { FeedbackRuntime } from './feedback-runtime.js';
+import type { FeedbackValidator } from './feedback-runtime.js';
+import { FeedbackWitnessSchema } from '@dafeiyu/contracts';
+import type { FeedbackMeta } from '@dafeiyu/contracts';
+import { z } from 'zod';
+import { createHash } from 'node:crypto';
 
-interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime }
+interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime }
+export interface ActionResult {value:Json;feedback:FeedbackMeta|null}
 export interface BoundAction {
   readonly definition: ActionCapability;
-  execute(args: unknown, signal: AbortSignal): Promise<Json>;
+  execute(args: unknown, signal: AbortSignal): Promise<ActionResult>;
 }
 export interface RunResult { readonly text: string; readonly sources: SourceRef[] }
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
@@ -23,15 +30,18 @@ export class DshRunError extends Error {
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
 export class DshRuntime {
   private readonly handles = new Map<string, OwnedSession>();
-  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator) {
+  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator) {
     const sessions=this.handles;
     ctx.on('llm/stream',async function*(options,next){
       const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
+      const feedback=options.sessionId?sessions.get(options.sessionId)?.feedback:undefined;
+      feedback?.guard(options);
       if(context&&!context.guard(options,true,true)){
         yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
       }
-      for await(const chunk of next()){context?.guard(options);yield chunk;}
+      for await(const chunk of next()){context?.guard(options);feedback?.guard(options);yield chunk;}
       context?.guard(options);
+      feedback?.guard(options);
     });
   }
 
@@ -41,9 +51,11 @@ export class DshRuntime {
     if (!owned) {
       let scoped: Context | undefined;
       let context:ContextRuntime|undefined;
+      let feedback:FeedbackRuntime|undefined;
       const identity = { persona };
       const setup = (scope: Context): void => {
         scoped = scope;
+        feedback=new FeedbackRuntime(scope,this.validateFeedback);
         context=new ContextRuntime(scope,this.coordinator);
         scope.systemPrompt.section({ name: 'dafeiyu-persona', order: 0, interpolate: false, text: () => identity.persona.text });
         scope.tools.presentAs('native');
@@ -53,14 +65,15 @@ export class DshRuntime {
       const handle = exists
         ? await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: this.model, setup })
         : await this.ctx.agents.create({ sessionId, meta: { cwd: this.cwd }, agentOptions: this.model, setup });
-      if (!scoped||!context) { await handle.dispose(); throw new Error('DSH did not compose the agent scope'); }
-      owned = { handle, scope: scoped,context, get persona() { return identity.persona; }, set persona(value) { identity.persona = value; } };
+      if (!scoped||!context||!feedback) { await handle.dispose(); throw new Error('DSH did not compose the agent scope'); }
+      owned = { handle, scope: scoped,context,feedback, get persona() { return identity.persona; }, set persona(value) { identity.persona = value; } };
       this.handles.set(item.sessionId, owned);
     }
     owned.persona = persona;
     const { agent } = owned.handle;
     if (agent.status !== 'idle') throw new Error('DSH conversation is busy outside the core');
     owned.context.begin(item,agent);
+    owned.feedback.begin(item,agent);
     const disposers: (() => void)[] = [];
     const before = agent.session.snapshotEvents().length;
     const abort = (): void => agent.cancel({ kind: 'hook', reason: 'Dafeiyu turn cancelled' });
@@ -73,10 +86,15 @@ export class DshRuntime {
         disposers.push(owned.scope.tools.register({
           name: action.definition.name, description: action.definition.description,
           parameters: { type: 'object', properties, required: Object.keys(action.definition.fields).filter(key => action.definition.fields[key]?.required), additionalProperties: false },
-          output: { schema: {}, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
-          execute: (args, exec) => {
+          output: { schema: {}, render: (_args,value) => [{ type: 'text', text: JSON.stringify(value) }],
+            ...(action.definition.feedback?{presentationMeta:(_args:unknown,value:Json)=>{
+              const parsed=z.object({feedbackView:z.object({owner:z.string(),witness:FeedbackWitnessSchema})}).safeParse(value);
+              return parsed.success?{dafeiyuFeedback:{...parsed.data.feedbackView,viewHash:createHash('sha256').update(JSON.stringify(value)).digest('hex')}}:{};
+            }}:{}) },
+          execute: async (args, exec) => {
             if (exec.agent !== agent) throw new Error('Action belongs to another agent');
-            return action.execute(args, AbortSignal.any([signal, exec.signal]));
+            const result=await action.execute(args, AbortSignal.any([signal, exec.signal]));
+            return result.feedback?{...z.record(z.string(),z.json()).parse(result.value),feedbackView:{owner:result.feedback.owner,witness:result.feedback.witness}}:result.value;
           },
         }));
       }
@@ -101,6 +119,7 @@ export class DshRuntime {
         .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })));
     } finally {
       owned.context.end();
+      owned.feedback.end();
       signal.removeEventListener('abort', abort);
       for (const dispose of disposers.reverse()) dispose();
     }

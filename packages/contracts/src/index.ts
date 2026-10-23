@@ -2,7 +2,9 @@ import { z } from 'zod';
 export * from './redaction.js';
 export * from './history.js';
 export * from './context.js';
+export * from './feedback.js';
 import type { ContextContributor } from './context.js';
+import type { FeedbackProvider } from './feedback.js';
 
 export const API_VERSION = 2 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -66,6 +68,8 @@ export interface ActionCapability {
   readonly description: string;
   readonly fields: Readonly<Record<string, { readonly description: string; readonly required: boolean }>>;
   execute(args: Readonly<Record<string, string>>, context: ActionContext): Promise<Json>;
+  /** Opt in to structured feedback, or declare a provider-owned archive reader. Legacy tools are unchanged. */
+  readonly feedback?: 'structured-v1'|'archive-view';
 }
 export interface Extension {
   readonly id: string;
@@ -75,6 +79,7 @@ export interface Extension {
   readonly channels?: readonly ChannelCapability[];
   readonly actions?: readonly ActionCapability[];
   readonly contexts?: readonly ContextContributor[];
+  readonly feedbackProvider?:FeedbackProvider;
 }
 export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
 export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }
