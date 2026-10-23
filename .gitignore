@@ -1,0 +1,12 @@
+node_modules/
+packages/*/lib/
+*.tsbuildinfo
+build-tests/
+.runtime/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.log
+coverage/

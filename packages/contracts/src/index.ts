@@ -1,0 +1,96 @@
+import { z } from 'zod';
+
+export const API_VERSION = 1 as const;
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+const id = z.string().min(1).max(160);
+export const ConversationSchema = z.strictObject({
+  channel: id, account: id, kind: z.enum(['private', 'group', 'local']), id,
+});
+export const MessageSchema = z.strictObject({
+  id, occurredAt: z.iso.datetime({ offset: true }),
+  conversation: ConversationSchema,
+  sender: z.strictObject({ id, displayName: z.string().max(200) }),
+  text: z.string().min(1).max(32_000),
+  replyTo: id.optional(),
+});
+export type Conversation = z.infer<typeof ConversationSchema>;
+export type InboundMessage = z.infer<typeof MessageSchema>;
+
+/** Collision-free identity; group participants share one conversation, never one global transcript. */
+export function conversationKey(agentId: string, c: Conversation): string {
+  return JSON.stringify([agentId, c.channel, c.account, c.kind, c.id]);
+}
+export interface PersonaSnapshot { readonly text: string; readonly version: string }
+export interface SourceRef { readonly kind: 'message' | 'session' | 'event'; readonly id: string; readonly seq?: number }
+export interface Reply {
+  readonly id: string;
+  readonly conversation: Conversation;
+  readonly sourceMessageId: string;
+  readonly text: string;
+}
+export type DeliveryResult =
+  | { readonly status: 'sent'; readonly receiptId: string }
+  | { readonly status: 'not-sent'; readonly code: string }
+  | { readonly status: 'unknown'; readonly code: string };
+export interface ChannelCapability {
+  readonly channel: string;
+  readonly account: string;
+  /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
+  deliver(reply: Reply, signal: AbortSignal): Promise<DeliveryResult>;
+}
+export interface ActionContext {
+  readonly operationId: string;
+  readonly conversation: Conversation;
+  readonly sourceMessageId: string;
+  readonly signal: AbortSignal;
+}
+/** Phase one supports named string fields only; richer schemas require an interface version change. */
+export interface ActionCapability {
+  readonly name: string;
+  readonly description: string;
+  readonly fields: Readonly<Record<string, { readonly description: string; readonly required: boolean }>>;
+  execute(args: Readonly<Record<string, string>>, context: ActionContext): Promise<Json>;
+}
+export interface Extension {
+  readonly id: string;
+  readonly version: string;
+  readonly apiVersion: number;
+  readonly agentId: string;
+  readonly channels?: readonly ChannelCapability[];
+  readonly actions?: readonly ActionCapability[];
+}
+export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
+export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }
+/** An opaque handle binds ingestion to the registered extension, never to a claimed payload plugin ID. */
+export interface ExtensionHandle {
+  ingest(message: unknown): Receipt;
+  dispose(): void;
+}
+export interface EventRecord {
+  readonly schemaVersion: 1;
+  readonly seq: number;
+  readonly id: string;
+  readonly agentId: string;
+  readonly route: string;
+  readonly traceId: string;
+  readonly operationId: string;
+  readonly causedBy: string | null;
+  readonly type: string;
+  readonly plugin: string;
+  readonly pluginVersion: string;
+  readonly occurredAt: string;
+  readonly recordedAt: string;
+  readonly visibility: { readonly kind: 'conversation'; readonly route: string };
+  readonly sources: readonly SourceRef[];
+  /** Audit metadata only. Do not place credentials, arbitrary tool output, or model reasoning here. */
+  readonly data: Readonly<Record<string, Json>>;
+}
+export interface PendingMessage {
+  readonly id: string;
+  readonly route: string;
+  readonly extensionId: string;
+  readonly message: InboundMessage;
+  readonly state: MessageState;
+  readonly sessionId: string;
+  readonly reply: Reply | null;
+}

@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    {"path":"packages/contracts"}, {"path":"packages/journal"},
+    {"path":"packages/core"}, {"path":"packages/channel-simulator"}
+  ]
+}

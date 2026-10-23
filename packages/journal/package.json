@@ -1,0 +1,17 @@
+{
+  "version": "0.1.0",
+  "private": true,
+  "types": "./lib/index.d.ts",
+  "name": "@dafeiyu/journal",
+  "type": "module",
+  "dependencies": {
+    "@dafeiyu/contracts": "0.1.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "main": "./lib/index.js"
+}
