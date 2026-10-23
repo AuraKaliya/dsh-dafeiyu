@@ -1,6 +1,6 @@
 {
-  "at": "2026-10-23T16:27:38.027Z",
-  "projectVersion": "0.10.0",
+  "at": "2026-10-23T17:29:02.194Z",
+  "projectVersion": "0.11.0",
   "dsh": "0.2.1-rc.2",
   "model": "scripted",
   "sample": "fictional-Chinese",
@@ -8,31 +8,31 @@
   "checkpointCount": 4,
   "shadowedTokens": 3648,
   "originalBytes": 40860,
-  "summaryBytes": 11004,
-  "compressedBytesRatio": 0.2693,
+  "summaryBytes": 1832,
+  "compressedBytesRatio": 0.0448,
   "checks": [
     {
-      "beforePressureEstimate": 8581,
+      "beforePressureEstimate": 12003,
       "targetEstimate": 2900,
-      "savedDshEstimate": 640
+      "savedDshEstimate": 848
     },
     {
-      "beforePressureEstimate": 9113,
+      "beforePressureEstimate": 12219,
       "targetEstimate": 2900,
-      "savedDshEstimate": 285
+      "savedDshEstimate": 825
     },
     {
-      "beforePressureEstimate": 10096,
+      "beforePressureEstimate": 12417,
       "targetEstimate": 2900,
-      "savedDshEstimate": 223
+      "savedDshEstimate": 837
     },
     {
-      "beforePressureEstimate": 11225,
+      "beforePressureEstimate": 12625,
       "targetEstimate": 2900,
-      "savedDshEstimate": 148
+      "savedDshEstimate": 837
     }
   ],
-  "dependentSummariesWithdrawnAfterDelete": true,
+  "dependentCheckpointViewsReplacedAfterDelete": true,
   "unrelatedRegionPreserved": true,
   "originalArchiveRetained": true,
   "measurement": "DSH heuristic plus UTF-8 floor; not provider billing or semantic-quality acceptance"

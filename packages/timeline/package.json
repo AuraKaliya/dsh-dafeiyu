@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/timeline",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -12,8 +12,8 @@
     }
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.7.0",
-    "@dafeiyu/core": "0.7.0",
+    "@dafeiyu/contracts": "0.8.0",
+    "@dafeiyu/core": "0.8.0",
     "zod": "4.4.3"
   },
   "peerDependencies": {

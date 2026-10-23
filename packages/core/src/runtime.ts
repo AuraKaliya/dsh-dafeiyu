@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent';
-import { SessionId } from '@deepseek-ai/dsh-session';
+import { SessionId,pluginRecordOf } from '@deepseek-ai/dsh-session';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-session-persistence';
 import type {} from '@deepseek-ai/dsh-system-prompt';
@@ -81,6 +81,8 @@ export class DshRuntime {
     }
     owned.persona = persona;
     const { agent } = owned.handle;
+    if(!this.ctx.get('tokenMeter')&&agent.session.snapshotEvents().some(e=>pluginRecordOf(e)?.type==='plugin:dafeiyu/summary-manifest'))
+      await (this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter)));
     if (agent.status !== 'idle') throw new Error('DSH conversation is busy outside the core');
     owned.context.begin(item,agent);
     owned.feedback.begin(item,agent);
@@ -112,7 +114,7 @@ export class DshRuntime {
       signal.throwIfAborted();
       const input=createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
         `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文]\n${item.message.text}` }] });
-      owned.compaction.expectInput(input.id);agent.followup(input);
+      owned.compaction.expectInput(input);agent.followup(input);
       await agent.whenIdle();
       owned.compaction.seal();
       if (!await this.ctx.sessions.flush(agent.session)) throw new Error('DSH persistence checkpoint unavailable');
@@ -153,4 +155,6 @@ export class DshRuntime {
     return this.handles.get(sessionId)?.compaction.validateDependencies(dependencies)??false;
   }
   sourceCurrent(sessionId:string,seq:number):boolean{return this.handles.get(sessionId)?.compaction.sourceCurrent(seq)??false;}
+  fragmentViewCurrent(sessionId:string,id:string,text:string):boolean{return this.handles.get(sessionId)?.compaction.fragmentViewCurrent(id,text)??false;}
+  readSummaryReference(sessionId:string,ref:string){return this.handles.get(sessionId)?.compaction.readSummaryReference(ref)??{status:'not_found' as const};}
 }

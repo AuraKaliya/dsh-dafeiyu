@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-project",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -25,7 +25,8 @@
     "demo:context": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-context.mjs",
     "demo:feedback": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-feedback.mjs",
     "demo:compaction": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-compaction.mjs",
-    "demo:provenance": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-provenance.mjs"
+    "demo:provenance": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-provenance.mjs",
+    "demo:fragments": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-fragments.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",

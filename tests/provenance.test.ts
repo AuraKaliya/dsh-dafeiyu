@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { CompactionId,compactCheckpointSource } from '@deepseek-ai/dsh-compaction';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-compaction/types';
+import { checkpointProof } from './summary-proof.js';
 
 test('delete A retires dependent answers but preserves independent B history and later user input byte-for-byte',async t=>{
   const h=await provenanceFixture();t.after(h.close);
@@ -89,7 +90,7 @@ test('fine-grained summary checkpoints keep independent B while withdrawing A an
   const b=await h.remember('B_SUMMARY_SOURCE');await h.select([b.memory],0);
   for(let i=0;i<5;i++)await h.run(`B阶段${i}：`+'虚构蓝色纸船尚未验证。'.repeat(200),'B阶段记录');
   const checkpoints=()=>h.session().deriveMessages().flatMap(m=>m.role==='user'&&m.source.kind==='compact-checkpoint'
-    ?[{id:m.id,data:JSON.parse(m.content.filter(b=>b.type==='text').map(b=>b.text).join(''))}]:[]);
+    ?[{id:m.id,data:checkpointProof(h.session(),m)}]:[]);
   const independent=checkpoints().map(c=>c.id);assert.ok(independent.length);
   const a=await h.remember('A_SUMMARY_SOURCE');await h.select([a.memory],1);
   for(let i=0;i<5;i++)await h.run(`A阶段${i}：`+'虚构后续检查尚未确认。'.repeat(200),'A阶段记录');
@@ -174,7 +175,7 @@ test('legacy summary uses its coarse fence without withdrawing independent v2 ch
   for(let i=0;i<6;i++)await h.run(`虚构${i}：`+'蓝色纸船尚未检验。'.repeat(200));
   const session=h.session(),events=session.snapshotEvents();const checkpoints=session.surface.nodes.flatMap(seq=>{const e=events[seq];return e?.type==='user/message'&&e.data.source.kind==='compact-checkpoint'?[e]:[];});assert.ok(checkpoints.length>1);
   const selected=checkpoints[0]!,text=selected.data.content.find(b=>b.type==='text');assert.ok(text&&text.type==='text');
-  const body=JSON.parse(text.text);delete body.dependencies;body.schemaVersion=1;body.summary='LEGACY_COARSE_SUMMARY';const id=CompactionId(randomUUID());
+  const {dependencies:_deps,...legacy}=checkpointProof(session,selected.data);const body={...legacy,schemaVersion:1,summary:'LEGACY_COARSE_SUMMARY'};const id=CompactionId(randomUUID());
   session.append('compaction/start',{compactionId:id,turn:null});session.append('compaction/summary',{compactionId:id,summary:[{type:'text',text:JSON.stringify(body)}],
     shadowedRange:{start:selected.seq,end:selected.seq},shadowedSeqs:[selected.seq],shadowedTokenCount:0,provider:'local-test',model:'scripted'});
   session.append('user/message',createUserMessage({source:compactCheckpointSource(id),content:[{type:'text',text:JSON.stringify(body)}]}),{surfaceOp:{op:'replace',startSeq:selected.seq,endSeq:selected.seq},sourceEventSeqs:[selected.seq]});

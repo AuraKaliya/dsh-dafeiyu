@@ -8,9 +8,10 @@ import { MemoryStore } from '@dafeiyu/memory/store';
 import type { MemoryView } from '@dafeiyu/memory/store';
 import { memoryFixture } from './memory-fixture.js';
 import { call,textReply } from './harness.js';
+import type { Config as MemoryConfig } from '@dafeiyu/memory';
 
-export async function provenanceFixture(root?:string,inputTokens=1000000){
-  const h=await memoryFixture(root,{compaction:{inputTokens,cooldownMs:0,minGrowthTokens:0,minSavingsTokens:64,retainTurns:1,maxSummaryChars:400},context:{},feedback:{}});
+export async function provenanceFixture(root?:string,inputTokens=1000000,overrides:Partial<NonNullable<MemoryConfig['compaction']>>={}){
+  const h=await memoryFixture(root,{compaction:{inputTokens,cooldownMs:0,minGrowthTokens:0,minSavingsTokens:64,retainTurns:1,maxSummaryChars:400,...overrides},context:{},feedback:{}});
   const store=new MemoryStore(join(h.root,'memory.sqlite'));
   const scopeFor=(route:string):OperationScope=>({agentId:'dafeiyu',route,traceId:'fictional-local-write',operationId:randomUUID(),startedEventId:randomUUID()});
   const run=async(text:string,reply='虚构回复',room='a')=>{

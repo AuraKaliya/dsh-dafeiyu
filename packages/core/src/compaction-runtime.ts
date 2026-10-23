@@ -3,7 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import { SessionSeq,appendPluginRecord,pluginRecordOf } from '@deepseek-ai/dsh-session';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
+import type { GenerateOptions,UserMessage } from '@deepseek-ai/dsh-llm';
 import { CompactionId, compactCheckpointSource, toolPairingBalancedBefore, toolPairingBalancedAfter } from '@deepseek-ai/dsh-compaction';
 import type {} from '@deepseek-ai/dsh-compaction/types';
 import type {} from '@deepseek-ai/dsh-token-meter';
@@ -13,6 +13,8 @@ import { z } from 'zod';
 import { SourceTracker,provenanceRecordSchema,dependenciesSchema,unionDependencies,readProvenance } from './provenance.js';
 import type { SourceDependency } from '@dafeiyu/contracts';
 import type { ContextRuntime } from './context-runtime.js';
+import { fragmentRecordSchema,fragmentManifestSchema,fragmentViewSchema,fragmentCapsuleSchema,renderFragmentView,resolveFragmentView,fragmentDependencies,activeFragments,parseSummaryReference } from './summary-fragments.js';
+import type { FragmentManifest } from './summary-fragments.js';
 
 export interface CompactionBinding { owner: string; version: string; provider: CompactionProvider }
 export type CompactionAudit = (item:PendingMessage,data:Record<string,import('@dafeiyu/contracts').Json>,seqs:number[])=>void;
@@ -29,7 +31,7 @@ const recordSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('plugin:dafeiyu/turn-open'),seq:z.number().transform(SessionSeq),data:z.strictObject({traceId:z.string(),route:z.string()})}),
   z.object({type:z.literal('plugin:dafeiyu/turn-seal'),seq:z.number().transform(SessionSeq),data:turnSchema}),
   z.object({type:z.literal('plugin:dafeiyu/compaction-check'),seq:z.number().transform(SessionSeq),data:z.strictObject({status:z.string(),pressure:z.number(),target:z.number(),saved:z.number(),at:z.number(),policy:z.string()})}),
-]).or(provenanceRecordSchema);
+]).or(provenanceRecordSchema).or(fragmentRecordSchema);
 /** DSH's supported plugin-record seam preserves these non-surface records across resume. */
 export function readCompactionEvents(session:Session):(SessionEvent|z.infer<typeof recordSchema>)[]{
   return session.snapshotEvents().map(event=>{const record=pluginRecordOf(event);
@@ -91,6 +93,7 @@ export class CompactionRuntime {
   private admitted: string | undefined;
   private checkedSeq: number | undefined;
   private readonly provenance:SourceTracker;
+  private pendingInput:UserMessage|undefined;
   constructor(private readonly ctx: Context, private readonly agentId: string, private readonly binding: () => CompactionBinding | undefined,private readonly audit:CompactionAudit,context:ContextRuntime) {
     this.provenance=new SourceTracker(agentId,binding,context);
     ctx.systemPrompt.section({name:'dafeiyu-compaction-rules',order:21,interpolate:false,text:()=>this.binding()
@@ -109,7 +112,7 @@ export class CompactionRuntime {
     return JSON.stringify([binding.owner, binding.version, binding.provider.basis(this.scope()).epoch]);
   }
   begin(item: PendingMessage, agent: Agent): void {
-    this.item = item; this.agent = agent; this.admitted = undefined;this.checkedSeq=undefined;
+    this.item = item; this.agent = agent; this.admitted = undefined;this.checkedSeq=undefined;this.pendingInput=undefined;
     const binding = this.binding();
     this.provenance.begin(item,agent.session,agent.session.seq);
     if (!binding) return;
@@ -137,7 +140,7 @@ export class CompactionRuntime {
       complete: ended?.type === 'turn/end' && ended.data.reason.kind === 'completed'
         && this.binding()?.provider === binding.provider && (!!binding.provider.sources||binding.provider.basis(this.scope()).epoch === basis.epoch) });
   }
-  end(): void { this.provenance.end();this.initial = undefined; this.item = undefined; this.admitted = undefined; }
+  end(): void { this.provenance.end();this.initial = undefined; this.item = undefined; this.admitted = undefined;this.pendingInput=undefined; }
   private valid(turn: Turn): boolean {
     const binding = this.binding();
     return !!binding && turn.complete && !turn.ephemeral && turn.route === this.item?.route && turn.owner === binding.owner
@@ -145,7 +148,10 @@ export class CompactionRuntime {
   }
   private capsuleValid(text: string): boolean {
     try {
-      const capsule = capsuleSchema.parse(JSON.parse(text)), binding = this.binding();
+      const parsed=JSON.parse(text),binding=this.binding(),compact=fragmentCapsuleSchema.safeParse(parsed);
+      if(compact.success){const view=this.agent&&resolveFragmentView(this.agent.session,compact.data.ref,this.scope());
+        return !!view&&view.text===text&&(view.view.active.length===0||!!binding&&view.manifest.owner===binding.owner&&this.provenance.validate(fragmentDependencies(view)));}
+      const capsule = capsuleSchema.parse(parsed);
       return !!binding && capsule.agentId === this.agentId && capsule.route === this.item?.route && capsule.owner === binding.owner
         && (capsule.schemaVersion===2?this.provenance.validate(capsule.dependencies!):capsule.epoch === binding.provider.basis(this.scope()).epoch);
     } catch { return false; }
@@ -167,8 +173,26 @@ export class CompactionRuntime {
     }
     for (const seq of session.surface.nodes) {
       const event = bySeq.get(seq);
-      if (event?.type === 'user/message' && event.data.source.kind === 'compact-checkpoint') {
+      if (event?.type === 'user/message' && (event.data.source.kind === 'compact-checkpoint'||event.data.source.kind==='dafeiyu-summary-view')) {
         const text = event.data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+        const compact=fragmentCapsuleSchema.safeParse((()=>{try{return JSON.parse(text);}catch{return null;}})());
+        if(compact.success){
+          const view=resolveFragmentView(session,compact.data.ref,this.scope());
+          if(!view||view.checkpoint.seq!==seq){invalid.add(seq);continue;}
+          const binding=this.binding(),active=activeFragments(view).filter(f=>!!binding&&view.manifest.owner===binding.owner
+            &&this.provenance.validate(fragmentDependencies(view,[f.id]))).map(f=>f.id);
+          if(active.length!==view.view.active.length){
+            const nextText=renderFragmentView(view.manifestSeq,view.manifest,active);
+            const nextView=appendPluginRecord(session,'plugin:dafeiyu/summary-view',fragmentViewSchema.parse({schemaVersion:1,manifestSeq:view.manifestSeq,
+              revision:view.view.revision+1,previousViewSeq:view.viewSeq,previousCheckpointSeq:seq,active,contentHash:hash(nextText)}));
+            priceRetirement(this.ctx,session,[seq]);
+            const next=session.append('user/message',createUserMessage({source:{kind:'dafeiyu-summary-view',compactionId:view.manifest.compactionId},content:[{type:'text',text:nextText}]}),
+              {surfaceOp:{op:'replace',startSeq:seq,endSeq:seq},sourceEventSeqs:[seq,view.manifestSeq,nextView]});
+            this.audit(this.item,{status:'fragments-retired',ref:compact.data.ref,revision:view.view.revision+1,kept:active.length,
+              retired:view.view.active.filter(id=>!active.includes(id))},[seq,next.seq,view.manifestSeq]);
+          }
+          continue;
+        }
         if (text.includes('"kind":"dafeiyu-incremental-summary"') && (!this.capsuleValid(text)||!committedSummary(session,event.data.source.compactionId,text))) invalid.add(seq);
       }
     }
@@ -204,7 +228,9 @@ export class CompactionRuntime {
   }
   private async check(signal: AbortSignal): Promise<void> {
     this.provenance.sync();
+    const previousGeneration=this.agent?.session.surface.replaceGeneration;
     this.clean();
+    if(this.agent&&previousGeneration!==this.agent.session.surface.replaceGeneration&&!await this.ctx.sessions.flush(this.agent.session))throw new Error('Summary view checkpoint unavailable');
     const binding = this.binding(), agent = this.agent;
     if (!binding || !agent) return;
     if(this.ctx.get('compaction'))throw new Error('Conflicting DSH compaction writer');
@@ -213,7 +239,11 @@ export class CompactionRuntime {
     const measurement = meter.measure(session);
     // DSH's heuristic is not a Chinese tokenizer. A UTF-8 byte floor deliberately overestimates
     // CJK/JSON; the core's existing final byte ceiling remains independent.
-    const pressure = Math.max(measurement.totalTokens, Math.ceil(Buffer.byteLength(JSON.stringify(session.deriveMessages()), 'utf8') / 3));
+    const history=session.deriveMessages();
+    // DSH invokes pre-step before claiming a new root input; reserve its full envelope now.
+    const pending=this.pendingInput&&!history.some(m=>m.id===this.pendingInput?.id)?this.pendingInput:undefined;
+    const pressure = Math.max(measurement.totalTokens+(pending?meter.estimateMessage(pending):0),
+      Math.ceil((Buffer.byteLength(JSON.stringify(history),'utf8')+(pending?Buffer.byteLength(JSON.stringify(pending),'utf8'):0))/3));
     const target = Math.floor(p.inputTokens * p.targetRatio), threshold = p.inputTokens * p.thresholdRatio;
     if (pressure < threshold) { this.record('below-threshold', pressure, target); return; }
     const events = readCompactionEvents(session), last = events.findLast(e => e.type === 'plugin:dafeiyu/compaction-check' && ['compacted', 'summary-failed', 'no-benefit', 'conflict'].includes(e.data.status));
@@ -223,12 +253,12 @@ export class CompactionRuntime {
     if (marker?.type === 'compaction/start') { this.record('busy', pressure, target); return; }
     const turns = events.filter(e => e.type === 'plugin:dafeiyu/turn-seal');
     const eligible = turns.slice(1, Math.max(1, turns.length - p.retainTurns)).filter(e => this.valid(e.data));
-    const bySeq = new Map(events.map(e => [Number(e.seq), e])), eligibleSeqs = new Set<number>();
+    const bySeq = new Map(events.map(e => [Number(e.seq), e])), eligibleSeqs = new Set<number>(),tasks=new Map<number,string|null>();
     for (const turn of eligible) {
       if (turn.data.taskId !== null && turn.data.taskId === binding.provider.basis(this.scope()).taskId) continue;
       // Unknown tool semantics and all tool call/result pairs remain protected in this phase.
       if (turn.data.seqs.some(seq => { const e = bySeq.get(seq); return e?.type === 'tool/result' || e?.type === 'assistant/message' && e.data.message.content.some(b => b.type !== 'text' && b.type !== 'reasoning'); })) continue;
-      for (const seq of turn.data.seqs) eligibleSeqs.add(seq);
+      for (const seq of turn.data.seqs){eligibleSeqs.add(seq);tasks.set(seq,turn.data.taskId);}
     }
     const messages = new Map(session.deriveMessages().map(m => [m.id, m]));
     const sources: CompactionSource[] = [], seqs: SessionSeq[] = [];
@@ -249,6 +279,20 @@ export class CompactionRuntime {
       selectedCost+=prices.get(seq)??0;
       if(e.type==='assistant/message'&&selectedCost>=pressure-target+p.maxSummaryChars+512)break;
     }
+    const grouped:{sources:CompactionSource[];dependencies:SourceDependency[];taskId:string|null}[]=[];
+    const fragmented=!!binding.provider.sources&&!!binding.provider.summarizeFragments;
+    if(fragmented){
+      const limit=Math.min(p.maxFragmentGroups??8,p.maxFragments??16,Math.max(1,Math.floor(p.maxSummaryChars/64)));
+      let count=0;
+      for(const source of sources){
+        const dependencies=unionDependencies(this.provenance.dependenciesFor(source.seq,this.legacyEpoch(source.seq))),last=grouped.at(-1);
+        const taskId=tasks.get(source.seq)??null;
+        if(last&&last.taskId===taskId&&JSON.stringify(last.dependencies)===JSON.stringify(dependencies))last.sources.push(source);
+        else{if(grouped.length===limit)break;grouped.push({sources:[source],dependencies,taskId});}
+        count++;
+      }
+      sources.length=count;seqs.length=count;
+    }
     const selected = new Set(seqs), priced = measurement.nodes.filter(n => selected.has(n.seq));
     const oldTokens = priced.reduce((sum, n) => sum + n.tokens, 0);
     if (!seqs.length || oldTokens < p.minSavingsTokens + 256 || !toolPairingBalancedBefore(session, seqs[0]!) || !toolPairingBalancedAfter(session, seqs.at(-1)!)) {
@@ -263,20 +307,46 @@ export class CompactionRuntime {
     let status = 'summary-failed', saved = 0;
     try {
       checkSources();
-      const summary = await binding.provider.summarize(this.scope(), sources, signal,dependencies?checkSources:undefined);
+      let manifest:FragmentManifest|undefined,text:string;
+      if(fragmented){
+        const groups:FragmentManifest['groups']=[],fragments:FragmentManifest['fragments']=[];
+        const budget=Math.floor(p.maxSummaryChars/grouped.length);
+        for(const [index,group] of grouped.entries()){
+          checkSources();
+          const results=await binding.provider.summarizeFragments!(this.scope(),group.sources,signal,checkSources,budget);
+          const id=`G${index+1}`;
+          groups.push({id,taskId:group.taskId,inputs:group.sources.map(({seq,role,hash})=>({seq,role,hash})),dependencies:group.dependencies});
+          for(const result of results)fragments.push({...result,id:`F${fragments.length+1}`,version:1,group:id});
+          if(!results.length||fragments.length>(p.maxFragments??16)||results.reduce((n,f)=>n+Array.from(f.text).length,0)>budget)throw new Error('Fragment budget exceeded');
+        }
+        manifest=fragmentManifestSchema.parse({schemaVersion:1,compactionId:id,sessionId:session.id,agentId:this.agentId,route:this.item!.route,owner:binding.owner,
+          producerVersion:binding.version,epoch:basis.epoch,taskId:basis.taskId,versions:basis.versions,policy:'dafeiyu-fragments-v1',policyHash:hash(JSON.stringify(p)),
+          model:{provider:agent.options.provider??'',model:agent.options.model??''},createdAt:Date.now(),groups,fragments});
+        text=renderFragmentView(session.seq,manifest,manifest.fragments.map(f=>f.id));
+      }else{
+        const summary = await binding.provider.summarize(this.scope(), sources, signal,dependencies?checkSources:undefined);
+        if (!summary.trim() || Array.from(summary).length > p.maxSummaryChars) throw new Error('Invalid summary');
+        text=JSON.stringify(capsuleSchema.parse({kind:'dafeiyu-incremental-summary',schemaVersion:dependencies?2:1,...(dependencies?{dependencies}:{}),
+          agentId:this.agentId,route:this.item!.route,owner:binding.owner,version:binding.version,epoch:basis.epoch,taskId:basis.taskId,versions:basis.versions,
+          policy:'dafeiyu-incremental-v1',policyHash:hash(JSON.stringify(p)),model:{provider:agent.options.provider??'',model:agent.options.model??''},
+          sources:sources.map(({seq,hash})=>({seq,hash})),summary,createdAt:Date.now()}));
+      }
       signal.throwIfAborted();
       checkSources();
       if (this.binding()?.provider !== binding.provider || (!dependencies&&basis.epoch !== binding.provider.basis(this.scope()).epoch) || generation !== session.surface.replaceGeneration) { status = 'conflict'; return; }
-      if (!summary.trim() || Array.from(summary).length > p.maxSummaryChars) throw new Error('Invalid summary');
-      const text = JSON.stringify(capsuleSchema.parse({ kind: 'dafeiyu-incremental-summary', schemaVersion: dependencies?2:1,...(dependencies?{dependencies}:{}),
-        agentId: this.agentId, route: this.item!.route, owner: binding.owner, version: binding.version, epoch: basis.epoch, taskId: basis.taskId,
-        versions:basis.versions,policy: 'dafeiyu-incremental-v1',policyHash:hash(JSON.stringify(p)), model:{provider:agent.options.provider??'',model:agent.options.model??''}, sources: sources.map(({ seq, hash }) => ({ seq, hash })), summary, createdAt: Date.now() }));
       const checkpoint = createUserMessage({ source: compactCheckpointSource(id), content: [{ type: 'text', text }] });
       saved = oldTokens - meter.estimateMessage(checkpoint);
       if (saved < p.minSavingsTokens) { status = 'no-benefit'; saved = 0; return; }
+      const proofSeqs:SessionSeq[]=[];
+      if(manifest){
+        const manifestSeq=appendPluginRecord(session,'plugin:dafeiyu/summary-manifest',manifest);
+        if(text!==renderFragmentView(manifestSeq,manifest,manifest.fragments.map(f=>f.id)))throw new Error('Manifest position changed');
+        proofSeqs.push(manifestSeq,appendPluginRecord(session,'plugin:dafeiyu/summary-view',{schemaVersion:1,manifestSeq,revision:1,
+          previousViewSeq:null,previousCheckpointSeq:null,active:manifest.fragments.map(f=>f.id),contentHash:hash(text)}));
+      }
       session.append('compaction/summary', { compactionId: id, summary: checkpoint.content.map(b => ({ ...b })), shadowedRange: { start: seqs[0]!, end: seqs.at(-1)! },
         shadowedSeqs: seqs, shadowedTokenCount: priced.reduce((sum, n) => sum + n.heuristicTokens, 0), provider: agent.options.provider ?? '', model: agent.options.model ?? '' });
-      session.append('user/message', checkpoint, { surfaceOp: { op: 'replace', startSeq: seqs[0]!, endSeq: seqs.at(-1)! }, sourceEventSeqs: seqs });
+      session.append('user/message', checkpoint, { surfaceOp: { op: 'replace', startSeq: seqs[0]!, endSeq: seqs.at(-1)! }, sourceEventSeqs: [...seqs,...proofSeqs] });
       status = 'compacted';
     } catch { signal.throwIfAborted(); }
     finally {
@@ -309,9 +379,9 @@ export class CompactionRuntime {
       const message=source?.type==='user/message'?source.data:source?.type==='assistant/message'||source?.type==='tool/result'?source.data.message:undefined;
       if(message&&visibleIds.has(message.id))throw new Error('Historical basis changed after assembly');
     }
-    for (const message of options.messages) if (message.role === 'user' && message.source?.kind === 'compact-checkpoint') {
+    for (const message of options.messages) if (message.role === 'user' && (message.source?.kind === 'compact-checkpoint'||message.source?.kind==='dafeiyu-summary-view')) {
       const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
-      if (text.includes('"kind":"dafeiyu-incremental-summary"') && (!this.capsuleValid(text)||!committedSummary(this.agent.session,message.source.compactionId,text))) throw new Error('Invalid summary checkpoint');
+      if (text.includes('"kind":"dafeiyu-incremental-summary"') && (!this.capsuleValid(text)||(!fragmentCapsuleSchema.safeParse(JSON.parse(text)).success&&!committedSummary(this.agent.session,message.source.compactionId,text)))) throw new Error('Invalid summary checkpoint');
     }
   }
   private legacyEpoch(seq:number):string|undefined {
@@ -320,5 +390,25 @@ export class CompactionRuntime {
   }
   validateDependencies(dependencies:readonly SourceDependency[]):boolean{return this.provenance.validate(dependencies);}
   sourceCurrent(seq:number):boolean{const record=this.provenance.get(seq);return record?this.provenance.valid(record):true;}
-  expectInput(id:string):void{this.provenance.expectInput(id);}
+  expectInput(message:UserMessage):void{this.pendingInput=message;this.provenance.expectInput(message.id);}
+  fragmentViewCurrent(id:string,text:string):boolean {
+    try{const capsule=fragmentCapsuleSchema.parse(JSON.parse(text)),view=this.agent&&resolveFragmentView(this.agent.session,capsule.ref,this.scope());
+      return !!view&&view.manifest.compactionId===id&&view.text===text&&this.capsuleValid(text);
+    }catch{return false;}
+  }
+  readSummaryReference(ref:string){
+    if(!this.agent||!this.item)return {status:'not_found' as const};
+    const parsed=parseSummaryReference(ref);if(!parsed)return {status:'invalid_reference' as const};
+    const view=resolveFragmentView(this.agent.session,ref,this.scope()),binding=this.binding();
+    if(!view||!binding||binding.owner!==view.manifest.owner)return {status:'not_found' as const};
+    if(parsed.revision!==null&&parsed.revision!==view.view.revision)return {status:'stale_reference' as const};
+    const fragments=activeFragments(view).filter(f=>parsed.fragment===null||f.id===parsed.fragment);
+    if(!fragments.length)return {status:'not_found' as const};
+    if(!this.provenance.validate(fragmentDependencies(view,fragments.map(f=>f.id))))return {status:'not_exported' as const};
+    const groups=view.manifest.groups.filter(g=>fragments.some(f=>f.group===g.id));
+    return {status:'ok' as const,untrustedEvidence:true as const,memoryUse:'derived-only' as const,ref:`${parsed.bundle}${parsed.fragment?`.${parsed.fragment}`:''}@${view.view.revision}`,revision:view.view.revision,
+      sourceSeqs:[...new Set(groups.flatMap(g=>g.inputs.map(i=>i.seq)))],sessionId:this.agent.session.id,
+      proof:{ref:parsed.bundle,revision:view.view.revision,taskId:view.manifest.taskId,policy:view.manifest.policy,model:view.manifest.model,
+        fragments:fragments.map(f=>({ref:`${parsed.bundle}.${f.id}`,kind:f.kind,text:f.text,version:f.version,group:f.group})),groups}};
+  }
 }

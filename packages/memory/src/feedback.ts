@@ -139,7 +139,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
     const end=Math.min(points.length,offset+limit),nextCursor=end<points.length?Buffer.from(JSON.stringify({fingerprint,offset:end})).toString('base64url'):null;
     const a=record.archive;
     this.ctx.dafeiyu.journal.append({agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId:scope.operationId,causedBy:scope.startedEventId,
-      type:'feedback.opened',plugin:'memory',pluginVersion:'0.7.0',occurredAt:new Date().toISOString(),sources:[{kind:'event',id:a.startedEventId,route:scope.route}],
+      type:'feedback.opened',plugin:'memory',pluginVersion:'0.8.0',occurredAt:new Date().toISOString(),sources:[{kind:'event',id:a.startedEventId,route:scope.route}],
       data:{archiveId:a.id,version:record.version,mode,offset,end}});
     return json({status:'ok',kind:'dafeiyu-feedback-page',ref:input.ref,version:record.version,hash:a.hash,mode,
       outcome:a.report.outcome,effects:a.report.effects,originalCompleteness:a.report.completeness,resourceVersion:a.report.resourceVersion,

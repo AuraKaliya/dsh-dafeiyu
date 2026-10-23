@@ -41,11 +41,16 @@ export interface CompactionPolicy {
   readonly retainTurns: number;
   readonly maxSourceBytes: number;
   readonly maxSummaryChars: number;
+  readonly maxFragmentGroups?:number;
+  readonly maxFragments?:number;
 }
+export const SummaryFragmentSchema=z.strictObject({kind:z.enum(['fact','decision','constraint','correction','pending','uncertainty','result','note']),text:z.string().trim().min(1).max(8000)});
+export type SummaryFragment=z.infer<typeof SummaryFragmentSchema>;
 export interface CompactionSource { readonly seq: number; readonly role: 'user' | 'assistant'; readonly text: string; readonly hash: string }
 export interface CompactionProvider {
   readonly policy: CompactionPolicy;
   basis(scope: CompactionScope): CompactionBasis;
   readonly sources?:SourcePolicy;
   summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal,checkSources?:()=>void): Promise<string>;
+  summarizeFragments?(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number):Promise<readonly SummaryFragment[]>;
 }

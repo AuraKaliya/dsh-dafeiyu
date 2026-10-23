@@ -2,6 +2,8 @@
 
 日期：2026-10-24。项目0.10.0；contracts/core/memory/timeline为0.7.0。仅本机虚构样本，无服务器或真实QQ操作。完整后续设计见[M5C方案](memory-phase-5c-plan.md)。
 
+本页记录C1交付时的行为。0.11.0的新摘要采用分片、局部视图和简短引用，见[C2验收](memory-phase-5c2.md)；原C1证明包装开销保留为历史对照。
+
 ## 已实现
 
 启用记忆插件的compaction配置后，主插件在DSH真正请求模型之前记录`plugin:dafeiyu/request-sources`，保存实际可见的历史、选中上下文条目、来源与版本。回答生成后记录`plugin:dafeiyu/source-record`，关联原事件、原文哈希、父消息及请求清单。

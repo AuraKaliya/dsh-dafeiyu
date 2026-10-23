@@ -2,7 +2,7 @@
 
 日期：2026-10-23。方案承接记忆方案v1.3及第四阶段通用装配接口。
 
-当前进度：M5A工具反馈、M5B主动历史压缩及M5C1精细来源记录已在本机实现，分别见[A验收](memory-phase-5a.md)、[B验收](memory-phase-5b.md)和[C1验收](memory-phase-5c1.md)。新记录按来源局部失效，旧M5B记录保留保守校验。摘要内语义分片、多代合并及错误经验整理仍待开发，详见[M5C方案](memory-phase-5c-plan.md)。服务器和真实QQ未修改。
+当前进度：M5A工具反馈、M5B主动历史压缩、M5C1精细来源记录及M5C2独立分片与短引用已在本机实现，见[A](memory-phase-5a.md)、[B](memory-phase-5b.md)、[C1](memory-phase-5c1.md)和[C2验收](memory-phase-5c2.md)。新检查点内按片段局部失效，完整证明保留在日志；旧格式保守校验。多代合并及错误经验整理仍待开发，详见[M5C方案](memory-phase-5c-plan.md)。服务器和真实QQ未修改。
 
 ## 1. 范围与职责
 

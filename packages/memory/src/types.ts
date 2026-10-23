@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const MEMORY_VERSION = '0.7.0';
+export const MEMORY_VERSION = '0.8.0';
 
 export const kindSchema = z.enum(['experience', 'knowledge', 'preference', 'procedure']);
 export const claimSchema = z.enum(['observation', 'self_report', 'reported_claim', 'inference']);

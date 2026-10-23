@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { fixtureTool,report,invoke,archivePointer } from './feedback-fixture.js';
 import { CompactionId,compactCheckpointSource } from '@deepseek-ai/dsh-compaction';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import { checkpointProof } from './summary-proof.js';
 
 type H = Awaited<ReturnType<typeof memoryFixture>>;
 const policy = { inputTokens: 5000, minGrowthTokens: 0, minSavingsTokens: 64, cooldownMs: 0, retainTurns: 1, maxSummaryChars: 400 };
@@ -96,7 +97,7 @@ test('deletion invalidates summaries and their raw derived turns; restoration ca
   const memory = z.object({ id: z.string() }).parse(await h.probe('a', c => h.memory.create(c, { requestId: randomUUID(), kind: 'knowledge', claimType: 'self_report', content: '虚构测试知识', sourceRefs: [evidence.ref] })));
   h.setCompactionResponse(() => textReply(JSON.stringify({ summary: 'SUMMARY_DELETE_SENTINEL：旧记录的虚构信息。' })));
   const agent = await seed(h, 6); assert.match(visible(lastChat(h)), /SUMMARY_DELETE_SENTINEL/);
-  const dependent=agent.session.deriveMessages().filter(m=>m.role==='user'&&m.source.kind==='compact-checkpoint'&&m.content.some(b=>b.type==='text'&&JSON.parse(b.text).dependencies?.some((d:{kind:string})=>d.kind==='legacy'))).map(m=>m.id);
+  const dependent=agent.session.deriveMessages().filter(m=>m.role==='user'&&m.source.kind==='compact-checkpoint'&&checkpointProof(agent.session,m).dependencies.some(d=>d.kind==='legacy')).map(m=>m.id);
   assert.ok(dependent.length);
   await h.probe('a', c => h.memory.delete(c, { requestId: randomUUID(), id: memory.id, expectedVersion: 1, reason: '测试删除' }));
   await next(h); assert.ok(!lastChat(h).messages.some(m=>m.id!==undefined&&dependent.includes(m.id)));
@@ -141,7 +142,7 @@ test('restart replays committed replacements once and missing provider withdraws
   try{await next(h);assert.match(visible(lastChat(h)),/dafeiyu-incremental-summary/);assert.equal(compactCalls(h).length,0);}finally{await h.close();}
   h=await memoryFixture(root);
   try{h.ctx.systemPrompt.context({name:'surviving-native',order:1,required:true,text:'SURVIVING_NATIVE'});await next(h);
-    assert.ok(!visible(lastChat(h)).includes('dafeiyu-incremental-summary'));assert.match(visible(lastChat(h)),/SURVIVING_NATIVE/);
+    assert.ok(lastChat(h).messages.filter(m=>m.role==='user'&&m.source?.kind==='compact-checkpoint').every(m=>m.content.every(b=>b.type!=='text'||JSON.parse(b.text).fragments?.length===0)));assert.match(visible(lastChat(h)),/SURVIVING_NATIVE/);
   }finally{await h.close();}
 });
 
@@ -183,7 +184,7 @@ test('an open DSH compaction bracket blocks another writer but preserves normal 
 });
 
 test('insufficient reduction does not replace sources or repeatedly retry in the cooldown window',async t=>{
-  const h=await memoryFixture(undefined,{compaction:{...policy,maxSummaryChars:8000,cooldownMs:600000}});t.after(h.close);
+  const h=await memoryFixture(undefined,{compaction:{...policy,maxSummaryChars:8000,maxFragmentGroups:1,cooldownMs:600000}});t.after(h.close);
   h.setCompactionResponse(()=>textReply(JSON.stringify({summary:'不应放大上下文。'.repeat(900)})));
   const agent=await seed(h,6);assert.equal(compactCalls(h).length,1);
   assert.ok(readCompactionEvents(agent.session).some(e=>e.type==='plugin:dafeiyu/compaction-check'&&e.data.status==='no-benefit'));

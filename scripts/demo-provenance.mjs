@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { API_VERSION } from '@dafeiyu/contracts';
 import { readProvenance } from '@dafeiyu/core';
 import { provenanceFixture } from '../build-tests/provenance-fixture.js';
+import { checkpointProof } from '../build-tests/summary-proof.js';
 
 const root=resolve('.runtime/demos',`provenance-${randomUUID()}`);await mkdir(root,{recursive:true});
 const h=await provenanceFixture(root,5000);
@@ -12,8 +13,8 @@ const expiry=new Date(Date.now()+600000).toISOString();
 const plugin=h.core.registerExtension({id:'fictional-independent',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
   id:'progress',kind:'operational-fact',prepare:async()=>[{id:'progress',version:'1',text:'SECOND_PLUGIN_STAYS',expiresAt:expiry,sources:[{ref:'fictional:progress',version:'1',hash:'test'}]}],validate:()=>true,
 }]});
-const checkpoints=()=>h.session().deriveMessages().flatMap(message=>message.role==='user'&&message.source.kind==='compact-checkpoint'
-  ?[{id:message.id,message,data:JSON.parse(message.content.filter(b=>b.type==='text').map(b=>b.text).join(''))}]:[]);
+const checkpoints=()=>h.session().deriveMessages().flatMap(message=>message.role==='user'&&(message.source.kind==='compact-checkpoint'||message.source.kind==='dafeiyu-summary-view')
+  ?[{id:message.id,message,data:checkpointProof(h.session(),message)}]:[]);
 try{
   const b=await h.remember('虚构B资料：纸船存放于蓝色抽屉。');await h.select([b.memory],0);
   for(let i=0;i<5;i++)await h.run(`B阶段${i}：`+'虚构蓝色纸船仍待检验，不能声明成功。'.repeat(500));
@@ -29,13 +30,13 @@ try{
   h.mutate(a,'restore',2);await h.run('恢复后继续');assert.ok(dependent.every(old=>!checkpoints().some(c=>c.id===old.id)));
   await h.run('另一个隔离会话','独立回复','other');assert.ok(!h.visible().includes('青羽842'));
   const records=readProvenance(h.session());
-  const result={at:new Date().toISOString(),projectVersion:'0.10.0',dsh:'0.2.1-rc.2',model:'scripted',samples:'fictional-Chinese',serverAccess:false,
-    independentCheckpointsPreserved:independent.length,dependentCheckpointsWithdrawn:dependent.length,independentBytesAndIdsUnchanged:true,
+  const result={at:new Date().toISOString(),projectVersion:'0.11.0',dsh:'0.2.1-rc.2',model:'scripted',samples:'fictional-Chinese',serverAccess:false,
+    independentCheckpointsPreserved:independent.length,dependentCheckpointViewsReplaced:dependent.length,independentBytesAndIdsUnchanged:true,
     independentUserInputPreserved:true,dependentAnswerWithdrawn:true,restoreDidNotReactivateOldViews:true,otherPluginRegionPreserved:true,crossConversationIsolated:true,
     sourceRecords:records.filter(e=>e.type==='plugin:dafeiyu/source-record').length,requestExposureRecords:records.filter(e=>e.type==='plugin:dafeiyu/request-sources').length,
     sourceRetirementEvents:h.core.journal.events(a.scope.route).filter(e=>e.type==='context.sources.retired').length,
     originalArchiveRetained:JSON.stringify(h.session().snapshotEvents()).includes('A_DERIVED_ANSWER_REMOVE'),
-    scope:'C1 source tracking and local invalidation only; multi-generation merge is not enabled'};
+    scope:'Source tracking compatibility under C2 fragment views; multi-generation merge is not enabled'};
   await writeFile(resolve(root,'result.json'),JSON.stringify(result,null,2)+'\n');await writeFile(resolve('docs/memory-phase-5c1-results.json'),JSON.stringify(result,null,2)+'\n');
   console.log(JSON.stringify(result,null,2));
 }finally{plugin.dispose();await h.close();}
