@@ -32,6 +32,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)
+- [第二阶段真实模型与QQ接入方案](docs/phase-2-plan.md)
 
 `profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。第一阶段没有长期记忆自动整理、专用压缩器、真实 QQ/B站接入、管理员任务或自主更新操作。
 
