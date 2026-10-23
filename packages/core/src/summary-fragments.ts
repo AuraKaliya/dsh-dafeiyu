@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { pluginRecordOf,SessionSeq } from '@deepseek-ai/dsh-session';
+import { pluginRecordOf,SessionSeq,foldSurface } from '@deepseek-ai/dsh-session';
 import type { Session,SessionEvent } from '@deepseek-ai/dsh-session';
 import { SummaryFragmentSchema } from '@dafeiyu/contracts';
 import type { SourceDependency,TimelineScope } from '@dafeiyu/contracts';
@@ -9,14 +9,20 @@ declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
 } }
 
 const inputSchema=z.strictObject({seq:z.number().int().nonnegative(),role:z.enum(['user','assistant']),hash:z.string().length(64)});
+const parentSchema=z.strictObject({ref:z.string(),manifestSeq:z.number().int().nonnegative(),viewSeq:z.number().int().nonnegative(),
+  checkpointSeq:z.number().int().nonnegative(),revision:z.number().int().positive(),hash:z.string().length(64)});
+const compositionSchema=z.strictObject({mode:z.literal('lossless-pack-v1'),generation:z.number().int().min(1).max(16),
+  parents:z.array(parentSchema).min(1).max(8),
+  lineage:z.array(z.strictObject({id:z.string(),parents:z.array(z.string()).min(1).max(256)})).min(1).max(32)});
 export const fragmentManifestSchema=z.strictObject({schemaVersion:z.literal(1),compactionId:z.string(),sessionId:z.string(),agentId:z.string(),route:z.string(),owner:z.string(),
   producerVersion:z.string(),epoch:z.string(),taskId:z.string().nullable(),versions:z.record(z.string(),z.number()),policy:z.string(),policyHash:z.string(),
   model:z.strictObject({provider:z.string(),model:z.string()}),createdAt:z.number(),
   groups:z.array(z.strictObject({id:z.string().regex(/^G[1-9]\d*$/),taskId:z.string().nullable(),inputs:z.array(inputSchema).min(1),dependencies:dependenciesSchema})).min(1).max(8),
   fragments:z.array(SummaryFragmentSchema.extend({id:z.string().regex(/^F[1-9]\d*$/),version:z.literal(1),group:z.string()})).min(1).max(32),
+  composition:compositionSchema.optional(),
 }).superRefine((m,c)=>{
   const groups=new Set(m.groups.map(g=>g.id)),ids=new Set(m.fragments.map(f=>f.id)),inputs=m.groups.flatMap(g=>g.inputs.map(i=>i.seq));
-  if(groups.size!==m.groups.length||ids.size!==m.fragments.length||new Set(inputs).size!==inputs.length
+  if(groups.size!==m.groups.length||ids.size!==m.fragments.length||(!m.composition&&new Set(inputs).size!==inputs.length)
     ||m.fragments.some(f=>!groups.has(f.group))||m.groups.some(g=>!m.fragments.some(f=>f.group===g.id)))c.addIssue({code:'custom',message:'Invalid fragment partition'});
   if(Buffer.byteLength(JSON.stringify(m))>2097152)c.addIssue({code:'custom',message:'Summary proof capacity exceeded'});
 });
@@ -79,15 +85,60 @@ function inputsVerified(session:Session,manifestSeq:number,m:FragmentManifest):b
   }
   return true;
 }
-/** Resolve the unique committed monotonic view chain; ignore uncommitted records, never
- * fall back to an old view when a committed branch is malformed or its proof is missing. */
-export function resolveFragmentView(session:Session,reference:string,scope:TimelineScope):ResolvedFragmentView|null {
+/** Deterministic composition. No model sees the other fragments; dependencies stay local.
+ * Equality includes original event identities, task and the complete source-state closure. */
+export function composeFragmentContent(views:readonly ResolvedFragmentView[]){
+  const groups:FragmentManifest['groups']=[],fragments:FragmentManifest['fragments']=[];
+  const lineage:z.infer<typeof compositionSchema>['lineage']=[];
+  const groupKeys=new Map<string,string>(),fragmentKeys=new Map<string,number>();
+  for(const view of views)for(const f of activeFragments(view)){
+    const original=view.manifest.groups.find(g=>g.id===f.group)!;
+    const content={taskId:original.taskId,inputs:[...original.inputs].sort((a,b)=>a.seq-b.seq),dependencies:unionDependencies(original.dependencies)};
+    const groupKey=JSON.stringify(content);let group=groupKeys.get(groupKey);
+    if(!group){group=`G${groups.length+1}`;groupKeys.set(groupKey,group);groups.push({id:group,...content});}
+    const key=JSON.stringify([groupKey,f.kind,f.text]),parent=`${summaryReference(view.manifestSeq,view.manifest)}.${f.id}`;
+    const duplicate=fragmentKeys.get(key);
+    if(duplicate!==undefined){lineage[duplicate]!.parents.push(parent);continue;}
+    const id=`F${fragments.length+1}`;fragmentKeys.set(key,fragments.length);
+    fragments.push({id,version:1,group,kind:f.kind,text:f.text});lineage.push({id,parents:[parent]});
+  }
+  const composition=compositionSchema.parse({mode:'lossless-pack-v1',generation:1+Math.max(0,...views.map(v=>v.manifest.composition?.generation??0)),
+    parents:views.map(v=>({ref:summaryReference(v.manifestSeq,v.manifest),manifestSeq:v.manifestSeq,viewSeq:v.viewSeq,
+      checkpointSeq:v.checkpoint.seq,revision:v.view.revision,hash:digestSource(v.text)})),lineage});
+  return {groups,fragments,composition};
+}
+
+/** Historical proof validity is separate from current surface selection. A captured parent
+ * is checked at the child creation boundary, never against its later display membership. */
+export function resolveFragmentProof(session:Session,reference:string,scope:TimelineScope,before=session.seq):ResolvedFragmentView|null {
+  return resolveProof(session,reference,scope,before,new Map(),{remaining:256},0);
+}
+function resolveProof(session:Session,reference:string,scope:TimelineScope,before:number,
+  memo:Map<string,ResolvedFragmentView|null>,budget:{remaining:number},depth:number):ResolvedFragmentView|null {
+  const key=`${reference}@${before}`;if(memo.has(key))return memo.get(key)!;
+  if(depth>16||--budget.remaining<0)return null;
   try{
     const parsed=parseSummaryReference(reference);if(!parsed)return null;
-    const artifacts=readSummaryArtifacts(session),records=artifacts.filter(r=>r.type==='plugin:dafeiyu/summary-manifest'&&summaryReference(r.seq,r.data)===parsed.bundle);
+    const artifacts=readSummaryArtifacts(session).filter(r=>r.seq<before),records=artifacts.filter(r=>r.type==='plugin:dafeiyu/summary-manifest'&&summaryReference(r.seq,r.data)===parsed.bundle);
     if(records.length!==1)return null;const record=records[0]!;if(record.type!=='plugin:dafeiyu/summary-manifest')return null;
-    const m=record.data,events=session.snapshotEvents();
-    if(m.sessionId!==session.id||m.agentId!==scope.agentId||m.route!==scope.route||!inputsVerified(session,record.seq,m))return null;
+    const m=record.data,events=session.snapshotEvents().filter(e=>e.seq<before);
+    if(m.sessionId!==session.id||m.agentId!==scope.agentId||m.route!==scope.route)return null;
+    let inputs=m.groups.flatMap(g=>g.inputs.map(i=>i.seq));
+    if(m.composition){
+      const parents:ResolvedFragmentView[]=[];
+      for(const p of m.composition.parents){
+        if(p.manifestSeq>=record.seq||p.checkpointSeq>=record.seq||p.viewSeq>=record.seq)return null;
+        const parent=resolveProof(session,p.ref,scope,record.seq,memo,budget,depth+1);
+        if(!parent||parent.manifest.owner!==m.owner||parent.manifestSeq!==p.manifestSeq||parent.viewSeq!==p.viewSeq
+          ||parent.checkpoint.seq!==p.checkpointSeq||parent.view.revision!==p.revision||digestSource(parent.text)!==p.hash||!parent.view.active.length)return null;
+        parents.push(parent);
+      }
+      const computed=composeFragmentContent(parents);
+      if(JSON.stringify(fragmentManifestSchema.parse({...m,...computed}))!==JSON.stringify(m))return null;
+      inputs=parents.map(p=>p.checkpoint.seq);
+      const surface=foldSurface(events.filter(e=>e.seq<record.seq)).nodes,start=surface.indexOf(SessionSeq(inputs[0]!));
+      if(start<0||JSON.stringify(surface.slice(start,start+inputs.length))!==JSON.stringify(inputs))return null;
+    }else if(!inputsVerified(session,record.seq,m))return null;
     let previous:ResolvedFragmentView|null=null;
     for(const v of artifacts){
       if(v.type!=='plugin:dafeiyu/summary-view'||v.data.manifestSeq!==record.seq)continue;
@@ -99,10 +150,16 @@ export function resolveFragmentView(session:Session,reference:string,scope:Timel
         ||digestSource(text)!==v.data.contentHash||eventText(checkpoint)!==text||!checkpoint.sourceEventSeqs?.includes(record.seq))return null;
       const op=checkpoint.surfaceOp;
       if(!previous){
-        const summary=events[checkpoint.seq-1],inputs=m.groups.flatMap(g=>g.inputs.map(i=>i.seq));
-        if(checkpoint.data.source.kind!=='compact-checkpoint'||v.data.revision!==1||v.data.previousViewSeq!==null||v.data.previousCheckpointSeq!==null||active.length!==m.fragments.length
-          ||summary?.type!=='compaction/summary'||summary.data.compactionId!==m.compactionId
-          ||JSON.stringify(summary.data.shadowedSeqs)!==JSON.stringify(inputs)||typeof op!=='object'||op.op!=='replace'||op.startSeq!==inputs[0]||op.endSeq!==inputs.at(-1)
+        const summary=events[checkpoint.seq-1];
+        if(v.data.revision!==1||v.data.previousViewSeq!==null||v.data.previousCheckpointSeq!==null||active.length!==m.fragments.length
+          ||typeof op!=='object'||op.op!=='replace'||op.startSeq!==inputs[0]||op.endSeq!==inputs.at(-1))return null;
+        if(m.composition){
+          const surface=foldSurface(events.filter(e=>e.seq<checkpoint.seq)).nodes,start=surface.indexOf(SessionSeq(inputs[0]!));
+          if(checkpoint.data.source.kind!=='dafeiyu-summary-view'||summary?.type!=='compaction/prune'
+            ||JSON.stringify(summary.data.shadowedSeqs)!==JSON.stringify(inputs)||start<0
+            ||JSON.stringify(surface.slice(start,start+inputs.length))!==JSON.stringify(inputs))return null;
+        }else if(checkpoint.data.source.kind!=='compact-checkpoint'||summary?.type!=='compaction/summary'||summary.data.compactionId!==m.compactionId
+          ||JSON.stringify(summary.data.shadowedSeqs)!==JSON.stringify(inputs)
           ||!events.some(e=>e.seq<record.seq&&e.type==='compaction/start'&&e.data.compactionId===m.compactionId)
           ||!events.some(e=>e.seq>checkpoint.seq&&e.type==='compaction/end'&&e.data.compactionId===m.compactionId&&e.data.error===undefined))return null;
       }else{
@@ -114,8 +171,23 @@ export function resolveFragmentView(session:Session,reference:string,scope:Timel
       }
       previous={manifest:m,manifestSeq:record.seq,view:v.data,viewSeq:v.seq,checkpoint,text};
     }
-    return previous&&session.surface.nodes.includes(previous.checkpoint.seq)?previous:null;
+    memo.set(key,previous);return previous;
   }catch{return null;}
+}
+/** Normal reads require an active view; historical proof inspection cannot grant access. */
+export function resolveFragmentView(session:Session,reference:string,scope:TimelineScope):ResolvedFragmentView|null {
+  const proof=resolveFragmentProof(session,reference,scope);
+  return proof&&session.surface.nodes.includes(proof.checkpoint.seq)?proof:null;
+}
+/** Display lifecycle only. Neither 'active' nor 'superseded' asserts live source validity. */
+export function summarySelectionState(session:Session,reference:string,scope:TimelineScope):'active'|'withdrawn'|'superseded'|'unselected'|'unproven' {
+  const proof=resolveFragmentProof(session,reference,scope);if(!proof)return 'unproven';
+  if(session.surface.nodes.includes(proof.checkpoint.seq))return proof.view.active.length?'active':'withdrawn';
+  for(const record of readSummaryArtifacts(session)){
+    if(record.type!=='plugin:dafeiyu/summary-manifest'||!record.data.composition?.parents.some(p=>p.checkpointSeq===proof.checkpoint.seq))continue;
+    if(resolveFragmentProof(session,summaryReference(record.seq,record.data),scope))return 'superseded';
+  }
+  return 'unselected';
 }
 export function activeFragments(view:ResolvedFragmentView){return view.manifest.fragments.filter(f=>view.view.active.includes(f.id));}
 export function fragmentDependencies(view:ResolvedFragmentView,ids:readonly string[]=view.view.active):SourceDependency[]{

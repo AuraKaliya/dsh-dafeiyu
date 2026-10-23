@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前项目版本0.11.0：核心、接口、时间线和记忆插件0.8.0实现独立摘要分片、同一检查点内局部退出，以及完整证明与模型可见短引用分离。保留精细来源、版本与删除防复活校验，未失效片段的引用和正文保持不变。继续复用DSH阈值、持久化和恢复。默认测试使用模拟模型，多代摘要合并尚未开启，新能力未加载到真实QQ或服务器。
+当前项目版本0.12.0：核心0.9.0新增M5C第三部分C3-A——多代来源链、替代状态与来源有效性分离、无损组合展示和严格同源去重。保留独立分片、完整私有证明、短引用、局部失效、逻辑删除防复活与会话隔离，复用DSH阈值、持久化和恢复。contracts/memory/timeline仍为0.8.0。测试使用虚构样本和脚本模型，语义融合与原文重建尚未开启，新能力未加载到真实QQ或服务器。
 
 ## 开始使用
 
@@ -45,6 +45,8 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第五阶段C多代摘要与精细来源开发方案](docs/memory-phase-5c-plan.md)
 - [第五阶段C1精细来源记录与局部失效验收](docs/memory-phase-5c1.md)
 - [第五阶段C2分片、局部视图与短引用验收](docs/memory-phase-5c2.md)
+- [第五阶段C3多代摘要合并开发方案](docs/memory-phase-5c3-plan.md)
+- [第五阶段C3-A来源链、组合展示与严格去重验收](docs/memory-phase-5c3a.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)
@@ -54,6 +56,6 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第三阶段时间线与来源接口](docs/phase-3-timeline.md)
 - [第三阶段验收](docs/phase-3-acceptance.md)
 
-`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。定时批量整理、语义关系图、多代摘要合并，以及本项目中的B站、管理员任务、图片/语音理解和自主更新操作尚未接入。`npm run demo:context`展示多区域装配；`demo:compaction`展示压缩；`demo:provenance`展示来源隔离；`npm run demo:fragments`展示同包局部退出、短引用回查和摘要区开销对比。专属压缩需显式配置可用输入预算，不能与宿主另一压缩写者同时启用。
+`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。定时批量整理、语义关系图、多代语义融合与原文重建，以及本项目中的B站、管理员任务、图片/语音理解和自主更新操作尚未接入。`npm run demo:context`展示多区域装配；`demo:compaction`展示压缩；`demo:provenance`展示来源隔离；`demo:fragments`展示同包局部退出与短引用；`npm run demo:composition`展示三代组合、同源去重、删除隔离与重启恢复。专属压缩需显式配置可用输入预算，不能与宿主另一压缩写者同时启用。
 
 Git 只管理源码、测试、模板和文档。运行数据库、登录凭据、私人记忆和聊天记录不入库。尚未配置远端仓库；没有部署或修改服务器。

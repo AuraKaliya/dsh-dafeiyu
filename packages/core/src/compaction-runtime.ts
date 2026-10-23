@@ -15,6 +15,7 @@ import type { SourceDependency } from '@dafeiyu/contracts';
 import type { ContextRuntime } from './context-runtime.js';
 import { fragmentRecordSchema,fragmentManifestSchema,fragmentViewSchema,fragmentCapsuleSchema,renderFragmentView,resolveFragmentView,fragmentDependencies,activeFragments,parseSummaryReference } from './summary-fragments.js';
 import type { FragmentManifest } from './summary-fragments.js';
+import { prepareSummaryComposition,commitSummaryComposition,summaryCompositionRuns } from './summary-composition.js';
 
 export interface CompactionBinding { owner: string; version: string; provider: CompactionProvider }
 export type CompactionAudit = (item:PendingMessage,data:Record<string,import('@dafeiyu/contracts').Json>,seqs:number[])=>void;
@@ -246,11 +247,33 @@ export class CompactionRuntime {
       Math.ceil((Buffer.byteLength(JSON.stringify(history),'utf8')+(pending?Buffer.byteLength(JSON.stringify(pending),'utf8'):0))/3));
     const target = Math.floor(p.inputTokens * p.targetRatio), threshold = p.inputTokens * p.thresholdRatio;
     if (pressure < threshold) { this.record('below-threshold', pressure, target); return; }
-    const events = readCompactionEvents(session), last = events.findLast(e => e.type === 'plugin:dafeiyu/compaction-check' && ['compacted', 'summary-failed', 'no-benefit', 'conflict'].includes(e.data.status));
+    const events = readCompactionEvents(session), last = events.findLast(e => e.type === 'plugin:dafeiyu/compaction-check' && ['compacted', 'composed', 'summary-failed', 'no-benefit', 'conflict'].includes(e.data.status));
     if (last?.type === 'plugin:dafeiyu/compaction-check' && (Date.now() - last.data.at < p.cooldownMs
       || pressure - (last.data.pressure - last.data.saved) < p.minGrowthTokens)) { this.record('cooldown-or-growth', pressure, target); return; }
     const marker = events.findLast(e => e.type === 'compaction/start' || e.type === 'compaction/end' || e.type === 'session/end-seed');
     if (marker?.type === 'compaction/start') { this.record('busy', pressure, target); return; }
+    // C3-A copies exact fragments; it cannot turn mixed evidence into a narrower claim.
+    if(binding.provider.sources){
+      const basis=binding.provider.basis(this.scope());
+      for(const refs of summaryCompositionRuns(session,this.scope())){
+        const plan=prepareSummaryComposition(session,this.scope(),refs,{owner:binding.owner,version:binding.version,
+          protectedTaskId:basis.taskId,maxFragments:p.maxFragments??16,maxGroups:p.maxFragmentGroups??8,maxBytes:p.maxSourceBytes},
+          deps=>this.provenance.validate(deps));
+        if(!plan)continue;
+        const text=renderFragmentView(session.seq,plan.manifest,plan.manifest.fragments.map(f=>f.id));
+        const checkpoint=createUserMessage({source:{kind:'dafeiyu-summary-view',compactionId:plan.manifest.compactionId},content:[{type:'text',text}]});
+        const old=measurement.nodes.filter(n=>plan.parents.some(v=>v.checkpoint.seq===n.seq)).reduce((n,v)=>n+v.tokens,0);
+        const saved=old-meter.estimateMessage(checkpoint);
+        if(saved<p.minSavingsTokens||Buffer.byteLength(text)>=plan.parents.reduce((n,v)=>n+Buffer.byteLength(v.text),0))continue;
+        const next=commitSummaryComposition(this.ctx,session,plan,deps=>this.provenance.validate(deps));
+        if(!await this.ctx.sessions.flush(session))throw new Error('Summary composition checkpoint unavailable');
+        this.record('composed',pressure,target,saved);
+        this.audit(this.item!,{status:'summary-composed',generation:plan.manifest.composition!.generation,
+          parents:plan.parents.length,kept:next.view.active.length,deduplicated:plan.parents.reduce((n,v)=>n+v.view.active.length,0)-next.view.active.length},
+          [...plan.parents.map(v=>v.checkpoint.seq),next.checkpoint.seq,next.manifestSeq]);
+        return;
+      }
+    }
     const turns = events.filter(e => e.type === 'plugin:dafeiyu/turn-seal');
     const eligible = turns.slice(1, Math.max(1, turns.length - p.retainTurns)).filter(e => this.valid(e.data));
     const bySeq = new Map(events.map(e => [Number(e.seq), e])), eligibleSeqs = new Set<number>(),tasks=new Map<number,string|null>();
@@ -409,6 +432,9 @@ export class CompactionRuntime {
     return {status:'ok' as const,untrustedEvidence:true as const,memoryUse:'derived-only' as const,ref:`${parsed.bundle}${parsed.fragment?`.${parsed.fragment}`:''}@${view.view.revision}`,revision:view.view.revision,
       sourceSeqs:[...new Set(groups.flatMap(g=>g.inputs.map(i=>i.seq)))],sessionId:this.agent.session.id,
       proof:{ref:parsed.bundle,revision:view.view.revision,taskId:view.manifest.taskId,policy:view.manifest.policy,model:view.manifest.model,
-        fragments:fragments.map(f=>({ref:`${parsed.bundle}.${f.id}`,kind:f.kind,text:f.text,version:f.version,group:f.group})),groups}};
+        fragments:fragments.map(f=>({ref:`${parsed.bundle}.${f.id}`,kind:f.kind,text:f.text,version:f.version,group:f.group})),groups,
+        ...(view.manifest.composition?{composition:{...view.manifest.composition,
+          lineage:view.manifest.composition.lineage.filter(l=>fragments.some(f=>f.id===l.id)),
+          parents:view.manifest.composition.parents.filter(p=>view.manifest.composition!.lineage.some(l=>fragments.some(f=>f.id===l.id)&&l.parents.some(r=>r.startsWith(`${p.ref}.`))))}}:{})}};
   }
 }

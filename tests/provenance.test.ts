@@ -12,6 +12,10 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-compaction/types';
 import { checkpointProof } from './summary-proof.js';
 
+declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
+  'provenance-test-barrier':{kind:'provenance-test-barrier'};
+} }
+
 test('delete A retires dependent answers but preserves independent B history and later user input byte-for-byte',async t=>{
   const h=await provenanceFixture();t.after(h.close);
   const b=await h.remember('B_SOURCE_独立文件路径');await h.select([b.memory],0);await h.run('请记录B任务','B_ANSWER_KEEP');
@@ -89,14 +93,20 @@ test('fine-grained summary checkpoints keep independent B while withdrawing A an
   const h=await provenanceFixture(undefined,5000);t.after(h.close);
   const b=await h.remember('B_SUMMARY_SOURCE');await h.select([b.memory],0);
   for(let i=0;i<5;i++)await h.run(`B阶段${i}：`+'虚构蓝色纸船尚未验证。'.repeat(200),'B阶段记录');
-  const checkpoints=()=>h.session().deriveMessages().flatMap(m=>m.role==='user'&&m.source.kind==='compact-checkpoint'
+  const checkpoints=()=>h.session().deriveMessages().flatMap(m=>m.role==='user'&&(m.source.kind==='compact-checkpoint'||m.source.kind==='dafeiyu-summary-view')
     ?[{id:m.id,data:checkpointProof(h.session(),m)}]:[]);
-  const independent=checkpoints().map(c=>c.id);assert.ok(independent.length);
+  const independent=checkpoints().map(c=>c.data);assert.ok(independent.length);
   const a=await h.remember('A_SUMMARY_SOURCE');await h.select([a.memory],1);
   for(let i=0;i<5;i++)await h.run(`A阶段${i}：`+'虚构后续检查尚未确认。'.repeat(200),'A阶段记录');
   const dependent=checkpoints().filter(c=>c.data.dependencies.some((d:{kind:string;id?:string;hash?:string})=>d.kind==='memory'&&d.id===a.memory.id||d.hash===a.memory.sources[0]!.contentHash)).map(c=>c.id);
   assert.ok(dependent.length);h.mutate(a,'delete',1);await h.run('继续有效部分');
-  const surviving=checkpoints().map(c=>c.id);assert.ok(independent.every(id=>surviving.includes(id)));assert.ok(dependent.every(id=>!surviving.includes(id)));
+  const surviving=checkpoints();
+  // C3-A may replace the container; independently grounded content and original closure survive.
+  const survivingSources=new Set(surviving.flatMap(c=>c.data.sources.map(s=>JSON.stringify(s))));
+  assert.ok(independent.every(proof=>proof.sources.every(s=>survivingSources.has(JSON.stringify(s)))));
+  assert.ok(independent.every(proof=>proof.summary.split('\n').every(text=>surviving.some(c=>c.data.summary.includes(text)))));
+  assert.ok(dependent.every(id=>!surviving.some(c=>c.id===id)));
+  assert.ok(surviving.every(c=>!c.data.dependencies.some(d=>d.kind==='memory'&&d.id===a.memory.id||'hash' in d&&d.hash===a.memory.sources[0]!.contentHash)));
   h.mutate(a,'restore',2);await h.run('恢复后继续');assert.ok(dependent.every(id=>!checkpoints().some(c=>c.id===id)));
 });
 
@@ -172,7 +182,10 @@ test('legacy working entries without captured source proofs stay archived until 
 
 test('legacy summary uses its coarse fence without withdrawing independent v2 checkpoints',async t=>{
   const h=await provenanceFixture(undefined,5000);t.after(h.close);const b=await h.remember('B_SOURCE');
-  for(let i=0;i<6;i++)await h.run(`虚构${i}：`+'蓝色纸船尚未检验。'.repeat(200));
+  for(let i=0;i<6;i++){
+    await h.run(`虚构${i}：`+'蓝色纸船尚未检验。'.repeat(200));
+    h.session().append('user/message',createUserMessage({source:{kind:'provenance-test-barrier'},content:[{type:'text',text:`OTHER_PLUGIN_BARRIER_${i}`}]}),{surfaceOp:'append'});
+  }
   const session=h.session(),events=session.snapshotEvents();const checkpoints=session.surface.nodes.flatMap(seq=>{const e=events[seq];return e?.type==='user/message'&&e.data.source.kind==='compact-checkpoint'?[e]:[];});assert.ok(checkpoints.length>1);
   const selected=checkpoints[0]!,text=selected.data.content.find(b=>b.type==='text');assert.ok(text&&text.type==='text');
   const {dependencies:_deps,...legacy}=checkpointProof(session,selected.data);const body={...legacy,schemaVersion:1,summary:'LEGACY_COARSE_SUMMARY'};const id=CompactionId(randomUUID());

@@ -19,7 +19,7 @@ import { fragmentCapsuleSchema } from './summary-fragments.js';
 export type { CompactionBinding } from './compaction-runtime.js';
 export { readCompactionEvents } from './compaction-runtime.js';
 export { readProvenance } from './provenance.js';
-export { readSummaryArtifacts,resolveFragmentView,expandedFragmentProof,activeFragments,fragmentDependencies } from './summary-fragments.js';
+export { readSummaryArtifacts,resolveFragmentView,resolveFragmentProof,summarySelectionState,expandedFragmentProof,activeFragments,fragmentDependencies } from './summary-fragments.js';
 
 export const name = 'dafeiyu-core';
 export const inject = ['agents', 'sessions', 'sessionPersistence', 'tools', 'systemPrompt','llm'];
