@@ -5,9 +5,9 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
 import { API_VERSION, MessageSchema, ObservationSchema, conversationKey } from '@dafeiyu/contracts';
-import type { ActionCapability, Extension, ExtensionHandle, Json, PendingMessage, PersonaSnapshot, Receipt, Reply } from '@dafeiyu/contracts';
+import type { ActionCapability, ActionContext, OperationScope, Extension, ExtensionHandle, Json, PendingMessage, PersonaSnapshot, Receipt, Reply } from '@dafeiyu/contracts';
 import { Journal, eventFor } from '@dafeiyu/journal';
-import { DshRuntime } from './runtime.js';
+import { DshRuntime, DshRunError } from './runtime.js';
 import type { BoundAction } from './runtime.js';
 
 export const name = 'dafeiyu-core';
@@ -31,6 +31,7 @@ export class DafeiyuService extends Service {
   private readonly extensions = new Map<string, Registered>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly scheduled = new Set<string>();
+  private readonly actionScopes = new WeakMap<ActionContext, OperationScope>();
   private readonly controller = new AbortController();
   private fatal: string | null = null;
   private closing: Promise<void> | null = null;
@@ -61,11 +62,19 @@ export class DafeiyuService extends Service {
     return { text, version: createHash('sha256').update(text).digest('hex') };
   }
   private event(item: PendingMessage, type: string, data: Record<string, Json> = {}, causedBy: string | null = null) {
-    return eventFor(this.config.agentId, item, type, '@dafeiyu/core', '0.2.0', item.id, causedBy, data);
+    return eventFor(this.config.agentId, item, type, '@dafeiyu/core', '0.3.0', item.id, causedBy, data);
   }
   private assertOpen(): void {
     if (this.controller.signal.aborted) throw new Error('Dafeiyu is closing');
     if (this.fatal) throw new Error(this.fatal);
+  }
+  /** Resolve an active invocation issued by this core. Model arguments cannot select a route or impersonate a context. */
+  scopeFor(context: ActionContext): OperationScope {
+    this.assertOpen();
+    const scope = this.actionScopes.get(context);
+    if (!scope) throw new Error('No active core-issued action context');
+    context.signal.throwIfAborted();
+    return scope;
   }
   registerExtension(extension: Extension): ExtensionHandle {
     this.assertOpen();
@@ -151,11 +160,14 @@ export class DafeiyuService extends Service {
         const event = (type: string, parent: string) => eventFor(this.config.agentId, item, type,
           entry.extension.id, entry.extension.version, operationId, parent, { action: definition.name });
         const started = this.journal.append(event('operation.started', causedBy));
+        const actionSignal = AbortSignal.any([signal, entry.controller.signal]);
+        const actionContext: ActionContext = Object.freeze({ operationId, conversation: Object.freeze({ ...item.message.conversation }),
+          sourceMessageId: item.message.id, signal: actionSignal });
         try {
-          const actionSignal = AbortSignal.any([signal, entry.controller.signal]);
           actionSignal.throwIfAborted();
-          const result = await definition.execute(args, { operationId, conversation: item.message.conversation,
-            sourceMessageId: item.message.id, signal: actionSignal });
+          this.actionScopes.set(actionContext, Object.freeze({ agentId: this.config.agentId, route: item.route,
+            traceId: item.id, operationId, startedEventId: started.id }));
+          const result = await definition.execute(args, actionContext);
           actionSignal.throwIfAborted();
           const validated = z.json().parse(result);
           this.journal.append(event('operation.succeeded', started.id));
@@ -164,7 +176,7 @@ export class DafeiyuService extends Service {
           this.journal.append(event('operation.failed', started.id));
           // Do not propagate raw extension errors (which may contain credentials) into model context.
           throw new Error(signal.aborted || entry.controller.signal.aborted ? 'Capability cancelled; verify effects' : 'Capability failed; verify effects');
-        }
+        } finally { this.actionScopes.delete(actionContext); }
       },
     })));
   }
@@ -189,8 +201,9 @@ export class DafeiyuService extends Service {
         const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(this.config.turnTimeoutMs)]);
         const channel = source.extension.channels?.find(capability => capability.channel === item.message.conversation.channel && capability.account === item.message.conversation.account);
         result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description);
-      } catch {
-        this.journal.transition(item.id, 'processing', 'failed', this.event(item, 'turn.failed', { code: 'TURN_FAILED', note: 'Earlier operations may have effects; no automatic replay' }, started.id));
+      } catch (error) {
+        this.journal.transition(item.id, 'processing', 'failed', { ...this.event(item, 'turn.failed', { code: 'TURN_FAILED', note: 'Earlier operations may have effects; no automatic replay' }, started.id),
+          sources: error instanceof DshRunError ? error.sources : [] });
         return;
       }
       const reply: Reply = { id: `${item.id}:reply`, conversation: item.message.conversation, sourceMessageId: item.message.id, text: result.text };

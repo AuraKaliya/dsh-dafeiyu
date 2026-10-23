@@ -12,6 +12,8 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import * as DeepSeek from '@deepseek-ai/dsh-llm-deepseek-api-key';
 import * as Core from '@dafeiyu/core';
 import * as Simulator from '@dafeiyu/channel-simulator';
+import Query from '@deepseek-ai/dsh-session-query-sqlite';
+import * as Timeline from '@dafeiyu/timeline';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -22,7 +24,7 @@ export const model = Object.freeze({ provider: 'deepseek-official', model: 'deep
 const fingerprint = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 
 /** Isolated DSH composition for local acceptance. Credential values never leave the DSH service. */
-export async function localHost(root, { simulator = true, realModel = true, adapter, timeout = 180000 } = {}) {
+export async function localHost(root, { simulator = true, realModel = true, adapter, timeout = 180000, timeline = false } = {}) {
   if (!process.env.DSH_HOME || resolve(process.env.DSH_HOME) !== resolve(root, 'dsh-home')) throw new Error('Isolated DSH_HOME must be selected before loading the host');
   const ctx = new Context();
   const calls = [];
@@ -38,6 +40,7 @@ export async function localHost(root, { simulator = true, realModel = true, adap
     await ctx.plugin(AgentRegistry);
     await ctx.plugin(Persistence, { root: resolve(root, 'sessions'), compression: 'none' });
     await ctx.plugin(AgentLoop, { agents: [] });
+    const queryFiber = timeline ? await ctx.plugin(Query, { path: resolve(root, 'history-index.sqlite'), openAt: 'never' }) : null;
     if (realModel) {
       // Fail before mounting the provider if its legacy migration might rewrite the user's store.
       const doc = parseDocument(await readFile(credentialFile, 'utf8'), { logLevel: 'silent' });
@@ -69,11 +72,12 @@ export async function localHost(root, { simulator = true, realModel = true, adap
       personaFile: resolve('profiles/persona.test.md'), ...(realModel ? model : { provider: 'local-test', model: 'scripted' }),
       turnTimeoutMs: timeout });
     const simulatorFiber = simulator ? await ctx.plugin(Simulator, { agentId: 'dafeiyu', account: 'local' }) : null;
+    const timelineFiber = timeline ? await ctx.plugin(Timeline, { agentId: 'dafeiyu' }) : null;
     let closed = false;
     return { ctx, core: ctx.dafeiyu, simulator: simulator ? ctx.dafeiyuSimulator : null, calls, faults,
       async close() {
         if (closed) return; closed = true;
-        await simulatorFiber?.dispose(); await coreFiber.dispose(); await ctx.fiber.dispose();
+        await simulatorFiber?.dispose(); await timelineFiber?.dispose(); await coreFiber.dispose(); await queryFiber?.dispose(); await ctx.fiber.dispose();
         if (credentialFingerprint && credentialFingerprint !== await fingerprint(credentialFile)) throw new Error('Credential store changed during acceptance');
       } };
   } catch (error) { await ctx.fiber.dispose(); throw error; }

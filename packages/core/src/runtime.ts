@@ -13,6 +13,10 @@ export interface BoundAction {
   execute(args: unknown, signal: AbortSignal): Promise<Json>;
 }
 export interface RunResult { readonly text: string; readonly sources: SourceRef[] }
+/** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
+export class DshRunError extends Error {
+  constructor(readonly sources: SourceRef[]) { super('DSH turn failed; consult visible evidence'); }
+}
 
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
 export class DshRuntime {
@@ -75,7 +79,11 @@ export class DshRuntime {
       const text = output.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
       if (!text) throw new Error('DSH turn produced no text');
       return { text, sources: events.filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
-        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq })) };
+        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })) };
+    } catch {
+      throw new DshRunError(agent.session.snapshotEvents().slice(before)
+        .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
+        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })));
     } finally {
       signal.removeEventListener('abort', abort);
       for (const dispose of disposers.reverse()) dispose();

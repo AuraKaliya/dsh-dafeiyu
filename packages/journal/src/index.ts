@@ -1,8 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { MessageSchema, conversationKey } from '@dafeiyu/contracts';
+import { MessageSchema, conversationKey, TimelineQuerySchema, redactJson } from '@dafeiyu/contracts';
+import type { TimelineQuery, TimelineScope } from '@dafeiyu/contracts';
+import { z } from 'zod';
 import type { EventRecord, InboundMessage, Json, MessageState, PendingMessage, Receipt, Reply, SourceRef } from '@dafeiyu/contracts';
 
 type NewEvent = Omit<EventRecord, 'seq' | 'id' | 'recordedAt' | 'visibility' | 'schemaVersion'>;
@@ -58,6 +60,10 @@ export class Journal {
         this.db.prepare('INSERT OR REPLACE INTO ownership(singleton,pid,nonce) VALUES(1,?,?)').run(process.pid, this.owner);
       });
     } catch (error) { this.db.close(); throw error; }
+    this.db.function('dafeiyu_search_text', { deterministic: true }, value => {
+      const body = z.object({ type: z.string(), plugin: z.string(), data: z.record(z.string(), z.json()) }).parse(JSON.parse(text(value)));
+      return JSON.stringify(redactJson({ type: body.type, plugin: body.plugin, data: body.data }).value).toLowerCase();
+    });
   }
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -80,7 +86,7 @@ export class Journal {
         .run(id, route, message.id, extensionId, payload, 'accepted');
       this.append({ agentId, route, traceId: id, operationId: id, causedBy: null,
         type: 'message.accepted', plugin: extensionId, pluginVersion: version,
-        occurredAt: message.occurredAt, sources: [{ kind: 'message', id: message.id }],
+        occurredAt: message.occurredAt, sources: [{ kind: 'message', id: message.id, route }],
         data: { senderId: message.sender.id } });
       return { id, duplicate: false, state: 'accepted' };
     });
@@ -123,6 +129,75 @@ export class Journal {
   events(route: string): EventRecord[] {
     return this.db.prepare('SELECT seq,body FROM events WHERE route=? ORDER BY seq').all(route)
       .map(row => ({ ...JSON.parse(text(row.body)), seq: Number(row.seq) }) as EventRecord);
+  }
+  /** Authorization predicates are evaluated inside the SQL query, including persisted visibility. */
+  private scopePredicate(): string {
+    return "route=? AND json_extract(body,'$.agentId')=? AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.visibility.route')=?";
+  }
+  scopedEvent(scope: TimelineScope, id: string): EventRecord | null {
+    const row = this.db.prepare(`SELECT seq,body FROM events WHERE ${this.scopePredicate()} AND id=?`).get(scope.route, scope.agentId, scope.route, id);
+    return row ? this.eventRow(row) : null;
+  }
+  private eventRow(row: Record<string, unknown>): EventRecord {
+    const body = z.object({ schemaVersion: z.literal(1), id: z.string(), agentId: z.string(), route: z.string(), traceId: z.string(),
+      operationId: z.string(), causedBy: z.string().nullable(), type: z.string(), plugin: z.string(), pluginVersion: z.string(),
+      occurredAt: z.string(), recordedAt: z.string(), visibility: z.object({ kind: z.literal('conversation'), route: z.string() }),
+      sources: z.array(z.object({ kind: z.enum(['message','session','event']), id: z.string(), seq: z.number().int().nonnegative().optional(), route: z.string().optional() })),
+      data: z.record(z.string(), z.json()) }).parse(JSON.parse(text(row.body)));
+    return { ...body, sources: body.sources.map(source => ({ kind: source.kind, id: source.id,
+      ...(source.seq === undefined ? {} : { seq: source.seq }), ...(source.route === undefined ? {} : { route: source.route }) })), seq: z.number().int().positive().parse(Number(row.seq)) };
+  }
+  sessionFor(scope: TimelineScope): string | null {
+    // The caller's route is derived by the core; never accept a session ID as authority.
+    const row = this.db.prepare('SELECT session_id FROM conversations WHERE route=?').get(scope.route);
+    return row ? text(row.session_id) : null;
+  }
+  messageFor(scope: TimelineScope, messageId: string): PendingMessage | null {
+    const row = this.db.prepare('SELECT id FROM inbox WHERE route=? AND message_id=?').get(scope.route, messageId);
+    return row ? this.get(text(row.id)) : null;
+  }
+  /** Snapshot keyset pagination. Cursor binds the scope and normalized query; it grants no access. */
+  searchTimeline(scope: TimelineScope, input: TimelineQuery) {
+    const parsed = TimelineQuerySchema.parse(input);
+    const { cursor, ...filter } = parsed;
+    if (filter.since) filter.since = new Date(filter.since).toISOString();
+    if (filter.until) filter.until = new Date(filter.until).toISOString();
+    // Only stable authorization identity belongs in a cursor, not the per-call operation/trace IDs.
+    const fingerprint = createHash('sha256').update(JSON.stringify([{ agentId: scope.agentId, route: scope.route }, filter])).digest('hex');
+    let snapshot: number;
+    let before: number;
+    if (cursor) {
+      try {
+        const page = z.strictObject({ v: z.literal(1), fingerprint: z.string(), snapshot: z.number().int().nonnegative().safe(),
+          before: z.number().int().positive().safe() }).parse(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')));
+        if (page.fingerprint !== fingerprint || page.before > page.snapshot) throw new Error('cursor mismatch');
+        snapshot = page.snapshot; before = page.before;
+      } catch { throw new Error('INVALID_TIMELINE_CURSOR'); }
+    } else {
+      const row = this.db.prepare(`SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE ${this.scopePredicate()}`).get(scope.route, scope.agentId, scope.route);
+      snapshot = Number(row?.seq ?? 0); before = snapshot + 1;
+    }
+    const clauses = ['seq<=?', 'seq<?'];
+    const args: (string | number)[] = [scope.route, scope.agentId, scope.route, snapshot, before];
+    for (const [key, path] of [['plugin','plugin'],['type','type'],['traceId','traceId'],['operationId','operationId']] as const) {
+      if (filter[key]) { clauses.push(`json_extract(body,'$.${path}')=?`); args.push(filter[key]); }
+    }
+    if (filter.actorId) {
+      clauses.push("EXISTS(SELECT 1 FROM inbox i WHERE i.id=scoped.trace_id AND i.route=scoped.route AND json_extract(i.payload,'$.sender.id')=?)");
+      args.push(filter.actorId);
+    }
+    if (filter.since) { clauses.push(`julianday(json_extract(body,'$.${filter.clock}'))>=julianday(?)`); args.push(filter.since); }
+    if (filter.until) { clauses.push(`julianday(json_extract(body,'$.${filter.clock}'))<=julianday(?)`); args.push(filter.until); }
+    if (filter.query) { clauses.push('instr(dafeiyu_search_text(body),?)>0'); args.push(filter.query.toLowerCase()); }
+    args.push(filter.limit + 1);
+    // Materialize the visible subset before keyword processing; search cannot match masked secrets.
+    const rows = this.db.prepare(`WITH scoped AS MATERIALIZED (SELECT seq,id,route,trace_id,body FROM events WHERE ${this.scopePredicate()})
+      SELECT seq,body FROM scoped WHERE ${clauses.join(' AND ')} ORDER BY seq DESC LIMIT ?`).all(...args);
+    const hasMore = rows.length > filter.limit;
+    const items = rows.slice(0, filter.limit).map(row => this.eventRow(row));
+    const last = items.at(-1);
+    const nextCursor = hasMore && last ? Buffer.from(JSON.stringify({ v: 1, fingerprint, snapshot, before: last.seq })).toString('base64url') : null;
+    return { items, snapshot, nextCursor };
   }
   close(): void {
     if (!this.closed) {

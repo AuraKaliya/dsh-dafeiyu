@@ -1,4 +1,6 @@
 import { z } from 'zod';
+export * from './redaction.js';
+export * from './history.js';
 
 export const API_VERSION = 2 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -27,7 +29,11 @@ export function conversationKey(agentId: string, c: Conversation): string {
   return JSON.stringify([agentId, c.channel, c.account, c.kind, c.id]);
 }
 export interface PersonaSnapshot { readonly text: string; readonly version: string }
-export interface SourceRef { readonly kind: 'message' | 'session' | 'event'; readonly id: string; readonly seq?: number }
+export interface SourceRef {
+  readonly kind: 'message' | 'session' | 'event'; readonly id: string; readonly seq?: number;
+  /** Explicit origin on new evidence. Legacy references inherit their anchor's route. */
+  readonly route?: string;
+}
 export interface Reply {
   readonly id: string;
   readonly conversation: Conversation;

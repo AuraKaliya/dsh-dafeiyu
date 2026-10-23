@@ -55,7 +55,7 @@ export class QqChannel extends Service {
     if (this.token.length < 32) throw new Error('OneBot token must be at least 32 characters');
     this.api = new OneBot(this.config.httpURL, this.token, this.config.botId, this.config.requestTimeoutMs);
     this.store = new QqStore(resolve(this.config.dataDir, 'qq.sqlite'));
-    this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.2.0', apiVersion: API_VERSION, agentId: this.config.agentId,
+    this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
       channels: [{ channel: 'qq', account: this.config.botId,
         description: '当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
         deliver: (reply, signal) => this.deliver(reply, signal) }] });

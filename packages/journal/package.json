@@ -1,11 +1,12 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "types": "./lib/index.d.ts",
   "name": "@dafeiyu/journal",
   "type": "module",
   "dependencies": {
-    "@dafeiyu/contracts": "0.2.0"
+    "@dafeiyu/contracts": "0.3.0",
+    "zod": "4.4.3"
   },
   "exports": {
     ".": {

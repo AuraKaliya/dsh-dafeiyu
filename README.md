@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前本地版本0.2.0：主插件、能力注册、统一事件记录，以及真实模型和QQ能力接入。DSH提供真正的Agent循环、会话和持久化。默认自动化测试与demo使用模拟模型；真实接入需显式运行第二阶段入口。
+当前源码版本0.3.0：主插件、能力注册、统一事件记录、真实模型与QQ接入，以及按会话隔离的行为时间线检索和来源回查。DSH提供Agent循环、会话、持久化及原文查询。默认测试与演示使用模拟模型；真实接入需显式启动，第三阶段能力需显式启用。
 
 ## 开始使用
 
@@ -25,6 +25,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 | `@dafeiyu/core` | DSH 主插件；人格装配、会话运行、能力注册、队列和交付协调 |
 | `@dafeiyu/channel-simulator` | DSH 关联插件；本机模拟渠道及确定性的发送结果 |
 | `@dafeiyu/channel-qq` | QQ能力插件；本机SnowLuma适配、明确账号范围、事件接入与交付 |
+| `@dafeiyu/timeline` | 当前会话行为检索、可见来源回查、分页和读取审计 |
 
 ## 文档
 
@@ -36,6 +37,8 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第二阶段真实模型与QQ接入方案](docs/phase-2-plan.md)
 - [第二阶段本机接入实现](docs/phase-2-implementation.md)
 - [第二阶段真实验收](docs/phase-2-acceptance.md)
+- [第三阶段时间线与来源接口](docs/phase-3-timeline.md)
+- [第三阶段验收](docs/phase-3-acceptance.md)
 
 `profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。长期记忆自动整理、专用压缩器、B站、管理员任务、图片/语音理解和自主更新操作尚未接入。
 

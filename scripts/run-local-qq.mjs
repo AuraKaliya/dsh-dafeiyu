@@ -21,7 +21,7 @@ catch(error) { if(error.code !== 'ENOENT') throw error; }
 const accountLease = new Journal(resolve('.runtime/phase2/account-1994142241.sqlite'));
 let host;
 try {
-  host = await localHost(root, { simulator: false, realModel: stage === 'C',
+  host = await localHost(root, { simulator: false, realModel: stage === 'C', timeline: process.argv.includes('--timeline'),
     adapter: new ScriptedModel(() => textReply('【本地接入验收·模拟模型】已收到这条消息，文字收发正常。')) });
 } catch(error) { accountLease.close(); throw error; }
 if(stage==='C')host.core.registerExtension({id:'qq-acceptance-tools',version:'0.2.0',apiVersion:2,agentId:'dafeiyu',actions:[{
