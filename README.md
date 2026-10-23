@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前项目版本0.6.0：记忆插件0.3.0在存储、版本、删除和检索之上，加入独立分析任务、结构化结果、记忆候选及保守自动提交。使用核心当前绑定的模型，通过独立DSH会话运行，不自动注入人格会话。默认测试使用模拟模型；真实模型与BGE验收分别显式运行，新能力未加载到真实QQ或服务器。
+当前项目版本0.7.0：核心、接口、时间线和记忆插件0.4.0加入通用上下文贡献接口、工作记忆与选中证据的受控装配，复用DSH动态上下文和持久会话视图。旧受控快照可选择性退出，保留其他插件区域；完整分析报告不自动注入。默认测试使用模拟模型；真实模型与BGE验收分别显式运行，新能力未加载到真实QQ或服务器。
 
 ## 开始使用
 
@@ -22,11 +22,11 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 |---|---|
 | `@dafeiyu/contracts` | 版本化接口、消息校验、能力和事件类型 |
 | `@dafeiyu/journal` | 本地 SQLite、接收去重、会话映射、交付状态、时序与因果事件 |
-| `@dafeiyu/core` | DSH 主插件；人格装配、会话运行、能力注册、队列和交付协调 |
+| `@dafeiyu/core` | DSH 主插件；人格、会话、能力注册、上下文贡献协调与预算、旧快照退出、交付 |
 | `@dafeiyu/channel-simulator` | DSH 关联插件；本机模拟渠道及确定性的发送结果 |
 | `@dafeiyu/channel-qq` | QQ能力插件；本机SnowLuma适配、明确账号范围、事件接入与交付 |
 | `@dafeiyu/timeline` | 当前会话行为检索、可见来源回查、分页和读取审计 |
-| `@dafeiyu/memory` | 隔离存储、版本与删除、来源依赖、中文FTS5、BGE召回、token分片及profile缓存；独立分析、候选与自动提交 |
+| `@dafeiyu/memory` | 隔离存储、版本与删除、来源依赖、中文FTS5、BGE召回、token分片及profile缓存；独立分析、候选、工作记忆与选中证据 |
 
 ## 文档
 
@@ -38,6 +38,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [记忆插件第一阶段实现与验收](docs/memory-phase-1.md)
 - [记忆插件第二阶段检索实现与验收](docs/memory-phase-2.md)
 - [记忆插件第三阶段独立分析与候选验收](docs/memory-phase-3.md)
+- [第四阶段受控上下文装配、插件接口与验收](docs/memory-phase-4.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)
@@ -47,6 +48,6 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第三阶段时间线与来源接口](docs/phase-3-timeline.md)
 - [第三阶段验收](docs/phase-3-acceptance.md)
 
-`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。定时批量整理、语义关系图、上下文装配与专用压缩器，以及本项目中的B站、管理员任务、图片/语音理解和自主更新操作尚未接入。
+`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。定时批量整理、语义关系图、历史对话专用压缩器，以及本项目中的B站、管理员任务、图片/语音理解和自主更新操作尚未接入。`npm run demo:context`展示纯本机虚构样本的多区域装配、选择性失效和跨会话隔离。
 
 Git 只管理源码、测试、模板和文档。运行数据库、登录凭据、私人记忆和聊天记录不入库。尚未配置远端仓库；没有部署或修改服务器。

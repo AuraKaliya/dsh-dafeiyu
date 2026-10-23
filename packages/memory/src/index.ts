@@ -14,12 +14,13 @@ import { RetrievalError, retrievalConfigSchema } from './retrieval-profile.js';
 import type { RetrievalDependencies } from './retrieval-profile.js';
 import { MemoryAnalysis } from './analysis.js';
 import { AnalysisError, analysisConfigSchema } from './analysis-types.js';
+import { WorkingMemory } from './working.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional() });
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional() });
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
   sourceRefs: z.array(z.string().min(1).max(300)).min(1).max(8) };
@@ -43,6 +44,7 @@ export class MemoryService extends Service {
   private readonly handle: ExtensionHandle;
   private readonly retrieval: MemoryRetrieval | null;
   private readonly analysis: MemoryAnalysis | null;
+  private readonly working:WorkingMemory|null;
   private closed = false;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
@@ -52,11 +54,13 @@ export class MemoryService extends Service {
     catch (error) { this.store.close(); throw error; }
     try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis):null; }
     catch(error){this.retrieval?.close();this.store.close();throw error;}
+    try{this.working=this.config.context?new WorkingMemory(ctx,this.store,this.retrieval,this.config.dataDir,(c,refs)=>this.evidence(c,refs)):null;}
+    catch(error){void this.analysis?.close();this.retrieval?.close();this.store.close();throw error;}
     try {
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
-        agentId: this.config.agentId, actions: this.actions() });
-    } catch (error) { void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
-    ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
+        agentId: this.config.agentId, actions: this.actions(),contexts:this.working?.contributors()??[] });
+    } catch (error) { this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
+    ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
     this.flush();
     this.analysis?.start();
   }
@@ -194,6 +198,11 @@ export class MemoryService extends Service {
     try{return this.analysis?.cancel(context,id)??{status:'not_configured'};}catch(error){return this.failure(error);}
   }
   async whenAnalysisIdle():Promise<void>{await this.analysis?.whenIdle();}
+  async updateWorking(context:ActionContext,raw:unknown){this.scope(context);try{return await this.working?.update(context,raw)??{status:'not_configured'};}catch(e){this.scope(context);return this.failure(e);}}
+  selectContext(context:ActionContext,raw:unknown){this.scope(context);try{return this.working?.select(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
+  async retrieveContext(context:ActionContext,raw:unknown){this.scope(context);try{return await this.working?.retrieve(context,raw)??{status:'not_configured'};}catch(e){this.scope(context);return this.failure(e);}}
+  clearContext(context:ActionContext,raw:unknown){this.scope(context);try{return this.working?.clear(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
+  contextStatus(context:ActionContext){this.scope(context);return this.working?.status(context)??{status:'not_configured'};}
   private actions(): ActionCapability[] {
     const field = (description: string, required = true) => ({ description, required });
     const content = { requestId: field('幂等请求标识；重试保持相同值和完整参数'), kind: field('experience / knowledge / preference / procedure'),
@@ -215,6 +224,21 @@ export class MemoryService extends Service {
       },
     });
     return [
+      ...(this.working?[
+        action('dafeiyu_memory_working_set','替换当前会话的工作状态。只返回回执，来源校验后由核心在下次请求装配。不会自动提炼分析报告。',
+          {requestId:field('幂等标识'),expectedVersion:field('工作区状态版本，首次0'),taskId:field('当前任务标识'),expiresAt:field('有效期ISO时间，24小时以内'),items:field('JSON数组：id、category(goal/constraint/correction/pending/result/gap)、text、sourceRefs')},
+          (args,ctx)=>this.updateWorking(ctx,{...args,expectedVersion:Number(args.expectedVersion),items:JSON.parse(args.items??'')})),
+        action('dafeiyu_memory_context_select','选择有效记忆片段供核心装配；必须携带读取时的版本、哈希及Unicode码点范围。不直接写入聊天消息。',
+          {requestId:field('幂等标识'),expectedVersion:field('检索证据区状态版本，首次0'),taskId:field('当前任务标识'),expiresAt:field('有效期ISO时间，24小时以内'),items:field('JSON数组：id、revision、version、contentHash、start、end')},
+          (args,ctx)=>this.selectContext(ctx,{...args,expectedVersion:Number(args.expectedVersion),items:JSON.parse(args.items??'')})),
+        action('dafeiyu_memory_context_retrieve','内部检索并选择前若干有效记忆完整分片；仅返回回执，完整命中列表和分析结果不注入聊天。',
+          {requestId:field('幂等标识'),expectedVersion:field('检索证据区版本，首次0'),taskId:field('当前任务标识'),expiresAt:field('有效期ISO时间，24小时以内'),query:field('检索问题'),strategy:field('lexical/semantic/hybrid',false),limit:field('最多1至12条，默认3',false)},
+          (args,ctx)=>this.retrieveContext(ctx,{...args,expectedVersion:Number(args.expectedVersion),...(args.limit?{limit:Number(args.limit)}:{})})),
+        action('dafeiyu_memory_context_status','查询工作区和证据区版本与存储条数；不返回记忆正文，不表示全部条目已获准装配。',{},(_args,ctx)=>this.contextStatus(ctx)),
+        action('dafeiyu_memory_context_clear','清空所选装配区；保留长期记忆与审计，旧受控快照将在下一请求前退出。',
+          {requestId:field('幂等标识'),kind:field('working/evidence'),expectedVersion:field('该区状态版本')},
+          (args,ctx)=>this.clearContext(ctx,{...args,expectedVersion:Number(args.expectedVersion)})),
+      ]:[]),
       ...(this.analysis?[
         action('dafeiyu_memory_analyze','提交独立后台记忆分析。只读当前会话的给定来源；符合保守规则的候选自动提交，分析全文不会自动写入当前聊天。',
           {requestId:field('幂等任务标识'),sourceRefs:field('JSON来源ref数组'),targetIds:field('允许更正的已有记忆UUID数组，默认[]',false)},

@@ -2,9 +2,10 @@ import * as Memory from '@dafeiyu/memory';
 import { timelineFixture } from './timeline-fixture.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { RetrievalDependencies } from '@dafeiyu/memory/retrieval-profile';
+import type { Config as CoreConfig } from '@dafeiyu/core';
 
-export async function memoryFixture(root?: string, options: Omit<Memory.Config, 'agentId' | 'dataDir'> = {}, dependencies?: RetrievalDependencies) {
-  const h = await timelineFixture(root);
+export async function memoryFixture(root?: string, options: Omit<Memory.Config, 'agentId' | 'dataDir'> = {}, dependencies?: RetrievalDependencies,context?:CoreConfig['context']) {
+  const h = await timelineFixture(root,context);
   const configuration = { agentId: 'dafeiyu', dataDir: h.root, ...options };
   const memoryFiber = dependencies
     ? await h.ctx.plugin({ name:'memory-fixture',inject:Memory.inject,apply:(ctx:Context)=>{new Memory.MemoryService(ctx,configuration,dependencies);} })

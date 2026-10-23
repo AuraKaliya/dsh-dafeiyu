@@ -152,11 +152,11 @@ export class Journal {
     const row = this.db.prepare(`SELECT seq,body FROM events WHERE ${this.scopePredicate()} AND id=?`).get(scope.route, scope.agentId, scope.route, id);
     return row ? this.eventRow(row) : null;
   }
-  issueAnalysisGrant(scope: import('@dafeiyu/contracts').OperationScope): string {
+  issueAnalysisGrant(scope: import('@dafeiyu/contracts').OperationScope,pluginVersion='0.3.0'): string {
     return this.transaction(() => {
       const id = randomUUID(), operationId = randomUUID();
       const event = this.append({ agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId,
-        causedBy:scope.startedEventId,type:'analysis.authorized',plugin:'core',pluginVersion:'0.3.0',occurredAt:new Date().toISOString(),sources:[],data:{grantId:id} });
+        causedBy:scope.startedEventId,type:'analysis.authorized',plugin:'core',pluginVersion,occurredAt:new Date().toISOString(),sources:[],data:{grantId:id} });
       const grant = { agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId,startedEventId:event.id };
       this.db.prepare('INSERT INTO analysis_grants(id,agent_id,route,body) VALUES(?,?,?,?)').run(id,scope.agentId,scope.route,JSON.stringify(grant));
       return id;

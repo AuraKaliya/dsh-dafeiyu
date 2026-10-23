@@ -6,8 +6,10 @@ import type {} from '@deepseek-ai/dsh-session-persistence';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 import type {} from '@deepseek-ai/dsh-tools';
 import type { ActionCapability, Json, PendingMessage, PersonaSnapshot, SourceRef } from '@dafeiyu/contracts';
+import { ContextRuntime } from './context-runtime.js';
+import type { ContextCoordinator } from './context.js';
 
-interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot }
+interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime }
 export interface BoundAction {
   readonly definition: ActionCapability;
   execute(args: unknown, signal: AbortSignal): Promise<Json>;
@@ -21,16 +23,28 @@ export class DshRunError extends Error {
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
 export class DshRuntime {
   private readonly handles = new Map<string, OwnedSession>();
-  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string) {}
+  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator) {
+    const sessions=this.handles;
+    ctx.on('llm/stream',async function*(options,next){
+      const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
+      if(context&&!context.guard(options,true,true)){
+        yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
+      }
+      for await(const chunk of next()){context?.guard(options);yield chunk;}
+      context?.guard(options);
+    });
+  }
 
   async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。'): Promise<RunResult> {
     signal.throwIfAborted();
     let owned = this.handles.get(item.sessionId);
     if (!owned) {
       let scoped: Context | undefined;
+      let context:ContextRuntime|undefined;
       const identity = { persona };
       const setup = (scope: Context): void => {
         scoped = scope;
+        context=new ContextRuntime(scope,this.coordinator);
         scope.systemPrompt.section({ name: 'dafeiyu-persona', order: 0, interpolate: false, text: () => identity.persona.text });
         scope.tools.presentAs('native');
       };
@@ -39,13 +53,14 @@ export class DshRuntime {
       const handle = exists
         ? await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: this.model, setup })
         : await this.ctx.agents.create({ sessionId, meta: { cwd: this.cwd }, agentOptions: this.model, setup });
-      if (!scoped) { await handle.dispose(); throw new Error('DSH did not compose the agent scope'); }
-      owned = { handle, scope: scoped, get persona() { return identity.persona; }, set persona(value) { identity.persona = value; } };
+      if (!scoped||!context) { await handle.dispose(); throw new Error('DSH did not compose the agent scope'); }
+      owned = { handle, scope: scoped,context, get persona() { return identity.persona; }, set persona(value) { identity.persona = value; } };
       this.handles.set(item.sessionId, owned);
     }
     owned.persona = persona;
     const { agent } = owned.handle;
     if (agent.status !== 'idle') throw new Error('DSH conversation is busy outside the core');
+    owned.context.begin(item,agent);
     const disposers: (() => void)[] = [];
     const before = agent.session.snapshotEvents().length;
     const abort = (): void => agent.cancel({ kind: 'hook', reason: 'Dafeiyu turn cancelled' });
@@ -85,6 +100,7 @@ export class DshRuntime {
         .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
         .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })));
     } finally {
+      owned.context.end();
       signal.removeEventListener('abort', abort);
       for (const dispose of disposers.reverse()) dispose();
     }

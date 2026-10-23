@@ -1,6 +1,8 @@
 import { z } from 'zod';
 export * from './redaction.js';
 export * from './history.js';
+export * from './context.js';
+import type { ContextContributor } from './context.js';
 
 export const API_VERSION = 2 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -72,6 +74,7 @@ export interface Extension {
   readonly agentId: string;
   readonly channels?: readonly ChannelCapability[];
   readonly actions?: readonly ActionCapability[];
+  readonly contexts?: readonly ContextContributor[];
 }
 export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
 export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }

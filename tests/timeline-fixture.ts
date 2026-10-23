@@ -8,12 +8,13 @@ import { API_VERSION } from '@dafeiyu/contracts';
 import type { ActionContext } from '@dafeiyu/contracts';
 import { harness, call, textReply } from './harness.js';
 import type { Response } from './harness.js';
+import type { Config as CoreConfig } from '@dafeiyu/core';
 
-export async function timelineFixture(existingRoot?: string) {
+export async function timelineFixture(existingRoot?: string,context?:CoreConfig['context']) {
   const root=existingRoot??await mkdtemp(join(tmpdir(),'dafeiyu-timeline-'));
   let response:Response=()=>textReply('正常回复');
   let analysisResponse:Response=()=>textReply(JSON.stringify({schemaVersion:1,overview:'没有候选',gaps:[],claims:[]}));
-  const h=await harness(root,options=>String(options.sessionId).startsWith('memory-analysis-')?analysisResponse(options):response(options));
+  const h=await harness(root,options=>String(options.sessionId).startsWith('memory-analysis-')?analysisResponse(options):response(options),undefined,5000,undefined,context);
   const queryFiber=await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});
   const timelineFiber=await h.ctx.plugin(Timeline,{agentId:'dafeiyu',maxPageChars:2000});
   const timeline=h.ctx.dafeiyuTimeline;

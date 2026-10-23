@@ -9,15 +9,19 @@ import type { ActionCapability, ActionContext, OperationScope, Extension, Extens
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { DshRuntime, DshRunError } from './runtime.js';
 import type { BoundAction } from './runtime.js';
+import { ContextCoordinator,contextConfigSchema } from './context.js';
+import type { ContextRequest } from '@dafeiyu/contracts';
+import { CORE_VERSION } from './version.js';
 
 export const name = 'dafeiyu-core';
-export const inject = ['agents', 'sessions', 'sessionPersistence', 'tools', 'systemPrompt'];
+export const inject = ['agents', 'sessions', 'sessionPersistence', 'tools', 'systemPrompt','llm'];
 const ConfigSchema = z.strictObject({
   agentId: z.string().min(1).max(100), dataDir: z.string().min(1), personaFile: z.string().min(1),
   provider: z.string().min(1), model: z.string().min(1),
   reasoningEffort: z.string().min(1).optional(),
   turnTimeoutMs: z.number().int().min(50).max(3_600_000).default(600_000),
   deliveryTimeoutMs: z.number().int().min(50).max(60_000).default(15_000),
+  context:contextConfigSchema.default({maxBytes:16000,requestMaxBytes:1000000,outputReserveBytes:16000,prepareTimeoutMs:5000,regions:{}}),
 });
 export type Config = z.input<typeof ConfigSchema>;
 interface Registered { extension: Extension; controller: AbortController; active: boolean }
@@ -28,6 +32,7 @@ export class DafeiyuService extends Service {
   readonly journal: Journal;
   private readonly config: z.output<typeof ConfigSchema>;
   private readonly runtime: DshRuntime;
+  private readonly contexts:ContextCoordinator;
   private readonly extensions = new Map<string, Registered>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly scheduled = new Set<string>();
@@ -42,8 +47,9 @@ export class DafeiyuService extends Service {
     this.config = ConfigSchema.parse(config);
     this.persona();
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
+    this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
-      ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir));
+      ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts);
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
       this.journal.transition(item.id, item.state, 'uncertain', this.event(item, 'recovery.uncertain', { previousState: item.state }));
@@ -62,7 +68,7 @@ export class DafeiyuService extends Service {
     return { text, version: createHash('sha256').update(text).digest('hex') };
   }
   private event(item: PendingMessage, type: string, data: Record<string, Json> = {}, causedBy: string | null = null) {
-    return eventFor(this.config.agentId, item, type, '@dafeiyu/core', '0.3.0', item.id, causedBy, data);
+    return eventFor(this.config.agentId, item, type, '@dafeiyu/core', CORE_VERSION, item.id, causedBy, data);
   }
   private assertOpen(): void {
     if (this.controller.signal.aborted) throw new Error('Dafeiyu is closing');
@@ -76,8 +82,9 @@ export class DafeiyuService extends Service {
     context.signal.throwIfAborted();
     return scope;
   }
+  scopeForContext(request:ContextRequest):OperationScope{this.assertOpen();return this.contexts.scopeFor(request);}
   /** Host-only durable authorization for read/analyze/commit work, never an ActionContext. */
-  issueAnalysisGrant(context: ActionContext): string { return this.journal.issueAnalysisGrant(this.scopeFor(context)); }
+  issueAnalysisGrant(context: ActionContext): string { return this.journal.issueAnalysisGrant(this.scopeFor(context),CORE_VERSION); }
   analysisScope(grantId: string): OperationScope {
     this.assertOpen();
     const scope = this.journal.analysisGrant(this.config.agentId,grantId);
@@ -116,6 +123,7 @@ export class DafeiyuService extends Service {
         fields: Object.fromEntries(Object.entries(action.fields).map(([key, field]) => [key, { ...field }])) })),
     };
     const registered: Registered = { extension, controller: new AbortController(), active: true };
+    const unregisterContexts=this.contexts.register(extension.id,extension.version,extension.contexts??[]);
     this.extensions.set(extension.id, registered);
     for (const item of this.journal.list(['accepted', 'reply-ready'])) {
       if (item.extensionId === extension.id) this.schedule(item);
@@ -145,6 +153,7 @@ export class DafeiyuService extends Service {
       dispose: () => {
         if (!registered.active) return;
         registered.active = false;
+        unregisterContexts();
         registered.controller.abort();
         this.extensions.delete(extension.id);
       },
