@@ -17,6 +17,7 @@ export const MemoryBoundarySchema=z.strictObject({
   task:z.discriminatedUnion('kind',[
     z.strictObject({kind:z.literal('unassigned')}),
     z.strictObject({kind:z.literal('conversation-task'),route,id:z.string().min(1).max(100)}),
+    z.strictObject({kind:z.literal('agent-task'),id:z.uuid()}),
   ]),
   internalUse:range,externalExpression:range,
   assignment:z.enum(['legacy-migration','conservative-create']),
@@ -26,7 +27,7 @@ export type MemoryAccessPurpose='internal'|'expression';
 export const MemoryBoundaryPolicySchema=z.strictObject({internalUse:z.enum(['conversation','none']).optional(),externalExpression:z.enum(['conversation','none']).optional()});
 export type MemoryBoundaryPolicy=z.infer<typeof MemoryBoundaryPolicySchema>;
 /** Trusted call-site metadata, never accepted from model tool arguments. */
-export const MemoryWriteBindingSchema=z.strictObject({conversation:conversation.optional(),ingressPluginId:id.optional(),taskId:z.string().min(1).max(100).nullable().optional()});
+export const MemoryWriteBindingSchema=z.strictObject({conversation:conversation.optional(),ingressPluginId:id.optional(),taskId:z.string().min(1).max(100).nullable().optional(),agentTaskId:z.uuid().optional()});
 export type MemoryWriteBinding=z.infer<typeof MemoryWriteBindingSchema>;
 export function boundaryAllows(boundary:MemoryBoundary,scope:TimelineScope,purpose:MemoryAccessPurpose):boolean {
   const matches=(range:MemoryBoundary['internalUse'])=>range.kind==='conversation'&&range.route===scope.route;

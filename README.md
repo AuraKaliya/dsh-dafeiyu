@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前项目版本0.15.0：contracts/core/memory 0.11.0完成智能体级记忆阶段B，提供统一插件观察与选择性贡献接口，支持原文、片段、摘要和无贡献活动。插件负责筛选，核心绑定身份，记忆模块保留范围、来源、时序与删除防复活。本机332项测试通过。真实QQ策略、跨会话任务工作区和全局访问尚未启用，服务器未修改。
+当前项目版本0.16.0：contracts/core/memory 0.12.0完成智能体级记忆阶段C，提供跨场景任务工作区、显式证据关联、独立结果槽和迟到结果归档。核心内部快照可以关联不同会话及插件，DSH聊天只装配本场景允许表达的内容；来源、版本与删除防复活继续生效。本机352项测试通过。真实QQ任务接入、跨场景授权检索和全局访问尚未启用，服务器未修改。
 
 ## 开始使用
 
@@ -51,6 +51,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [智能体级记忆与跨场景任务连续性方案](docs/agent-memory-continuity-plan.md)
 - [阶段A范围拆分与旧数据迁移验收](docs/agent-memory-phase-a.md)
 - [阶段B插件观察与选择性记忆贡献验收](docs/agent-memory-phase-b.md)
+- [阶段C跨场景任务工作区与并发验收](docs/agent-memory-phase-c.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)

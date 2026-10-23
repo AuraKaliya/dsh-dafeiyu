@@ -22,7 +22,7 @@ function scene(scope:TimelineScope,binding:MemoryWriteBinding):MemoryBoundary['s
 export function conservativeBoundary(scope:TimelineScope,assignment:MemoryBoundary['assignment'],rawBinding:MemoryWriteBinding={}):MemoryBoundary {
   const binding=MemoryWriteBindingSchema.parse(rawBinding);
   return MemoryBoundarySchema.parse({schemaVersion:1,policyVersion:1,owner:{kind:'agent',agentId:scope.agentId},sourceScene:scene(scope,binding),
-    task:binding.taskId?{kind:'conversation-task',route:scope.route,id:binding.taskId}:{kind:'unassigned'},
+    task:binding.agentTaskId?{kind:'agent-task',id:binding.agentTaskId}:binding.taskId?{kind:'conversation-task',route:scope.route,id:binding.taskId}:{kind:'unassigned'},
     internalUse:{kind:'conversation',route:scope.route},externalExpression:{kind:'conversation',route:scope.route},assignment});
 }
 /** Sources and the previous head may narrow a new revision, never silently widen it. */

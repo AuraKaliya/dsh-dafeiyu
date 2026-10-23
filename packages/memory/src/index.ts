@@ -2,7 +2,7 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import type {} from '@dafeiyu/timeline';
-import { API_VERSION, redactContent } from '@dafeiyu/contracts';
+import { API_VERSION, redactContent,ContextItemSchema } from '@dafeiyu/contracts';
 import type { ActionCapability, ActionContext, ExtensionHandle, Json, OperationScope } from '@dafeiyu/contracts';
 import { resolve } from 'node:path';
 import { z } from 'zod';
@@ -20,6 +20,7 @@ import { MemoryCompaction,compactionConfigSchema } from './compaction.js';
 import { createHash } from 'node:crypto';
 import { MemorySourcePolicy } from './source-policy.js';
 import type { CompactionScope } from '@dafeiyu/contracts';
+import type { TaskWorkspace } from './task-workspace.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
@@ -51,11 +52,13 @@ export class MemoryService extends Service {
   private readonly analysis: MemoryAnalysis | null;
   private readonly working:WorkingMemory|null;
   private readonly feedbackArchive:ToolFeedbackArchive|null;
+  private readonly tasks:TaskWorkspace;
   private closed = false;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
     this.config = configSchema.parse(config);
     this.store = new MemoryStore(resolve(this.config.dataDir, 'memory.sqlite'));
+    this.tasks=this.store.taskWorkspace((scope,ref,hash)=>ctx.dafeiyuTimeline.checkArchivedSource(scope,ref,hash),(scope,a,b)=>ctx.dafeiyuTimeline.sameArchivedSource(scope,a,b));
     try { this.retrieval = this.config.retrieval ? new MemoryRetrieval(this.store, this.config.dataDir, this.config.retrieval, dependencies) : null; }
     catch (error) { this.store.close(); throw error; }
     try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis):null; }
@@ -67,22 +70,39 @@ export class MemoryService extends Service {
     const basis=(scope:CompactionScope)=>{
           if(this.closed||scope.agentId!==this.config.agentId)throw new Error('Compaction scope unavailable');
           const work=this.working?.compactionBasis(scope);
-          const versions={memoryMutations:this.store.mutationEpoch(scope),working:work?.working??0,evidence:work?.evidence??0,feedbackMutations:this.feedbackArchive?.mutationEpoch(scope)??0};
-          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId:work?.taskId??null})).digest('hex'),taskId:work?.taskId??null,
+          const selection=this.tasks.selection(scope),activeTask=this.tasks.activeTask(scope),taskId=activeTask?`agent-task:${activeTask}`:work?.taskId??null;
+          const versions={memoryMutations:this.store.mutationEpoch(scope),working:work?.working??0,evidence:work?.evidence??0,feedbackMutations:this.feedbackArchive?.mutationEpoch(scope)??0,taskSelection:selection.version};
+          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId})).digest('hex'),taskId,
             versions:{...versions,memoryGeneration:this.store.generation(scope)}};
     };
     try {
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
+        taskWorkspaceProvider:{
+          current:scope=>{this.assertTasks();return scope.agentId===this.config.agentId?this.tasks.activeTask(scope):null;},
+          create:(agent,input)=>{this.assertTasks();if(agent!==this.config.agentId)throw new Error('Wrong task owner');const id=this.tasks.create(agent,input);this.flush();return id;},
+          read:(agent,id)=>{this.assertTasks();return this.tasks.read(agent,id);},
+          update:(agent,id,input)=>{this.assertTasks();const result=this.tasks.update(agent,id,input);this.flush();return result;},
+          join:(authority,id,input)=>{this.assertTasks();const result=this.tasks.join(authority,id,input);this.flush();return result;},
+          activate:(authority,id,input)=>{this.assertTasks();const result=this.tasks.activate(authority,id,input);this.flush();return result;},
+          link:(authority,id,input)=>{this.assertTasks();const result=this.tasks.link(authority,id,input);this.flush();return result;},
+          begin:(authority,id,input)=>{this.assertTasks();const result=this.tasks.begin(authority,id,input);this.flush();return result;},
+          observe:(authority,id,input)=>{this.assertTasks();const result=this.tasks.observe(authority,id,input);return {...result,auditPending:this.flush()};},
+          complete:(authority,id,input)=>{this.assertTasks();const result=this.tasks.complete(authority,id,input);this.flush();return result;},
+          view:(authority,id)=>{this.assertTasks();return this.tasks.view(authority,id);},
+        },
         memoryObservationProvider:{submit:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.submit(authority,input);return {...receipt,auditPending:this.flush()};},
           open:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');return this.store.observations.open(authority,input);},
           change:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.change(authority,input);return {...receipt,auditPending:this.flush()};}},
-        agentId: this.config.agentId, actions: this.actions(),contexts:this.working?.contributors()??[],
+        agentId: this.config.agentId, actions: this.actions(),contexts:[...(this.working?.contributors()??[]),{id:'task-workspace',kind:'working-state',
+          prepare:async request=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)),
+          validate:(request,item)=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)).some(current=>JSON.stringify(ContextItemSchema.parse(current))===JSON.stringify(item))}],
         ...(this.config.compaction?{compactionProvider:new MemoryCompaction(ctx,this.config.compaction,basis,
           new MemorySourcePolicy(ctx,this.store,this.working,this.feedbackArchive,scope=>basis(scope).epoch))}:{}),
         ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
     ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close();this.feedbackArchive?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
     this.flush();
+    this.tasks.recover(this.config.agentId);this.flush();
     this.analysis?.start();
   }
   private scope(context: ActionContext): OperationScope {
@@ -91,6 +111,7 @@ export class MemoryService extends Service {
     if (scope.agentId !== this.config.agentId) throw new Error('Wrong memory agent');
     return scope;
   }
+  private assertTasks(){if(this.closed)throw new Error('Task workspace provider unavailable');}
   private failure(error: unknown): Failure {
     if(error instanceof AnalysisError)return {status:error.code};
     if (error instanceof MemoryError) return { status: error.code };
@@ -133,8 +154,9 @@ export class MemoryService extends Service {
   }
   private commit(context: ActionContext, command: Command) {
     const scope=this.scope(context),origin=this.ctx.dafeiyu.journal.get(scope.traceId);
+    const agentTaskId=this.tasks.activeTask(scope);
     const receipt = this.store.mutate(scope, command,{conversation:context.conversation,ingressPluginId:origin.extensionId,
-      taskId:this.working?.compactionBasis(scope).taskId??null});
+      taskId:this.working?.compactionBasis(scope).taskId??null,...(agentTaskId?{agentTaskId}:{})});
     const auditPending = this.flush();
     return { status: 'ok' as const, ...receipt, auditPending,
       visibleNow: this.store.read(this.scope(context), receipt.id) !== null,

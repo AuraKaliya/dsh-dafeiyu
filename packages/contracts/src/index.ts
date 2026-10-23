@@ -10,6 +10,8 @@ export * from './compaction.js';
 export * from './semantic.js';
 export * from './memory-boundary.js';
 export * from './observation.js';
+export * from './task-workspace.js';
+import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
 import type { MemoryObservationProvider,ObservationReceipt } from './observation.js';
 import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
@@ -87,11 +89,13 @@ export interface Extension {
   readonly feedbackProvider?:FeedbackProvider;
   readonly compactionProvider?: CompactionProvider;
   readonly memoryObservationProvider?:MemoryObservationProvider;
+  readonly taskWorkspaceProvider?:TaskWorkspaceProvider;
 }
 export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
 export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }
 /** An opaque handle binds ingestion to the registered extension, never to a claimed payload plugin ID. */
 export interface ExtensionHandle {
+  readonly tasks:TaskPluginAPI;
   ingest(message: unknown): Receipt;
   /** Records transport/processing facts without opening a model turn. */
   observe(event: Observation): string;

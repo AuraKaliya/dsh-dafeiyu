@@ -12,6 +12,7 @@ import type { MemoryBoundary,MemoryAccessPurpose,MemoryWriteBinding } from '@daf
 import { conservativeBoundary,restrictBoundary,boundaryDigest } from './boundary.js';
 import { migrateMemoryBoundaries } from './migrate-boundaries.js';
 import { ObservationStore,migrateObservations } from './observations.js';
+import { TaskWorkspace,migrateTaskWorkspaces } from './task-workspace.js';
 
 const APPLICATION_ID = 0x44464d31;
 const string = (value: unknown): string => z.string().parse(value);
@@ -41,16 +42,20 @@ export class MemoryStore {
   private readonly db: DatabaseSync;
   private closed = false;
   private transactionDepth=0;
+  private taskSourceValidator:((agentId:string,jobId:string,purpose:MemoryAccessPurpose)=>'valid'|'deleted'|'changed'|'unavailable')|undefined;
+  private readonly validatingTaskSources=new Set<string>();
   readonly observations:ObservationStore;
   constructor(file: string) {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     try {
+      // Schema reads can race a different process's migration too, not only writes.
+      this.db.exec('PRAGMA busy_timeout=5000;');
       const app = this.db.prepare('PRAGMA application_id').get()?.application_id;
       const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
       const tables = this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
       const fresh = app === 0 && version === 0 && tables === 0;
-      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3))) throw new Error('Unsupported memory database identity or schema');
+      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4))) throw new Error('Unsupported memory database identity or schema');
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (fresh) this.transaction(() => this.db.exec(`
         CREATE TABLE memory_items(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,
@@ -80,6 +85,7 @@ export class MemoryStore {
       this.transaction(()=>migrateMemoryBoundaries(this.db));
       this.transaction(()=>migrateObservations(this.db));
       this.observations=new ObservationStore(this.db,work=>this.transaction(work),this);
+      this.transaction(()=>migrateTaskWorkspaces(this.db));
     } catch (error) { this.db.close(); throw error; }
   }
   private transaction<T>(work: () => T): T {
@@ -89,6 +95,14 @@ export class MemoryStore {
       try { const result = work(); this.db.exec(depth?`RELEASE ${savepoint}`:'COMMIT'); return result; }
       catch (error) { this.db.exec(depth?`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`:'ROLLBACK'); throw error; }
     }finally{this.transactionDepth--;}
+  }
+  taskWorkspace(timeline:(scope:TimelineScope,ref:string,hash:string)=>boolean,sameSource:(scope:TimelineScope,a:string,b:string)=>boolean){
+    const workspace=new TaskWorkspace(this.db,work=>this.transaction(work),this,timeline,sameSource);
+    this.taskSourceValidator=(agentId,jobId,purpose)=>workspace.sourceState(agentId,jobId,purpose);return workspace;
+  }
+  taskSourceState(agentId:string,jobId:string,purpose:MemoryAccessPurpose='internal'):'valid'|'deleted'|'changed'|'unavailable' {
+    const key=`${agentId}:${jobId}:${purpose}`;if(!this.taskSourceValidator||this.validatingTaskSources.has(key)||this.validatingTaskSources.size>=64)return 'unavailable';
+    this.validatingTaskSources.add(key);try{return this.taskSourceValidator(agentId,jobId,purpose);}catch{return 'unavailable';}finally{this.validatingTaskSources.delete(key);}
   }
   private item(scope: TimelineScope, id: string): Item | null {
     const row = this.db.prepare('SELECT * FROM memory_items WHERE id=? AND agent_id=? AND route=?').get(id, scope.agentId, scope.route);
@@ -123,7 +137,7 @@ export class MemoryStore {
     };
     visit(id,revision);return result;
   }
-  evidenceFences(scope:TimelineScope,id:string,revision:number,sameSource?:(left:string,right:string)=>boolean){return this.provenance(scope,id,revision).flatMap(item=>item.sources.flatMap(s=>s.kind==='timeline'
+  evidenceFences(scope:TimelineScope,id:string,revision:number,sameSource?:(left:string,right:string)=>boolean,purpose:MemoryAccessPurpose='expression'){return this.provenance(scope,id,revision,purpose).flatMap(item=>item.sources.flatMap(s=>s.kind==='timeline'
     ?[{ref:s.ref,contentHash:s.contentHash,fence:this.sourceFence(scope,s.contentHash,sameSource?ref=>sameSource(s.ref,ref):undefined)}]:[]));}
   /** Conservative tombstone barrier: automatic extraction cannot resurrect deleted source material. */
   suppressedEvidence(scope: TimelineScope, contentHash: string,matchesSource?:(ref:string)=>boolean): boolean {
@@ -179,6 +193,8 @@ export class MemoryStore {
     let sourceDeleted=false,sourceChanged=false;
     for(const row of rows){
       if(row.body===null)continue;
+      const taskWork=this.observations.taskWorkForMemory(string(row.id));
+      if(taskWork){const status=this.taskSourceState(scope.agentId,taskWork);sourceDeleted ||= status==='deleted';sourceChanged ||= status==='changed';inaccessible ||= status==='unavailable';}
       for(const evidence of revisionSchema.parse(JSON.parse(string(row.body))).sources)if(evidence.kind==='observation'){
         const source=this.observations.source(scope,evidence.ref,purpose);
         if(!source){inaccessible=true;continue;}boundaries.push(source.boundary);
@@ -329,7 +345,8 @@ export class MemoryStore {
     for (const row of this.db.prepare('SELECT e.id,e.body FROM memory_events e JOIN outbox o ON o.event_id=e.id WHERE o.delivered=0 ORDER BY e.rowid').iterate()) {
       try {
         const parsed = z.strictObject({ agentId: z.string(), route: z.string(), traceId: z.string(), operationId: z.string(),
-          causedBy: z.string().nullable(), type: z.enum(['memory.created', 'memory.revised', 'memory.deleted', 'memory.restored','observation.recorded','observation.source.deleted','observation.source.restored']),
+          causedBy: z.string().nullable(), type: z.enum(['memory.created', 'memory.revised', 'memory.deleted', 'memory.restored','observation.recorded','observation.source.deleted','observation.source.restored',
+            'task.created','task.updated','task.scene.joined','task.scene.selected','task.sources.linked','task.work.started','task.observation.linked','task.work.completed','task.work.late','task.work.interrupted']),
           plugin: z.string().min(1), pluginVersion: z.string().min(1).max(80), occurredAt: z.iso.datetime({offset:true}),
           sources: z.array(z.strictObject({ kind: z.literal('event'), id: z.string(), route: z.string() })),
           data: z.record(z.string(), z.json()) }).parse(JSON.parse(string(row.body)));

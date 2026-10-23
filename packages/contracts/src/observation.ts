@@ -28,6 +28,7 @@ export const MemoryObservationSchema=z.strictObject({requestId:key,conversation:
 });
 export type MemoryObservation=z.infer<typeof MemoryObservationSchema>;
 export interface ObservationAuthority {agentId:string;route:string;pluginId:string;pluginVersion:string;ingressPluginId:string;conversation:Conversation;taskId:string|null;
+  agentTaskId?:string;taskWorkId?:string;
   parent?:{traceId:string;operationId:string;eventId:string}}
 export interface ObservationReceipt {activityId:string;sequence:number;eventId:string;duplicate:boolean;sources:{key:string;ref:string;version:number}[];
   contributions:{id:string;form:'original'|'fragment'|'summary';memoryId:string;revision:number;version:number}[];auditPending:boolean}

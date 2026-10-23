@@ -10,13 +10,13 @@ import { MemoryError } from './types.js';
 
 const digest=(text:string)=>createHash('sha256').update(text).digest('hex');
 const text=(v:unknown)=>z.string().parse(v),number=(v:unknown)=>z.number().int().safe().parse(v);
-const sourceSchema=z.strictObject({key:z.string(),producerVersion:z.string(),occurredAt:z.string(),retention:z.enum(['text','digest']),text:z.string().nullable(),hash:z.string().regex(/^[a-f0-9]{64}$/),boundary:MemoryBoundarySchema})
+const sourceSchema=z.strictObject({key:z.string(),producerVersion:z.string(),occurredAt:z.string(),retention:z.enum(['text','digest']),text:z.string().nullable(),hash:z.string().regex(/^[a-f0-9]{64}$/),boundary:MemoryBoundarySchema,taskWorkId:z.uuid().optional()})
   .refine(v=>v.retention==='text'?v.text!==null&&digest(v.text)===v.hash:v.text===null,'Invalid retained source body');
 export const observationSourceRef=(id:string)=>`dafeiyu:observation-source:${id}`;
 const sourceId=(ref:string)=>z.uuid().parse(/^dafeiyu:observation-source:(.+)$/.exec(ref)?.[1]);
 export function migrateObservations(db:DatabaseSync):void {
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
-  if(version===3){for(const table of ['observation_sources','observation_activities','observation_contributions','observation_source_requests'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===3||version===4){for(const table of ['observation_sources','observation_activities','observation_contributions','observation_source_requests'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==2)throw new Error('Unsupported observation database');
   db.exec(`CREATE TABLE observation_sources(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,source_key TEXT NOT NULL,version INTEGER NOT NULL,deleted INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,UNIQUE(agent_id,route,source_key));
     CREATE TABLE observation_activities(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT NOT NULL,UNIQUE(agent_id,route,plugin,request_id));
@@ -35,7 +35,7 @@ export function migrateObservations(db:DatabaseSync):void {
 /** Shares the memory transaction and outbox: an activity and its selected contributions
  * either all commit or none do. Counts/interest decisions remain producer-reported facts. */
 export class ObservationStore {
-  constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly memory:Pick<MemoryStore,'mutate'|'suppressedEvidence'>){}
+  constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly memory:Pick<MemoryStore,'mutate'|'suppressedEvidence'|'read'|'taskSourceState'>){}
   private publish(authority:ObservationAuthority,id:string,activityId:string,type:string,occurredAt:string,data:NewEvent['data']){
     const event:NewEvent={agentId:authority.agentId,route:authority.route,traceId:authority.parent?.traceId??activityId,operationId:activityId,causedBy:authority.parent?.eventId??null,type,plugin:authority.pluginId,
       pluginVersion:authority.pluginVersion,occurredAt,sources:[],data:redactJson(data).value as NewEvent['data']};
@@ -51,13 +51,16 @@ export class ObservationStore {
     }catch{return null;}
   }
   source(scope:TimelineScope,ref:string,purpose:MemoryAccessPurpose='expression'){
-    const record=this.record(scope,ref);return record&&boundaryAllows(record.boundary,scope,purpose)?record:null;
+    const record=this.record(scope,ref);if(!record||!boundaryAllows(record.boundary,scope,purpose))return null;
+    const status=record.taskWorkId?this.memory.taskSourceState(scope.agentId,record.taskWorkId):'valid';
+    return status==='unavailable'||status==='changed'?null:{...record,deleted:record.deleted||status==='deleted'};
   }
   private register(authority:ObservationAuthority,input:MemoryObservation['sources'][number]){
     const sanitized=input.archive.kind==='text'?redactContent(input.archive.text).value:null;
     const body=sourceSchema.parse({key:input.key,producerVersion:authority.pluginVersion,occurredAt:input.occurredAt,retention:input.archive.kind,text:sanitized,
+      ...(authority.taskWorkId?{taskWorkId:authority.taskWorkId}:{}),
       hash:input.archive.kind==='text'?digest(sanitized!):input.archive.hash,
-      boundary:restrictBoundary(conservativeBoundary(authority,'conservative-create',{conversation:authority.conversation,ingressPluginId:authority.ingressPluginId,taskId:authority.taskId}),[],input.policy)});
+      boundary:restrictBoundary(conservativeBoundary(authority,'conservative-create',{conversation:authority.conversation,ingressPluginId:authority.ingressPluginId,taskId:authority.taskId,...(authority.agentTaskId?{agentTaskId:authority.agentTaskId}:{})}),[],input.policy)});
     const old=this.db.prepare('SELECT id,plugin,body FROM observation_sources WHERE agent_id=? AND route=? AND source_key=?').get(authority.agentId,authority.route,input.key);
     if(old){
       const previous=sourceSchema.parse(JSON.parse(text(old.body)));
@@ -79,6 +82,7 @@ export class ObservationStore {
       const activityId=randomUUID(),eventId=randomUUID(),sources=input.sources.map(s=>this.register(authority,s));
       const body={startedAt:input.startedAt,observedAt:input.observedAt,finishedAt:input.finishedAt,recordedAt:new Date().toISOString(),outcome:input.outcome,
         selection:input.selection,counts:input.counts,producerReported:true,sources:sources.map(s=>s.ref),exposedSources:input.exposedSources.map(key=>sources.find(s=>s.key===key)!.ref),taskId:authority.taskId,
+        ...(authority.agentTaskId?{agentTaskId:authority.agentTaskId,taskWorkId:authority.taskWorkId??null}:{}),
         ...(authority.parent?{parent:authority.parent}:{})};
       const inserted=this.db.prepare('INSERT INTO observation_activities(id,agent_id,route,plugin,request_id,fingerprint,body,receipt) VALUES(?,?,?,?,?,?,?,?)')
         .run(activityId,authority.agentId,authority.route,authority.pluginId,input.requestId,fingerprint,JSON.stringify(body),'{}');
@@ -103,7 +107,7 @@ export class ObservationStore {
         const scope:OperationScope={agentId:authority.agentId,route:authority.route,traceId:authority.parent?.traceId??activityId,operationId:activityId,startedEventId:eventId};
         const receipt=this.memory.mutate(scope,{action:'create',requestId:`obs-${activityId}-${contributions.length}`,value:{kind:'experience',claimType:contribution.form==='summary'?'inference':'reported_claim',content,
           sources:exposure.map(s=>({kind:'observation',ref:s.ref,version:s.version,contentHash:s.hash}))},...(contribution.policy?{boundaryPolicy:contribution.policy}:{})},
-          {conversation:authority.conversation,ingressPluginId:authority.ingressPluginId,taskId:authority.taskId});
+          {conversation:authority.conversation,ingressPluginId:authority.ingressPluginId,taskId:authority.taskId,...(authority.agentTaskId?{agentTaskId:authority.agentTaskId}:{})});
         const details={activityId,producer:{id:authority.pluginId,version:authority.pluginVersion},contributionId:contribution.id,form:contribution.form,exposure:exposure.map(s=>({ref:s.ref,version:s.version,hash:s.hash,retention:s.retention})),
           ...(contribution.form==='fragment'?{range:{start:contribution.start,end:contribution.end,unit:'unicode-codepoint'}}:{})};
         this.db.prepare('INSERT INTO observation_contributions VALUES(?,?,?,?)').run(receipt.id,activityId,contribution.id,JSON.stringify(details));
@@ -136,6 +140,20 @@ export class ObservationStore {
     });
   }
   epoch(scope:TimelineScope):number{return number(this.db.prepare('SELECT coalesce(sum(version-1),0) AS n FROM observation_sources WHERE agent_id=? AND route=?').get(scope.agentId,scope.route)?.n);}
+  taskWorkForMemory(id:string):string|null {
+    const row=this.db.prepare("SELECT json_extract(a.body,'$.taskWorkId') AS job FROM observation_contributions c JOIN observation_activities a ON a.id=c.activity_id WHERE c.memory_id=?").get(id);
+    return row?.job?z.uuid().parse(row.job):null;
+  }
+  activity(scope:TimelineScope,id:string,purpose:MemoryAccessPurpose='expression'){
+    const row=this.db.prepare('SELECT body,receipt,sequence FROM observation_activities WHERE id=? AND agent_id=? AND route=?').get(id,scope.agentId,scope.route);if(!row)return null;
+    const taskWorkId=z.object({taskWorkId:z.uuid().nullable().optional()}).parse(JSON.parse(text(row.body))).taskWorkId;
+    if(taskWorkId&&this.memory.taskSourceState(scope.agentId,taskWorkId,purpose)!=='valid')return null;
+    const receipt=ObservationStoredReceiptSchema.parse(JSON.parse(text(row.receipt))),body=z.object({startedAt:z.string(),observedAt:z.string(),finishedAt:z.string(),outcome:z.string(),
+      counts:z.object({received:z.number(),processed:z.number(),modelExposed:z.number()}),selection:z.object({policyId:z.string(),policyVersion:z.string(),reasonCode:z.string()})}).parse(JSON.parse(text(row.body)));
+    if(receipt.activityId!==id||receipt.sequence!==row.sequence||receipt.sources.some(s=>{const source=this.source(scope,s.ref,purpose);return !source||source.deleted||source.version!==s.version||this.memory.suppressedEvidence(scope,source.hash,r=>r===source.ref);}))return null;
+    if(receipt.contributions.some(c=>{const memory=this.memory.read(scope,c.memoryId,'normal',c.revision,purpose);return !memory||memory.version!==c.version;}))return null;
+    return {hash:digest(JSON.stringify([JSON.parse(text(row.body)),receipt])),receipt,summary:{activityId:id,...body,producerReported:true}};
+  }
   contribution(id:string,revision:number):unknown {
     if(revision!==1)return undefined;const row=this.db.prepare('SELECT body FROM observation_contributions WHERE memory_id=?').get(id);return row?JSON.parse(text(row.body)):undefined;
   }
