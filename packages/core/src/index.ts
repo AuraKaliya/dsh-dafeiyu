@@ -171,6 +171,7 @@ export class DafeiyuService extends Service {
           context:extension.compactionProvider.sources.context.bind(extension.compactionProvider.sources),tool:extension.compactionProvider.sources.tool.bind(extension.compactionProvider.sources),
           validate:extension.compactionProvider.sources.validate.bind(extension.compactionProvider.sources)}}:{}),
         ...(extension.compactionProvider.summarizeFragments?{summarizeFragments:extension.compactionProvider.summarizeFragments.bind(extension.compactionProvider)}:{}),
+        ...(extension.compactionProvider.rewrite?{rewrite:extension.compactionProvider.rewrite.bind(extension.compactionProvider)}:{}),
         basis:extension.compactionProvider.basis.bind(extension.compactionProvider),summarize:extension.compactionProvider.summarize.bind(extension.compactionProvider)}}:{}),
     };
     const registered: Registered = { extension, controller: new AbortController(), active: true };

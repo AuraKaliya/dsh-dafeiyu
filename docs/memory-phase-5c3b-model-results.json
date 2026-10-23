@@ -1,0 +1,448 @@
+{
+  "at": "2026-10-23T18:30:54.248Z",
+  "kind": "real-model-fictional-data",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "serverAccess": false,
+  "chatInjection": false,
+  "semanticAutomaticDefault": false,
+  "cases": [
+    {
+      "id": "permission-scope",
+      "round": 1,
+      "mode": "fusion",
+      "output": "用户说明：晨露项目只在虚构测试群246801357试运行；主人确认后才能发送。尚未验收，不允许正式群发。以下记录只是整理过程。这些内容正在整理。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 343,
+      "parentChars": 498,
+      "outputChars": 72,
+      "durationMs": 36849
+    },
+    {
+      "id": "permission-scope",
+      "round": 2,
+      "mode": "fusion",
+      "output": "晨露项目只在虚构测试群246801357试运行；主人确认后才能发送。尚未验收，不允许正式群发。以下记录只是整理过程。重复出现的“以下记录只是整理过程。”表示这些内容仅属于整理过程，不是已确认事实。来源还称把资料放在一起、核对行文并整理标点；这属于过程性说明，未提供验收结果或发送许可。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 343,
+      "parentChars": 72,
+      "outputChars": 142,
+      "durationMs": 14579
+    },
+    {
+      "id": "permission-scope",
+      "round": 3,
+      "mode": "rebuild",
+      "output": "晨露项目只在虚构测试群246801357试运行；主人确认后才能发送。尚未验收，不允许正式群发。以下记录只是整理过程。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 343,
+      "parentChars": 142,
+      "outputChars": 58,
+      "durationMs": 5616
+    },
+    {
+      "id": "correction-time-units",
+      "round": 1,
+      "mode": "fusion",
+      "output": "小林更正：代号从紫帆731改为青羽842。预算上限30元，有效期截至2026-11-01。旧代号不再用于后续任务。以下记录只是整理过程。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 353,
+      "parentChars": 518,
+      "outputChars": 68,
+      "durationMs": 9111
+    },
+    {
+      "id": "uncertainty-partial-failure",
+      "round": 1,
+      "mode": "fusion",
+      "output": "小周说故障可能与网络有关，尚未验证。三次测试只完成一次，另两次失败。离线测试成功不等于线上已通过。故障的网络相关原因仍未核实；测试未全部完成，且不能据离线测试成功认定线上已通过。以下记录只是整理过程。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 345,
+      "parentChars": 502,
+      "outputChars": 100,
+      "durationMs": 20889
+    },
+    {
+      "id": "conditional-attribution",
+      "round": 1,
+      "mode": "fusion",
+      "output": "小林转述小周的假设：若明天收到确认，才考虑试发；没有确认就继续等待。这里只记录提议，并非已获许可。以下记录只是整理过程。这些内容正在整理。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 345,
+      "parentChars": 502,
+      "outputChars": 69,
+      "durationMs": 25532
+    }
+  ],
+  "negativeChecks": [
+    {
+      "id": "permission-expansion",
+      "candidateContainsAllExactQualifiers": true,
+      "generation": "injected-fictional-bad-candidate",
+      "verification": "current-bound-real-model",
+      "verdict": {
+        "compatible": true,
+        "faithful": false,
+        "issues": [
+          "候选在正确引文后编造“条件都已满足、现已验收、可在全部正式群发布”，与来源“尚未验收、不允许正式群发”直接冲突并扩大权限。"
+        ]
+      },
+      "rejected": true
+    },
+    {
+      "id": "invented-result",
+      "candidateContainsAllExactQualifiers": true,
+      "generation": "injected-fictional-bad-candidate",
+      "verification": "current-bound-real-model",
+      "verdict": {
+        "compatible": true,
+        "faithful": false,
+        "issues": [
+          "候选摘要多加“工具已经实际发送成功，并收到全部成员确认”，这是原文没有写、原话也没有依据的事实，而且和“尚未验收、不允许正式群发、需主人确认”相冲突。"
+        ]
+      },
+      "rejected": true
+    }
+  ],
+  "passed": true,
+  "calls": [
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 7598,
+      "usage": {
+        "inputTokens": 204,
+        "outputTokens": 1123,
+        "cacheReadTokens": 896,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2223
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 29246,
+      "usage": {
+        "inputTokens": 211,
+        "outputTokens": 5045,
+        "cacheReadTokens": 896,
+        "cacheWriteTokens": 0,
+        "totalTokens": 6152
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1336,
+      "usage": {
+        "inputTokens": 205,
+        "outputTokens": 97,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 942
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 13240,
+      "usage": {
+        "inputTokens": 256,
+        "outputTokens": 2162,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3058
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 4339,
+      "usage": {
+        "inputTokens": 158,
+        "outputTokens": 538,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1336
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 129,
+      "usage": null,
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 2391,
+      "usage": {
+        "inputTokens": 158,
+        "outputTokens": 249,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1047
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 3220,
+      "usage": {
+        "inputTokens": 157,
+        "outputTokens": 371,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1168
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 5966,
+      "usage": {
+        "inputTokens": 235,
+        "outputTokens": 811,
+        "cacheReadTokens": 896,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1942
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 3142,
+      "usage": {
+        "inputTokens": 242,
+        "outputTokens": 362,
+        "cacheReadTokens": 896,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1500
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 15632,
+      "usage": {
+        "inputTokens": 983,
+        "outputTokens": 2633,
+        "cacheReadTokens": 128,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3744
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 5256,
+      "usage": {
+        "inputTokens": 1137,
+        "outputTokens": 748,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1885
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 6926,
+      "usage": {
+        "inputTokens": 1000,
+        "outputTokens": 1081,
+        "cacheReadTokens": 128,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2209
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 18605,
+      "usage": {
+        "inputTokens": 1138,
+        "outputTokens": 3134,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "totalTokens": 4272
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 0,
+      "usage": null,
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1801,
+      "usage": {
+        "inputTokens": 339,
+        "outputTokens": 176,
+        "cacheReadTokens": 128,
+        "cacheWriteTokens": 0,
+        "totalTokens": 643
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 0,
+      "usage": null,
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 2432,
+      "usage": {
+        "inputTokens": 209,
+        "outputTokens": 266,
+        "cacheReadTokens": 256,
+        "cacheWriteTokens": 0,
+        "totalTokens": 731
+      },
+      "status": "completed"
+    }
+  ],
+  "faults": [],
+  "finishes": [
+    {
+      "stage": "generate",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    },
+    {
+      "stage": "generate",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    },
+    {
+      "stage": "generate",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "error"
+    },
+    {
+      "stage": "generate",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    },
+    {
+      "stage": "generate",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    },
+    {
+      "stage": "generate",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    },
+    {
+      "stage": "generate",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    },
+    {
+      "stage": "verify",
+      "reason": "stop"
+    }
+  ],
+  "maxOutputTokens": 8192,
+  "runs": 2,
+  "fixtureHash": "0de4a12634c7ab6bff4b551737fdb2528006d54347a41b6c96b03238f64c07f7",
+  "callAccounting": "calls are DSH stream observations, including injected negative-candidate generation; finishes record provider-dispatched requests only. A passed report means all listed positive and negative checks passed, not that every intermediate attempt succeeded."
+}

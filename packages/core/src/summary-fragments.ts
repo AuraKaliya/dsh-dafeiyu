@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { pluginRecordOf,SessionSeq,foldSurface } from '@deepseek-ai/dsh-session';
 import type { Session,SessionEvent } from '@deepseek-ai/dsh-session';
-import { SummaryFragmentSchema } from '@dafeiyu/contracts';
-import type { SourceDependency,TimelineScope } from '@dafeiyu/contracts';
+import { SummaryFragmentSchema,semanticResultSchema,checkSemanticResult } from '@dafeiyu/contracts';
+import type { SourceDependency,TimelineScope,SemanticRequest } from '@dafeiyu/contracts';
 import { dependenciesSchema,digestSource,unionDependencies,readProvenance,eventText } from './source-records.js';
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
   'dafeiyu-summary-view':{kind:'dafeiyu-summary-view';compactionId:string};
@@ -14,15 +14,21 @@ const parentSchema=z.strictObject({ref:z.string(),manifestSeq:z.number().int().n
 const compositionSchema=z.strictObject({mode:z.literal('lossless-pack-v1'),generation:z.number().int().min(1).max(16),
   parents:z.array(parentSchema).min(1).max(8),
   lineage:z.array(z.strictObject({id:z.string(),parents:z.array(z.string()).min(1).max(256)})).min(1).max(32)});
+export const rewriteSchema=z.strictObject({mode:z.enum(['fusion','rebuild']),generation:z.number().int().min(1).max(64),parent:parentSchema,
+  targetGroup:z.string(),inputs:z.array(inputSchema).min(1),dependencies:dependenciesSchema,
+  consecutive:z.number().int().min(0).max(4),maxChars:z.number().int().min(1).max(8000),inputHash:z.string().length(64),result:semanticResultSchema});
+export type SummaryRewrite=z.infer<typeof rewriteSchema>;
 export const fragmentManifestSchema=z.strictObject({schemaVersion:z.literal(1),compactionId:z.string(),sessionId:z.string(),agentId:z.string(),route:z.string(),owner:z.string(),
   producerVersion:z.string(),epoch:z.string(),taskId:z.string().nullable(),versions:z.record(z.string(),z.number()),policy:z.string(),policyHash:z.string(),
   model:z.strictObject({provider:z.string(),model:z.string()}),createdAt:z.number(),
-  groups:z.array(z.strictObject({id:z.string().regex(/^G[1-9]\d*$/),taskId:z.string().nullable(),inputs:z.array(inputSchema).min(1),dependencies:dependenciesSchema})).min(1).max(8),
+  groups:z.array(z.strictObject({id:z.string().regex(/^G[1-9]\d*$/),taskId:z.string().nullable(),inputs:z.array(inputSchema).min(1),dependencies:dependenciesSchema,
+    semanticDepth:z.number().int().min(0).max(4).optional()})).min(1).max(8),
   fragments:z.array(SummaryFragmentSchema.extend({id:z.string().regex(/^F[1-9]\d*$/),version:z.literal(1),group:z.string()})).min(1).max(32),
   composition:compositionSchema.optional(),
+  rewrite:rewriteSchema.optional(),
 }).superRefine((m,c)=>{
   const groups=new Set(m.groups.map(g=>g.id)),ids=new Set(m.fragments.map(f=>f.id)),inputs=m.groups.flatMap(g=>g.inputs.map(i=>i.seq));
-  if(groups.size!==m.groups.length||ids.size!==m.fragments.length||(!m.composition&&new Set(inputs).size!==inputs.length)
+  if((m.composition&&m.rewrite)||groups.size!==m.groups.length||ids.size!==m.fragments.length||(!m.composition&&!m.rewrite&&new Set(inputs).size!==inputs.length)
     ||m.fragments.some(f=>!groups.has(f.group))||m.groups.some(g=>!m.fragments.some(f=>f.group===g.id)))c.addIssue({code:'custom',message:'Invalid fragment partition'});
   if(Buffer.byteLength(JSON.stringify(m))>2097152)c.addIssue({code:'custom',message:'Summary proof capacity exceeded'});
 });
@@ -60,6 +66,7 @@ export function readSummaryArtifacts(session:Session):readonly Artifact[]{
 export interface ResolvedFragmentView {
   manifest:FragmentManifest;manifestSeq:SessionSeq;view:FragmentView;viewSeq:SessionSeq;checkpoint:SessionEvent<'user/message'>;text:string;
 }
+export function summaryGeneration(m:FragmentManifest):number{return m.rewrite?.generation??m.composition?.generation??0;}
 function inputsVerified(session:Session,manifestSeq:number,m:FragmentManifest):boolean {
   const events=session.snapshotEvents(),records=readProvenance(session).filter(r=>r.type==='plugin:dafeiyu/source-record');
   for(const group of m.groups){
@@ -93,7 +100,8 @@ export function composeFragmentContent(views:readonly ResolvedFragmentView[]){
   const groupKeys=new Map<string,string>(),fragmentKeys=new Map<string,number>();
   for(const view of views)for(const f of activeFragments(view)){
     const original=view.manifest.groups.find(g=>g.id===f.group)!;
-    const content={taskId:original.taskId,inputs:[...original.inputs].sort((a,b)=>a.seq-b.seq),dependencies:unionDependencies(original.dependencies)};
+    const content={taskId:original.taskId,inputs:[...original.inputs].sort((a,b)=>a.seq-b.seq),dependencies:unionDependencies(original.dependencies),
+      ...(original.semanticDepth===undefined?{}:{semanticDepth:original.semanticDepth})};
     const groupKey=JSON.stringify(content);let group=groupKeys.get(groupKey);
     if(!group){group=`G${groups.length+1}`;groupKeys.set(groupKey,group);groups.push({id:group,...content});}
     const key=JSON.stringify([groupKey,f.kind,f.text]),parent=`${summaryReference(view.manifestSeq,view.manifest)}.${f.id}`;
@@ -102,21 +110,60 @@ export function composeFragmentContent(views:readonly ResolvedFragmentView[]){
     const id=`F${fragments.length+1}`;fragmentKeys.set(key,fragments.length);
     fragments.push({id,version:1,group,kind:f.kind,text:f.text});lineage.push({id,parents:[parent]});
   }
-  const composition=compositionSchema.parse({mode:'lossless-pack-v1',generation:1+Math.max(0,...views.map(v=>v.manifest.composition?.generation??0)),
+  const composition=compositionSchema.parse({mode:'lossless-pack-v1',generation:1+Math.max(0,...views.map(v=>summaryGeneration(v.manifest))),
     parents:views.map(v=>({ref:summaryReference(v.manifestSeq,v.manifest),manifestSeq:v.manifestSeq,viewSeq:v.viewSeq,
       checkpointSeq:v.checkpoint.seq,revision:v.view.revision,hash:digestSource(v.text)})),lineage});
   return {groups,fragments,composition};
 }
 
+/** Rebuild reads raw records only. Even a retired mixed group may yield independent valid
+ * leaves, but it never yields old summary text. Caller validates live source state. */
+export function rawRewriteInputs(session:Session,parent:ResolvedFragmentView,inputs:SummaryRewrite['inputs']){
+  const events=session.snapshotEvents(),records=readProvenance(session),dependencies:SourceDependency[][]=[];
+  const sources=inputs.map(input=>{
+    const text=eventText(events[input.seq]),record=records.find(r=>r.type==='plugin:dafeiyu/source-record'&&r.data.targetSeq===input.seq);
+    if(text===null||digestSource(text)!==input.hash||record?.type!=='plugin:dafeiyu/source-record'||record.data.hash!==input.hash
+      ||record.data.agentId!==parent.manifest.agentId||record.data.route!==parent.manifest.route||record.data.owner!==parent.manifest.owner)throw new Error('Raw rewrite source proof unavailable');
+    dependencies.push(record.data.dependencies);return {...input,text};
+  });
+  return {sources,dependencies:unionDependencies(...dependencies)};
+}
+export function rewriteRequest(session:Session,parent:ResolvedFragmentView,rewrite:Pick<SummaryRewrite,'mode'|'targetGroup'|'inputs'|'maxChars'>):SemanticRequest {
+  const group=parent.manifest.groups.find(g=>g.id===rewrite.targetGroup);if(!group)throw new Error('Missing rewrite group');
+  if(!rewrite.inputs.length||new Set(rewrite.inputs.map(i=>i.seq)).size!==rewrite.inputs.length
+    ||rewrite.inputs.some(i=>!group.inputs.some(p=>JSON.stringify(p)===JSON.stringify(i))))throw new Error('Rewrite input outside original group');
+  const active=activeFragments(parent).filter(f=>f.group===group.id);
+  if(rewrite.mode==='fusion'&&(!active.length||JSON.stringify(rewrite.inputs)!==JSON.stringify(group.inputs)))throw new Error('Fusion must retain all exposed sources');
+  return {mode:rewrite.mode,sources:rawRewriteInputs(session,parent,rewrite.inputs).sources,
+    parents:rewrite.mode==='fusion'?active.map(({kind,text})=>({kind,text})):[],maxChars:rewrite.maxChars};
+}
+export function rewrittenContent(session:Session,parent:ResolvedFragmentView,rewrite:SummaryRewrite){
+  const request=rewriteRequest(session,parent,rewrite),result=checkSemanticResult(request,rewrite.result);
+  const original=parent.manifest.groups.find(g=>g.id===rewrite.targetGroup)!;
+  const dependencies=rawRewriteInputs(session,parent,rewrite.inputs).dependencies;
+  if(rewrite.generation!==summaryGeneration(parent.manifest)+1||rewrite.consecutive!==(rewrite.mode==='rebuild'?0:(original.semanticDepth??0)+1)
+    ||rewrite.inputHash!==digestSource(JSON.stringify(request))||JSON.stringify(dependencies)!==JSON.stringify(rewrite.dependencies))throw new Error('Rewrite lineage mismatch');
+  const other=activeFragments(parent).filter(f=>f.group!==original.id),groups=parent.manifest.groups.filter(g=>g.id!==original.id&&other.some(f=>f.group===g.id));
+  groups.push({...original,inputs:rewrite.inputs,dependencies,semanticDepth:rewrite.consecutive});
+  // Preserve relative order of unaffected fragments and insert the new unit at its old group.
+  const fragments:FragmentManifest['fragments']=[];let inserted=false;
+  for(const f of parent.manifest.fragments){
+    if(f.group===original.id){if(!inserted){fragments.push({...result.fragment,id:`F${fragments.length+1}`,version:1,group:original.id});inserted=true;}}
+    else if(parent.view.active.includes(f.id))fragments.push({...f,id:`F${fragments.length+1}`});
+  }
+  return {groups,fragments};
+}
+
 /** Historical proof validity is separate from current surface selection. A captured parent
  * is checked at the child creation boundary, never against its later display membership. */
-export function resolveFragmentProof(session:Session,reference:string,scope:TimelineScope,before=session.seq):ResolvedFragmentView|null {
-  return resolveProof(session,reference,scope,before,new Map(),{remaining:256},0);
+export function resolveFragmentProof(session:Session,reference:string,scope:TimelineScope,before=session.seq,reservedNodes=0):ResolvedFragmentView|null {
+  if(!Number.isInteger(reservedNodes)||reservedNodes<0||reservedNodes>255)return null;
+  return resolveProof(session,reference,scope,before,new Map(),{remaining:256-reservedNodes},reservedNodes);
 }
 function resolveProof(session:Session,reference:string,scope:TimelineScope,before:number,
   memo:Map<string,ResolvedFragmentView|null>,budget:{remaining:number},depth:number):ResolvedFragmentView|null {
   const key=`${reference}@${before}`;if(memo.has(key))return memo.get(key)!;
-  if(depth>16||--budget.remaining<0)return null;
+  if(depth>64||--budget.remaining<0)return null;
   try{
     const parsed=parseSummaryReference(reference);if(!parsed)return null;
     const artifacts=readSummaryArtifacts(session).filter(r=>r.seq<before),records=artifacts.filter(r=>r.type==='plugin:dafeiyu/summary-manifest'&&summaryReference(r.seq,r.data)===parsed.bundle);
@@ -124,7 +171,16 @@ function resolveProof(session:Session,reference:string,scope:TimelineScope,befor
     const m=record.data,events=session.snapshotEvents().filter(e=>e.seq<before);
     if(m.sessionId!==session.id||m.agentId!==scope.agentId||m.route!==scope.route)return null;
     let inputs=m.groups.flatMap(g=>g.inputs.map(i=>i.seq));
-    if(m.composition){
+    if(m.rewrite){
+      const p=m.rewrite.parent;if(p.manifestSeq>=record.seq||p.viewSeq>=record.seq||p.checkpointSeq>=record.seq)return null;
+      const parent=resolveProof(session,p.ref,scope,record.seq,memo,budget,depth+1);
+      if(!parent||parent.manifest.owner!==m.owner||parent.manifestSeq!==p.manifestSeq||parent.viewSeq!==p.viewSeq||parent.checkpoint.seq!==p.checkpointSeq
+        ||parent.view.revision!==p.revision||digestSource(parent.text)!==p.hash)return null;
+      const computed=rewrittenContent(session,parent,m.rewrite);
+      if(JSON.stringify(fragmentManifestSchema.parse({...m,...computed}))!==JSON.stringify(m))return null;
+      inputs=[parent.checkpoint.seq];
+      if(!foldSurface(events.filter(e=>e.seq<record.seq)).nodes.includes(parent.checkpoint.seq))return null;
+    }else if(m.composition){
       const parents:ResolvedFragmentView[]=[];
       for(const p of m.composition.parents){
         if(p.manifestSeq>=record.seq||p.checkpointSeq>=record.seq||p.viewSeq>=record.seq)return null;
@@ -153,7 +209,7 @@ function resolveProof(session:Session,reference:string,scope:TimelineScope,befor
         const summary=events[checkpoint.seq-1];
         if(v.data.revision!==1||v.data.previousViewSeq!==null||v.data.previousCheckpointSeq!==null||active.length!==m.fragments.length
           ||typeof op!=='object'||op.op!=='replace'||op.startSeq!==inputs[0]||op.endSeq!==inputs.at(-1))return null;
-        if(m.composition){
+        if(m.composition||m.rewrite){
           const surface=foldSurface(events.filter(e=>e.seq<checkpoint.seq)).nodes,start=surface.indexOf(SessionSeq(inputs[0]!));
           if(checkpoint.data.source.kind!=='dafeiyu-summary-view'||summary?.type!=='compaction/prune'
             ||JSON.stringify(summary.data.shadowedSeqs)!==JSON.stringify(inputs)||start<0
@@ -184,7 +240,8 @@ export function summarySelectionState(session:Session,reference:string,scope:Tim
   const proof=resolveFragmentProof(session,reference,scope);if(!proof)return 'unproven';
   if(session.surface.nodes.includes(proof.checkpoint.seq))return proof.view.active.length?'active':'withdrawn';
   for(const record of readSummaryArtifacts(session)){
-    if(record.type!=='plugin:dafeiyu/summary-manifest'||!record.data.composition?.parents.some(p=>p.checkpointSeq===proof.checkpoint.seq))continue;
+    if(record.type!=='plugin:dafeiyu/summary-manifest'||!(record.data.composition?.parents.some(p=>p.checkpointSeq===proof.checkpoint.seq)
+      ||record.data.rewrite?.parent.checkpointSeq===proof.checkpoint.seq))continue;
     if(resolveFragmentProof(session,summaryReference(record.seq,record.data),scope))return 'superseded';
   }
   return 'unselected';

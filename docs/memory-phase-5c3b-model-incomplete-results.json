@@ -1,0 +1,64 @@
+{
+  "at": "2026-10-23T18:28:39.121Z",
+  "kind": "real-model-fictional-data",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "serverAccess": false,
+  "chatInjection": false,
+  "semanticAutomaticDefault": false,
+  "cases": [
+    {
+      "id": "permission-scope",
+      "round": 1,
+      "mode": "fusion",
+      "output": "用户说明：晨露项目只在虚构测试群246801357试运行；主人确认后才能发送。尚未验收，不允许正式群发。以下记录只是整理过程。这些内容正在整理。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 343,
+      "parentChars": 498,
+      "outputChars": 72,
+      "durationMs": 21680
+    },
+    {
+      "id": "permission-scope",
+      "round": 2,
+      "mode": "fusion",
+      "output": "用户说明：晨露项目只在虚构测试群246801357试运行；主人确认后才能发送。尚未验收，不允许正式群发。以下记录只是整理过程。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 343,
+      "parentChars": 72,
+      "outputChars": 63,
+      "durationMs": 10242
+    },
+    {
+      "id": "permission-scope",
+      "round": 3,
+      "mode": "rebuild",
+      "output": "晨露项目只在虚构测试群246801357试运行；主人确认后才能发送。尚未验收，不允许正式群发。以下记录只是整理过程。",
+      "qualifierCount": 11,
+      "verifier": {
+        "compatible": true,
+        "faithful": true,
+        "issues": []
+      },
+      "sourceChars": 343,
+      "parentChars": 63,
+      "outputChars": 58,
+      "durationMs": 6753
+    }
+  ],
+  "negativeChecks": [],
+  "passed": false
+}

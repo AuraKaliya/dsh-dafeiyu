@@ -5,7 +5,7 @@
   "name": "@dafeiyu/journal",
   "type": "module",
   "dependencies": {
-    "@dafeiyu/contracts": "0.8.0",
+    "@dafeiyu/contracts": "0.9.0",
     "zod": "4.4.3"
   },
   "exports": {

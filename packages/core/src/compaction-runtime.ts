@@ -16,6 +16,7 @@ import type { ContextRuntime } from './context-runtime.js';
 import { fragmentRecordSchema,fragmentManifestSchema,fragmentViewSchema,fragmentCapsuleSchema,renderFragmentView,resolveFragmentView,fragmentDependencies,activeFragments,parseSummaryReference } from './summary-fragments.js';
 import type { FragmentManifest } from './summary-fragments.js';
 import { prepareSummaryComposition,commitSummaryComposition,summaryCompositionRuns } from './summary-composition.js';
+import { prepareSummaryRewrite,generateSummaryRewrite,buildRewriteManifest,commitSummaryRewrite } from './summary-rewrite.js';
 
 export interface CompactionBinding { owner: string; version: string; provider: CompactionProvider }
 export type CompactionAudit = (item:PendingMessage,data:Record<string,import('@dafeiyu/contracts').Json>,seqs:number[])=>void;
@@ -247,7 +248,7 @@ export class CompactionRuntime {
       Math.ceil((Buffer.byteLength(JSON.stringify(history),'utf8')+(pending?Buffer.byteLength(JSON.stringify(pending),'utf8'):0))/3));
     const target = Math.floor(p.inputTokens * p.targetRatio), threshold = p.inputTokens * p.thresholdRatio;
     if (pressure < threshold) { this.record('below-threshold', pressure, target); return; }
-    const events = readCompactionEvents(session), last = events.findLast(e => e.type === 'plugin:dafeiyu/compaction-check' && ['compacted', 'composed', 'summary-failed', 'no-benefit', 'conflict'].includes(e.data.status));
+    const events = readCompactionEvents(session), last = events.findLast(e => e.type === 'plugin:dafeiyu/compaction-check' && ['compacted', 'composed', 'rewritten', 'rewrite-failed', 'rewrite-no-benefit', 'summary-failed', 'no-benefit', 'conflict'].includes(e.data.status));
     if (last?.type === 'plugin:dafeiyu/compaction-check' && (Date.now() - last.data.at < p.cooldownMs
       || pressure - (last.data.pressure - last.data.saved) < p.minGrowthTokens)) { this.record('cooldown-or-growth', pressure, target); return; }
     const marker = events.findLast(e => e.type === 'compaction/start' || e.type === 'compaction/end' || e.type === 'session/end-seed');
@@ -272,6 +273,53 @@ export class CompactionRuntime {
           parents:plan.parents.length,kept:next.view.active.length,deduplicated:plan.parents.reduce((n,v)=>n+v.view.active.length,0)-next.view.active.length},
           [...plan.parents.map(v=>v.checkpoint.seq),next.checkpoint.seq,next.manifestSeq]);
         return;
+      }
+    }
+    if(p.semanticEnabled&&binding.provider.rewrite&&binding.provider.sources){
+      const basis=binding.provider.basis(this.scope());
+      for(const seq of session.surface.nodes){
+        const event=session.snapshotEvents()[seq];if(event?.type!=='user/message'||!['compact-checkpoint','dafeiyu-summary-view'].includes(event.data.source.kind))continue;
+        const capsule=fragmentCapsuleSchema.safeParse((()=>{try{return JSON.parse(event.data.content.filter(b=>b.type==='text').map(b=>b.text).join('\n'));}catch{return null;}})());
+        if(!capsule.success)continue;const view=resolveFragmentView(session,capsule.data.ref,this.scope());if(!view)continue;
+        for(const group of view.manifest.groups){
+          const fragments=activeFragments(view).filter(f=>f.group===group.id),depth=group.semanticDepth??0;
+          const mode=!fragments.length||depth>=(p.semanticMaxConsecutive??2)?'rebuild':'fusion';
+          if(mode==='fusion'&&fragments.length<2&&depth===0)continue;
+          const plan=prepareSummaryRewrite(session,this.scope(),capsule.data.ref,group.id,mode,{owner:binding.owner,version:binding.version,
+            protectedTaskId:basis.taskId,maxChars:p.maxSummaryChars,maxBytes:p.maxSourceBytes,maxConsecutive:p.semanticMaxConsecutive??2},deps=>this.provenance.validate(deps));
+          if(!plan)continue;
+          let status='rewrite-failed',saved=0;
+          try{
+            const validate=(deps:readonly SourceDependency[])=>this.binding()?.provider===binding.provider
+              &&binding.provider.basis(this.scope()).taskId===basis.taskId&&this.provenance.validate(deps);
+            const result=await generateSummaryRewrite(session,plan,binding.provider,signal,validate),manifest=buildRewriteManifest(session,plan,result);
+            const text=renderFragmentView(session.seq,manifest,manifest.fragments.map(f=>f.id));
+            const message=createUserMessage({source:{kind:'dafeiyu-summary-view',compactionId:manifest.compactionId},content:[{type:'text',text}]});
+            saved=(measurement.nodes.find(n=>n.seq===seq)?.tokens??0)-meter.estimateMessage(message);
+            // Rebuilding surviving original evidence after withdrawal may grow an empty view;
+            // still obey the usable input target. Other rewrites must have measured benefit.
+            const recovery=mode==='rebuild'&&!fragments.length;
+            const recoveryPressure=Math.max(pressure-saved,pressure+Math.ceil((Buffer.byteLength(text)-Buffer.byteLength(view.text))/3));
+            if(Buffer.byteLength(text)>p.maxSourceBytes||(!recovery&&(saved<p.minSavingsTokens||Buffer.byteLength(text)>=Buffer.byteLength(view.text)))
+              ||recovery&&recoveryPressure>p.inputTokens){status='rewrite-no-benefit';}
+            else{
+              const next=commitSummaryRewrite(this.ctx,session,plan,result,validate);status='rewritten';
+              this.audit(this.item!,{status:'summary-rewritten',mode,generation:manifest.rewrite!.generation,group:group.id,
+                qualifierCount:result.qualifiers.length,kept:next.view.active.length},[seq,next.checkpoint.seq,next.manifestSeq]);
+            }
+          }catch(error){
+            signal.throwIfAborted();
+            const message=error instanceof Error?error.message:'';
+            const reason=message==='Semantic verification rejected'?'verification-rejected':message.includes('qualifier')?'qualifier-validation'
+              :message.includes('conflict')?'source-conflict':message.includes('capacity')?'capacity':message.includes('incomplete')?'incomplete':'invalid-result';
+            this.audit(this.item!,{status:'summary-rewrite-rejected',ref:capsule.data.ref,group:group.id,mode,reason},[seq,view.manifestSeq]);
+          }
+          finally{
+            this.clean();this.record(status,pressure,target,saved);
+            if(!await this.ctx.sessions.flush(session))throw new Error('Semantic summary checkpoint unavailable');
+          }
+          return;
+        }
       }
     }
     const turns = events.filter(e => e.type === 'plugin:dafeiyu/turn-seal');
@@ -435,6 +483,7 @@ export class CompactionRuntime {
         fragments:fragments.map(f=>({ref:`${parsed.bundle}.${f.id}`,kind:f.kind,text:f.text,version:f.version,group:f.group})),groups,
         ...(view.manifest.composition?{composition:{...view.manifest.composition,
           lineage:view.manifest.composition.lineage.filter(l=>fragments.some(f=>f.id===l.id)),
-          parents:view.manifest.composition.parents.filter(p=>view.manifest.composition!.lineage.some(l=>fragments.some(f=>f.id===l.id)&&l.parents.some(r=>r.startsWith(`${p.ref}.`))))}}:{})}};
+          parents:view.manifest.composition.parents.filter(p=>view.manifest.composition!.lineage.some(l=>fragments.some(f=>f.id===l.id)&&l.parents.some(r=>r.startsWith(`${p.ref}.`))))}}:{}),
+        ...(view.manifest.rewrite&&fragments.some(f=>f.group===view.manifest.rewrite!.targetGroup)?{rewrite:view.manifest.rewrite}:{})}};
   }
 }

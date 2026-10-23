@@ -4,6 +4,7 @@ export * from './history.js';
 export * from './context.js';
 export * from './feedback.js';
 export * from './compaction.js';
+export * from './semantic.js';
 import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
 import type { FeedbackProvider } from './feedback.js';

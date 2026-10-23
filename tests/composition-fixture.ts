@@ -6,21 +6,23 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { SummaryFragment } from '@dafeiyu/contracts';
 import { readCompactionEvents,readProvenance,resolveFragmentView } from '@dafeiyu/core';
 import { provenanceFixture } from './provenance-fixture.js';
-import { digestSource,eventText } from '../packages/core/lib/source-records.js';
+import { digestSource,eventText,unionDependencies } from '../packages/core/lib/source-records.js';
 import { fragmentManifestSchema,renderFragmentView,summaryReference } from '../packages/core/lib/summary-fragments.js';
 import { prepareSummaryComposition,commitSummaryComposition } from '../packages/core/lib/summary-composition.js';
 import type { ResolvedFragmentView } from '../packages/core/lib/summary-fragments.js';
 
 export type CompositionHarness=Awaited<ReturnType<typeof provenanceFixture>>;
 /** Scripted root summaries on real, tracked DSH turns. No unproven/raw message injection. */
-export async function seedCheckpoint(h:CompositionHarness,text:string,fragments:SummaryFragment[],taskId:string|null=null){
+export async function seedCheckpoint(h:CompositionHarness,text:string,fragments:SummaryFragment[],taskId:string|null=null,previousTurns=0){
   const memory=await h.remember(text),session=h.session();
   const seal=readCompactionEvents(session).findLast(e=>e.type==='plugin:dafeiyu/turn-seal');assert.ok(seal?.type==='plugin:dafeiyu/turn-seal');
-  const seqs=seal.data.seqs.map(SessionSeq),records=readProvenance(session),events=session.snapshotEvents();
-  const groups=seqs.map((seq,index)=>{
+  const seals=readCompactionEvents(session).filter(e=>e.type==='plugin:dafeiyu/turn-seal').slice(-(previousTurns+1));
+  const seqs=seals.flatMap(s=>s.data.seqs).map(SessionSeq),records=readProvenance(session),events=session.snapshotEvents();
+  let groups=seqs.map((seq,index)=>{
     const record=records.find(r=>r.type==='plugin:dafeiyu/source-record'&&r.data.targetSeq===seq);assert.ok(record?.type==='plugin:dafeiyu/source-record');
     return {id:`G${index+1}`,taskId,inputs:[{seq,role:events[seq]!.type==='user/message'?'user' as const:'assistant' as const,hash:digestSource(eventText(events[seq])!)}],dependencies:record.data.dependencies};
   });
+  if(previousTurns)groups=[{id:'G1',taskId,inputs:groups.flatMap(g=>g.inputs),dependencies:unionDependencies(...groups.map(g=>g.dependencies))}];
   const id=CompactionId(randomUUID());
   const manifest=fragmentManifestSchema.parse({schemaVersion:1,compactionId:id,sessionId:session.id,agentId:'dafeiyu',route:memory.scope.route,owner:'memory',
     producerVersion:'test',epoch:'test',taskId,versions:{},policy:'fictional-root',policyHash:digestSource('test'),

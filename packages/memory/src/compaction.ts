@@ -5,6 +5,8 @@ import { createSystemMessage, createUserMessage,ReasoningEffortId } from '@deeps
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { rewriteMemorySummary } from './semantic.js';
+import type { SemanticRequest } from '@dafeiyu/contracts';
 
 /** inputTokens is the usable input budget AFTER reserving completion space for this route. */
 export const compactionConfigSchema = z.strictObject({
@@ -19,6 +21,9 @@ export const compactionConfigSchema = z.strictObject({
   maxSummaryChars: z.number().int().min(100).max(8000).default(2000),
   maxFragmentGroups:z.number().int().min(1).max(8).default(8),
   maxFragments:z.number().int().min(1).max(32).default(16),
+  semanticEnabled:z.boolean().default(false),
+  semanticMaxConsecutive:z.number().int().min(1).max(4).default(2),
+  semanticMaxOutputTokens:z.number().int().min(2048).max(32768).default(8192),
   timeoutMs: z.number().int().min(100).max(300000).default(30000),
 }).refine(p => p.targetRatio < p.thresholdRatio, 'Target must be below trigger');
 
@@ -33,6 +38,9 @@ export class MemoryCompaction implements CompactionProvider {
   }
   async summarizeFragments(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number){
     return this.generate(scope,sources,signal,checkSources,maxChars);
+  }
+  async rewrite(_scope:CompactionScope,request:SemanticRequest,signal:AbortSignal,checkSources:()=>void){
+    return rewriteMemorySummary(this.ctx,request,signal,checkSources,this.policy.timeoutMs,this.policy.semanticMaxOutputTokens,this.policy.maxSourceBytes);
   }
   private async generate(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:(()=>void)|undefined,maxChars:number){
     const model = this.ctx.dafeiyu.analysisModelRoute();

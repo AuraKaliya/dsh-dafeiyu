@@ -1,6 +1,7 @@
 import type { TimelineScope } from './history.js';
 import { z } from 'zod';
 import type { ContextItem } from './context.js';
+import type { SemanticRequest,SemanticResult } from './semantic.js';
 
 const scopeFields={agentId:z.string(),route:z.string()};
 /** Immutable input dependencies, supplied by trusted producers rather than model citations. */
@@ -43,6 +44,9 @@ export interface CompactionPolicy {
   readonly maxSummaryChars: number;
   readonly maxFragmentGroups?:number;
   readonly maxFragments?:number;
+  readonly semanticEnabled?:boolean;
+  readonly semanticMaxConsecutive?:number;
+  readonly semanticMaxOutputTokens?:number;
 }
 export const SummaryFragmentSchema=z.strictObject({kind:z.enum(['fact','decision','constraint','correction','pending','uncertainty','result','note']),text:z.string().trim().min(1).max(8000)});
 export type SummaryFragment=z.infer<typeof SummaryFragmentSchema>;
@@ -53,4 +57,5 @@ export interface CompactionProvider {
   readonly sources?:SourcePolicy;
   summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal,checkSources?:()=>void): Promise<string>;
   summarizeFragments?(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number):Promise<readonly SummaryFragment[]>;
+  rewrite?(scope:CompactionScope,request:SemanticRequest,signal:AbortSignal,checkSources:()=>void):Promise<SemanticResult>;
 }

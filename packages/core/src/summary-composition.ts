@@ -36,7 +36,7 @@ export function prepareSummaryComposition(session:Session,scope:TimelineScope,re
     if(!contiguous(session,parents))return null;
     const content=composeFragmentContent(parents);
     if(content.fragments.length>options.maxFragments||content.groups.length>options.maxGroups)return null;
-    const first=parents[0]!.manifest;
+    const {rewrite:_rewrite,...first}=parents[0]!.manifest;
     const tasks=new Set(content.groups.map(g=>g.taskId));
     const manifest=fragmentManifestSchema.parse({...first,...content,compactionId:randomUUID(),producerVersion:options.version,
       taskId:tasks.size===1?content.groups[0]!.taskId:null,epoch:digestSource(JSON.stringify(content.groups)),versions:{},
