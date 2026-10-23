@@ -1,7 +1,8 @@
 import { randomUUID,createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { conversationKey,redactContent } from '@dafeiyu/contracts';
+import { conversationKey,redactContent,TaskMemoryAuthorizationSchema } from '@dafeiyu/contracts';
+import type { TaskMemoryAuthorization } from '@dafeiyu/contracts';
 import type { ObservationAuthority,MemoryObservation,TimelineScope,MemoryAccessPurpose,ContextItem,TaskWorkspaceProvider } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import type { NewEvent } from '@dafeiyu/journal';
@@ -9,12 +10,12 @@ import { MEMORY_VERSION,sourceVersionSchema,sourceFenceSchema } from './types.js
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const string=(v:unknown)=>z.string().parse(v),integer=(v:unknown)=>z.number().int().safe().parse(v);
-const witnessSchema=z.discriminatedUnion('kind',[
+export const witnessSchema=z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('memory'),route:z.string(),id:z.uuid(),revision:z.number().int().positive(),version:z.number().int().positive(),contentHash:z.string(),
-    ancestors:z.array(sourceVersionSchema),fences:z.array(sourceFenceSchema)}),
+    ancestors:z.array(sourceVersionSchema),fences:z.array(sourceFenceSchema),authorization:TaskMemoryAuthorizationSchema.optional(),range:z.strictObject({start:z.number().int().nonnegative(),end:z.number().int().positive()}).optional()}),
   z.strictObject({kind:z.literal('observation'),route:z.string(),id:z.uuid(),contentHash:z.string()}),
 ]);
-type Witness=z.infer<typeof witnessSchema>;
+export type Witness=z.infer<typeof witnessSchema>;
 const authoritySchema=z.object({agentId:z.string(),route:z.string(),pluginId:z.string(),pluginVersion:z.string(),ingressPluginId:z.string(),
   conversation:z.object({channel:z.string(),account:z.string(),kind:z.enum(['private','group','local']),id:z.string()}),taskId:z.string().nullable(),
   parent:z.object({traceId:z.string(),operationId:z.string(),eventId:z.string()}).optional()}).transform(value=>{
@@ -27,7 +28,7 @@ const privateRoute=(agentId:string,taskId:string)=>conversationKey(agentId,{chan
 export function migrateTaskWorkspaces(db:DatabaseSync):void {
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
   const tables=['task_workspaces','task_revisions','task_members','task_selections','task_links','task_jobs','task_slots','task_requests','task_observations'];
-  if(version===4){for(const table of tables)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===4||version===5){for(const table of tables)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==3)throw new Error('Unsupported task workspace schema');
   db.exec(`CREATE TABLE task_workspaces(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,version INTEGER NOT NULL,epoch INTEGER NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL);
     CREATE TABLE task_revisions(task_id TEXT NOT NULL REFERENCES task_workspaces(id),version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(task_id,version));
@@ -49,6 +50,18 @@ export function migrateTaskWorkspaces(db:DatabaseSync):void {
 /** One SQLite transaction for task state, source adoption, observations and outbox. Task
  * control epoch, scene activation and per-slot version are independent concurrency fences. */
 export class TaskWorkspace {
+  private authorization:((agent:string,proof:TaskMemoryAuthorization,route:string,memoryId:string)=>boolean)|undefined;
+  authorizeWith(validate:NonNullable<TaskWorkspace['authorization']>){this.authorization=validate;}
+  state(agentId:string,id:string){const {version,epoch,status}=this.task(agentId,id);return {version,epoch,status};}
+  memoryProof(scope:TimelineScope,id:string,revision:number,version:number,contentHash:string){return this.capture(scope,{kind:'memory',id,revision,version,contentHash});}
+  validProof(agentId:string,proof:Witness){return !!this.evidence(agentId,proof);}
+  selectAuthorized(agentId:string,id:string,requestId:string,expectedVersion:number,proofs:Witness[]){
+    return this.request({agentId,route:privateRoute(agentId,id),pluginId:'$task-coordinator'},requestId,{kind:'authorized-selection',id,expectedVersion,proofs},()=>{
+      const task=this.task(agentId,id);if(task.version!==expectedVersion||task.status!=='active')throw new Error('task_version_conflict');
+      for(const proof of proofs)if(proof.kind!=='memory'||proof.authorization?.taskId!==id||!this.evidence(agentId,proof))throw new Error('task_source_unavailable');
+      const links=proofs.map(proof=>this.adopt(id,proof));task.version++;this.revise(task);this.record(task,'task.sources.linked',{version:task.version,links,internalOnly:true});return {taskId:id,version:task.version,links};
+    });
+  }
   constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly memory:MemoryStore,
     private readonly timeline:(scope:TimelineScope,ref:string,hash:string)=>boolean,private readonly sameSource:(scope:TimelineScope,a:string,b:string)=>boolean){}
   private task(agentId:string,id:string){
@@ -109,8 +122,12 @@ export class TaskWorkspace {
   private evidence(agentId:string,proof:Witness,purpose:MemoryAccessPurpose='internal'){
     const scope={agentId,route:proof.route};
     if(proof.kind==='observation'){const activity=this.memory.observations.activity(scope,proof.id,purpose);return activity&&activity.hash===proof.contentHash?{text:JSON.stringify(activity.summary),proof}:null;}
-    const current=this.capture(scope,proof);if(!current||hash(current)!==hash(proof))return null;
-    const item=this.memory.read(scope,proof.id,'normal',proof.revision,purpose);return item?{text:item.content,proof}:null;
+    const {authorization,range,...base}=proof;
+    if(authorization&&(purpose==='expression'||!this.authorization?.(agentId,authorization,proof.route,proof.id)))return null;
+    const current=this.capture(scope,proof);if(!current||hash(current)!==hash(base))return null;
+    const item=this.memory.read(scope,proof.id,'normal',proof.revision,purpose);if(!item)return null;
+    const points=Array.from(item.content);if(range&&(range.start>=range.end||range.end>points.length))return null;
+    return {text:range?points.slice(range.start,range.end).join(''):item.content,proof};
   }
   link(authority:ObservationAuthority,id:string,input:Parameters<TaskWorkspaceProvider['link']>[2]):Record<string,unknown>{
     return this.request(authority,input.requestId,{kind:'link',id,input},()=>{const task=this.member(authority,id);if(task.status!=='active')throw new Error('task_not_active');if(task.version!==input.expectedVersion)throw new Error('task_version_conflict');
@@ -155,6 +172,7 @@ export class TaskWorkspace {
     const include=(next:typeof state)=>{if(rank[next]>rank[state])state=next;};
     for(const input of job.inputs){const proof=input.proof,scope={agentId,route:proof.route};if(this.evidence(agentId,proof))continue;
       if(proof.kind==='memory'){
+        if(proof.authorization&&!this.authorization?.(agentId,proof.authorization,proof.route,proof.id)){include('unavailable');continue;}
         if(this.memory.read(scope,proof.id,'deleted',proof.revision,'internal')||proof.fences.some(f=>this.memory.suppressedEvidence(scope,f.contentHash,r=>this.sameSource(scope,r,f.ref))))include('deleted');
         else include(this.memory.read(scope,proof.id,'history',proof.revision,'internal')?'changed':'unavailable');
         continue;

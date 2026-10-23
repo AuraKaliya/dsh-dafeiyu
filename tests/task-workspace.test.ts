@@ -216,11 +216,11 @@ test('schema v3 upgrade preserves old memory boundaries, observation sources and
   h.handle.changeObservationSource({conversation:observationConversation,ref,requestId:'legacy-delete',expectedVersion:1,action:'delete'});
   const before=h.store.read(h.scope,id,'deleted');assert.ok(before);await h.close();
   const db=new DatabaseSync(join(root,'memory.sqlite'));try{
-    for(const table of ['task_observations','task_requests','task_slots','task_jobs','task_links','task_selections','task_members','task_revisions','task_workspaces'])db.exec(`DROP TABLE ${table}`);
+    for(const table of ['task_memory_hits','task_memory_grants','task_memory_policies','task_memory_policy_revisions','task_memory_requests','task_observations','task_requests','task_slots','task_jobs','task_links','task_selections','task_members','task_revisions','task_workspaces'])db.exec(`DROP TABLE ${table}`);
     db.exec('PRAGMA user_version=3');
   }finally{db.close();}
   const next=await observationFixture(root);try{assert.deepEqual(next.store.read(next.scope,id,'deleted'),before);assert.equal(next.store.read(next.scope,id),null);
-    assert.equal(before.boundary.task.kind,'unassigned');const verify=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(verify.prepare('PRAGMA user_version').get()?.user_version,4);assert.equal(verify.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{verify.close();}
+    assert.equal(before.boundary.task.kind,'unassigned');const verify=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(verify.prepare('PRAGMA user_version').get()?.user_version,5);assert.equal(verify.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{verify.close();}
   }finally{await next.close();}
 });
 

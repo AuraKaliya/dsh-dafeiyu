@@ -76,7 +76,17 @@ export class MemoryService extends Service {
             versions:{...versions,memoryGeneration:this.store.generation(scope)}};
     };
     try {
+      const taskMemory=this.store.taskMemory(this.tasks,this.retrieval);
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
+        taskMemoryProvider:{
+          policy:(agent,input)=>{this.assertTasks();if(agent!==this.config.agentId)throw new Error('Wrong task owner');const result=taskMemory.policy(agent,input);this.flush();return result;},
+          grant:(agent,task,input)=>{this.assertTasks();const result=taskMemory.grant(agent,task,input);this.flush();return result;},
+          check:(agent,task,id)=>{this.assertTasks();taskMemory.check(agent,task,id);},
+          revoke:(agent,task,input)=>{this.assertTasks();const result=taskMemory.revoke(agent,task,input);this.flush();return result;},
+          recall:async(agent,task,id,input,signal,guard)=>{this.assertTasks();const result=await taskMemory.recall(agent,task,id,input,signal,()=>{this.assertTasks();guard();});this.flush();return result;},
+          open:(agent,task,id,input)=>{this.assertTasks();const result=taskMemory.open(agent,task,id,input);this.flush();return result;},
+          select:(agent,task,id,input)=>{this.assertTasks();const result=taskMemory.select(agent,task,id,input);this.flush();return result;},
+        },
         taskWorkspaceProvider:{
           current:scope=>{this.assertTasks();return scope.agentId===this.config.agentId?this.tasks.activeTask(scope):null;},
           create:(agent,input)=>{this.assertTasks();if(agent!==this.config.agentId)throw new Error('Wrong task owner');const id=this.tasks.create(agent,input);this.flush();return id;},

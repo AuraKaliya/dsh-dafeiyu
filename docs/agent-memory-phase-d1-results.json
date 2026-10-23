@@ -1,0 +1,76 @@
+{
+  "at": "2026-10-23T22:05:36.579Z",
+  "projectVersion": "0.17.0",
+  "samples": "fictional-only",
+  "serverAccess": false,
+  "realGenerationModel": false,
+  "realEmbedding": "BAAI/bge-small-zh-v1.5 / FastEmbed + ONNX",
+  "evaluations": [
+    {
+      "strategy": "lexical",
+      "query": "下雨 雨具",
+      "elapsedMs": 216,
+      "relevantRetrieved": 2,
+      "returned": 2,
+      "scenes": [
+        {
+          "cacheHits": 0,
+          "vectorsComputed": 0,
+          "degraded": false
+        },
+        {
+          "cacheHits": 0,
+          "vectorsComputed": 0,
+          "degraded": false
+        }
+      ]
+    },
+    {
+      "strategy": "semantic",
+      "query": "有降水的天气出门要携带哪些防护用品",
+      "elapsedMs": 132,
+      "relevantRetrieved": 2,
+      "returned": 2,
+      "scenes": [
+        {
+          "cacheHits": 0,
+          "vectorsComputed": 5,
+          "degraded": false
+        },
+        {
+          "cacheHits": 0,
+          "vectorsComputed": 5,
+          "degraded": false
+        }
+      ]
+    },
+    {
+      "strategy": "hybrid",
+      "query": "下雨外出要准备什么",
+      "elapsedMs": 74,
+      "relevantRetrieved": 2,
+      "returned": 2,
+      "scenes": [
+        {
+          "cacheHits": 4,
+          "vectorsComputed": 1,
+          "degraded": false
+        },
+        {
+          "cacheHits": 4,
+          "vectorsComputed": 1,
+          "degraded": false
+        }
+      ]
+    }
+  ],
+  "cacheRepeatComputedNoVectors": true,
+  "taskGrantCacheIsolation": true,
+  "unauthorizedSceneExcluded": true,
+  "internalMemoryRetrievedWithoutExpressionGrant": true,
+  "revocationInvalidatedSelectedEvidence": true,
+  "revocationBlockedRecallAndOpen": true,
+  "deletionFilteredCachedEvidence": true,
+  "modelCalls": 0,
+  "externalDeliveries": 0
+}

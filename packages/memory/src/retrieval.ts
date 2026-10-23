@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import type { z } from 'zod';
-import type { TimelineScope } from '@dafeiyu/contracts';
+import type { TimelineScope,MemoryAccessPurpose } from '@dafeiyu/contracts';
 import { MemoryStore } from './store.js';
 import type { MemoryView } from './store.js';
 import { loadProfile, digest, recallSchema, retrievalConfigSchema, RetrievalError, validateVector } from './retrieval-profile.js';
@@ -8,6 +8,8 @@ import type { RetrievalConfig, RetrievalDependencies, TextChunk } from './retrie
 import { LocalTokenizer, LoopbackEmbedder } from './retrieval-clients.js';
 import { RetrievalIndex, lexicalTokens, lexicalRank } from './retrieval-index.js';
 import type { IndexedChunk } from './retrieval-index.js';
+
+interface RetrievalView {purpose:MemoryAccessPurpose;cacheScope:TimelineScope;accepts:(memory:MemoryView)=>boolean}
 
 /** Index membership is derived from authorized live memory, never from vector cache membership. */
 export class MemoryRetrieval {
@@ -37,22 +39,22 @@ export class MemoryRetrieval {
     }
     if (end !== points.length) throw new RetrievalError('tokenizer_unavailable');
   }
-  private live(scope: TimelineScope, chunk: IndexedChunk): MemoryView | null {
-    const memory = this.memory.read(scope, chunk.memoryId, 'normal', chunk.revision);
-    if (!memory || memory.contentHash !== chunk.memoryHash || Array.from(memory.content).slice(chunk.start,chunk.end).join('') !== chunk.text) return null;
+  private live(scope: TimelineScope, chunk: IndexedChunk,view:RetrievalView): MemoryView | null {
+    const memory = this.memory.read(scope, chunk.memoryId, 'normal', chunk.revision,view.purpose);
+    if (!memory || !view.accepts(memory)||memory.contentHash !== chunk.memoryHash || Array.from(memory.content).slice(chunk.start,chunk.end).join('') !== chunk.text) return null;
     return memory;
   }
-  private async reconcile(scope: TimelineScope, generation: number, signal: AbortSignal, guard: () => void): Promise<IndexedChunk[]> {
-    const previous = this.index.rows(scope, this.profile.hash, this.config.maxChunks + 1);
+  private async reconcile(scope: TimelineScope, generation: number, signal: AbortSignal, guard: () => void,view:RetrievalView): Promise<IndexedChunk[]> {
+    const previous = this.index.rows(view.cacheScope, this.profile.hash, this.config.maxChunks + 1);
     const oversized = previous.length > this.config.maxChunks;
     const existing = oversized ? [] : previous;
-    if (!oversized && this.index.snapshot(scope, this.profile.hash) === generation) {
+    if (!oversized && this.index.snapshot(view.cacheScope, this.profile.hash) === generation) {
       const verified = new Map<string, {memory:MemoryView;points:string[]} | null>();
       const visible = existing.filter(row => {
         const key = `${row.memoryId}:${row.revision}`;
         if (!verified.has(key)) {
-          const memory = this.memory.read(scope,row.memoryId,'normal',row.revision);
-          verified.set(key,memory ? {memory,points:Array.from(memory.content)} : null);
+          const memory = this.memory.read(scope,row.memoryId,'normal',row.revision,view.purpose);
+          verified.set(key,memory&&view.accepts(memory) ? {memory,points:Array.from(memory.content)} : null);
         }
         const value = verified.get(key);
         return !!value && value.memory.contentHash === row.memoryHash && value.points.slice(row.start,row.end).join('') === row.text;
@@ -62,7 +64,8 @@ export class MemoryRetrieval {
     }
     const rows: IndexedChunk[] = [];
     const current: MemoryView[] = [];
-    for (const memory of this.memory.current(scope)) {
+    for (const memory of this.memory.current(scope,view.purpose)) {
+      if(!view.accepts(memory))continue;
       current.push(memory);
       if (current.length > this.config.maxDocuments) throw new RetrievalError('capacity_exceeded');
     }
@@ -73,15 +76,22 @@ export class MemoryRetrieval {
       try { this.validateChunks(memory, cached); chunks = cached; }
       catch { chunks = await this.dependencies.tokenizer.chunks(memory.content, signal); guard(); this.validateChunks(memory, chunks); }
       for (const chunk of chunks) {
-        const key = digest(JSON.stringify([scope.agentId,scope.route,this.profile.hash,memory.id,memory.revision,memory.contentHash,chunk.start,chunk.end,chunk.text]));
+        const key = digest(JSON.stringify([view.cacheScope.agentId,view.cacheScope.route,this.profile.hash,memory.id,memory.revision,memory.contentHash,chunk.start,chunk.end,chunk.text]));
         rows.push({ ...chunk, key, memoryId: memory.id, revision: memory.revision, memoryHash: memory.contentHash, terms: lexicalTokens(chunk.text).join(' '), order: rows.length });
       }
       if (rows.length > this.config.maxChunks) throw new RetrievalError('capacity_exceeded');
     }
-    guard(); this.index.replace(scope, this.profile.hash, this.profile.definition, generation, rows);
+    guard(); this.index.replace(view.cacheScope, this.profile.hash, this.profile.definition, generation, rows);
     return rows;
   }
   async recall(scope: TimelineScope, raw: unknown, signal: AbortSignal, authorize: () => void) {
+    return this.run(scope,raw,signal,authorize,{purpose:'expression',cacheScope:scope,accepts:()=>true});
+  }
+  /** Trusted task executor only; model-facing recall cannot choose purpose or namespace. */
+  async recallInternal(scope:TimelineScope,partition:string,accepts:RetrievalView['accepts'],raw:unknown,signal:AbortSignal,authorize:()=>void){
+    return this.run(scope,raw,signal,authorize,{purpose:'internal',cacheScope:{agentId:scope.agentId,route:`$task-internal:${digest(JSON.stringify([scope.route,partition]))}`},accepts});
+  }
+  private async run(scope:TimelineScope,raw:unknown,signal:AbortSignal,authorize:()=>void,view:RetrievalView){
     const input = recallSchema.parse(raw);
     const active = AbortSignal.any([signal, this.stop.signal]);
     const generation = this.memory.generation(scope);
@@ -91,9 +101,9 @@ export class MemoryRetrieval {
       if (generation !== this.memory.generation(scope)) throw new RetrievalError('stale_state');
     };
     guard();
-    if (input.rebuild) this.index.invalidate(scope, this.profile.hash);
-    const rows = await this.reconcile(scope, generation, active, guard); guard();
-    const matches = input.strategy === 'semantic' ? new Set<string>() : this.index.lexicalMatches(scope, this.profile.hash, input.query);
+    if (input.rebuild) this.index.invalidate(view.cacheScope, this.profile.hash);
+    const rows = await this.reconcile(scope, generation, active, guard,view); guard();
+    const matches = input.strategy === 'semantic' ? new Set<string>() : this.index.lexicalMatches(view.cacheScope, this.profile.hash, input.query);
     const lexical = input.strategy === 'semantic' ? [] : lexicalRank(rows, input.query, matches);
     let dense: {row: IndexedChunk;score:number}[] = [];
     let degraded: string | null = null;
@@ -106,7 +116,7 @@ export class MemoryRetrieval {
         const missing: IndexedChunk[] = [];
         for (const row of rows.filter(row => row.text.trim())) {
           guard();
-          const cached = this.index.getVector(scope, this.profile.hash, 'document', row.text);
+          const cached = this.index.getVector(view.cacheScope, this.profile.hash, 'document', row.text);
           if (cached) { stats.cacheHits++; documentVectors.set(row.key,cached); }
           else missing.push(row);
         }
@@ -121,16 +131,16 @@ export class MemoryRetrieval {
           if (vectors.length !== batch.length) throw new RetrievalError('invalid_vector');
           vectors.forEach((rawVector,index) => {
             const vector = validateVector(rawVector), row = batch[index]!;
-            this.index.putVector(scope,this.profile.hash,'document',row.text,vector); documentVectors.set(row.key,vector); stats.vectorsComputed++;
+            this.index.putVector(view.cacheScope,this.profile.hash,'document',row.text,vector); documentVectors.set(row.key,vector); stats.vectorsComputed++;
           });
         }
-        let queryVector = this.index.getVector(scope,this.profile.hash,'query',query.text);
+        let queryVector = this.index.getVector(view.cacheScope,this.profile.hash,'query',query.text);
         if (queryVector) stats.cacheHits++;
         else {
           guard(); const values = await this.dependencies.embedder.embed([query.text], active); guard();
           if (values.length !== 1) throw new RetrievalError('invalid_vector');
           queryVector = validateVector(values[0]);
-          this.index.putVector(scope,this.profile.hash,'query',query.text,queryVector); stats.vectorsComputed++;
+          this.index.putVector(view.cacheScope,this.profile.hash,'query',query.text,queryVector); stats.vectorsComputed++;
         }
         const vector = queryVector;
         dense = rows.filter(row=>documentVectors.has(row.key)).map(row=>({row,
@@ -156,7 +166,7 @@ export class MemoryRetrieval {
     const items = [];
     for (const entry of ranked) {
       if (seen.has(entry.row.memoryId)) continue;
-      const memory = this.live(scope,entry.row); if (!memory) continue;
+      const memory = this.live(scope,entry.row,view); if (!memory) continue;
       seen.add(memory.id);
       const preview = Array.from(entry.row.text).slice(0,600).join('');
       items.push({ id: memory.id, ref: memory.ref, revision: memory.revision, version: memory.version, contentHash: memory.contentHash,
