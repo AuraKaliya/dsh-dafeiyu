@@ -1,0 +1,11 @@
+# Match the eight inspected server packages; no torch or CUDA dependency.
+fastembed==0.9.0
+onnxruntime==1.31.0
+tokenizers==0.23.3
+numpy==2.5.4
+huggingface-hub==1.33.0
+fastapi==0.156.2
+pydantic==2.14.1
+uvicorn==0.54.0
+psutil==7.1.3
+httpx==0.28.1

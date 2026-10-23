@@ -1,0 +1,85 @@
+{
+  "checked_at": "2026-10-23T16:43:36.5362430+08:00",
+  "versions": [
+    {
+      "version": "0.156.2",
+      "name": "fastapi"
+    },
+    {
+      "version": "0.9.0",
+      "name": "fastembed"
+    },
+    {
+      "version": "1.33.0",
+      "name": "huggingface_hub"
+    },
+    {
+      "version": "2.5.4",
+      "name": "numpy"
+    },
+    {
+      "version": "1.31.0",
+      "name": "onnxruntime"
+    },
+    {
+      "version": "2.14.1",
+      "name": "pydantic"
+    },
+    {
+      "version": "0.23.3",
+      "name": "tokenizers"
+    },
+    {
+      "version": "0.54.0",
+      "name": "uvicorn"
+    }
+  ],
+  "model_files": [
+    {
+      "sha256": "9088751d39abbf86ec3d19ffca92ad62ad19075f7e59712e6c71217fa125d1d3",
+      "name": "config.json",
+      "bytes": 739
+    },
+    {
+      "sha256": "1294ea4b6331115a353d81f96b85e8c8d7fdcc284453d5b2fab5b016230aad38",
+      "name": "model_optimized.onnx",
+      "bytes": 94781076
+    },
+    {
+      "sha256": "97e78d1d21c2eb719e865b018f17915df6a12ed987446eb7f3f3a783a5afb1e1",
+      "name": "ort_config.json",
+      "bytes": 1234
+    },
+    {
+      "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",
+      "name": "special_tokens_map.json",
+      "bytes": 125
+    },
+    {
+      "sha256": "48cea5d44424912a6fd1ea647bf4fe50b55ab8b1e5879c3275f80e339e8fae26",
+      "name": "tokenizer.json",
+      "bytes": 439125
+    },
+    {
+      "sha256": "e6f3b96db926a37d4039995fbf5ad17de158dfb8f6343d607e4dbaad18d75f5a",
+      "name": "tokenizer_config.json",
+      "bytes": 367
+    },
+    {
+      "sha256": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c",
+      "name": "vocab.txt",
+      "bytes": 109540
+    }
+  ],
+  "service_sha256": "a87325c00422261c827bfa3e863fc8cd4cc12bdffab7a7d88219aeb28e116615",
+  "fastembed_source_hashes": {
+    "fastembed\\text\\onnx_embedding.py": "f9e7f5dfba036c86fd6b187fcb1686c070d7c0f1f7910171a42501be69a84a42",
+    "fastembed\\common\\onnx_model.py": "3edf2ceec2ea46074dcebfbf533d50a62ef3b861bfad74382b4d0bb754dee104",
+    "fastembed\\common\\model_description.py": "e985c4688975668f25a4200a5cf428a98070053f3cf550a809c564dcd478d6d4",
+    "fastembed\\text\\text_embedding.py": "dabd569c484548e5e861fd5de59e47c1193ebddd99110fbb1f057b7841e3c762"
+  },
+  "source": {
+    "repo": "Qdrant/bge-small-zh-v1.5",
+    "revision": "46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "dataset_sha256": "b6cf93a5d31102903186d47d7d4d39230249eaa2183ba7fe42fc9ad94d381336",
+  "comparison": {
+    "raw": {
+      "documents": {
+        "vectors": 100,
+        "max_abs_difference": 0.00030112266540527344,
+        "mean_abs_difference": 4.6236824364323524e-05,
+        "min_cosine": 0.9999988083578936,
+        "mean_cosine": 0.9999991392778278,
+        "within_1e_5_abs": false
+      },
+      "queries": {
+        "vectors": 47,
+        "max_abs_difference": 0.0002540628775022924,
+        "mean_abs_difference": 4.559307078464272e-05,
+        "min_cosine": 0.9999988825852363,
+        "mean_cosine": 0.9999991605281646,
+        "within_1e_5_abs": false
+      }
+    },
+    "prefixed": {
+      "documents": {
+        "vectors": 100,
+        "max_abs_difference": 0.00030112266540527344,
+        "mean_abs_difference": 4.6236824364323524e-05,
+        "min_cosine": 0.9999988083578936,
+        "mean_cosine": 0.9999991392778278,
+        "within_1e_5_abs": false
+      },
+      "queries": {
+        "vectors": 47,
+        "max_abs_difference": 0.00026759214233607054,
+        "mean_abs_difference": 4.9791831767144796e-05,
+        "min_cosine": 0.9999987184653649,
+        "mean_cosine": 0.9999989996177294,
+        "within_1e_5_abs": false
+      }
+    }
+  },
+  "comparison_kind": "Same input strings; original BAAI safetensors vs server-hash-matched Qdrant ONNX; sample equivalence only"
+}
