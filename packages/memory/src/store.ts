@@ -82,6 +82,10 @@ export class MemoryStore {
     const row = this.db.prepare('SELECT generation FROM scope_generations WHERE agent_id=? AND route=?').get(scope.agentId, scope.route);
     return row ? integer(row.generation) : 0;
   }
+  /** Monotonic invalidation epoch. Adding an unrelated memory does not erase valid conversation history. */
+  mutationEpoch(scope:TimelineScope):number {
+    return integer(this.db.prepare('SELECT coalesce(sum(version-1),0) AS n FROM memory_items WHERE agent_id=? AND route=?').get(scope.agentId,scope.route)?.n);
+  }
   /** Conservative tombstone barrier: automatic extraction cannot resurrect deleted source material. */
   suppressedEvidence(scope: TimelineScope, contentHash: string): boolean {
     for(const row of this.db.prepare('SELECT r.id,r.revision,r.body FROM memory_revisions r JOIN memory_items i ON i.id=r.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,scope.route)) {

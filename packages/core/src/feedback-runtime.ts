@@ -3,13 +3,14 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { FeedbackMetaSchema,FEEDBACK_RETIRED_TEXT } from '@dafeiyu/contracts';
 import type { PendingMessage } from '@dafeiyu/contracts';
+import { priceRetirement } from './compaction-runtime.js';
 
 export type FeedbackValidator=(item:PendingMessage,metadata:unknown,text:string)=>boolean;
 /** Replaces only core-tagged tool results; preserves tool-call pairing and other plugins' nodes. */
 export class FeedbackRuntime {
   private agent:Agent|undefined;
   private item:PendingMessage|undefined;
-  constructor(scope:Context,private readonly validate:FeedbackValidator){
+  constructor(private readonly scope:Context,private readonly validate:FeedbackValidator){
     scope.systemPrompt.context({name:'dafeiyu:feedback-guard:v1',order:9999,required:true,interpolate:false,text:()=>{this.retire();return '';}});
   }
   begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;}
@@ -26,6 +27,7 @@ export class FeedbackRuntime {
       if(this.validate(this.item,parsed.data,text))continue;
       // DSH requires a tool-result rewrite to preserve every field except content,
       // including message identity, call ID, outcome and private presentation metadata.
+      priceRetirement(this.scope,session,[seq]);
       session.append('tool/result',{...event.data,message:{...event.data.message,content:[{type:'text',text:FEEDBACK_RETIRED_TEXT}]}},
         {surfaceOp:{op:'replace',startSeq:seq,endSeq:seq},sourceEventSeqs:[seq]});
     }

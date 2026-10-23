@@ -33,6 +33,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
     this.config=feedbackConfigSchema.parse(config);this.store=new FeedbackStore(resolve(directory,'feedback.sqlite'));this.flush();
   }
   private scope(context:ActionContext){return this.ctx.dafeiyu.scopeFor(context);}
+  mutationEpoch(scope:Scope):number{return this.store.mutationEpoch(scope);}
   private id(value:string):string{const match=refPattern.exec(value);if(!match)throw new MemoryError('not_found');return z.uuid().parse(match[1]);}
   private state(scope:Scope,record:FeedbackHeaderRecord):State{
     if(record.archive.rejectedSources)return 'unavailable';
@@ -133,7 +134,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
     const end=Math.min(points.length,offset+limit),nextCursor=end<points.length?Buffer.from(JSON.stringify({fingerprint,offset:end})).toString('base64url'):null;
     const a=record.archive;
     this.ctx.dafeiyu.journal.append({agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId:scope.operationId,causedBy:scope.startedEventId,
-      type:'feedback.opened',plugin:'memory',pluginVersion:'0.5.0',occurredAt:new Date().toISOString(),sources:[{kind:'event',id:a.startedEventId,route:scope.route}],
+      type:'feedback.opened',plugin:'memory',pluginVersion:'0.6.0',occurredAt:new Date().toISOString(),sources:[{kind:'event',id:a.startedEventId,route:scope.route}],
       data:{archiveId:a.id,version:record.version,mode,offset,end}});
     return json({status:'ok',kind:'dafeiyu-feedback-page',ref:input.ref,version:record.version,hash:a.hash,mode,
       outcome:a.report.outcome,effects:a.report.effects,originalCompleteness:a.report.completeness,resourceVersion:a.report.resourceVersion,

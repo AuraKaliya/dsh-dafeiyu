@@ -16,12 +16,14 @@ import { MemoryAnalysis } from './analysis.js';
 import { AnalysisError, analysisConfigSchema } from './analysis-types.js';
 import { WorkingMemory } from './working.js';
 import { ToolFeedbackArchive,feedbackConfigSchema } from './feedback.js';
+import { MemoryCompaction,compactionConfigSchema } from './compaction.js';
+import { createHash } from 'node:crypto';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional() });
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional() });
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
   sourceRefs: z.array(z.string().min(1).max(300)).min(1).max(8) };
@@ -63,6 +65,12 @@ export class MemoryService extends Service {
     try {
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
         agentId: this.config.agentId, actions: this.actions(),contexts:this.working?.contributors()??[],
+        ...(this.config.compaction?{compactionProvider:new MemoryCompaction(ctx,this.config.compaction,scope=>{
+          if(this.closed||scope.agentId!==this.config.agentId)throw new Error('Compaction scope unavailable');
+          const work=this.working?.compactionBasis(scope);
+          const versions={memoryMutations:this.store.mutationEpoch(scope),working:work?.working??0,evidence:work?.evidence??0,feedbackMutations:this.feedbackArchive?.mutationEpoch(scope)??0};
+          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId:work?.taskId??null})).digest('hex'),taskId:work?.taskId??null,versions};
+        })}:{}),
         ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
     ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close();this.feedbackArchive?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');

@@ -13,6 +13,10 @@ import type { BoundAction,ActionResult } from './runtime.js';
 import { ContextCoordinator,contextConfigSchema } from './context.js';
 import type { ContextRequest } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
+import { capsuleSchema } from './compaction-runtime.js';
+import type { CompactionBinding } from './compaction-runtime.js';
+export type { CompactionBinding } from './compaction-runtime.js';
+export { readCompactionEvents } from './compaction-runtime.js';
 
 export const name = 'dafeiyu-core';
 export const inject = ['agents', 'sessions', 'sessionPersistence', 'tools', 'systemPrompt','llm'];
@@ -51,7 +55,8 @@ export class DafeiyuService extends Service {
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
-      (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text));
+      (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text),this.config.agentId,()=>this.compactionBinding(),
+      (item,data,seqs)=>{this.journal.append({...this.event(item,'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});});
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
       this.journal.transition(item.id, item.state, 'uncertain', this.event(item, 'recovery.uncertain', { previousState: item.state }));
@@ -86,6 +91,19 @@ export class DafeiyuService extends Service {
   }
   scopeForContext(request:ContextRequest):OperationScope{this.assertOpen();return this.contexts.scopeFor(request);}
   private feedbackEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.feedbackProvider);}
+  private compactionBinding():CompactionBinding|undefined {
+    const entry=[...this.extensions.values()].find(e=>e.active&&e.extension.compactionProvider);
+    return entry?.extension.compactionProvider?{owner:entry.extension.id,version:entry.extension.version,provider:entry.extension.compactionProvider}:undefined;
+  }
+  /** Read-only source export gate for archived summary checkpoints. */
+  compactionViewCurrent(scope:Pick<OperationScope,'agentId'|'route'|'traceId'>,text:string,compactionId:string):boolean {
+    try {
+      const capsule=capsuleSchema.parse(JSON.parse(text)),binding=this.compactionBinding();
+      return !!binding&&scope.agentId===this.config.agentId&&capsule.agentId===scope.agentId&&capsule.route===scope.route
+        &&capsule.owner===binding.owner&&capsule.version===binding.version&&capsule.epoch===binding.provider.basis(scope).epoch
+        &&this.runtime.summaryCommitted(this.journal.sessionFor(scope)??'',compactionId,text);
+    }catch{return false;}
+  }
   feedbackViewCurrent(scope:Pick<OperationScope,'agentId'|'route'|'traceId'>,raw:unknown,text:string):boolean{
     const parsed=FeedbackMetaSchema.safeParse(raw);if(!parsed.success)return false;
     if(text===FEEDBACK_RETIRED_TEXT)return true;
@@ -126,6 +144,8 @@ export class DafeiyuService extends Service {
       if(action.feedback==='archive-view'&&!extension.feedbackProvider)throw new Error('Archive views belong to their feedback provider');
     }
     if(extension.feedbackProvider&&this.feedbackEntry())throw new Error('Feedback provider already registered');
+    if(extension.compactionProvider&&this.compactionBinding())throw new Error('Compaction provider already registered');
+    if(extension.compactionProvider&&this.ctx.get('compaction'))throw new Error('Use one compaction writer per Dafeiyu host');
     // Snapshot registration metadata so caller-side mutations cannot change a running capability.
     extension = { ...extension,
       channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
@@ -137,6 +157,8 @@ export class DafeiyuService extends Service {
         fields: Object.fromEntries(Object.entries(action.fields).map(([key, field]) => [key, { ...field }])) })),
       ...(extension.feedbackProvider?{feedbackProvider:{capture:extension.feedbackProvider.capture.bind(extension.feedbackProvider),
         present:extension.feedbackProvider.present.bind(extension.feedbackProvider),validate:extension.feedbackProvider.validate.bind(extension.feedbackProvider)}}:{}),
+      ...(extension.compactionProvider?{compactionProvider:{policy:Object.freeze({...extension.compactionProvider.policy}),
+        basis:extension.compactionProvider.basis.bind(extension.compactionProvider),summarize:extension.compactionProvider.summarize.bind(extension.compactionProvider)}}:{}),
     };
     const registered: Registered = { extension, controller: new AbortController(), active: true };
     const unregisterContexts=this.contexts.register(extension.id,extension.version,extension.contexts??[]);

@@ -1,0 +1,39 @@
+{
+  "at": "2026-10-23T15:28:21.626Z",
+  "projectVersion": "0.9.0",
+  "dsh": "0.2.1-rc.2",
+  "model": "scripted",
+  "sample": "fictional-Chinese",
+  "serverAccess": false,
+  "checkpointCount": 4,
+  "shadowedTokens": 3648,
+  "originalBytes": 40860,
+  "summaryBytes": 3804,
+  "compressedBytesRatio": 0.0931,
+  "checks": [
+    {
+      "beforePressureEstimate": 8581,
+      "targetEstimate": 2900,
+      "savedDshEstimate": 724
+    },
+    {
+      "beforePressureEstimate": 8986,
+      "targetEstimate": 2900,
+      "savedDshEstimate": 701
+    },
+    {
+      "beforePressureEstimate": 9324,
+      "targetEstimate": 2900,
+      "savedDshEstimate": 713
+    },
+    {
+      "beforePressureEstimate": 9696,
+      "targetEstimate": 2900,
+      "savedDshEstimate": 713
+    }
+  ],
+  "summaryWithdrawnAfterDelete": true,
+  "unrelatedRegionPreserved": true,
+  "originalArchiveRetained": true,
+  "measurement": "DSH heuristic plus UTF-8 floor; not provider billing or semantic-quality acceptance"
+}

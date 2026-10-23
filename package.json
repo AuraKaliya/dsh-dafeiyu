@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-project",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -23,12 +23,14 @@
     "accept:memory-retrieval": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-memory-retrieval.mjs",
     "accept:memory-analysis": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-memory-analysis.mjs",
     "demo:context": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-context.mjs",
-    "demo:feedback": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-feedback.mjs"
+    "demo:feedback": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-feedback.mjs",
+    "demo:compaction": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-compaction.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.2.1-rc.2",
     "@deepseek-ai/dsh-credentials-local": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm-deepseek-api-key": "0.2.1-rc.2",
@@ -38,6 +40,7 @@
     "@deepseek-ai/dsh-session-query": "0.2.1-rc.2",
     "@deepseek-ai/dsh-session-query-sqlite": "0.2.1-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
     "@types/node": "24.10.0",
     "@types/ws": "8.18.1",

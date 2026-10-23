@@ -3,6 +3,8 @@ export * from './redaction.js';
 export * from './history.js';
 export * from './context.js';
 export * from './feedback.js';
+export * from './compaction.js';
+import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
 import type { FeedbackProvider } from './feedback.js';
 
@@ -80,6 +82,7 @@ export interface Extension {
   readonly actions?: readonly ActionCapability[];
   readonly contexts?: readonly ContextContributor[];
   readonly feedbackProvider?:FeedbackProvider;
+  readonly compactionProvider?: CompactionProvider;
 }
 export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
 export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }

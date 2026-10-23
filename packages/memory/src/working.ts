@@ -29,6 +29,11 @@ export class WorkingMemory {
     this.state=new WorkingStore(resolve(directory,'working.sqlite'));this.flush();
   }
   private scope(context:ActionContext){return this.ctx.dafeiyu.scopeFor(context);}
+  compactionBasis(scope:Pick<OperationScope,'agentId'|'route'>){
+    const state=this.state.read(scope,'working');
+    return {working:this.state.version(scope,'working'),evidence:this.state.version(scope,'evidence'),
+      taskId:state&&state.items.length&&Date.parse(state.expiresAt)>Date.now()?state.taskId:null};
+  }
   private expiry(value:string):void{const n=Date.parse(value);if(n<=Date.now()||n>Date.now()+86400000)throw new z.ZodError([{code:'custom',path:['expiresAt'],message:'Expiry must be within 24 hours'}]);}
   private selected(scope:OperationScope,item:SelectedMemory){
     const memory=this.memory.read(scope,item.id,'normal',item.revision);

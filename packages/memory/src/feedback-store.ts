@@ -73,6 +73,10 @@ export class FeedbackStore {
       const record=this.header(scope,z.string().parse(row.id));if(record)yield record;
     }
   }
+  /** New archives do not invalidate old summaries; state changes do, including restore. */
+  mutationEpoch(scope:TimelineScope):number {
+    return z.number().parse(this.db.prepare('SELECT coalesce(sum(s.version-1),0) AS n FROM states s JOIN archives a ON a.id=s.id WHERE a.agent_id=? AND a.route=?').get(scope.agentId,scope.route)?.n);
+  }
   private event(scope:OperationScope,type:'feedback.archived'|'feedback.deleted'|'feedback.restored',id:string,version:number,reason=''):string{
     const eventId=randomUUID();const event:NewEvent={agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId:scope.operationId,causedBy:scope.startedEventId,
       type,plugin:'memory',pluginVersion:MEMORY_VERSION,occurredAt:new Date().toISOString(),sources:[{kind:'event',id:scope.startedEventId,route:scope.route}],data:{archiveId:id,ref:`dafeiyu:feedback:${id}:1`,version}};

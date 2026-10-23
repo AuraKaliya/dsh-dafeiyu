@@ -14,8 +14,11 @@ import { FeedbackWitnessSchema } from '@dafeiyu/contracts';
 import type { FeedbackMeta } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
+import TokenMeter from '@deepseek-ai/dsh-token-meter';
+import { CompactionRuntime,committedSummary } from './compaction-runtime.js';
+import type { CompactionBinding,CompactionAudit } from './compaction-runtime.js';
 
-interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime }
+interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime }
 export interface ActionResult {value:Json;feedback:FeedbackMeta|null}
 export interface BoundAction {
   readonly definition: ActionCapability;
@@ -30,33 +33,40 @@ export class DshRunError extends Error {
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
 export class DshRuntime {
   private readonly handles = new Map<string, OwnedSession>();
-  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator) {
+  private meterLoading: Promise<unknown> | undefined;
+  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator,private readonly agentId:string,private readonly compactionBinding:()=>CompactionBinding|undefined,private readonly compactionAudit:CompactionAudit) {
     const sessions=this.handles;
     ctx.on('llm/stream',async function*(options,next){
       const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
       const feedback=options.sessionId?sessions.get(options.sessionId)?.feedback:undefined;
+      const compaction=options.sessionId?sessions.get(options.sessionId)?.compaction:undefined;
+      compaction?.guard(options,true);
       feedback?.guard(options);
       if(context&&!context.guard(options,true,true)){
         yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
       }
-      for await(const chunk of next()){context?.guard(options);feedback?.guard(options);yield chunk;}
+      for await(const chunk of next()){context?.guard(options);feedback?.guard(options);compaction?.guard(options);yield chunk;}
       context?.guard(options);
       feedback?.guard(options);
+      compaction?.guard(options);
     });
   }
 
   async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。'): Promise<RunResult> {
     signal.throwIfAborted();
+    if(this.compactionBinding()&&!this.ctx.get('tokenMeter'))await (this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter)));
     let owned = this.handles.get(item.sessionId);
     if (!owned) {
       let scoped: Context | undefined;
       let context:ContextRuntime|undefined;
       let feedback:FeedbackRuntime|undefined;
+      let compaction:CompactionRuntime|undefined;
       const identity = { persona };
       const setup = (scope: Context): void => {
         scoped = scope;
         feedback=new FeedbackRuntime(scope,this.validateFeedback);
         context=new ContextRuntime(scope,this.coordinator);
+        compaction=new CompactionRuntime(scope,this.agentId,this.compactionBinding,this.compactionAudit);
         scope.systemPrompt.section({ name: 'dafeiyu-persona', order: 0, interpolate: false, text: () => identity.persona.text });
         scope.tools.presentAs('native');
       };
@@ -65,8 +75,8 @@ export class DshRuntime {
       const handle = exists
         ? await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: this.model, setup })
         : await this.ctx.agents.create({ sessionId, meta: { cwd: this.cwd }, agentOptions: this.model, setup });
-      if (!scoped||!context||!feedback) { await handle.dispose(); throw new Error('DSH did not compose the agent scope'); }
-      owned = { handle, scope: scoped,context,feedback, get persona() { return identity.persona; }, set persona(value) { identity.persona = value; } };
+      if (!scoped||!context||!feedback||!compaction) { await handle.dispose(); throw new Error('DSH did not compose the agent scope'); }
+      owned = { handle, scope: scoped,context,feedback,compaction, get persona() { return identity.persona; }, set persona(value) { identity.persona = value; } };
       this.handles.set(item.sessionId, owned);
     }
     owned.persona = persona;
@@ -79,6 +89,7 @@ export class DshRuntime {
     const abort = (): void => agent.cancel({ kind: 'hook', reason: 'Dafeiyu turn cancelled' });
     signal.addEventListener('abort', abort, { once: true });
     try {
+      owned.compaction.begin(item,agent);
       // DSH restrict() filters inherited GLOBAL tools; locally registered tools remain visible.
       disposers.push(owned.scope.tools.restrict({ allow: [] }));
       for (const action of actions) {
@@ -102,6 +113,7 @@ export class DshRuntime {
       agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
         `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文]\n${item.message.text}` }] }));
       await agent.whenIdle();
+      owned.compaction.seal();
       if (!await this.ctx.sessions.flush(agent.session)) throw new Error('DSH persistence checkpoint unavailable');
       signal.throwIfAborted();
       const events = agent.session.snapshotEvents().slice(before);
@@ -118,15 +130,22 @@ export class DshRuntime {
         .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
         .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })));
     } finally {
+      try{owned.compaction.seal();}finally{
+      owned.compaction.end();
       owned.context.end();
       owned.feedback.end();
       signal.removeEventListener('abort', abort);
       for (const dispose of disposers.reverse()) dispose();
+      }
     }
   }
   async close(): Promise<void> {
     const handles = [...this.handles.values()];
     this.handles.clear();
     for (const owned of handles) await owned.handle.dispose();
+  }
+  summaryCommitted(sessionId:string,id:string,text:string):boolean {
+    const session=this.handles.get(sessionId)?.handle.agent.session;
+    return !!session&&committedSummary(session,id,text);
   }
 }
