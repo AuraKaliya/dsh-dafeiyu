@@ -129,7 +129,9 @@ export class MemoryService extends Service {
       sources: await this.evidence(context, input.sourceRefs) };
   }
   private commit(context: ActionContext, command: Command) {
-    const receipt = this.store.mutate(this.scope(context), command);
+    const scope=this.scope(context),origin=this.ctx.dafeiyu.journal.get(scope.traceId);
+    const receipt = this.store.mutate(scope, command,{conversation:context.conversation,ingressPluginId:origin.extensionId,
+      taskId:this.working?.compactionBasis(scope).taskId??null});
     const auditPending = this.flush();
     return { status: 'ok' as const, ...receipt, auditPending,
       visibleNow: this.store.read(this.scope(context), receipt.id) !== null,

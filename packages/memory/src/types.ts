@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import type { MemoryBoundaryPolicy } from '@dafeiyu/contracts';
 
-export const MEMORY_VERSION = '0.9.0';
+export const MEMORY_VERSION = '0.10.0';
 
 export const kindSchema = z.enum(['experience', 'knowledge', 'preference', 'procedure']);
 export const claimSchema = z.enum(['observation', 'self_report', 'reported_claim', 'inference']);
@@ -36,7 +37,7 @@ type Mutation =
   | { readonly action: 'create'; readonly requestId: string; readonly value: WriteContent }
   | { readonly action: 'revise'; readonly requestId: string; readonly id: string; readonly expectedVersion: number; readonly value: WriteContent }
   | { readonly action: 'delete' | 'restore'; readonly requestId: string; readonly id: string; readonly expectedVersion: number; readonly reason: string };
-export type Command = Mutation & { readonly expectedGeneration?: number };
+export type Command = Mutation & { readonly expectedGeneration?: number;readonly boundaryPolicy?:MemoryBoundaryPolicy };
 export type MemoryErrorCode = 'not_found' | 'version_conflict' | 'idempotency_conflict' | 'deleted' | 'not_deleted' | 'source_unavailable' | 'stale_cursor' | 'invalid_cursor';
 export class MemoryError extends Error {
   constructor(readonly code: MemoryErrorCode) { super(code); }

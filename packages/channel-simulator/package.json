@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@dafeiyu/core": "0.10.0",
-    "@dafeiyu/contracts": "0.9.0"
+    "@dafeiyu/contracts": "0.10.0"
   },
   "exports": {
     ".": {

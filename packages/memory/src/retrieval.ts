@@ -160,7 +160,7 @@ export class MemoryRetrieval {
       seen.add(memory.id);
       const preview = Array.from(entry.row.text).slice(0,600).join('');
       items.push({ id: memory.id, ref: memory.ref, revision: memory.revision, version: memory.version, contentHash: memory.contentHash,
-        sources: memory.sources, sourceVersions:memory.sourceVersions, score: entry.score,
+        sources: memory.sources, sourceVersions:memory.sourceVersions,boundary:memory.boundary,effectiveAccess:memory.effectiveAccess, score: entry.score,
         chunk: { key:entry.row.key, start:entry.row.start,end:entry.row.end,tokens:entry.row.tokens,offsetUnit:'unicode-codepoint' as const,
           text:preview,truncated:preview!==entry.row.text,previewEnd:entry.row.start+Array.from(preview).length } });
       if (items.length >= input.limit) break;

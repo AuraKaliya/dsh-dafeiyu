@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/memory",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -32,7 +32,7 @@
     }
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.9.0",
+    "@dafeiyu/contracts": "0.10.0",
     "@dafeiyu/core": "0.10.0",
     "@dafeiyu/journal": "0.3.0",
     "@dafeiyu/timeline": "0.8.0",

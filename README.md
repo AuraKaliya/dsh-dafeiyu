@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前项目版本0.13.0：核心0.10.0、contracts/memory 0.9.0新增C3-B限定条件校验、来源组内受控语义融合与有效原文重建。保留多代证明、局部失效、删除防复活、会话隔离和其他插件区域保护。自动语义请求默认关闭，需显式配置启用。本机虚构样本通过292项测试，并使用当前DSH绑定deepseek-flash / max完成6轮正向保真检查及2类反例检查；新能力未加载到真实QQ或服务器。
+当前项目版本0.14.0：contracts/memory 0.10.0完成智能体级记忆阶段A，拆分所有权、来源场景、任务、内部使用与对外表达，新增v1→v2保守兼容迁移。旧记忆范围不扩大，来源、版本与删除防复活保留。本机虚构样本通过310项测试。本阶段尚未启用跨会话检索或任务工作区，真实QQ与服务器未修改。C3-B受控融合能力继续保留，自动语义请求仍默认关闭。
 
 ## 开始使用
 
@@ -48,6 +48,8 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第五阶段C3多代摘要合并开发方案](docs/memory-phase-5c3-plan.md)
 - [第五阶段C3-A来源链、组合展示与严格去重验收](docs/memory-phase-5c3a.md)
 - [第五阶段C3-B限定条件、受控融合与原文重建验收](docs/memory-phase-5c3b.md)
+- [智能体级记忆与跨场景任务连续性方案](docs/agent-memory-continuity-plan.md)
+- [阶段A范围拆分与旧数据迁移验收](docs/agent-memory-phase-a.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)

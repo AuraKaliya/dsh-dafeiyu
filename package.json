@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-project",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -28,7 +28,8 @@
     "demo:provenance": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-provenance.mjs",
     "demo:fragments": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-fragments.mjs",
     "demo:composition": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-composition.mjs",
-    "accept:memory-semantic": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-memory-semantic.mjs"
+    "accept:memory-semantic": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-memory-semantic.mjs",
+    "demo:memory-boundaries": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-memory-boundaries.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",

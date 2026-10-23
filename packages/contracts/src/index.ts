@@ -5,6 +5,7 @@ export * from './context.js';
 export * from './feedback.js';
 export * from './compaction.js';
 export * from './semantic.js';
+export * from './memory-boundary.js';
 import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
 import type { FeedbackProvider } from './feedback.js';

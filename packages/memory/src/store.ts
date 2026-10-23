@@ -7,6 +7,10 @@ import type { Json, OperationScope, TimelineScope } from '@dafeiyu/contracts';
 import type { NewEvent } from '@dafeiyu/journal';
 import { MEMORY_VERSION, MemoryError, memoryRef, receiptSchema, revisionSchema } from './types.js';
 import type { Command, MutationReceipt, ReadMode, Revision, WriteContent } from './types.js';
+import { MemoryBoundarySchema,boundaryAllows } from '@dafeiyu/contracts';
+import type { MemoryBoundary,MemoryAccessPurpose,MemoryWriteBinding } from '@dafeiyu/contracts';
+import { conservativeBoundary,restrictBoundary,boundaryDigest } from './boundary.js';
+import { migrateMemoryBoundaries } from './migrate-boundaries.js';
 
 const APPLICATION_ID = 0x44464d31;
 const string = (value: unknown): string => z.string().parse(value);
@@ -19,6 +23,8 @@ function canonical(value: Json): string {
 const hash = (value: unknown): string => createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');
 interface Item { id: string; ordinal: number; version: number; head: number; deleted: boolean; reason: string; }
 export interface MemoryView extends Revision {
+  readonly boundary:MemoryBoundary;
+  readonly effectiveAccess:Pick<MemoryBoundary,'internalUse'|'externalExpression'>;
   readonly sourceVersions:readonly {id:string;revision:number;version:number;contentHash:string}[];
   readonly ref: string; readonly version: number; readonly latestRevision: number;
   readonly validity: 'active' | 'superseded'; readonly deleted: boolean; readonly effectivelyDeleted: boolean;
@@ -40,7 +46,7 @@ export class MemoryStore {
       const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
       const tables = this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
       const fresh = app === 0 && version === 0 && tables === 0;
-      if (!fresh && (app !== APPLICATION_ID || version !== 1)) throw new Error('Unsupported memory database identity or schema');
+      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2))) throw new Error('Unsupported memory database identity or schema');
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (fresh) this.transaction(() => this.db.exec(`
         CREATE TABLE memory_items(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,
@@ -67,6 +73,7 @@ export class MemoryStore {
         CREATE TRIGGER dependencies_immutable_delete BEFORE DELETE ON dependencies BEGIN SELECT RAISE(ABORT,'Immutable source dependency'); END;
         PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=1;
       `));
+      this.transaction(()=>migrateMemoryBoundaries(this.db));
     } catch (error) { this.db.close(); throw error; }
   }
   private transaction<T>(work: () => T): T {
@@ -98,11 +105,11 @@ export class MemoryStore {
     }
     return hash([...versions].sort(([a],[b])=>a.localeCompare(b)));
   }
-  provenance(scope:TimelineScope,id:string,revision:number):MemoryView[] {
+  provenance(scope:TimelineScope,id:string,revision:number,purpose:MemoryAccessPurpose='expression'):MemoryView[] {
     const result:MemoryView[]=[],seen=new Set<string>();
     const visit=(id:string,revision:number):void=>{
       const key=`${id}:${revision}`;if(seen.has(key))return;seen.add(key);
-      const item=this.read(scope,id,'normal',revision);if(!item)throw new MemoryError('source_unavailable');result.push(item);
+      const item=this.read(scope,id,'normal',revision,purpose);if(!item)throw new MemoryError('source_unavailable');result.push(item);
       for(const source of item.sources)if(source.kind==='memory')visit(source.id,source.revision);
     };
     visit(id,revision);return result;
@@ -127,25 +134,57 @@ export class MemoryStore {
     }
   }
   /** Versioned source graph; UNION handles shared ancestry without infinite traversal. */
-  private lineage(scope: TimelineScope, id: string, revision: number) {
+  private decodeBoundary(body:unknown,digest:unknown,agent:unknown,route:unknown):MemoryBoundary|null {
+    try{
+      const boundary=MemoryBoundarySchema.parse(JSON.parse(string(body)));
+      if(boundaryDigest(boundary)!==digest||boundary.owner.agentId!==agent||boundary.sourceScene.route!==route
+        ||boundary.task.kind==='conversation-task'&&boundary.task.route!==route
+        ||boundary.internalUse.kind==='conversation'&&boundary.internalUse.route!==route
+        ||boundary.externalExpression.kind==='conversation'&&boundary.externalExpression.route!==route)return null;
+      if(boundary.sourceScene.kind==='conversation'){
+        const expected=conservativeBoundary({agentId:boundary.owner.agentId,route:string(route)},boundary.assignment,{conversation:boundary.sourceScene.conversation});
+        if(expected.sourceScene.kind!=='conversation')return null;
+      }
+      return boundary;
+    }catch{return null;}
+  }
+  private boundary(id:string,revision:number):MemoryBoundary|null {
+    const row=this.db.prepare('SELECT b.body,b.boundary_hash,i.agent_id,i.route FROM memory_boundaries b JOIN memory_items i ON i.id=b.id WHERE b.id=? AND b.revision=?').get(id,revision);
+    return row?this.decodeBoundary(row.body,row.boundary_hash,row.agent_id,row.route):null;
+  }
+  private lineage(scope: TimelineScope, id: string, revision: number,purpose:MemoryAccessPurpose='expression') {
     const rows = this.db.prepare(`WITH RECURSIVE lineage(id,revision) AS (
       VALUES(?,?) UNION SELECT d.parent_id,d.parent_revision FROM dependencies d JOIN lineage l ON d.id=l.id AND d.revision=l.revision)
-      SELECT l.revision,i.id,i.agent_id,i.route,i.deleted,i.head,i.version,r.body FROM lineage l
-      LEFT JOIN memory_items i ON i.id=l.id LEFT JOIN memory_revisions r ON r.id=l.id AND r.revision=l.revision`).all(id, revision);
-    const inaccessible = rows.some(row => row.agent_id !== scope.agentId || row.route !== scope.route || row.body === null);
-    return { inaccessible, deleted: rows.some(row => row.deleted === 1), changed: rows.some(row => row.head !== row.revision),
+      SELECT l.revision,i.id,i.agent_id,i.route,i.deleted,i.head,i.version,r.body,
+        b.body AS boundary_body,b.boundary_hash,h.body AS head_boundary_body,h.boundary_hash AS head_boundary_hash FROM lineage l
+      LEFT JOIN memory_items i ON i.id=l.id LEFT JOIN memory_revisions r ON r.id=l.id AND r.revision=l.revision
+      LEFT JOIN memory_boundaries b ON b.id=l.id AND b.revision=l.revision
+      LEFT JOIN memory_boundaries h ON h.id=i.id AND h.revision=i.head`).all(id, revision);
+    const boundaries:MemoryBoundary[]=[];
+    const inaccessible = rows.some(row => {
+      const boundary=this.decodeBoundary(row.boundary_body,row.boundary_hash,row.agent_id,row.route),head=this.decodeBoundary(row.head_boundary_body,row.head_boundary_hash,row.agent_id,row.route);
+      if(boundary&&head)boundaries.push(boundary,head);
+      return row.agent_id!==scope.agentId||row.route!==scope.route||row.body===null||!boundary||!head
+        ||!boundaryAllows(boundary,scope,purpose)||!boundaryAllows(head,scope,purpose);
+    });
+    const effectiveAccess:MemoryView['effectiveAccess']={
+      internalUse:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'internal'))?{kind:'conversation',route:scope.route}:{kind:'none'},
+      externalExpression:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'expression'))?{kind:'conversation',route:scope.route}:{kind:'none'},
+    };
+    return { inaccessible,effectiveAccess, deleted: rows.some(row => row.deleted === 1), changed: rows.some(row => row.head !== row.revision),
       versions:inaccessible?[]:rows.map(row=>({id:string(row.id),revision:integer(row.revision),version:integer(row.version),contentHash:revisionSchema.parse(JSON.parse(string(row.body))).contentHash})) };
   }
-  read(scope: TimelineScope, id: string, mode: ReadMode = 'normal', revision?: number): MemoryView | null {
+  read(scope: TimelineScope, id: string, mode: ReadMode = 'normal', revision?: number,purpose:MemoryAccessPurpose='expression'): MemoryView | null {
     const item = this.item(scope, id);
     if (!item) return null;
     const number = revision ?? item.head;
-    const state = this.lineage(scope, id, number);
+    const state = this.lineage(scope, id, number,purpose);
     if (state.inaccessible || (mode === 'deleted' ? !state.deleted : state.deleted) || (mode === 'normal' && state.changed)) return null;
     const row = this.db.prepare('SELECT body FROM memory_revisions WHERE id=? AND revision=?').get(id, number);
     if (!row) return null;
     const body = revisionSchema.parse(JSON.parse(string(row.body)));
-    return { ...body,sourceVersions:state.versions, ref: memoryRef(id, number), version: item.version, latestRevision: item.head,
+    const boundary=this.boundary(id,number);if(!boundary)return null;
+    return { ...body,boundary,effectiveAccess:state.effectiveAccess,sourceVersions:state.versions, ref: memoryRef(id, number), version: item.version, latestRevision: item.head,
       validity: number === item.head ? 'active' : 'superseded', deleted: item.deleted, effectivelyDeleted: state.deleted,
       basisStatus: state.deleted ? 'deleted' : state.changed ? 'changed' : 'current',
       deletionReason: item.deleted ? item.reason : null, untrustedEvidence: true,
@@ -182,7 +221,7 @@ export class MemoryStore {
   private validateSources(scope: TimelineScope, value: WriteContent, target?: string): void {
     for (const source of value.sources) if (source.kind === 'memory') {
       if (source.id === target) throw new MemoryError('source_unavailable');
-      const parent = this.read(scope, source.id, 'normal', source.revision);
+      const parent = this.read(scope, source.id, 'normal', source.revision,'internal');
       if (!parent || parent.contentHash !== source.contentHash) throw new MemoryError('source_unavailable');
     }
   }
@@ -193,7 +232,7 @@ export class MemoryStore {
     if(row.fingerprint!==hash(command))throw new MemoryError('idempotency_conflict');
     return receiptSchema.parse(JSON.parse(string(row.receipt)));
   }
-  mutate(scope: OperationScope, command: Command): MutationReceipt & { duplicate: boolean } {
+  mutate(scope: OperationScope, command: Command,binding:MemoryWriteBinding={}): MutationReceipt & { duplicate: boolean } {
     return this.transaction(() => {
       const fingerprint = hash(command);
       const old = this.db.prepare('SELECT fingerprint,receipt FROM requests WHERE agent_id=? AND route=? AND request_id=?')
@@ -204,7 +243,9 @@ export class MemoryStore {
         return { ...receiptSchema.parse(JSON.parse(string(old.receipt))), duplicate: true };
       }
       if(command.expectedGeneration!==undefined && command.expectedGeneration!==this.generation(scope))throw new MemoryError('version_conflict');
+      if(command.boundaryPolicy&&command.action!=='create'&&command.action!=='revise')throw new Error('Boundary policy requires a new content revision');
       let item: Item;
+      let previousBoundary:MemoryBoundary|undefined;
       if (command.action === 'create') {
         this.validateSources(scope, command.value);
         const id = randomUUID();
@@ -214,6 +255,8 @@ export class MemoryStore {
         const existing = this.item(scope, command.id);
         if (!existing) throw new MemoryError('not_found');
         item = existing;
+        previousBoundary=this.boundary(item.id,item.head)??undefined;
+        if(!previousBoundary)throw new MemoryError('source_unavailable');
         if (item.version !== command.expectedVersion) throw new MemoryError('version_conflict');
         if (command.action !== 'restore' && item.deleted) throw new MemoryError('deleted');
         if (command.action === 'restore' && !item.deleted) throw new MemoryError('not_deleted');
@@ -229,6 +272,12 @@ export class MemoryStore {
         const body: Revision = revisionSchema.parse({ ...value, id: item.id, revision: item.head,
           contentHash: hash(value), createdAt: new Date().toISOString(), analysisStatus: value.analysis ? 'evidence_checked' : 'not_analyzed' });
         this.db.prepare('INSERT INTO memory_revisions(id,revision,body,event_id) VALUES(?,?,?,?)').run(item.id, item.head, JSON.stringify(body), eventId);
+        const ancestors:MemoryBoundary[]=previousBoundary?[previousBoundary]:[];
+        for(const source of value.sources)if(source.kind==='memory'){
+          ancestors.push(...this.provenance(scope,source.id,source.revision,'internal').map(item=>item.boundary));
+        }
+        const boundary=restrictBoundary(conservativeBoundary(scope,'conservative-create',binding),ancestors,command.boundaryPolicy);
+        this.db.prepare('INSERT INTO memory_boundaries(id,revision,body,boundary_hash) VALUES(?,?,?,?)').run(item.id,item.head,JSON.stringify(boundary),boundaryDigest(boundary));
         for (const source of value.sources) if (source.kind === 'memory') {
           this.db.prepare('INSERT OR IGNORE INTO dependencies(id,revision,parent_id,parent_revision) VALUES(?,?,?,?)')
             .run(item.id, item.head, source.id, source.revision);
