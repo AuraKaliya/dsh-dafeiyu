@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前项目版本0.4.0：在既有主插件、QQ接入、事件与来源回查基础上，新增记忆能力插件0.1.0的存储、内容版本、逻辑删除、专门查询及恢复。DSH提供Agent循环、会话、持久化及原文查询。默认测试与演示使用模拟模型；新记忆能力未自动加载到真实QQ或服务器。
+当前项目版本0.5.0：记忆插件0.2.0在版本管理、逻辑删除和来源追踪之上，加入中文全文检索、BGE语义召回、真实token分片及完整profile缓存。DSH提供Agent循环、会话、持久化及原文查询。默认测试与演示使用模拟模型；真实BGE验收需显式运行，新能力未自动加载到真实QQ或服务器。
 
 ## 开始使用
 
@@ -26,7 +26,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 | `@dafeiyu/channel-simulator` | DSH 关联插件；本机模拟渠道及确定性的发送结果 |
 | `@dafeiyu/channel-qq` | QQ能力插件；本机SnowLuma适配、明确账号范围、事件接入与交付 |
 | `@dafeiyu/timeline` | 当前会话行为检索、可见来源回查、分页和读取审计 |
-| `@dafeiyu/memory` | 会话隔离的记忆存储、不可改写内容版本、逻辑删除／恢复、来源依赖及可靠变更审计 |
+| `@dafeiyu/memory` | 隔离存储与版本、逻辑删除／恢复、来源依赖、中文FTS5、BGE召回、token分片及profile缓存 |
 
 ## 文档
 
@@ -36,6 +36,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [中文记忆 embedding 本机实测与选型](docs/embedding-benchmark-2026-10-23.md)
 - [现有 FastEmbed＋ONNX 服务的本机兼容验证与2GB预算](docs/fastembed-compatibility-2026-10-23.md)
 - [记忆插件第一阶段实现与验收](docs/memory-phase-1.md)
+- [记忆插件第二阶段检索实现与验收](docs/memory-phase-2.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)

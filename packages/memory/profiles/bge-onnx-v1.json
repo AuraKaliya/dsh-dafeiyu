@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "model": "BAAI/bge-small-zh-v1.5",
+  "dimensions": 512,
+  "queryPrefix": "为这个句子生成表示以用于检索相关文章：",
+  "documentPrefix": "",
+  "pooling": "CLS",
+  "normalize": "L2",
+  "outputDtype": "float32",
+  "maxTokens": 512,
+  "chunkTokens": 480,
+  "chunkChars": 6000,
+  "chunker": "offset-semantic-v1",
+  "lexical": "cjk-unigram-bigram-identifier-v1",
+  "assets": [
+    {
+      "file": "config.json",
+      "sha256": "9088751d39abbf86ec3d19ffca92ad62ad19075f7e59712e6c71217fa125d1d3"
+    },
+    {
+      "file": "model_optimized.onnx",
+      "sha256": "1294ea4b6331115a353d81f96b85e8c8d7fdcc284453d5b2fab5b016230aad38"
+    },
+    {
+      "file": "ort_config.json",
+      "sha256": "97e78d1d21c2eb719e865b018f17915df6a12ed987446eb7f3f3a783a5afb1e1"
+    },
+    {
+      "file": "special_tokens_map.json",
+      "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3"
+    },
+    {
+      "file": "tokenizer.json",
+      "sha256": "48cea5d44424912a6fd1ea647bf4fe50b55ab8b1e5879c3275f80e339e8fae26"
+    },
+    {
+      "file": "tokenizer_config.json",
+      "sha256": "e6f3b96db926a37d4039995fbf5ad17de158dfb8f6343d607e4dbaad18d75f5a"
+    },
+    {
+      "file": "vocab.txt",
+      "sha256": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"
+    }
+  ],
+  "software": {
+    "fastapi": "0.156.2",
+    "fastembed": "0.9.0",
+    "huggingface_hub": "1.33.0",
+    "numpy": "2.5.4",
+    "onnxruntime": "1.31.0",
+    "pydantic": "2.14.1",
+    "tokenizers": "0.23.3",
+    "uvicorn": "0.54.0"
+  },
+  "serviceSha256": "a87325c00422261c827bfa3e863fc8cd4cc12bdffab7a7d88219aeb28e116615",
+  "fastembedSources": {
+    "fastembed/text/onnx_embedding.py": "f9e7f5dfba036c86fd6b187fcb1686c070d7c0f1f7910171a42501be69a84a42",
+    "fastembed/common/onnx_model.py": "3edf2ceec2ea46074dcebfbf533d50a62ef3b861bfad74382b4d0bb754dee104",
+    "fastembed/common/model_description.py": "e985c4688975668f25a4200a5cf428a98070053f3cf550a809c564dcd478d6d4",
+    "fastembed/text/text_embedding.py": "dabd569c484548e5e861fd5de59e47c1193ebddd99110fbb1f057b7841e3c762"
+  }
+}

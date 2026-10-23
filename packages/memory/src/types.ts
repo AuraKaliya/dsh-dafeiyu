@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const MEMORY_VERSION = '0.2.0';
+
 export const kindSchema = z.enum(['experience', 'knowledge', 'preference', 'procedure']);
 export const claimSchema = z.enum(['observation', 'self_report', 'reported_claim', 'inference']);
 export const versionSchema = z.number().int().positive().safe();

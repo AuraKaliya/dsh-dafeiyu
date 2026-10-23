@@ -7,14 +7,17 @@ import type { ActionCapability, ActionContext, ExtensionHandle, Json, OperationS
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { MemoryStore } from './store.js';
-import { MemoryError, claimSchema, keySchema, kindSchema, memoryRefPattern, versionSchema } from './types.js';
+import { MEMORY_VERSION, MemoryError, claimSchema, keySchema, kindSchema, memoryRefPattern, versionSchema } from './types.js';
 import type { Command, Evidence, ReadMode, WriteContent } from './types.js';
+import { MemoryRetrieval } from './retrieval.js';
+import { RetrievalError, retrievalConfigSchema } from './retrieval-profile.js';
+import type { RetrievalDependencies } from './retrieval-profile.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1) });
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional() });
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
   sourceRefs: z.array(z.string().min(1).max(300)).min(1).max(8) };
@@ -27,7 +30,7 @@ const readSchema = z.strictObject({ ...readShape, mode: z.enum(['normal', 'histo
 const deletedReadSchema = z.strictObject(readShape);
 const toJson = (value: unknown): Json => z.json().parse(value);
 const numberArgument = (value: string | undefined): number | undefined => value === undefined ? undefined : /^[1-9]\d*$/.test(value) ? Number(value) : NaN;
-type Failure = { status: 'invalid_input' | MemoryError['code'] };
+type Failure = { status: 'invalid_input' | MemoryError['code'] | RetrievalError['code'] };
 
 declare module '@deepseek-ai/cordis' { interface Context { dafeiyuMemory: MemoryService } }
 
@@ -36,16 +39,19 @@ export class MemoryService extends Service {
   private readonly config: z.output<typeof configSchema>;
   private readonly store: MemoryStore;
   private readonly handle: ExtensionHandle;
+  private readonly retrieval: MemoryRetrieval | null;
   private closed = false;
-  constructor(ctx: Context, config: Config) {
+  constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
     this.config = configSchema.parse(config);
     this.store = new MemoryStore(resolve(this.config.dataDir, 'memory.sqlite'));
+    try { this.retrieval = this.config.retrieval ? new MemoryRetrieval(this.store, this.config.dataDir, this.config.retrieval, dependencies) : null; }
+    catch (error) { this.store.close(); throw error; }
     try {
-      this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: '0.1.0', apiVersion: API_VERSION,
+      this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
         agentId: this.config.agentId, actions: this.actions() });
-    } catch (error) { this.store.close(); throw error; }
-    ctx.effect(() => () => { this.closed = true; this.handle.dispose(); this.store.close(); }, 'memory.close');
+    } catch (error) { this.retrieval?.close(); this.store.close(); throw error; }
+    ctx.effect(() => () => { this.closed = true; this.handle.dispose(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
     this.flush();
   }
   private scope(context: ActionContext): OperationScope {
@@ -56,6 +62,7 @@ export class MemoryService extends Service {
   }
   private failure(error: unknown): Failure {
     if (error instanceof MemoryError) return { status: error.code };
+    if (error instanceof RetrievalError) return { status: error.code };
     if (error instanceof z.ZodError || error instanceof SyntaxError) return { status: 'invalid_input' };
     throw error;
   }
@@ -64,7 +71,7 @@ export class MemoryService extends Service {
   }
   private audit(scope: OperationScope, type: string, data: Record<string, Json>): void {
     this.ctx.dafeiyu.journal.append({ agentId: scope.agentId, route: scope.route, traceId: scope.traceId,
-      operationId: scope.operationId, causedBy: scope.startedEventId, type, plugin: 'memory', pluginVersion: '0.1.0',
+      operationId: scope.operationId, causedBy: scope.startedEventId, type, plugin: 'memory', pluginVersion: MEMORY_VERSION,
       occurredAt: new Date().toISOString(), sources: [], data });
   }
   private async evidence(context: ActionContext, refs: readonly string[]): Promise<Evidence[]> {
@@ -151,6 +158,17 @@ export class MemoryService extends Service {
   }
   read(context: ActionContext, raw: unknown) { return this.open(context, raw, false); }
   readDeleted(context: ActionContext, raw: unknown) { return this.open(context, raw, true); }
+  async recall(context: ActionContext, raw: unknown) {
+    const scope = this.scope(context); this.flush();
+    if (!this.retrieval) return { status: 'not_configured' as const };
+    try {
+      const result = await this.retrieval.recall(scope,raw,context.signal,()=>{this.scope(context);});
+      this.scope(context);
+      this.audit(scope,'memory.recalled',{profile:result.profile,strategy:result.strategyUsed,degraded:result.degraded,
+        selected:result.items.map(item=>({id:item.id,revision:item.revision,start:item.chunk.start,end:item.chunk.end}))});
+      return result;
+    } catch(error) { this.scope(context); return this.failure(error); }
+  }
   private actions(): ActionCapability[] {
     const field = (description: string, required = true) => ({ description, required });
     const content = { requestId: field('幂等请求标识；重试保持相同值和完整参数'), kind: field('experience / knowledge / preference / procedure'),
@@ -180,6 +198,10 @@ export class MemoryService extends Service {
       action('dafeiyu_memory_open', '读取当前会话记忆；history模式可查看指定旧版本，不能读取已删除记录。', { ...open, mode: field('normal / history，默认normal', false) }, (args, ctx) => this.read(ctx, openArgs(args))),
       action('dafeiyu_memory_deleted_search', '仅明确寻找已删除记忆时使用；只查当前会话，结果不能自动恢复或成为新记忆依据。', search, (args, ctx) => this.searchDeleted(ctx, searchArgs(args))),
       action('dafeiyu_memory_deleted_open', '查看已删除记忆的指定版本；标记仅用于本次查找，不自动恢复。', open, (args, ctx) => this.readDeleted(ctx, openArgs(args))),
+      ...(this.retrieval ? [action('dafeiyu_memory_recall','检索当前会话有效记忆正文：中文全文、BGE语义或混合召回。返回有来源的片段，分数不是可信概率。已删除记忆使用原有专门查询。',
+        {query:field('检索问题；不要自行添加embedding指令'),strategy:field('lexical / semantic / hybrid，默认hybrid',false),limit:field('最多返回1到20条',false),rebuild:field('true时重建当前会话当前profile的派生索引',false)},
+        (args,ctx)=>this.recall(ctx,{...args,...(args.limit===undefined?{}:{limit:numberArgument(args.limit)}),
+          ...(args.rebuild===undefined?{}:{rebuild:args.rebuild==='true'?true:args.rebuild==='false'?false:args.rebuild})}))] : []),
     ];
   }
 }

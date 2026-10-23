@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
 import { z } from 'zod';
 import type { Json, OperationScope, TimelineScope } from '@dafeiyu/contracts';
 import type { NewEvent } from '@dafeiyu/journal';
-import { MemoryError, memoryRef, receiptSchema, revisionSchema } from './types.js';
+import { MEMORY_VERSION, MemoryError, memoryRef, receiptSchema, revisionSchema } from './types.js';
 import type { Command, MutationReceipt, ReadMode, Revision, WriteContent } from './types.js';
 
 const APPLICATION_ID = 0x44464d31;
@@ -78,9 +78,17 @@ export class MemoryStore {
     return row ? { id: string(row.id), ordinal: integer(row.ordinal), version: integer(row.version), head: integer(row.head),
       deleted: row.deleted === 1, reason: string(row.reason) } : null;
   }
-  private generation(scope: TimelineScope): number {
+  generation(scope: TimelineScope): number {
     const row = this.db.prepare('SELECT generation FROM scope_generations WHERE agent_id=? AND route=?').get(scope.agentId, scope.route);
     return row ? integer(row.generation) : 0;
+  }
+  /** Trusted indexer enumeration: sources and tombstones are checked before any text is yielded. */
+  *current(scope: TimelineScope): Generator<MemoryView> {
+    for (const row of this.db.prepare('SELECT id FROM memory_items WHERE agent_id=? AND route=? ORDER BY ordinal')
+      .iterate(scope.agentId, scope.route)) {
+      const item = this.read(scope, string(row.id));
+      if (item) yield item;
+    }
   }
   /** Versioned source graph; UNION handles shared ancestry without infinite traversal. */
   private lineage(scope: TimelineScope, id: string, revision: number) {
@@ -183,7 +191,7 @@ export class MemoryStore {
       }
       const type = { create: 'memory.created', revise: 'memory.revised', delete: 'memory.deleted', restore: 'memory.restored' }[command.action];
       const event: NewEvent = { agentId: scope.agentId, route: scope.route, traceId: scope.traceId, operationId: scope.operationId,
-        causedBy: scope.startedEventId, type, plugin: 'memory', pluginVersion: '0.1.0', occurredAt: new Date().toISOString(),
+        causedBy: scope.startedEventId, type, plugin: 'memory', pluginVersion: MEMORY_VERSION, occurredAt: new Date().toISOString(),
         sources: [{ kind: 'event', id: scope.startedEventId, route: scope.route }],
         data: { memoryId: item.id, revision: item.head, version: item.version, deleted: item.deleted, deletionScope: 'memory-item-and-revisions' } };
       this.db.prepare('INSERT INTO memory_events(id,body,reason) VALUES(?,?,?)').run(eventId, JSON.stringify(event), 'reason' in command ? command.reason : '');
