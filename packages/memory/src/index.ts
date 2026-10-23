@@ -18,6 +18,8 @@ import { WorkingMemory } from './working.js';
 import { ToolFeedbackArchive,feedbackConfigSchema } from './feedback.js';
 import { MemoryCompaction,compactionConfigSchema } from './compaction.js';
 import { createHash } from 'node:crypto';
+import { MemorySourcePolicy } from './source-policy.js';
+import type { CompactionScope } from '@dafeiyu/contracts';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
@@ -58,19 +60,22 @@ export class MemoryService extends Service {
     catch (error) { this.store.close(); throw error; }
     try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis):null; }
     catch(error){this.retrieval?.close();this.store.close();throw error;}
-    try{this.working=this.config.context?new WorkingMemory(ctx,this.store,this.retrieval,this.config.dataDir,(c,refs)=>this.evidence(c,refs)):null;}
+    try{this.working=this.config.context?new WorkingMemory(ctx,this.store,this.retrieval,this.config.dataDir,(c,refs)=>this.evidence(c,refs),!!this.config.compaction):null;}
     catch(error){void this.analysis?.close();this.retrieval?.close();this.store.close();throw error;}
-    try{this.feedbackArchive=this.config.feedback?new ToolFeedbackArchive(ctx,this.store,this.config.dataDir,this.config.feedback,(c,refs)=>this.evidence(c,refs)):null;}
+    try{this.feedbackArchive=this.config.feedback?new ToolFeedbackArchive(ctx,this.store,this.config.dataDir,this.config.feedback,(c,refs)=>this.evidence(c,refs),!!this.config.compaction):null;}
     catch(error){this.working?.close();void this.analysis?.close();this.retrieval?.close();this.store.close();throw error;}
-    try {
-      this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
-        agentId: this.config.agentId, actions: this.actions(),contexts:this.working?.contributors()??[],
-        ...(this.config.compaction?{compactionProvider:new MemoryCompaction(ctx,this.config.compaction,scope=>{
+    const basis=(scope:CompactionScope)=>{
           if(this.closed||scope.agentId!==this.config.agentId)throw new Error('Compaction scope unavailable');
           const work=this.working?.compactionBasis(scope);
           const versions={memoryMutations:this.store.mutationEpoch(scope),working:work?.working??0,evidence:work?.evidence??0,feedbackMutations:this.feedbackArchive?.mutationEpoch(scope)??0};
-          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId:work?.taskId??null})).digest('hex'),taskId:work?.taskId??null,versions};
-        })}:{}),
+          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId:work?.taskId??null})).digest('hex'),taskId:work?.taskId??null,
+            versions:{...versions,memoryGeneration:this.store.generation(scope)}};
+    };
+    try {
+      this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
+        agentId: this.config.agentId, actions: this.actions(),contexts:this.working?.contributors()??[],
+        ...(this.config.compaction?{compactionProvider:new MemoryCompaction(ctx,this.config.compaction,basis,
+          new MemorySourcePolicy(ctx,this.store,this.working,this.feedbackArchive,scope=>basis(scope).epoch))}:{}),
         ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
     ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close();this.feedbackArchive?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
@@ -164,7 +169,8 @@ export class MemoryService extends Service {
         ...(parsed.cursor === undefined ? {} : { cursor: parsed.cursor }) });
       this.audit(scope, 'memory.searched', { mode, count: page.items.length,
         selected: page.items.map(item => ({ id: item.id, revision: item.revision })) });
-      return { status: 'ok' as const, mode, untrustedEvidence: true, ...page };
+      return { status: 'ok' as const, mode, untrustedEvidence: true, ...page,
+        items:page.items.map(item=>({...item,...(mode==='normal'?{sourceFences:this.store.evidenceFences(scope,item.id,item.revision,(left,right)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,left,right))}:{})})) };
     } catch (error) { this.scope(context); return this.failure(error); }
   }
   search(context: ActionContext, raw: unknown) { return this.find(context, raw, 'normal'); }
@@ -177,7 +183,7 @@ export class MemoryService extends Service {
       const item = this.store.read(scope, input.id, mode, input.revision);
       if (!item) return { status: 'not_found' as const };
       this.audit(scope, 'memory.opened', { memoryId: item.id, revision: item.revision, mode });
-      return { status: 'ok' as const, item };
+      return { status: 'ok' as const, item:{...item,...(mode==='normal'?{sourceFences:this.store.evidenceFences(scope,item.id,item.revision,(left,right)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,left,right))}:{})} };
     } catch (error) { this.scope(context); return this.failure(error); }
   }
   read(context: ActionContext, raw: unknown) { return this.open(context, raw, false); }
@@ -190,7 +196,7 @@ export class MemoryService extends Service {
       this.scope(context);
       this.audit(scope,'memory.recalled',{profile:result.profile,strategy:result.strategyUsed,degraded:result.degraded,
         selected:result.items.map(item=>({id:item.id,revision:item.revision,start:item.chunk.start,end:item.chunk.end}))});
-      return result;
+      return {...result,items:result.items.map(item=>({...item,sourceFences:this.store.evidenceFences(scope,item.id,item.revision,(left,right)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,left,right))}))};
     } catch(error) { this.scope(context); return this.failure(error); }
   }
   async analyze(context:ActionContext,raw:unknown){

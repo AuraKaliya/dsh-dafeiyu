@@ -1,10 +1,12 @@
 import { z } from 'zod';
 
-export const MEMORY_VERSION = '0.6.0';
+export const MEMORY_VERSION = '0.7.0';
 
 export const kindSchema = z.enum(['experience', 'knowledge', 'preference', 'procedure']);
 export const claimSchema = z.enum(['observation', 'self_report', 'reported_claim', 'inference']);
 export const versionSchema = z.number().int().positive().safe();
+export const sourceVersionSchema=z.strictObject({id:z.uuid(),revision:versionSchema,version:versionSchema,contentHash:z.string()});
+export const sourceFenceSchema=z.strictObject({ref:z.string(),contentHash:z.string(),fence:z.string()});
 export const keySchema = z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/);
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const evidenceSchema = z.discriminatedUnion('kind', [

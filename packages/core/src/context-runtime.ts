@@ -5,6 +5,8 @@ import type { GenerateOptions,ContextFormed } from '@deepseek-ai/dsh-llm';
 import { joinContextSections,renderContextSections,renderPrompt } from '@deepseek-ai/dsh-system-prompt';
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt';
 import type { PendingMessage } from '@dafeiyu/contracts';
+import type { SourceDependency,CompactionScope } from '@dafeiyu/contracts';
+import { createHash } from 'node:crypto';
 import { ContextCoordinator,CONTEXT_CARRIER,bytes } from './context.js';
 import type { PreparedRegion,ContextPacket } from './context.js';
 import { priceRetirement } from './compaction-runtime.js';
@@ -28,6 +30,7 @@ export class ContextRuntime {
   private retired=0;
   private repairs=0;
   private retryPending=false;
+  private nativeSections:{name:string;text:string}[]=[];
   constructor(private readonly scope:Context,private readonly coordinator:ContextCoordinator){
     scope.systemPrompt.context({name:CONTEXT_CARRIER,order:10000,required:true,interpolate:false,text:()=>this.render()});
     scope.systemPrompt.section({name:'dafeiyu-context-rules',order:20,interpolate:false,
@@ -43,6 +46,7 @@ export class ContextRuntime {
       this.allowance=this.available(accepted);
       this.preparing=false;
       const text=this.render();
+      this.nativeSections=renderContextSections({...accepted,contexts:accepted.contexts.filter(c=>c.name!==CONTEXT_CARRIER)});
       return {...accepted,contexts:[...accepted.contexts.filter(c=>c.name!==CONTEXT_CARRIER),{name:CONTEXT_CARRIER,text,interpolate:false}]};
     });
     scope.on('agent/request-error',async(payload,next)=>{
@@ -52,6 +56,16 @@ export class ContextRuntime {
   }
   begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;this.preparing=true;this.retired=0;}
   end():void{this.coordinator.release(this.prepared);this.prepared=[];this.item=undefined;this.preparing=true;}
+  sourceItems(){return this.packet.regions.flatMap(region=>region.items.map(item=>({owner:region.owner,region:region.region,item})));}
+  nativeDependencies(scope:CompactionScope):SourceDependency[]{return this.nativeSections.filter(s=>s.text).map(s=>({
+    agentId:scope.agentId,route:scope.route,kind:'context',owner:'$native',region:s.name,id:s.name,version:'1',hash:createHash('sha256').update(s.text).digest('hex')}));}
+  validateHistorical(dep:Extract<SourceDependency,{kind:'context'}>):boolean {
+    if(this.preparing)return false;
+    if(dep.owner==='$native')return this.nativeSections.some(s=>s.name===dep.id&&createHash('sha256').update(s.text).digest('hex')===dep.hash);
+    return this.prepared.some(region=>region.entry.active&&region.entry.owner===dep.owner&&region.entry.contributor.id===dep.region
+      &&region.items.some(item=>item.id===dep.id&&item.version===dep.version&&createHash('sha256').update(JSON.stringify([item.text,item.sources])).digest('hex')===dep.hash
+        &&Date.parse(item.expiresAt)>Date.now()&&region.entry.contributor.validate(region.request,item)));
+  }
   private available(assembly:PromptAssembly):number{
     const native=renderContextSections({...assembly,contexts:assembly.contexts.filter(c=>c.name!==CONTEXT_CARRIER)});
     // Provisional allocation; dispatch checks the complete final request, including native changes.

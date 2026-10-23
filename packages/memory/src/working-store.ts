@@ -5,13 +5,13 @@ import { createHash,randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { OperationScope,TimelineScope } from '@dafeiyu/contracts';
 import type { NewEvent } from '@dafeiyu/journal';
-import { evidenceSchema,MemoryError,MEMORY_VERSION } from './types.js';
+import { evidenceSchema,MemoryError,MEMORY_VERSION,sourceVersionSchema as ancestorSchema,sourceFenceSchema } from './types.js';
 
-export const sourceVersionSchema=z.strictObject({evidence:evidenceSchema,version:z.number().int().positive().nullable()});
+export const sourceVersionSchema=z.strictObject({evidence:evidenceSchema,version:z.number().int().positive().nullable(),ancestors:z.array(ancestorSchema).optional(),sourceFences:z.array(sourceFenceSchema).optional()});
 export const workEntrySchema=z.strictObject({id:z.string().min(1).max(80),category:z.enum(['goal','constraint','correction','pending','result','gap']),
   text:z.string().min(1).max(4000),sources:z.array(sourceVersionSchema).min(1).max(8)});
 export const selectedSchema=z.strictObject({id:z.uuid(),revision:z.number().int().positive(),version:z.number().int().positive(),contentHash:z.string().regex(/^[a-f0-9]{64}$/),
-  start:z.number().int().min(0),end:z.number().int().positive()});
+  start:z.number().int().min(0),end:z.number().int().positive(),ancestors:z.array(ancestorSchema).optional(),sourceFences:z.array(sourceFenceSchema).optional()});
 const common={version:z.number().int().nonnegative(),taskId:z.string().min(1).max(100),expiresAt:z.iso.datetime()};
 export const stateSchema=z.discriminatedUnion('kind',[
   z.strictObject({...common,kind:z.literal('working'),items:z.array(workEntrySchema).max(12)}),
@@ -47,6 +47,17 @@ export class WorkingStore {
   read(scope:TimelineScope,kind:'working'|'evidence'):WorkingState|null{
     const row=this.db.prepare('SELECT body FROM states WHERE agent_id=? AND route=? AND kind=?').get(scope.agentId,scope.route,kind);
     return row?stateSchema.parse(JSON.parse(z.string().parse(row.body))):null;
+  }
+  /** Version of this item's current uninterrupted content, independent of sibling edits. */
+  itemVersion(scope:TimelineScope,id:string):number {
+    let previous:string|null=null,version=0;
+    for(const row of this.db.prepare("SELECT version,body FROM revisions WHERE agent_id=? AND route=? AND kind='working' ORDER BY version").iterate(scope.agentId,scope.route)){
+      const state=stateSchema.parse(JSON.parse(z.string().parse(row.body)));
+      const item=state.items.find(i=>i.id===id);
+      const fingerprint=item?JSON.stringify({taskId:state.taskId,item}):null;
+      if(fingerprint!==previous){version=z.number().parse(row.version);previous=fingerprint;}
+    }
+    return version;
   }
   version(scope:TimelineScope,kind:'working'|'evidence'):number{
     return z.number().int().nonnegative().parse(this.db.prepare('SELECT version FROM states WHERE agent_id=? AND route=? AND kind=?').get(scope.agentId,scope.route,kind)?.version??0);

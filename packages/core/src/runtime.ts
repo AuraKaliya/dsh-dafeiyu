@@ -40,11 +40,11 @@ export class DshRuntime {
       const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
       const feedback=options.sessionId?sessions.get(options.sessionId)?.feedback:undefined;
       const compaction=options.sessionId?sessions.get(options.sessionId)?.compaction:undefined;
-      compaction?.guard(options,true);
       feedback?.guard(options);
       if(context&&!context.guard(options,true,true)){
         yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
       }
+      compaction?.guard(options,true);
       for await(const chunk of next()){context?.guard(options);feedback?.guard(options);compaction?.guard(options);yield chunk;}
       context?.guard(options);
       feedback?.guard(options);
@@ -66,7 +66,7 @@ export class DshRuntime {
         scoped = scope;
         feedback=new FeedbackRuntime(scope,this.validateFeedback);
         context=new ContextRuntime(scope,this.coordinator);
-        compaction=new CompactionRuntime(scope,this.agentId,this.compactionBinding,this.compactionAudit);
+        compaction=new CompactionRuntime(scope,this.agentId,this.compactionBinding,this.compactionAudit,context);
         scope.systemPrompt.section({ name: 'dafeiyu-persona', order: 0, interpolate: false, text: () => identity.persona.text });
         scope.tools.presentAs('native');
       };
@@ -110,8 +110,9 @@ export class DshRuntime {
         }));
       }
       signal.throwIfAborted();
-      agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
-        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文]\n${item.message.text}` }] }));
+      const input=createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
+        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文]\n${item.message.text}` }] });
+      owned.compaction.expectInput(input.id);agent.followup(input);
       await agent.whenIdle();
       owned.compaction.seal();
       if (!await this.ctx.sessions.flush(agent.session)) throw new Error('DSH persistence checkpoint unavailable');
@@ -148,4 +149,8 @@ export class DshRuntime {
     const session=this.handles.get(sessionId)?.handle.agent.session;
     return !!session&&committedSummary(session,id,text);
   }
+  summarySourcesCurrent(sessionId:string,dependencies:readonly import('@dafeiyu/contracts').SourceDependency[]):boolean{
+    return this.handles.get(sessionId)?.compaction.validateDependencies(dependencies)??false;
+  }
+  sourceCurrent(sessionId:string,seq:number):boolean{return this.handles.get(sessionId)?.compaction.sourceCurrent(seq)??false;}
 }

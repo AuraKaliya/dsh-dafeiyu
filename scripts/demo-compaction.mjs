@@ -19,6 +19,9 @@ try{
   const summaries=events.filter(e=>e.type==='compaction/summary');assert.ok(summaries.length>0);
   const report=checks.map(e=>({beforePressureEstimate:e.data.pressure,targetEstimate:e.data.target,savedDshEstimate:e.data.saved}));
   const checkpointCount=summaries.length,shadowedTokens=summaries.reduce((n,e)=>n+e.data.shadowedTokenCount,0);
+  const dependentIds=agent.session.deriveMessages().filter(m=>m.role==='user'&&m.source.kind==='compact-checkpoint'
+    &&m.content.some(b=>b.type==='text'&&JSON.parse(b.text).dependencies?.some(d=>d.kind==='legacy'))).map(m=>m.id);
+  assert.ok(dependentIds.length);
   const originalBytes=summaries.reduce((total,e)=>total+e.data.shadowedSeqs.reduce((n,seq)=>{
     const source=events[seq];const message=source.type==='user/message'?source.data:source.type==='assistant/message'?source.data.message:null;
     return n+Buffer.byteLength(JSON.stringify(message?.content??[]));
@@ -27,10 +30,10 @@ try{
   await h.probe('a',c=>h.memory.delete(c,{requestId:randomUUID(),id:memory.id,expectedVersion:1,reason:'虚构删除验收'}));
   await h.seed('a','当前任务：只检查仍有效内容');
   const chat=h.adapter.requests.findLast(r=>r.purpose!=='compaction');const visible=JSON.stringify(chat.messages);
-  assert.ok(!visible.includes('dafeiyu-incremental-summary'));assert.match(visible,/独立插件区域不变/);
-  const result={at:new Date().toISOString(),projectVersion:'0.9.0',dsh:'0.2.1-rc.2',model:'scripted',sample:'fictional-Chinese',serverAccess:false,
+  assert.ok(!chat.messages.some(m=>dependentIds.includes(m.id)));assert.match(visible,/独立插件区域不变/);
+  const result={at:new Date().toISOString(),projectVersion:'0.10.0',dsh:'0.2.1-rc.2',model:'scripted',sample:'fictional-Chinese',serverAccess:false,
     checkpointCount,shadowedTokens,originalBytes,summaryBytes,compressedBytesRatio:Number((summaryBytes/originalBytes).toFixed(4)),checks:report,
-    summaryWithdrawnAfterDelete:true,unrelatedRegionPreserved:true,originalArchiveRetained:agent.session.snapshotEvents().some(e=>e.type==='compaction/summary'),
+    dependentSummariesWithdrawnAfterDelete:true,unrelatedRegionPreserved:true,originalArchiveRetained:agent.session.snapshotEvents().some(e=>e.type==='compaction/summary'),
     measurement:'DSH heuristic plus UTF-8 floor; not provider billing or semantic-quality acceptance'};
   await writeFile(resolve(root,'result.json'),JSON.stringify(result,null,2)+'\n');
   await writeFile(resolve('docs/memory-phase-5b-results.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));

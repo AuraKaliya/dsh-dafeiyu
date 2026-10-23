@@ -19,6 +19,7 @@ function canonical(value: Json): string {
 const hash = (value: unknown): string => createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');
 interface Item { id: string; ordinal: number; version: number; head: number; deleted: boolean; reason: string; }
 export interface MemoryView extends Revision {
+  readonly sourceVersions:readonly {id:string;revision:number;version:number;contentHash:string}[];
   readonly ref: string; readonly version: number; readonly latestRevision: number;
   readonly validity: 'active' | 'superseded'; readonly deleted: boolean; readonly effectivelyDeleted: boolean;
   readonly basisStatus: 'current' | 'changed' | 'deleted';
@@ -86,12 +87,34 @@ export class MemoryStore {
   mutationEpoch(scope:TimelineScope):number {
     return integer(this.db.prepare('SELECT coalesce(sum(version-1),0) AS n FROM memory_items WHERE agent_id=? AND route=?').get(scope.agentId,scope.route)?.n);
   }
-  /** Conservative tombstone barrier: automatic extraction cannot resurrect deleted source material. */
-  suppressedEvidence(scope: TimelineScope, contentHash: string): boolean {
-    for(const row of this.db.prepare('SELECT r.id,r.revision,r.body FROM memory_revisions r JOIN memory_items i ON i.id=r.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,scope.route)) {
-      if(!this.lineage(scope,string(row.id),integer(row.revision)).deleted)continue;
+  /** Explicit state changes on memories directly grounded in this source form its fence.
+   * Derived invalidity never flows backwards through a sibling input. */
+  sourceFence(scope:TimelineScope,contentHash:string,matchesSource?:(ref:string)=>boolean):string {
+    const versions=new Map<string,number>();
+    for(const row of this.db.prepare('SELECT r.id,r.revision,r.body,i.version FROM memory_revisions r JOIN memory_items i ON i.id=r.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,scope.route)){
       const revision=revisionSchema.parse(JSON.parse(string(row.body)));
-      if(revision.contentHash===contentHash||revision.sources.some(source=>source.contentHash===contentHash))return true;
+      if(!(!matchesSource&&revision.contentHash===contentHash)&&!revision.sources.some(s=>s.contentHash===contentHash&&(!matchesSource||s.kind==='timeline'&&matchesSource(s.ref))))continue;
+      if(integer(row.version)>1)versions.set(string(row.id),integer(row.version));
+    }
+    return hash([...versions].sort(([a],[b])=>a.localeCompare(b)));
+  }
+  provenance(scope:TimelineScope,id:string,revision:number):MemoryView[] {
+    const result:MemoryView[]=[],seen=new Set<string>();
+    const visit=(id:string,revision:number):void=>{
+      const key=`${id}:${revision}`;if(seen.has(key))return;seen.add(key);
+      const item=this.read(scope,id,'normal',revision);if(!item)throw new MemoryError('source_unavailable');result.push(item);
+      for(const source of item.sources)if(source.kind==='memory')visit(source.id,source.revision);
+    };
+    visit(id,revision);return result;
+  }
+  evidenceFences(scope:TimelineScope,id:string,revision:number,sameSource?:(left:string,right:string)=>boolean){return this.provenance(scope,id,revision).flatMap(item=>item.sources.flatMap(s=>s.kind==='timeline'
+    ?[{ref:s.ref,contentHash:s.contentHash,fence:this.sourceFence(scope,s.contentHash,sameSource?ref=>sameSource(s.ref,ref):undefined)}]:[]));}
+  /** Conservative tombstone barrier: automatic extraction cannot resurrect deleted source material. */
+  suppressedEvidence(scope: TimelineScope, contentHash: string,matchesSource?:(ref:string)=>boolean): boolean {
+    for(const row of this.db.prepare('SELECT r.id,r.revision,r.body,i.deleted FROM memory_revisions r JOIN memory_items i ON i.id=r.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,scope.route)) {
+      if(matchesSource?row.deleted!==1:!this.lineage(scope,string(row.id),integer(row.revision)).deleted)continue;
+      const revision=revisionSchema.parse(JSON.parse(string(row.body)));
+      if(!matchesSource&&revision.contentHash===contentHash||revision.sources.some(source=>source.contentHash===contentHash&&(!matchesSource||source.kind==='timeline'&&matchesSource(source.ref))))return true;
     }
     return false;
   }
@@ -107,10 +130,11 @@ export class MemoryStore {
   private lineage(scope: TimelineScope, id: string, revision: number) {
     const rows = this.db.prepare(`WITH RECURSIVE lineage(id,revision) AS (
       VALUES(?,?) UNION SELECT d.parent_id,d.parent_revision FROM dependencies d JOIN lineage l ON d.id=l.id AND d.revision=l.revision)
-      SELECT l.revision,i.id,i.agent_id,i.route,i.deleted,i.head,r.body FROM lineage l
+      SELECT l.revision,i.id,i.agent_id,i.route,i.deleted,i.head,i.version,r.body FROM lineage l
       LEFT JOIN memory_items i ON i.id=l.id LEFT JOIN memory_revisions r ON r.id=l.id AND r.revision=l.revision`).all(id, revision);
     const inaccessible = rows.some(row => row.agent_id !== scope.agentId || row.route !== scope.route || row.body === null);
-    return { inaccessible, deleted: rows.some(row => row.deleted === 1), changed: rows.some(row => row.head !== row.revision) };
+    return { inaccessible, deleted: rows.some(row => row.deleted === 1), changed: rows.some(row => row.head !== row.revision),
+      versions:inaccessible?[]:rows.map(row=>({id:string(row.id),revision:integer(row.revision),version:integer(row.version),contentHash:revisionSchema.parse(JSON.parse(string(row.body))).contentHash})) };
   }
   read(scope: TimelineScope, id: string, mode: ReadMode = 'normal', revision?: number): MemoryView | null {
     const item = this.item(scope, id);
@@ -121,7 +145,7 @@ export class MemoryStore {
     const row = this.db.prepare('SELECT body FROM memory_revisions WHERE id=? AND revision=?').get(id, number);
     if (!row) return null;
     const body = revisionSchema.parse(JSON.parse(string(row.body)));
-    return { ...body, ref: memoryRef(id, number), version: item.version, latestRevision: item.head,
+    return { ...body,sourceVersions:state.versions, ref: memoryRef(id, number), version: item.version, latestRevision: item.head,
       validity: number === item.head ? 'active' : 'superseded', deleted: item.deleted, effectivelyDeleted: state.deleted,
       basisStatus: state.deleted ? 'deleted' : state.changed ? 'changed' : 'current',
       deletionReason: item.deleted ? item.reason : null, untrustedEvidence: true,

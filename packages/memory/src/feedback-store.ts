@@ -6,10 +6,10 @@ import { z } from 'zod';
 import type { OperationScope,TimelineScope } from '@dafeiyu/contracts';
 import type { NewEvent } from '@dafeiyu/journal';
 import { ToolFeedbackSchema } from '@dafeiyu/contracts';
-import { evidenceSchema,MemoryError,MEMORY_VERSION } from './types.js';
+import { evidenceSchema,MemoryError,MEMORY_VERSION,sourceVersionSchema,sourceFenceSchema } from './types.js';
 
 export const digestText=(text:string)=>createHash('sha256').update(text).digest('hex');
-export const dependencySchema=z.strictObject({evidence:evidenceSchema,version:z.number().int().positive().nullable()});
+export const dependencySchema=z.strictObject({evidence:evidenceSchema,version:z.number().int().positive().nullable(),ancestors:z.array(sourceVersionSchema).optional(),sourceFences:z.array(sourceFenceSchema).optional()});
 export type FeedbackDependency=z.infer<typeof dependencySchema>;
 export const archiveSchema=z.strictObject({id:z.uuid(),body:z.string(),hash:z.string(),report:ToolFeedbackSchema.omit({data:true}),
   preview:z.strictObject({text:z.string().max(1200),totalChars:z.number().int().nonnegative()}),

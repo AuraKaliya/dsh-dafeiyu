@@ -96,11 +96,12 @@ test('deletion invalidates summaries and their raw derived turns; restoration ca
   const memory = z.object({ id: z.string() }).parse(await h.probe('a', c => h.memory.create(c, { requestId: randomUUID(), kind: 'knowledge', claimType: 'self_report', content: '虚构测试知识', sourceRefs: [evidence.ref] })));
   h.setCompactionResponse(() => textReply(JSON.stringify({ summary: 'SUMMARY_DELETE_SENTINEL：旧记录的虚构信息。' })));
   const agent = await seed(h, 6); assert.match(visible(lastChat(h)), /SUMMARY_DELETE_SENTINEL/);
+  const dependent=agent.session.deriveMessages().filter(m=>m.role==='user'&&m.source.kind==='compact-checkpoint'&&m.content.some(b=>b.type==='text'&&JSON.parse(b.text).dependencies?.some((d:{kind:string})=>d.kind==='legacy'))).map(m=>m.id);
+  assert.ok(dependent.length);
   await h.probe('a', c => h.memory.delete(c, { requestId: randomUUID(), id: memory.id, expectedVersion: 1, reason: '测试删除' }));
-  await next(h); assert.ok(!visible(lastChat(h)).includes('SUMMARY_DELETE_SENTINEL'));
-  assert.ok(!visible(lastChat(h)).includes('虚构旧任务1'));
+  await next(h); assert.ok(!lastChat(h).messages.some(m=>m.id!==undefined&&dependent.includes(m.id)));
   await h.probe('a', c => h.memory.restore(c, { requestId: randomUUID(), id: memory.id, expectedVersion: 2, reason: '测试恢复' }));
-  await next(h); assert.ok(!visible(lastChat(h)).includes('SUMMARY_DELETE_SENTINEL'));
+  await next(h); assert.ok(!lastChat(h).messages.some(m=>m.id!==undefined&&dependent.includes(m.id)));
   assert.ok(JSON.stringify(readCompactionEvents(agent.session)).includes('SUMMARY_DELETE_SENTINEL'));
 });
 
@@ -118,8 +119,10 @@ test('source version changes during summarization reject the result and retire i
   const e=await h.evidence('a');
   const memory=z.object({id:z.string()}).parse(await h.probe('a',c=>h.memory.create(c,{requestId:randomUUID(),kind:'knowledge',claimType:'self_report',content:'虚构依赖',sourceRefs:[e.ref]})));
   let changed=false;
-  h.setCompactionResponse(()=>{
+  h.setCompactionResponse(request=>{
     if(changed)return textReply(JSON.stringify({summary:'FRESH_VALID_SUMMARY'}));
+    const input=request.messages.at(-1)?.content.find(b=>b.type==='text');
+    if(!input||input.type!=='text'||!JSON.parse(input.text).sources.some((s:{role:string})=>s.role==='assistant'))return textReply(JSON.stringify({summary:'VALID_INDEPENDENT_SUMMARY'}));
     if(!changed){changed=true;const store=new MemoryStore(join(h.root,'memory.sqlite'));try{
       store.mutate({agentId:'dafeiyu',route:e.message.route,traceId:'fictional-race',operationId:'fictional-race',startedEventId:randomUUID()},
         {action:'delete',id:memory.id,expectedVersion:1,requestId:randomUUID(),reason:'虚构并发删除'});
@@ -146,7 +149,7 @@ test('old summary source is derived-only while valid and cannot be exported afte
   const h=await memoryFixture(undefined,{compaction:policy});t.after(h.close);
   const e=await h.evidence('a');const memory=z.object({id:z.string()}).parse(await h.probe('a',c=>h.memory.create(c,{requestId:randomUUID(),kind:'knowledge',claimType:'self_report',content:'虚构知识',sourceRefs:[e.ref]})));
   await seed(h);
-  const audit=h.core.journal.events(e.message.route).find(e=>e.type==='context.compaction.checked'&&e.data.status==='compacted');assert.ok(audit);
+  const audit=h.core.journal.events(e.message.route).findLast(e=>e.type==='context.compaction.checked'&&e.data.status==='compacted');assert.ok(audit);
   const ref=`dafeiyu:source:${audit.id}:1`;
   const valid=await h.probe('a',c=>h.timeline.open(c,{ref}));assert.equal(valid.status,'ok');if(valid.status==='ok')assert.equal(valid.memoryUse,'derived-only');
   await h.probe('a',c=>h.memory.delete(c,{requestId:randomUUID(),id:memory.id,expectedVersion:1,reason:'删除'}));

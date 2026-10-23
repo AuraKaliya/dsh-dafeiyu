@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { CompactionProvider, CompactionScope, CompactionSource } from '@dafeiyu/contracts';
+import type { CompactionProvider, CompactionScope, CompactionSource,SourcePolicy } from '@dafeiyu/contracts';
 import { redactContent } from '@dafeiyu/contracts';
 import { createSystemMessage, createUserMessage,ReasoningEffortId } from '@deepseek-ai/dsh-llm';
 import { SessionId } from '@deepseek-ai/dsh-session';
@@ -25,8 +25,8 @@ export const compactionConfigSchema = z.strictObject({
 export class MemoryCompaction implements CompactionProvider {
   readonly policy: z.output<typeof compactionConfigSchema>;
   constructor(private readonly ctx: Context, config: z.input<typeof compactionConfigSchema>,
-    readonly basis: CompactionProvider['basis']) { this.policy = compactionConfigSchema.parse(config); }
-  async summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal): Promise<string> {
+    readonly basis: CompactionProvider['basis'],readonly sources:SourcePolicy) { this.policy = compactionConfigSchema.parse(config); }
+  async summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal,checkSources?:()=>void): Promise<string> {
     const model = this.ctx.dafeiyu.analysisModelRoute();
     const before = this.basis(scope).epoch;
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(this.policy.timeoutMs)]);
@@ -42,14 +42,15 @@ export class MemoryCompaction implements CompactionProvider {
       createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: JSON.stringify({ sources }) }] })] });
     for await (const chunk of stream) {
       deadline.throwIfAborted();
-      if (before !== this.basis(scope).epoch) throw new Error('Compaction sources changed');
+      if(checkSources)checkSources();else if (before !== this.basis(scope).epoch) throw new Error('Compaction sources changed');
       if (chunk.type === 'block-start' && chunk.blockType === 'tool-call') throw new Error('Compaction cannot use tools');
       if (chunk.type === 'block-end' && chunk.block.type === 'text') text += chunk.block.text;
       if (text.length > this.policy.maxSummaryChars * 8 + 1024) throw new Error('Summary too large');
       if (chunk.type === 'finish') completed = chunk.reason.kind === 'stop';
     }
     deadline.throwIfAborted();
-    if (!completed || before !== this.basis(scope).epoch) throw new Error('Compaction did not complete');
+    if(checkSources)checkSources();
+    if (!completed || (!checkSources&&before !== this.basis(scope).epoch)) throw new Error('Compaction did not complete');
     return redactContent(z.strictObject({ summary: z.string().trim().min(1).max(this.policy.maxSummaryChars) }).parse(JSON.parse(text)).summary).value;
   }
 }

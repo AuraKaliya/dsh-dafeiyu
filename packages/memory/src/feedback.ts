@@ -29,23 +29,28 @@ export class ToolFeedbackArchive implements FeedbackProvider {
   private readonly store:FeedbackStore;
   private readonly config:z.output<typeof feedbackConfigSchema>;
   constructor(private readonly ctx:Context,private readonly memories:MemoryStore,directory:string,config:z.input<typeof feedbackConfigSchema>,
-    private readonly evidence:(context:ActionContext,refs:readonly string[])=>Promise<Evidence[]>){
+    private readonly evidence:(context:ActionContext,refs:readonly string[])=>Promise<Evidence[]>,private readonly strictSources=false){
     this.config=feedbackConfigSchema.parse(config);this.store=new FeedbackStore(resolve(directory,'feedback.sqlite'));this.flush();
   }
   private scope(context:ActionContext){return this.ctx.dafeiyu.scopeFor(context);}
   mutationEpoch(scope:Scope):number{return this.store.mutationEpoch(scope);}
+  sourceRecord(scope:Scope,id:string){const record=this.store.header(scope,id);return record&&this.state(scope,record)==='valid'?record:null;}
+  private match(scope:Scope,ref:string){return (other:string)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,ref,other);}
   private id(value:string):string{const match=refPattern.exec(value);if(!match)throw new MemoryError('not_found');return z.uuid().parse(match[1]);}
   private state(scope:Scope,record:FeedbackHeaderRecord):State{
     if(record.archive.rejectedSources)return 'unavailable';
     let changed=false,deleted=record.deleted;
     for(const source of record.archive.dependencies){
+      if(this.strictSources&&(!source.sourceFences||(source.evidence.kind==='memory'&&!source.ancestors)))changed=true;
+      if(source.sourceFences?.some(s=>this.memories.sourceFence(scope,s.contentHash,this.match(scope,s.ref))!==s.fence))changed=true;
+      if(source.ancestors?.some(s=>{const parent=this.memories.read(scope,s.id,'normal',s.revision);return !parent||parent.version!==s.version||parent.contentHash!==s.contentHash;}))changed=true;
       const e=source.evidence;
       if(e.kind==='memory'){
         if(this.memories.read(scope,e.id,'deleted',e.revision)){deleted=true;continue;}
         const current=this.memories.read(scope,e.id,'normal',e.revision);
         if(!current||current.version!==source.version||current.contentHash!==e.contentHash)changed=true;
       }else{
-        if(this.memories.suppressedEvidence(scope,e.contentHash)){deleted=true;continue;}
+        if(this.memories.suppressedEvidence(scope,e.contentHash,this.match(scope,e.ref))){deleted=true;continue;}
         if(!this.ctx.dafeiyuTimeline.checkArchivedSource(scope,e.ref,e.contentHash))return 'unavailable';
       }
     }
@@ -93,10 +98,10 @@ export class ToolFeedbackArchive implements FeedbackProvider {
         this.scope(request.context);
         if(e.kind==='memory'){
           const memory=this.memories.read(scope,e.id,'normal',e.revision);if(!memory||memory.contentHash!==e.contentHash)throw new MemoryError('source_unavailable');
-          dependencies.push({evidence:e,version:memory.version});
+          dependencies.push({evidence:e,version:memory.version,ancestors:[...memory.sourceVersions],sourceFences:this.memories.evidenceFences(scope,memory.id,memory.revision,(left,right)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,left,right))});
         }else{
           if(!this.ctx.dafeiyuTimeline.checkWorkingSource(request.context,e.ref,e.contentHash))throw new MemoryError('source_unavailable');
-          dependencies.push({evidence:e,version:null});
+          dependencies.push({evidence:e,version:null,sourceFences:[{ref:e.ref,contentHash:e.contentHash,fence:this.memories.sourceFence(scope,e.contentHash,this.match(scope,e.ref))}]});
         }
       }
     }catch{this.scope(request.context);rejectedSources=true;}
@@ -134,7 +139,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
     const end=Math.min(points.length,offset+limit),nextCursor=end<points.length?Buffer.from(JSON.stringify({fingerprint,offset:end})).toString('base64url'):null;
     const a=record.archive;
     this.ctx.dafeiyu.journal.append({agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId:scope.operationId,causedBy:scope.startedEventId,
-      type:'feedback.opened',plugin:'memory',pluginVersion:'0.6.0',occurredAt:new Date().toISOString(),sources:[{kind:'event',id:a.startedEventId,route:scope.route}],
+      type:'feedback.opened',plugin:'memory',pluginVersion:'0.7.0',occurredAt:new Date().toISOString(),sources:[{kind:'event',id:a.startedEventId,route:scope.route}],
       data:{archiveId:a.id,version:record.version,mode,offset,end}});
     return json({status:'ok',kind:'dafeiyu-feedback-page',ref:input.ref,version:record.version,hash:a.hash,mode,
       outcome:a.report.outcome,effects:a.report.effects,originalCompleteness:a.report.completeness,resourceVersion:a.report.resourceVersion,

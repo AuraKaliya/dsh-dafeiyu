@@ -25,7 +25,7 @@ export class WorkingMemory {
   private readonly state:WorkingStore;
   private readonly cache=new WeakMap<ContextRequest,Map<string,{epoch:string;items:ContextItem[]}>>();
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly retrieval:MemoryRetrieval|null,directory:string,
-    private readonly evidence:(context:ActionContext,refs:readonly string[])=>Promise<Evidence[]>){
+    private readonly evidence:(context:ActionContext,refs:readonly string[])=>Promise<Evidence[]>,private readonly strictSources=false){
     this.state=new WorkingStore(resolve(directory,'working.sqlite'));this.flush();
   }
   private scope(context:ActionContext){return this.ctx.dafeiyu.scopeFor(context);}
@@ -34,10 +34,19 @@ export class WorkingMemory {
     return {working:this.state.version(scope,'working'),evidence:this.state.version(scope,'evidence'),
       taskId:state&&state.items.length&&Date.parse(state.expiresAt)>Date.now()?state.taskId:null};
   }
+  sourceItem(scope:Pick<OperationScope,'agentId'|'route'>,id:string){
+    const state=this.state.read(scope,'working');if(!state||state.kind!=='working')return null;
+    const item=state.items.find(i=>i.id===id);if(!item)return null;
+    return {id,taskId:state.taskId,revision:this.state.itemVersion(scope,id),hash:digest({taskId:state.taskId,item}),item};
+  }
+  private match(scope:Pick<OperationScope,'agentId'|'route'>,ref:string){return (other:string)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,ref,other);}
   private expiry(value:string):void{const n=Date.parse(value);if(n<=Date.now()||n>Date.now()+86400000)throw new z.ZodError([{code:'custom',path:['expiresAt'],message:'Expiry must be within 24 hours'}]);}
-  private selected(scope:OperationScope,item:SelectedMemory){
+  private selected(scope:OperationScope,item:SelectedMemory,stored=false){
+    if(stored&&this.strictSources&&(!item.ancestors||!item.sourceFences))return null;
     const memory=this.memory.read(scope,item.id,'normal',item.revision);
     if(!memory||memory.version!==item.version||memory.contentHash!==item.contentHash)return null;
+    if(item.ancestors?.some(source=>{const parent=this.memory.read(scope,source.id,'normal',source.revision);return !parent||parent.version!==source.version||parent.contentHash!==source.contentHash;}))return null;
+    if(item.sourceFences?.some(s=>this.memory.suppressedEvidence(scope,s.contentHash,this.match(scope,s.ref))||this.memory.sourceFence(scope,s.contentHash,this.match(scope,s.ref))!==s.fence))return null;
     const points=Array.from(memory.content);
     return item.start<item.end&&item.end<=points.length?{memory,text:points.slice(item.start,item.end).join('')}:null;
   }
@@ -52,10 +61,10 @@ export class WorkingMemory {
         if(evidence.kind==='memory'){
           const parent=this.memory.read(scope,evidence.id,'normal',evidence.revision);
           if(!parent||parent.contentHash!==evidence.contentHash)throw new MemoryError('source_unavailable');
-          sources.push({evidence,version:parent.version});
+          sources.push({evidence,version:parent.version,ancestors:[...parent.sourceVersions],sourceFences:this.memory.evidenceFences(scope,parent.id,parent.revision,(left,right)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,left,right))});
         }else{
-          if(!this.ctx.dafeiyuTimeline.checkWorkingSource(context,evidence.ref,evidence.contentHash)||this.memory.suppressedEvidence(scope,evidence.contentHash))throw new MemoryError('source_unavailable');
-          sources.push({evidence,version:null});
+          if(!this.ctx.dafeiyuTimeline.checkWorkingSource(context,evidence.ref,evidence.contentHash)||this.memory.suppressedEvidence(scope,evidence.contentHash,this.match(scope,evidence.ref)))throw new MemoryError('source_unavailable');
+          sources.push({evidence,version:null,sourceFences:[{ref:evidence.ref,contentHash:evidence.contentHash,fence:this.memory.sourceFence(scope,evidence.contentHash,this.match(scope,evidence.ref))}]});
         }
       }
       items.push({id:item.id,category:item.category,text:redactContent(item.text).value,sources});
@@ -67,7 +76,7 @@ export class WorkingMemory {
       if(e.kind==='memory'){
         const parent=this.memory.read(scope,e.id,'normal',e.revision);
         if(!parent||parent.version!==source.version||parent.contentHash!==e.contentHash)throw new MemoryError('source_unavailable');
-      }else if(this.memory.suppressedEvidence(scope,e.contentHash))throw new MemoryError('source_unavailable');
+      }else if(this.memory.suppressedEvidence(scope,e.contentHash,this.match(scope,e.ref)))throw new MemoryError('source_unavailable');
     }
     const receipt=this.state.write(scope,input.requestId,input.expectedVersion,{kind:'working',version:input.expectedVersion,taskId:input.taskId,expiresAt:input.expiresAt,items});
     this.flush();return {status:'ok' as const,...receipt,admission:'pending-next-request'};
@@ -75,7 +84,8 @@ export class WorkingMemory {
   select(context:ActionContext,raw:unknown){
     const scope=this.scope(context),input=selectSchema.parse(raw);this.expiry(input.expiresAt);
     for(const item of input.items)if(!this.selected(scope,item))throw new MemoryError('source_unavailable');
-    const receipt=this.state.write(scope,input.requestId,input.expectedVersion,{kind:'evidence',version:input.expectedVersion,workingVersion:this.state.version(scope,'working'),taskId:input.taskId,expiresAt:input.expiresAt,items:input.items});
+    const receipt=this.state.write(scope,input.requestId,input.expectedVersion,{kind:'evidence',version:input.expectedVersion,workingVersion:this.state.version(scope,'working'),taskId:input.taskId,expiresAt:input.expiresAt,
+      items:input.items.map(item=>({...item,ancestors:[...this.selected(scope,item)!.memory.sourceVersions],sourceFences:this.memory.evidenceFences(scope,item.id,item.revision,(left,right)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,left,right))}))});
     this.flush();return {status:'ok' as const,...receipt,selected:input.items.length,admission:'pending-next-request'};
   }
   async retrieve(context:ActionContext,raw:unknown){
@@ -112,7 +122,7 @@ export class WorkingMemory {
       const working=this.state.read(scope,'working');
       if(working&&((working.items.length>0&&working.taskId!==state.taskId)||(!working.items.length&&working.version>(state.workingVersion??0))))return [];
       return state.items.flatMap(item=>{
-        const value=this.selected(scope,item);if(!value)return [];
+        const value=this.selected(scope,item,true);if(!value)return [];
         return [{id:`${item.id}:${item.start}:${item.end}`,version:`${state.version}:${item.version}`,expiresAt:state.expiresAt,
           text:JSON.stringify({taskId:state.taskId,kind:value.memory.kind,claimType:value.memory.claimType,offset:[item.start,item.end],text:value.text}),
           sources:[{ref:memoryRef(item.id,item.revision),version:String(item.version),hash:item.contentHash},...value.memory.sources.map(e=>({ref:e.kind==='memory'?memoryRef(e.id,e.revision):e.ref,version:e.kind==='memory'?String(e.revision):'immutable',hash:e.contentHash}))]}];
@@ -120,13 +130,16 @@ export class WorkingMemory {
     }
     return state.items.flatMap(item=>{
       for(const source of item.sources){
+        if(this.strictSources&&(!source.sourceFences||(source.evidence.kind==='memory'&&!source.ancestors)))return [];
+        if(source.sourceFences?.some(s=>this.memory.suppressedEvidence(scope,s.contentHash,this.match(scope,s.ref))||this.memory.sourceFence(scope,s.contentHash,this.match(scope,s.ref))!==s.fence))return [];
+        if(source.ancestors?.some(s=>{const parent=this.memory.read(scope,s.id,'normal',s.revision);return !parent||parent.version!==s.version||parent.contentHash!==s.contentHash;}))return [];
         const e=source.evidence;
         if(e.kind==='memory'){
           const parent=this.memory.read(scope,e.id,'normal',e.revision);
           if(!parent||parent.version!==source.version||parent.contentHash!==e.contentHash)return [];
-        }else if(this.memory.suppressedEvidence(scope,e.contentHash)||!this.ctx.dafeiyuTimeline.checkContextSource(request,e.ref,e.contentHash))return [];
+        }else if(this.memory.suppressedEvidence(scope,e.contentHash,this.match(scope,e.ref))||!this.ctx.dafeiyuTimeline.checkContextSource(request,e.ref,e.contentHash))return [];
       }
-      return [{id:item.id,version:String(state.version),expiresAt:state.expiresAt,
+      return [{id:item.id,version:String(this.state.itemVersion(scope,item.id)),expiresAt:state.expiresAt,
         text:JSON.stringify({taskId:state.taskId,category:item.category,text:item.text}),sources:item.sources.map(s=>({
           ref:s.evidence.kind==='memory'?memoryRef(s.evidence.id,s.evidence.revision):s.evidence.ref,
           version:s.version===null?'immutable':String(s.version),hash:s.evidence.contentHash}))}];

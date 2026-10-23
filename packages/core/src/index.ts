@@ -17,6 +17,7 @@ import { capsuleSchema } from './compaction-runtime.js';
 import type { CompactionBinding } from './compaction-runtime.js';
 export type { CompactionBinding } from './compaction-runtime.js';
 export { readCompactionEvents } from './compaction-runtime.js';
+export { readProvenance } from './provenance.js';
 
 export const name = 'dafeiyu-core';
 export const inject = ['agents', 'sessions', 'sessionPersistence', 'tools', 'systemPrompt','llm'];
@@ -56,7 +57,7 @@ export class DafeiyuService extends Service {
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
       (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text),this.config.agentId,()=>this.compactionBinding(),
-      (item,data,seqs)=>{this.journal.append({...this.event(item,'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});});
+      (item,data,seqs)=>{this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});});
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
       this.journal.transition(item.id, item.state, 'uncertain', this.event(item, 'recovery.uncertain', { previousState: item.state }));
@@ -100,9 +101,12 @@ export class DafeiyuService extends Service {
     try {
       const capsule=capsuleSchema.parse(JSON.parse(text)),binding=this.compactionBinding();
       return !!binding&&scope.agentId===this.config.agentId&&capsule.agentId===scope.agentId&&capsule.route===scope.route
-        &&capsule.owner===binding.owner&&capsule.version===binding.version&&capsule.epoch===binding.provider.basis(scope).epoch
+        &&capsule.owner===binding.owner&&(capsule.schemaVersion===2?this.runtime.summarySourcesCurrent(this.journal.sessionFor(scope)??'',capsule.dependencies!):capsule.epoch===binding.provider.basis(scope).epoch)
         &&this.runtime.summaryCommitted(this.journal.sessionFor(scope)??'',compactionId,text);
     }catch{return false;}
+  }
+  historicalSourceCurrent(scope:Pick<OperationScope,'agentId'|'route'>,sessionId:string,seq:number):boolean{
+    return scope.agentId===this.config.agentId&&this.journal.sessionFor(scope)===sessionId&&this.runtime.sourceCurrent(sessionId,seq);
   }
   feedbackViewCurrent(scope:Pick<OperationScope,'agentId'|'route'|'traceId'>,raw:unknown,text:string):boolean{
     const parsed=FeedbackMetaSchema.safeParse(raw);if(!parsed.success)return false;
@@ -158,6 +162,9 @@ export class DafeiyuService extends Service {
       ...(extension.feedbackProvider?{feedbackProvider:{capture:extension.feedbackProvider.capture.bind(extension.feedbackProvider),
         present:extension.feedbackProvider.present.bind(extension.feedbackProvider),validate:extension.feedbackProvider.validate.bind(extension.feedbackProvider)}}:{}),
       ...(extension.compactionProvider?{compactionProvider:{policy:Object.freeze({...extension.compactionProvider.policy}),
+        ...(extension.compactionProvider.sources?{sources:{inbound:extension.compactionProvider.sources.inbound.bind(extension.compactionProvider.sources),
+          context:extension.compactionProvider.sources.context.bind(extension.compactionProvider.sources),tool:extension.compactionProvider.sources.tool.bind(extension.compactionProvider.sources),
+          validate:extension.compactionProvider.sources.validate.bind(extension.compactionProvider.sources)}}:{}),
         basis:extension.compactionProvider.basis.bind(extension.compactionProvider),summarize:extension.compactionProvider.summarize.bind(extension.compactionProvider)}}:{}),
     };
     const registered: Registered = { extension, controller: new AbortController(), active: true };
