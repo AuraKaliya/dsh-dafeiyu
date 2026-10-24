@@ -8,8 +8,8 @@
     "@deepseek-ai/cordis": "4.0.5"
   },
   "dependencies": {
-    "@dafeiyu/core": "0.13.0",
-    "@dafeiyu/contracts": "0.13.0"
+    "@dafeiyu/core": "0.14.0",
+    "@dafeiyu/contracts": "0.14.0"
   },
   "exports": {
     ".": {

@@ -15,6 +15,8 @@ import { ObservationStore,migrateObservations } from './observations.js';
 import { TaskWorkspace,migrateTaskWorkspaces } from './task-workspace.js';
 import { TaskMemory,migrateTaskMemory } from './task-memory.js';
 import type { MemoryRetrieval } from './retrieval.js';
+import type { Context } from '@deepseek-ai/cordis';
+import { TaskExpression,migrateExpression } from './expression.js';
 
 const APPLICATION_ID = 0x44464d31;
 const string = (value: unknown): string => z.string().parse(value);
@@ -57,7 +59,7 @@ export class MemoryStore {
       const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
       const tables = this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
       const fresh = app === 0 && version === 0 && tables === 0;
-      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5))) throw new Error('Unsupported memory database identity or schema');
+      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6))) throw new Error('Unsupported memory database identity or schema');
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (fresh) this.transaction(() => this.db.exec(`
         CREATE TABLE memory_items(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,
@@ -89,6 +91,7 @@ export class MemoryStore {
       this.observations=new ObservationStore(this.db,work=>this.transaction(work),this);
       this.transaction(()=>migrateTaskWorkspaces(this.db));
       this.transaction(()=>migrateTaskMemory(this.db));
+      this.transaction(()=>migrateExpression(this.db));
     } catch (error) { this.db.close(); throw error; }
   }
   private transaction<T>(work: () => T): T {
@@ -108,6 +111,7 @@ export class MemoryStore {
     this.validatingTaskSources.add(key);try{return this.taskSourceValidator(agentId,jobId,purpose);}catch{return 'unavailable';}finally{this.validatingTaskSources.delete(key);}
   }
   taskMemory(tasks:TaskWorkspace,retrieval:MemoryRetrieval|null){return new TaskMemory(this.db,work=>this.transaction(work),this,tasks,retrieval);}
+  taskExpression(tasks:TaskWorkspace,ctx:Context){return new TaskExpression(this.db,work=>this.transaction(work),this,tasks,ctx);}
   private item(scope: TimelineScope, id: string): Item | null {
     const row = this.db.prepare('SELECT * FROM memory_items WHERE id=? AND agent_id=? AND route=?').get(id, scope.agentId, scope.route);
     return row ? { id: string(row.id), ordinal: integer(row.ordinal), version: integer(row.version), head: integer(row.head),
@@ -351,7 +355,8 @@ export class MemoryStore {
         const parsed = z.strictObject({ agentId: z.string(), route: z.string(), traceId: z.string(), operationId: z.string(),
           causedBy: z.string().nullable(), type: z.enum(['memory.created', 'memory.revised', 'memory.deleted', 'memory.restored','observation.recorded','observation.source.deleted','observation.source.restored',
             'task.created','task.updated','task.scene.joined','task.scene.selected','task.sources.linked','task.work.started','task.observation.linked','task.work.completed','task.work.late','task.work.interrupted',
-            'task.memory.policy','task.memory.granted','task.memory.revoked','task.memory.recalled','task.memory.opened']),
+            'task.memory.policy','task.memory.granted','task.memory.revoked','task.memory.recalled','task.memory.opened',
+            'task.expression.policy','task.expression.prepared','task.expression.withdrawn','task.expression.started','task.expression.completed','task.expression.failed','task.expression.interrupted']),
           plugin: z.string().min(1), pluginVersion: z.string().min(1).max(80), occurredAt: z.iso.datetime({offset:true}),
           sources: z.array(z.strictObject({ kind: z.literal('event'), id: z.string(), route: z.string() })),
           data: z.record(z.string(), z.json()) }).parse(JSON.parse(string(row.body)));

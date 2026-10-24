@@ -12,6 +12,8 @@ export * from './memory-boundary.js';
 export * from './observation.js';
 export * from './task-workspace.js';
 export * from './task-memory.js';
+export * from './expression.js';
+import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
 import type { MemoryObservationProvider,ObservationReceipt } from './observation.js';
@@ -93,6 +95,7 @@ export interface Extension {
   readonly memoryObservationProvider?:MemoryObservationProvider;
   readonly taskWorkspaceProvider?:TaskWorkspaceProvider;
   readonly taskMemoryProvider?:TaskMemoryProvider;
+  readonly taskExpressionProvider?:TaskExpressionProvider;
 }
 export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
 export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }

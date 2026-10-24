@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { MemorySourcePolicy } from './source-policy.js';
 import type { CompactionScope } from '@dafeiyu/contracts';
 import type { TaskWorkspace } from './task-workspace.js';
+import type { TaskExpression } from './expression.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
@@ -53,6 +54,7 @@ export class MemoryService extends Service {
   private readonly working:WorkingMemory|null;
   private readonly feedbackArchive:ToolFeedbackArchive|null;
   private readonly tasks:TaskWorkspace;
+  private readonly expression:TaskExpression;
   private closed = false;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
@@ -77,7 +79,16 @@ export class MemoryService extends Service {
     };
     try {
       const taskMemory=this.store.taskMemory(this.tasks,this.retrieval);
+      this.expression=this.store.taskExpression(this.tasks,ctx);
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
+        taskExpressionProvider:{
+          policy:(agent,input)=>{this.assertTasks();if(agent!==this.config.agentId)throw new Error('Wrong expression owner');const result=this.expression.policy(agent,input);this.flush();return result;},
+          prepare:(agent,task,input)=>{this.assertTasks();const result=this.expression.prepare(agent,task,input);this.flush();return result;},
+          open:(agent,task,input)=>{this.assertTasks();return this.expression.open(agent,task,input);},
+          result:(agent,task,input)=>{this.assertTasks();return this.expression.result(agent,task,input);},
+          withdraw:(agent,task,input)=>{this.assertTasks();const result=this.expression.withdraw(agent,task,input);this.flush();return result;},
+          generate:async(agent,task,input,signal,guard)=>{this.assertTasks();try{return await this.expression.generate(agent,task,input,signal,()=>{this.assertTasks();guard();});}finally{this.flush();}},
+        },
         taskMemoryProvider:{
           policy:(agent,input)=>{this.assertTasks();if(agent!==this.config.agentId)throw new Error('Wrong task owner');const result=taskMemory.policy(agent,input);this.flush();return result;},
           grant:(agent,task,input)=>{this.assertTasks();const result=taskMemory.grant(agent,task,input);this.flush();return result;},
@@ -110,9 +121,10 @@ export class MemoryService extends Service {
           new MemorySourcePolicy(ctx,this.store,this.working,this.feedbackArchive,scope=>basis(scope).epoch))}:{}),
         ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
-    ctx.effect(() => async () => { this.closed = true; this.handle.dispose(); await this.analysis?.close();this.feedbackArchive?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
+    ctx.effect(() => async () => { this.closed = true; this.handle.dispose();await this.expression.close(); await this.analysis?.close();this.feedbackArchive?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
     this.flush();
     this.tasks.recover(this.config.agentId);this.flush();
+    this.expression.recover(this.config.agentId);this.flush();
     this.analysis?.start();
   }
   private scope(context: ActionContext): OperationScope {

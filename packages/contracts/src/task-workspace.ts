@@ -5,6 +5,7 @@ import type { ActionContext } from './index.js';
 import type { MemoryObservation,ObservationAuthority,ObservationReceipt } from './observation.js';
 import type { TimelineScope } from './history.js';
 import type { TaskMemoryControl } from './task-memory.js';
+import type { TaskExpressionControl } from './expression.js';
 
 const key=z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),version=z.number().int().nonnegative();
 export const TaskCreateSchema=z.strictObject({requestId:key,title:z.string().min(1).max(200),goal:z.string().min(1).max(2000)});
@@ -21,7 +22,7 @@ export const TaskCompleteSchema=z.strictObject({requestId:key,text:z.string().mi
 /** These identities are opaque core capabilities. A serialized id is not authority. */
 export interface TaskReference {readonly id:string}
 export interface TaskWorkTicket {readonly id:string}
-export interface TaskController {readonly reference:TaskReference;readonly memory:TaskMemoryControl;read():Record<string,unknown>;update(input:unknown):Record<string,unknown>}
+export interface TaskController {readonly reference:TaskReference;readonly memory:TaskMemoryControl;readonly expression:TaskExpressionControl;read():Record<string,unknown>;update(input:unknown):Record<string,unknown>}
 export interface TaskPluginAPI {
   join(task:TaskReference,input:unknown,context?:ActionContext):Record<string,unknown>;
   activate(task:TaskReference|null,input:unknown,context?:ActionContext):Record<string,unknown>;

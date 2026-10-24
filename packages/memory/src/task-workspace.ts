@@ -28,7 +28,7 @@ const privateRoute=(agentId:string,taskId:string)=>conversationKey(agentId,{chan
 export function migrateTaskWorkspaces(db:DatabaseSync):void {
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
   const tables=['task_workspaces','task_revisions','task_members','task_selections','task_links','task_jobs','task_slots','task_requests','task_observations'];
-  if(version===4||version===5){for(const table of tables)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===4||version===5||version===6){for(const table of tables)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==3)throw new Error('Unsupported task workspace schema');
   db.exec(`CREATE TABLE task_workspaces(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,version INTEGER NOT NULL,epoch INTEGER NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL);
     CREATE TABLE task_revisions(task_id TEXT NOT NULL REFERENCES task_workspaces(id),version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(task_id,version));
@@ -55,6 +55,10 @@ export class TaskWorkspace {
   state(agentId:string,id:string){const {version,epoch,status}=this.task(agentId,id);return {version,epoch,status};}
   memoryProof(scope:TimelineScope,id:string,revision:number,version:number,contentHash:string){return this.capture(scope,{kind:'memory',id,revision,version,contentHash});}
   validProof(agentId:string,proof:Witness){return !!this.evidence(agentId,proof);}
+  expressionLink(agentId:string,taskId:string,id:string){const link=this.links(agentId,taskId).find(l=>l.id===id);if(!link)return null;const evidence=this.evidence(agentId,link.proof);return evidence?{id,text:evidence.text,proof:link.proof}:null;}
+  expressionSlot(agentId:string,taskId:string,slot:string){const task=this.task(agentId,taskId),entry=this.entries(agentId,taskId).find(e=>e.slot===slot);
+    if(!entry||entry.job.taskEpoch!==task.epoch||!entry.result.proofs.length||entry.result.proofs.some(p=>!this.evidence(agentId,p)))return null;
+    return {slot,version:entry.version,jobId:entry.jobId,text:entry.result.text,proofs:entry.result.proofs};}
   selectAuthorized(agentId:string,id:string,requestId:string,expectedVersion:number,proofs:Witness[]){
     return this.request({agentId,route:privateRoute(agentId,id),pluginId:'$task-coordinator'},requestId,{kind:'authorized-selection',id,expectedVersion,proofs},()=>{
       const task=this.task(agentId,id);if(task.version!==expectedVersion||task.status!=='active')throw new Error('task_version_conflict');

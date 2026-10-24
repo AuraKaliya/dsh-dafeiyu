@@ -18,7 +18,7 @@ import type { CompactionBinding } from './compaction-runtime.js';
 import { fragmentCapsuleSchema } from './summary-fragments.js';
 import { MemoryObservationSchema,ObservationSourceReadSchema,ObservationSourceChangeSchema } from '@dafeiyu/contracts';
 import type { Conversation,ObservationAuthority } from '@dafeiyu/contracts';
-import { TaskCoordinator,bindTaskProvider,bindTaskMemoryProvider } from './task-coordinator.js';
+import { TaskCoordinator,bindTaskProvider,bindTaskMemoryProvider,bindExpressionProvider } from './task-coordinator.js';
 export type { CompactionBinding } from './compaction-runtime.js';
 export { readCompactionEvents } from './compaction-runtime.js';
 export { readProvenance } from './provenance.js';
@@ -57,7 +57,7 @@ export class DafeiyuService extends Service {
   constructor(ctx: Context, config: Config) {
     super(ctx, 'dafeiyu');
     this.config = ConfigSchema.parse(config);
-    this.taskCoordinator=new TaskCoordinator(this.config.agentId,()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskWorkspaceProvider)?.extension.taskWorkspaceProvider,()=>this.assertOpen(),()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskMemoryProvider)?.extension.taskMemoryProvider);
+    this.taskCoordinator=new TaskCoordinator(this.config.agentId,()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskWorkspaceProvider)?.extension.taskWorkspaceProvider,()=>this.assertOpen(),()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskMemoryProvider)?.extension.taskMemoryProvider,()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskExpressionProvider)?.extension.taskExpressionProvider);
     this.persona();
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
@@ -102,6 +102,7 @@ export class DafeiyuService extends Service {
   createTaskWorkspace(input:unknown){return this.taskCoordinator.create(input);}
   resumeTaskWorkspace(id:string){return this.taskCoordinator.resume(id);}
   setTaskMemoryPolicy(input:unknown){return this.taskCoordinator.policy(input);}
+  setTaskExpressionPolicy(input:unknown){return this.taskCoordinator.expressionPolicy(input);}
   private feedbackEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.feedbackProvider);}
   private observationEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.memoryObservationProvider);}
   private observationAuthority(entry:Registered,conversation:Conversation,context?:ActionContext):ObservationAuthority {
@@ -182,6 +183,7 @@ export class DafeiyuService extends Service {
     if(extension.memoryObservationProvider&&this.observationEntry())throw new Error('Memory observation provider already registered');
     if(extension.taskWorkspaceProvider&&[...this.extensions.values()].some(e=>e.active&&e.extension.taskWorkspaceProvider))throw new Error('Task workspace provider already registered');
     if(extension.taskMemoryProvider&&[...this.extensions.values()].some(e=>e.active&&e.extension.taskMemoryProvider))throw new Error('Task memory provider already registered');
+    if(extension.taskExpressionProvider&&[...this.extensions.values()].some(e=>e.active&&e.extension.taskExpressionProvider))throw new Error('Task expression provider already registered');
     if(extension.compactionProvider&&this.compactionBinding())throw new Error('Compaction provider already registered');
     if(extension.compactionProvider&&this.ctx.get('compaction'))throw new Error('Use one compaction writer per Dafeiyu host');
     // Snapshot registration metadata so caller-side mutations cannot change a running capability.
@@ -199,6 +201,7 @@ export class DafeiyuService extends Service {
         open:extension.memoryObservationProvider.open.bind(extension.memoryObservationProvider),change:extension.memoryObservationProvider.change.bind(extension.memoryObservationProvider)}}:{}),
       ...(extension.taskWorkspaceProvider?{taskWorkspaceProvider:bindTaskProvider(extension.taskWorkspaceProvider)}:{}),
       ...(extension.taskMemoryProvider?{taskMemoryProvider:bindTaskMemoryProvider(extension.taskMemoryProvider)}:{}),
+      ...(extension.taskExpressionProvider?{taskExpressionProvider:bindExpressionProvider(extension.taskExpressionProvider)}:{}),
       ...(extension.compactionProvider?{compactionProvider:{policy:Object.freeze({...extension.compactionProvider.policy}),
         ...(extension.compactionProvider.sources?{sources:{inbound:extension.compactionProvider.sources.inbound.bind(extension.compactionProvider.sources),
           context:extension.compactionProvider.sources.context.bind(extension.compactionProvider.sources),tool:extension.compactionProvider.sources.tool.bind(extension.compactionProvider.sources),

@@ -19,7 +19,7 @@ type Grant=ReturnType<TaskMemory['active']>;
 
 export function migrateTaskMemory(db:DatabaseSync){
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
-  if(version===5){for(const table of ['task_memory_policies','task_memory_policy_revisions','task_memory_grants','task_memory_requests','task_memory_hits'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===5||version===6){for(const table of ['task_memory_policies','task_memory_policy_revisions','task_memory_grants','task_memory_requests','task_memory_hits'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==4)throw new Error('Unsupported task memory schema');
   db.exec(`CREATE TABLE task_memory_policies(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id));
     CREATE TABLE task_memory_policy_revisions(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id,version));
