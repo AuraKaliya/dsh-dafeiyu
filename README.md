@@ -41,6 +41,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第一阶段：核心与统一运行入口开发方案（1.1）](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、底色与阶段状态、无聊天任务、增量迁移与验收；1A—1F完成，1G待实施。
 - [本地统一入口使用说明](docs/host-usage.md)：配置模板、命令、诊断、迁移与数据保护。
 - [1G样本留存与验收延期](docs/phase1g-deferred-samples.md)：162次待执行清单、判定标准、尚未批准的预算和后续统一验收要求。
+- [阶段2：QQ文字能力与流程整合方案](docs/qq-capabilities-plan.md)：2A—2F步骤、依赖、触发／群同步、浏览记忆、任务交付与迁移；真实平台验收延期。
 - [1F统一入口实施拆分](docs/phase1f-implementation-plan.md)及[最终验收](docs/phase1f3-cli-acceptance.md)：三个子步骤独立测试、记录和提交，真实模型／模拟模型／实际终端分开计量。
 - [第一阶段1A适配前提验收](docs/phase1a-adaptation.md)：DSH程序来源、真实模型工具续轮与持久化、真实图像和本地音频探针。
 - [第一阶段1B接口与生命周期验收](docs/phase1b-lifecycle.md)：v2/v3兼容、启动准入、恢复／激活分离、延迟分析与QQ连接。
