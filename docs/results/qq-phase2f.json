@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "runId": "253a1512-811e-42d3-91d4-28f10c4b6fdd",
+  "startedAt": "2026-10-24T23:17:06.165Z",
+  "finishedAt": "2026-10-24T23:17:19.792Z",
+  "stages": [
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "durationMs": 125
+    },
+    {
+      "name": "test-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 1999
+    },
+    {
+      "name": "tooling-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 559
+    },
+    {
+      "name": "tests",
+      "code": 0,
+      "signal": null,
+      "durationMs": 10878
+    }
+  ],
+  "summary": {
+    "success": true,
+    "counts": {
+      "tests": 1,
+      "failed": 0,
+      "passed": 1,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 1,
+      "suites": 0
+    },
+    "durationMs": 10816.6595,
+    "failures": []
+  },
+  "reason": null,
+  "cleanup": {
+    "removed": [
+      "253a1512-811e-42d3-91d4-28f10c4b6fdd"
+    ],
+    "retained": [
+      {
+        "id": "1440d1de-587f-40e6-8752-51445101417f",
+        "bytes": 26385113
+      },
+      {
+        "id": "cd99c68b-eb88-4163-a127-4c77be3d43b7",
+        "bytes": 15116547
+      },
+      {
+        "id": "d3b6e7ca-e97c-47dd-b456-eb3800def514",
+        "bytes": 2716049
+      }
+    ],
+    "blocked": []
+  },
+  "freeBytes": 217968939008,
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "testScope": "integrated-qq-stage-program-check",
+  "fullRegression": false,
+  "testFiles": [
+    "qq-phase2-flow"
+  ],
+  "scenarioAssertions": [
+    "passive-cache-without-fake-inbound",
+    "natural-address-owner-task",
+    "scoped-native-browse",
+    "task-only-selected-summary",
+    "private-summary-excluded-from-target-renderer",
+    "verified-lossless-segmented-delivery",
+    "restart-no-model-or-send-replay",
+    "peer-conversation-isolation",
+    "source-conversation-continuity",
+    "cancel-retires-old-result-context",
+    "sent-fact-remains-recorded"
+  ]
+}
