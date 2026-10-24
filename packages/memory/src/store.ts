@@ -27,9 +27,10 @@ import type { PersonaResolver } from './persona-store.js';
 import { ExecutionSources } from './execution-sources.js';
 import { ExecutionMemoryState } from './execution-memory-state.js';
 import { CapabilityObservations, migrateCapabilityObservations } from './capability-observations.js';
+import { NativeExpression,migrateNativeExpression } from './native-expression.js';
 
 export const MEMORY_APPLICATION_ID = 0x44464d31;
-export const MEMORY_SCHEMA_VERSION = 9;
+export const MEMORY_SCHEMA_VERSION = 10;
 const APPLICATION_ID = MEMORY_APPLICATION_ID;
 const string = (value: unknown): string => z.string().parse(value);
 const integer = (value: unknown): number => z.number().int().safe().parse(value);
@@ -73,7 +74,7 @@ export class MemoryStore {
       const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
       const tables = this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
       const fresh = app === 0 && version === 0 && tables === 0;
-      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7&&version!==8&&version!==9))) throw new Error('Unsupported memory database identity or schema');
+      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7&&version!==8&&version!==9&&version!==10))) throw new Error('Unsupported memory database identity or schema');
       configureSqlite(this.db);
       if (fresh) this.transaction(() => this.db.exec(`
         CREATE TABLE memory_items(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,
@@ -110,6 +111,7 @@ export class MemoryStore {
       this.transaction(()=>migratePersona(this.db));
       this.transaction(()=>migrateCapabilityObservations(this.db));
       this.capabilities=new CapabilityObservations(this.db,this);
+      this.transaction(()=>migrateNativeExpression(this.db));
     } catch (error) { this.db.close(); throw error; }
   }
   private transaction<T>(work: () => T): T {
@@ -136,6 +138,7 @@ export class MemoryStore {
   atomic<T>(work:()=>T):T{return this.transaction(work);}
   withExecutionValidator<T>(validator:NonNullable<MemoryStore['executionValidator']>,work:()=>T):T{const previous=this.executionValidator;this.executionValidator=validator;try{return work();}finally{this.executionValidator=previous;}}
   taskExpression(tasks:TaskWorkspace,ctx:Context){return new TaskExpression(this.db,work=>this.transaction(work),this,tasks,ctx);}
+  nativeExpression(ctx:Context,expression:TaskExpression,ready:()=>boolean,flush:()=>void){return new NativeExpression(ctx,this.db,this,expression,ready,flush);}
   private item(scope: TimelineScope, id: string): Item | null {
     const row = this.db.prepare('SELECT * FROM memory_items WHERE id=? AND agent_id=? AND route=?').get(id, scope.agentId, scope.route);
     return row ? { id: string(row.id), ordinal: integer(row.ordinal), version: integer(row.version), head: integer(row.head),

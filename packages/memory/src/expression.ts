@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { conversationKey,ConversationSchema,ExpressionPolicySchema,redactContent,redactJson } from '@dafeiyu/contracts';
-import type { TaskExpressionProvider,Conversation,Json } from '@dafeiyu/contracts';
+import type { TaskExpressionProvider,Conversation,Json,PersonaSourceRef } from '@dafeiyu/contracts';
 import type { NewEvent } from '@dafeiyu/journal';
 import type { MemoryStore } from './store.js';
 import { TaskWorkspace,witnessSchema } from './task-workspace.js';
@@ -23,7 +23,7 @@ const policyBodySchema=z.strictObject({input:ExpressionPolicySchema,proofs:z.arr
 
 export function migrateExpression(db:DatabaseSync){
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
-if(version===6||version===7||version===8||version===9){for(const name of ['expression_policies','expression_policy_revisions','expression_requests','expression_packets','expression_jobs'])db.prepare(`SELECT * FROM ${name} LIMIT 0`).all();return;}
+if(version===6||version===7||version===8||version===9||version===10){for(const name of ['expression_policies','expression_policy_revisions','expression_requests','expression_packets','expression_jobs'])db.prepare(`SELECT * FROM ${name} LIMIT 0`).all();return;}
   if(version!==5)throw new Error('Unsupported expression schema');
   db.exec(`CREATE TABLE expression_policies(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id));
     CREATE TABLE expression_policy_revisions(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id,version));
@@ -70,6 +70,11 @@ export class TaskExpression {
     if(proof.route===targetRoute)return true;
     const {authorization:_authorization,range:_range,...base}=proof;
     return !!policy?.proofs.some(p=>hash(p)===hash(base)&&this.tasks.validProof(agentId,p));
+  }
+  nativeMemoryMaterial(agentId:string,ref:PersonaSourceRef,target:Conversation,policy:Packet['policy']):string|null{
+    if(ref.kind!=='memory'||ref.agentId!==agentId)return null;const scope={agentId,route:ref.scopeKey},memory=this.store.read(scope,ref.id,'normal',ref.revision,'expression'),proof=this.tasks.memoryProof(scope,ref.id,ref.revision,ref.version,ref.contentHash);
+    if(!memory||memory.version!==ref.version||memory.contentHash!==ref.contentHash||!proof||!this.allowed(agentId,proof,target,this.expressionPolicy(agentId,policy,target)))return null;
+    return ref.range?Array.from(memory.content).slice(ref.range.start,ref.range.end).join(''):memory.content;
   }
   private question(agentId:string,inboundId:string,knownRef?:string){
     const message=this.ctx.dafeiyu.journal.get(inboundId),scope={agentId,route:message.route};

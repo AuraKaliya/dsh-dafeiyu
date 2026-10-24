@@ -13,4 +13,5 @@ export const MessageTaskSourceSchema=z.strictObject({schemaVersion:z.literal(1),
 export type MessageTaskSource=z.infer<typeof MessageTaskSourceSchema>;
 /** Program-owned registration, never model parameters. The classifier sees only the real main body. */
 export interface MessageTaskBinding {id:string;pluginId:string;channelExtensionId:string;channel:string;account:string;ownerId:string;policyId:string;version:string;
+  expressionPolicy?:{id:string;version:number};
   classify(message:InboundMessage):{kind:'submit'|'cancel'|'revise'|'resolve'|'none';text:string};active():boolean;}

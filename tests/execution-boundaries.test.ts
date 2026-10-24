@@ -29,8 +29,8 @@ test('a native timeline action only observes its current task and ordinary timel
 });
 
 test('v3 channel-only extensions use the existing reply ledger and revoke their ingress handle',async()=>{
-  const h=await executionHarness(await root());const sent:string[]=[];
-  try{const spec:ExtensionV3={protocolVersion:3,id:'v3-channel',version:'1',agentId:'dafeiyu',channels:[{channel:'fixture-v3',account:'local',deliver:async reply=>{sent.push(reply.text);return {status:'sent',receiptId:'fixture-receipt'};}}]};
+  const h=await executionHarness(await root(),undefined,undefined,true,{sourceTracking:true});const sent:string[]=[];
+  try{const spec:ExtensionV3={protocolVersion:3,id:'v3-channel',version:'1',agentId:'dafeiyu',channels:[{channel:'fixture-v3',account:'local',deliveryValidation:'per-segment',deliver:async(reply,_signal,authority)=>{assert.equal(typeof authority,'function');authority!();sent.push(reply.text);return {status:'sent',receiptId:'fixture-receipt'};}}]};
     const handle=h.core.registerExtensionV3(spec);assert.ok(handle.ingest);const input=MessageSchema.parse({id:'one',occurredAt:new Date().toISOString(),conversation:{channel:'fixture-v3',account:'local',kind:'local',id:'room'},sender:{id:'fictional-user',displayName:'虚构用户'},text:'执行普通聊天'});
     const accepted=handle.ingest(input);await h.core.whenIdle();assert.equal(h.core.journal.get(accepted.id).state,'delivered');assert.equal(sent.length,1);assert.equal(h.core.getStatus().extensions.filter(id=>id==='v3-channel').length,1);
     assert.throws(()=>handle.ingest!({...input,id:'two',conversation:{...input.conversation,account:'foreign'}}),/SCOPE_DENIED/);

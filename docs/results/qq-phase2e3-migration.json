@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "runId": "c6059e3a-413e-44b0-b196-cffbd7bf14f8",
+  "startedAt": "2026-10-24T21:11:18.617Z",
+  "finishedAt": "2026-10-24T21:11:51.304Z",
+  "stages": [
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "durationMs": 2013
+    },
+    {
+      "name": "test-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 1957
+    },
+    {
+      "name": "tooling-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 582
+    },
+    {
+      "name": "tests",
+      "code": 1,
+      "signal": null,
+      "durationMs": 27803
+    }
+  ],
+  "summary": {
+    "success": false,
+    "counts": {
+      "tests": 92,
+      "failed": 2,
+      "passed": 90,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 92,
+      "suites": 0
+    },
+    "durationMs": 27733.2613,
+    "failures": [
+      {
+        "name": "a plugin copying a valid public observation cannot mark its other output fields as public evidence",
+        "file": "qq-task-expression.test.js"
+      },
+      {
+        "name": "DSH scene contexts stay isolated and task switching preserves unrelated plugin regions",
+        "file": "task-workspace.test.js"
+      }
+    ]
+  },
+  "reason": "TEST_STAGE_FAILED",
+  "cleanup": {
+    "removed": [
+      "fadf682f-9dfd-4098-801c-0d1108354c34"
+    ],
+    "retained": [
+      {
+        "id": "229d73b0-3d49-423a-86ec-ac8a3d616da5",
+        "bytes": 14062031
+      },
+      {
+        "id": "7a5d6376-06fe-4735-b554-bb045cc4b58b",
+        "bytes": 38061140
+      },
+      {
+        "id": "c6059e3a-413e-44b0-b196-cffbd7bf14f8",
+        "bytes": 76360147
+      }
+    ],
+    "blocked": []
+  },
+  "freeBytes": 217906216960,
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "testScope": "related-development-tests",
+  "fullRegression": false,
+  "testFiles": [
+    "qq-task-expression",
+    "storage-migration",
+    "memory-boundary",
+    "task-memory",
+    "task-workspace",
+    "host-runtime"
+  ]
+}

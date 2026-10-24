@@ -64,6 +64,8 @@ export class MemoryService extends Service {
   private readonly gate=new ServiceGate();
   private closing:Promise<void>|undefined;
   private unbindRepository:(()=>void)|undefined;
+  private unbindNativeExpression:(()=>void)|undefined;
+  private nativeExpression:import('./native-expression.js').NativeExpression|undefined;
   readonly persona:PersonaService|undefined;
   private readonly capabilityService:CapabilityObservationService|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
@@ -140,6 +142,7 @@ export class MemoryService extends Service {
       ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
     if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction);
     if(this.config.lifecycleMode==='managed')this.capabilityService=new CapabilityObservationService(ctx,this.store,()=>!this.closed&&this.gate.active,sourcePolicy,()=>{this.flush();this.persona?.flush();});
+    if(this.config.lifecycleMode==='managed'){this.nativeExpression=this.store.nativeExpression(ctx,this.expression,()=>!this.closed&&this.gate.active,()=>{this.flush();this.persona?.flush();});this.unbindNativeExpression=ctx.dafeiyu.bindNativeExpression(this.nativeExpression);}
     ctx.effect(()=>ctx.dafeiyu.onReady(()=>{if(this.gate.active)this.analysis?.start();}),'memory.core-ready');
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
@@ -154,12 +157,12 @@ export class MemoryService extends Service {
   activate():void {if(this.closed)throw new Error('Memory capability is unregistered');this.gate.activate();this.analysis?.activate();}
   quiesce():void {this.gate.quiesce();this.analysis?.quiesce();}
   stopBackground():void {this.analysis?.quiesce();}
-  cancelRunning():void {this.analysis?.cancelRunning();}
-  async whenIdle():Promise<void>{await this.analysis?.whenIdle();}
+  cancelRunning():void {this.analysis?.cancelRunning();this.nativeExpression?.cancel();}
+  async whenIdle():Promise<void>{await this.analysis?.whenIdle();await this.nativeExpression?.whenIdle();}
   close():Promise<void>{
     if(this.closing)return this.closing;
-    this.quiesce();this.closed=true;this.capabilityService?.close();this.persona?.close();this.handle.dispose();this.unbindRepository?.();
-    this.closing=(async()=>{try{await this.expression.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
+    this.quiesce();this.closed=true;this.unbindNativeExpression?.();this.capabilityService?.close();this.persona?.close();this.handle.dispose();this.unbindRepository?.();
+    this.closing=(async()=>{try{await this.expression.close();await this.nativeExpression?.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
     return this.closing;
   }
   private scope(context: ActionContext): OperationScope {

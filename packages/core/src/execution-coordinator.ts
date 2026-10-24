@@ -15,8 +15,8 @@ import type { NativeAction } from './execution-frame.js';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
 import { SourceDependencySchema } from '@dafeiyu/contracts';
-import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskSourceSchema,MessageTaskControlSchema } from '@dafeiyu/contracts';
-import type { MessageTaskBinding,MessageTaskSource } from '@dafeiyu/contracts';
+import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskSourceSchema,MessageTaskControlSchema,PersonaSourceRefSchema,TaskResultAnchorSchema } from '@dafeiyu/contracts';
+import type { MessageTaskBinding,MessageTaskSource,NativeExpressionAccess,PersonaSourceRef } from '@dafeiyu/contracts';
 import { ExecutionEvidence } from './execution-evidence.js';
 import type { NativeContext } from './execution-evidence.js';
 
@@ -87,6 +87,38 @@ export class ExecutionCoordinator {
     if(!run)throw new Error('SCOPE_DENIED');return run;}
   private messageIntent(run:StoredRun){const task=this.repository().readState(this.d.agentId,run.definition.taskId!);if(task.epoch!==run.definition.intentVersion)return null;
     return this.d.memory()?.intent(this.d.personas.access(run,this.inputsFor(run),this.d.signal,()=>{if(this.repository().readState(this.d.agentId,task.id).epoch!==task.epoch)throw new Error('TASK_NOT_ACTIVE');}))??null;}
+  async nativeResultAccess(id:string):Promise<NativeExpressionAccess>{const run=this.d.store.get(z.uuid().parse(id));if(run.definition.scope.kind!=='task'||run.state!=='completed'||!run.result)throw new Error('RESULT_UNAVAILABLE');
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;if(!source)throw new Error('MESSAGE_REQUIRED');this.validateMessageSource(source);
+    const inputs=this.inputsFor(run),inputHash=runtimeHash(inputs),task=this.repository().readState(this.d.agentId,run.definition.taskId!),proof=z.array(SourceDependencySchema).parse(this.d.store.readInput(run.id,'result-sources'));
+    const structuralGuard=()=>{this.d.signal.throwIfAborted();this.validateMessageSource(source);const current=this.repository().readState(this.d.agentId,task.id);
+      if(current.status!=='active'||current.epoch!==run.definition.intentVersion||runtimeHash(this.inputsFor(run))!==inputHash)throw new Error('SOURCE_STALE');};structuralGuard();
+    const access=this.d.personas.access(run,inputs,this.d.signal,structuralGuard),evidence=this.evidenceFor(run,access);
+    const guard=()=>{structuralGuard();if(!evidence.validate(proof)||this.d.memory()?.intent(access).blocking)throw new Error('SOURCE_STALE');const persona=this.d.store.personaBinding(run.id);if(persona.kind==='bound')this.d.personas.validateStored(run,persona.manifest,inputs,this.d.signal,structuralGuard);};guard();
+    const output=await this.d.runtime.readResult(run.result);guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=false;
+    const add=(ref:PersonaSourceRef)=>{const key=runtimeHash(ref);candidates.set(key,{source:ref,view:views.get(key)??null});};
+    const visit=(dependencies:readonly SourceDependency[])=>{for(const dependency of dependencies){const key=runtimeHash(dependency);if(visited.has(key))continue;if(visited.size>=4096)throw new Error('CAPACITY_EXCEEDED');visited.add(key);
+      if(dependency.kind==='execution-source')add(dependency.ref);
+      else if(dependency.kind==='execution-input'){const body=z.object({sources:z.array(PersonaSourceRefSchema),continuity:z.object({id:z.uuid()}).nullable()}).parse(this.d.store.readInput(dependency.runId,'native-program'));body.sources.forEach(add);
+        if(body.continuity){const checkpoint=this.d.memory()?.checkpoint(access,body.continuity.id);if(!checkpoint)opaque=true;else checkpoint.dependencies.forEach(add);}}
+      else if(dependency.kind==='execution-operation'){
+        const operation=this.d.store.operation(dependency.operationId),outcome=operation.outcome;visit(z.array(SourceDependencySchema).parse(this.d.store.readInput(operation.runId,`operation-inputs:${operation.id}`)));
+        const page=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
+        if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
+          if(operation.plugin!=='qq-capabilities'||operation.action!=='qq_browse')opaque=true;}
+        else if(!(operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select')&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action)))opaque=true;
+        if(!outcome||outcome.effects==='unknown'||outcome.status==='unknown')opaque=true;
+      }else if(dependency.kind==='context'){
+        if(dependency.id==='persona:availability'){opaque=true;continue;}
+        const body=z.object({item:z.object({text:z.string()})}).safeParse(this.d.store.findContext(`context:${runtimeHash(dependency)}`));let selected:ReturnType<typeof PersonaSourceRefSchema.safeParse>|undefined;
+        if(body.success){try{selected=PersonaSourceRefSchema.safeParse(z.object({source:z.unknown()}).parse(JSON.parse(body.data.item.text)).source);}catch{/* Unsupported context cannot grant expression. */}}
+        if(dependency.owner==='memory'&&dependency.region==='execution'&&selected?.success)add(selected.data);else opaque=true;
+      }else opaque=true;
+    }};visit(proof);for(const [key,candidate] of candidates)candidate.view=views.get(key)??candidate.view;
+    if(candidates.size>64)throw new Error('CAPACITY_EXCEEDED');
+    const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString()});
+    const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
+    return {execution:access,anchor,question:task.goal,output,candidates:[...candidates.values()],opaqueInfluence:opaque,...(expressionPolicy?{expressionPolicy}:{}),guard};
+  }
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run);return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:task.title,goal:task.goal,motivation:this.motivation(run).kind,
       resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}

@@ -102,12 +102,12 @@ export class QqChannel extends Service {
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
       this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
-        channels: [{ channel: 'qq', account: this.config.botId,
+        channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',
           description: '当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority) }] });
       if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing)});
-      if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,naturalNames:this.config.naturalNames});
+      if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,naturalNames:this.config.naturalNames,...(this.config.tasks.expressionPolicy?{expressionPolicy:this.config.tasks.expressionPolicy}:{})});
     } catch (error) {this.tasks?.close();this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'qq.close');
   }

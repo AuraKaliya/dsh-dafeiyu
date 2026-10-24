@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "runId": "10ac6f2a-e727-448e-aa01-d518799b255a",
+  "startedAt": "2026-10-24T21:15:02.284Z",
+  "finishedAt": "2026-10-24T21:15:18.846Z",
+  "stages": [
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "durationMs": 3226
+    },
+    {
+      "name": "test-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 1981
+    },
+    {
+      "name": "tooling-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 580
+    },
+    {
+      "name": "tests",
+      "code": 0,
+      "signal": null,
+      "durationMs": 10550
+    }
+  ],
+  "summary": {
+    "success": true,
+    "counts": {
+      "tests": 45,
+      "failed": 0,
+      "passed": 45,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 45,
+      "suites": 0
+    },
+    "durationMs": 10471.6513,
+    "failures": []
+  },
+  "reason": null,
+  "cleanup": {
+    "removed": [
+      "10ac6f2a-e727-448e-aa01-d518799b255a"
+    ],
+    "retained": [
+      {
+        "id": "229d73b0-3d49-423a-86ec-ac8a3d616da5",
+        "bytes": 14062031
+      },
+      {
+        "id": "28ef2a27-cf03-413d-8669-b697aa6c910b",
+        "bytes": 12638232
+      },
+      {
+        "id": "c6059e3a-413e-44b0-b196-cffbd7bf14f8",
+        "bytes": 76360147
+      }
+    ],
+    "blocked": []
+  },
+  "freeBytes": 217939259392,
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "testScope": "related-development-tests",
+  "fullRegression": false,
+  "testFiles": [
+    "qq-task-expression",
+    "task-workspace",
+    "qq-delivery",
+    "execution-boundaries"
+  ]
+}

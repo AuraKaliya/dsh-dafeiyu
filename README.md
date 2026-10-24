@@ -4,7 +4,7 @@
 
 第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，1F结束时529项回归通过。用户于2026-10-25决定将真实模型与整体验收延后至整体开发完成；[162次场景样本已保留](docs/phase1g-deferred-samples.md)，1G尚未通过，继续阶段2开发并保留本地程序回归。1A音画探针单独记录，现有QQ和服务器未切换。
 
-阶段2已完成[2A存储迁移基础](docs/qq-phase2a-storage.md)、[2B自然称呼／群同步](docs/qq-phase2b-triggers-groups.md)、[2C浏览／观察／选择性记忆](docs/qq-phase2c3-integration.md)和[2D可靠分段交付](docs/qq-phase2d3-host.md)的本地开发。当前QQ库为v4、memory为v9，已有数据需显式备份升级；浏览能力默认关闭，样例明确开启，旧配置保留原触发方式。2D按三步分别完成19／87／30项相关检查（有重叠），2E新任务流程和2F整体装配继续推进，真实模型／QQ验收延期。
+阶段2已完成[2A存储迁移基础](docs/qq-phase2a-storage.md)、[2B自然称呼／群同步](docs/qq-phase2b-triggers-groups.md)、[2C浏览／观察／选择性记忆](docs/qq-phase2c3-integration.md)和[2D可靠分段交付](docs/qq-phase2d3-host.md)的本地开发。当前QQ库为v4、memory为v10，已有数据需显式备份升级；浏览能力默认关闭，样例明确开启，旧配置保留原触发方式。2D按三步分别完成19／87／30项相关检查（有重叠），2E新任务流程和2F整体装配继续推进，真实模型／QQ验收延期。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 

@@ -21,6 +21,7 @@ import { TaskCoordinator,bindTaskProvider,bindTaskMemoryProvider,bindExpressionP
 import { TaskDelivery } from './task-delivery.js';
 import { prepareReplySources } from './reply-sources.js';
 import type { MessageTaskBinding } from '@dafeiyu/contracts';
+import type { NativeExpressionPort } from '@dafeiyu/contracts';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
 import { CapabilityRegistryV3 } from './registry-v3.js';
@@ -61,6 +62,11 @@ declare module '@deepseek-ai/cordis' { interface Context { dafeiyu: DafeiyuServi
 
 /** Owns a logical persona and its independent conversations; extensions own platform-specific work. */
 export class DafeiyuService extends Service {
+  private nativeExpressionPort:NativeExpressionPort|undefined;
+  bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
+  async prepareMessageTaskExpression(runId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const port=this.nativeExpressionPort,access=await this.executions.nativeResultAccess(runId);if(port!==this.nativeExpressionPort)throw new Error('DEPENDENCY_UNAVAILABLE');return port.prepare(access);}
+  async openMessageTaskExpression(runId:string,packetId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.open(await this.executions.nativeResultAccess(runId),packetId);}
+  async withdrawMessageTaskExpression(runId:string,packetId:string,version:number){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.withdraw(await this.executions.nativeResultAccess(runId),packetId,version);}
   readonly journal: Journal;
   private readonly config: z.output<typeof ConfigSchema>;
   private readonly runtime: DshRuntime;
@@ -151,7 +157,7 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   bindMessageTasks(binding:MessageTaskBinding){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const channel=this.extensions.get(binding.channelExtensionId);
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
@@ -241,7 +247,7 @@ export class DafeiyuService extends Service {
     try{
       if(extension.channels?.length){
         const channels=extension.channels.map(channel=>({channel:channel.channel,account:channel.account,deliver:channel.deliver.bind(channel),
-          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{})}));
+          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{})}));
         bridge={active:true,controller:new AbortController(),extension:{apiVersion:2,id:extension.id,version:extension.version,agentId:extension.agentId,channels,
           ...(extension.lifecycleReady?{lifecycleReady:extension.lifecycleReady.bind(extension)}:{})}};
         this.extensions.set(extension.id,bridge);
@@ -349,6 +355,7 @@ export class DafeiyuService extends Service {
     const actionNames = new Set([...existing.flatMap(ext => ext.actions ?? []).map(action => action.name),...this.registryV3.actionNames()]);
     for (const c of extension.channels ?? []) {
       if(c.taskDelivery!==undefined&&c.taskDelivery!=='simulated')throw new Error('Task delivery requires simulated capability');
+      if(c.deliveryValidation!==undefined&&c.deliveryValidation!=='per-segment')throw new Error('Invalid delivery validation contract');
       const key = JSON.stringify([c.channel, c.account]);
       if (!c.channel || !c.account || channelKeys.has(key)) throw new Error('Duplicate or invalid channel/account');
       channelKeys.add(key);
@@ -371,6 +378,7 @@ export class DafeiyuService extends Service {
       ...(extension.lifecycleReady?{lifecycleReady:extension.lifecycleReady.bind(extension)}:{}),
       channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
         ...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),
+        ...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),
         ...(channel.description ? { description: channel.description } : {}),
         deliver: channel.deliver.bind(channel) })),
       actions: (extension.actions ?? []).map(action => ({ name: action.name, description: action.description,
@@ -577,7 +585,7 @@ export class DafeiyuService extends Service {
     let result,invoked=false;let release=()=>{};
     try {
       const signal=AbortSignal.any([this.controller.signal,source.controller.signal,AbortSignal.timeout(this.config.deliveryTimeoutMs)]);
-      const evidence=await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal);release=evidence.release;
+      const evidence=channel.deliveryValidation==='per-segment'?await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal):{guard:()=>{},release:()=>{}};release=evidence.release;
       const authority=()=>{if(!source.active||this.fatal||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
         if(runId&&this.runStore)this.validateRunPersona(this.runStore.get(runId));
         evidence.guard();};

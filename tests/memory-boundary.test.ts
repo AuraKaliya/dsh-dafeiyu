@@ -19,7 +19,7 @@ async function path(){return join(await mkdtemp(join(tmpdir(),'dafeiyu-boundary-
 test('v1 migration adds conservative five-axis boundaries without changing any legacy row or hash',async t=>{
   const file=await path(),old=legacyMemory(file),before=legacySnapshot(old.db);old.db.close();
   const store=new MemoryStore(file);t.after(()=>store.close());const db=new DatabaseSync(file);t.after(()=>db.close());
-assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,9);
+assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,10);
   assert.equal(db.prepare('SELECT count(*) AS n FROM memory_boundaries').get()?.n,6);
   const item=store.read(old.scope,old.active.id)!;
   assert.deepEqual(item.boundary.owner,{kind:'agent',agentId:'fish'});assert.equal(item.boundary.sourceScene.kind,'conversation');

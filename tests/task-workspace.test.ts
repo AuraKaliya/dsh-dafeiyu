@@ -222,7 +222,7 @@ test('schema v3 upgrade preserves old memory boundaries, observation sources and
     db.exec('PRAGMA user_version=3');
   }finally{db.close();}
   const next=await observationFixture(root);try{assert.deepEqual(next.store.read(next.scope,id,'deleted'),before);assert.equal(next.store.read(next.scope,id),null);
-assert.equal(before.boundary.task.kind,'unassigned');const verify=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(verify.prepare('PRAGMA user_version').get()?.user_version,9);assert.equal(verify.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{verify.close();}
+assert.equal(before.boundary.task.kind,'unassigned');const verify=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(verify.prepare('PRAGMA user_version').get()?.user_version,10);assert.equal(verify.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{verify.close();}
   }finally{await next.close();}
 });
 

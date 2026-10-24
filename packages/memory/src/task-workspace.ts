@@ -28,7 +28,7 @@ const privateRoute=(agentId:string,taskId:string)=>conversationKey(agentId,{chan
 export function migrateTaskWorkspaces(db:DatabaseSync):void {
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
   const tables=['task_workspaces','task_revisions','task_members','task_selections','task_links','task_jobs','task_slots','task_requests','task_observations'];
-if(version===4||version===5||version===6||version===7||version===8||version===9){for(const table of tables)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+if(version===4||version===5||version===6||version===7||version===8||version===9||version===10){for(const table of tables)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==3)throw new Error('Unsupported task workspace schema');
   db.exec(`CREATE TABLE task_workspaces(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,version INTEGER NOT NULL,epoch INTEGER NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL);
     CREATE TABLE task_revisions(task_id TEXT NOT NULL REFERENCES task_workspaces(id),version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(task_id,version));

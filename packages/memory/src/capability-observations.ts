@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { CapabilityObservationSchema,CapabilitySelectionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema,SourceDependencySchema,PersonaSourceRefSchema,redactJson,conversationKey } from '@dafeiyu/contracts';
-import type { CapabilityObservationAccess,PersonaAccess,PersonaSourceRef,TimelineScope,MemoryAccessPurpose } from '@dafeiyu/contracts';
+import type { CapabilityObservationAccess,PersonaAccess,PersonaSourceRef,TimelineScope,MemoryAccessPurpose,Conversation } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import { conservativeBoundary } from './boundary.js';
 import { personaScope } from './persona-digest.js';
@@ -19,7 +19,7 @@ type RecordBody=z.infer<typeof recordSchema>;
 type Validator=(scope:TimelineScope,body:RecordBody,access:PersonaAccess|undefined)=>boolean;
 export function migrateCapabilityObservations(db:DatabaseSync):void {
   const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===9){for(const table of ['capability_observations','capability_selections'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===9||version===10){for(const table of ['capability_observations','capability_selections'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==8)throw new Error('Unsupported capability observation database');
   db.exec(`CREATE TABLE capability_observations(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,content_hash TEXT NOT NULL,UNIQUE(agent_id,scope_key,producer,request_id));
     CREATE TABLE capability_selections(agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,scope_key,producer,request_id));
@@ -67,6 +67,16 @@ export class CapabilityObservations {
   }
   material(access:PersonaAccess,ref:PersonaSourceRef){return this.withAccess(access,()=>{const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||!this.valid(scope,ref))return null;
     return {text:JSON.stringify(row.body),dependencies:row.body.parent?[row.body.parent]:[],rootSources:row.body.proof.roots};});}
+  expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string):{text:string;fence:string}|null{return this.withAccess(access,()=>{
+    const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||conversationKey(scope.agentId,row.body.proof.scene)!==conversationKey(scope.agentId,target)
+      ||!this.valid(scope,ref,textHash(view))||this.suppressed(scope,row.body.proof)||this.suppressed({agentId:scope.agentId,route:conversationKey(scope.agentId,target)},row.body.proof))return null;
+    const versions=new Map<string,number>();for(const route of new Set([scope.route,conversationKey(scope.agentId,target)])){
+      for(const memory of this.db.prepare('SELECT i.id,i.version,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,route)){
+        for(const source of revisionSchema.parse(JSON.parse(String(memory.body))).sources){if(source.kind!=='capability')continue;const old=this.row({agentId:scope.agentId,route},source.ref.slice('dafeiyu:capability:'.length));
+          if(old?.body.proof.provider===row.body.proof.provider&&old.body.proof.roots.some(root=>row.body.proof.roots.includes(root)))versions.set(String(memory.id),Number(memory.version));}
+      }
+    }return {text:view,fence:digest([...versions].sort(([a],[b])=>a.localeCompare(b)))};
+  });}
   memoryMaterial(access:PersonaAccess,ref:PersonaSourceRef){if(ref.kind!=='memory'||ref.scopeKey!==personaScope(access.view.scope)||ref.authorization||ref.range||ref.selectionId)return null;
     return this.withAccess(access,()=>{const scope=this.scope(access),item=this.memory.read(scope,ref.id,'normal',ref.revision,access.view.scope.kind==='task'?'internal':'expression');
       if(!item||item.version!==ref.version||item.contentHash!==ref.contentHash)return null;

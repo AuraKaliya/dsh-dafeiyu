@@ -66,7 +66,7 @@ start保持运行，开放已配置渠道并处理已受理队列。另一终端
 
 2B已加入可配置自然称呼和群列表同步。旧配置默认 `naturalNames:[]`、`groupSync.enabled:false`，保留原at／引用和静态群范围；样例启用“大肥鱼”“蓝色大肥鱼”，只识别正文直接称呼，引用／昵称不作为称呼或主人授权。群同步默认每30秒刷新，allowlist模式取配置群与已加入群交集；joined模式必须明确开启，才能开放所有实际已加入群。失败可在120秒内沿用本进程最后成功集合，过期拒绝群操作；重启后需重新成功同步。Host状态保存同步状态、错误、有效群数量与上次成功时间；失败显示degraded，仍可提供已授权主人私聊。图片／语音／文件和新任务交付仍待后续步骤。
 
-当前QQ目标库为v4，memory为v9。旧QQ v0—v3／memory v1—v8库普通启动会提示迁移，先按第6节流程备份升级；不能用init重建旧目录，也不能让旧二进制写升级后的库。群快照只记录账号绑定的成员范围，浏览短期快照也不等于长期记忆。
+当前QQ目标库为v4，memory为v10。旧QQ v0—v3／memory v1—v9库普通启动会提示迁移，先按第6节流程备份升级；不能用init重建旧目录，也不能让旧二进制写升级后的库。群快照只记录账号绑定的成员范围，浏览短期快照也不等于长期记忆。
 
 2C浏览能力需显式开启 `channel-qq.config.capabilities.enabled:true`，装配memory及来源追踪（`memory.config.sourceTracking:true`，或已有compaction），并为 `conversation` 策略配置producer `channel-qq`、三个动作 `qq_groups`／`qq_browse`／`qq_observe_select` 和 `allowLocalWrite:true`。缺项在连接前拒绝。样例已包含这些配置，未开启时沿用原QQ行为。来源追踪自身不会增加辅助模型调用。
 
@@ -104,7 +104,7 @@ node scripts/dafeiyu-host.mjs migrate verify --config path/to/host.json --plan .
 
 命令会核对选定profile、实际路径、配置哈希和固定迁移计划。计划文件使用独占创建，不覆盖同名已有计划。活动Host占用的数据不能迁移；更换配置／路径后需要重新核对计划，不能套用另一profile的清单。
 
-目标为journal v2、memory v9、runtime v2、QQ v4；旧D3及辅助权威库保持既有版本。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。
+目标为journal v2、memory v10、runtime v2、QQ v4；旧D3及辅助权威库保持既有版本。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。
 
 迁移中断保持准入关闭；新版本已产生新数据后，不用旧备份覆盖新增记忆。原`scripts/migrate-profile.mjs`仍可用，新入口复用其底层迁移实现。
 

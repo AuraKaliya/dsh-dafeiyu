@@ -2,7 +2,7 @@
 
 版本：1.0；日期：2026-10-25；基线：`384cffd`（功能基线 `fda28fd`）。这是统一架构中的阶段2，不是早期 `phase-2-plan.md` 的接入试验。依据总方案、人格成长方案以及用户将最终验收延后到整体开发完成的决定编写。
 
-实施补充：方案提交后已完成[2A存储基础](qq-phase2a-storage.md)、[2B自然称呼与群同步](qq-phase2b-triggers-groups.md)、[2C浏览／观察／选择记忆](qq-phase2c3-integration.md)和[2D可靠分段](qq-phase2d3-host.md)的本地开发；当前QQ库目标为v4、memory为v9，继续2E—2F。下文保留设计基线与次序，实际完成情况以逐步记录为准。开发检查按本次改动选择相关范围；发布／部署时再全量回归。
+实施补充：方案提交后已完成[2A存储基础](qq-phase2a-storage.md)、[2B自然称呼与群同步](qq-phase2b-triggers-groups.md)、[2C浏览／观察／选择记忆](qq-phase2c3-integration.md)和[2D可靠分段](qq-phase2d3-host.md)的本地开发；当前QQ库目标为v4、memory为v10，继续2E—2F。下文保留设计基线与次序，实际完成情况以逐步记录为准。开发检查按本次改动选择相关范围；发布／部署时再全量回归。
 
 ## 1. 目标与范围
 

@@ -84,6 +84,6 @@ try{
     }
     await host.close();assert.equal(owners(coordination).length,0);
   }
-const db=new DatabaseSync(join(prepared.paths.memory,'memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,9);}finally{db.close();}
+const db=new DatabaseSync(join(prepared.paths.memory,'memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,10);}finally{db.close();}
   console.log(JSON.stringify({scenario,passed:true,phases,modelCalls,platformCalls,realModel:false,realPlatform:false,serverAccess:false}));
 }finally{await host?.close();if(wss){for(const socket of wss.clients)socket.terminate();await new Promise<void>(resolve=>wss!.close(()=>resolve()));}if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));}

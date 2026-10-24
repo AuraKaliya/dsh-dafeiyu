@@ -23,6 +23,7 @@ export * from './persona.js';
 export * from './execution-memory.js';
 export * from './resource-observation.js';
 export * from './message-task.js';
+export * from './native-expression.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
@@ -76,6 +77,8 @@ export interface ChannelCapability {
   /** Actual transport capabilities/limits, independent of the model's own modalities. */
   readonly description?: string;
   readonly taskDelivery?:'simulated';
+  /** Opt-in for persistent reply source rebinding and checks before every transport part. */
+  readonly deliveryValidation?:'per-segment';
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
   deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
 }

@@ -11,6 +11,8 @@ export function dropExecutionFixtureSchema(db:DatabaseSync):void {
   db.prepare('DELETE FROM memory_schema_migrations WHERE version=7').run();
 }
 export function dropCapabilityFixtureSchema(db:DatabaseSync):void {
+  db.exec('DROP TABLE IF EXISTS native_expression_packets');
+  db.prepare('DELETE FROM memory_schema_migrations WHERE version=10').run();
   db.exec('DROP TABLE IF EXISTS capability_selections;DROP TABLE IF EXISTS capability_observations');
   db.prepare('DELETE FROM memory_schema_migrations WHERE version=9').run();
 }

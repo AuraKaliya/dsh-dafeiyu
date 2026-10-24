@@ -26,7 +26,7 @@ export function outcomes(request:GenerateOptions){return request.messages.flatMa
 const browseData=z.object({snapshotId:z.uuid(),nextCursor:z.uuid().nullable(),page:z.record(z.string(),z.json()).and(z.object({messages:z.array(z.object({id:z.string(),text:z.string(),occurredAt:z.string().nullable(),unsupported:z.array(z.string())})),limitations:z.array(z.string())}))});
 export function lastPage(request:GenerateOptions){const pages=outcomes(request).flatMap(outcome=>{const result=browseData.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(pages.length,'model must actually see a QQ page');return pages.at(-1)!;}
 
-export async function qqCapabilityFixture({tasks=false}:{tasks?:boolean}={}){
+export async function qqCapabilityFixture({tasks=false,extraTaskActions=[]}:{tasks?:boolean;extraTaskActions?:string[]}={}){
   const root=await mkdtemp(join(testTempDir(),'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
     afterSend:async(_count:number):Promise<void>=>{},beforeVerify:async():Promise<void>=>{}};
@@ -48,7 +48,7 @@ export async function qqCapabilityFixture({tasks=false}:{tasks?:boolean}={}){
   h.core.configureExecution({profileId:'qq-capability-fixture',createStore:true,policies:[
     {id:'conversation',producers:['channel-qq'],actions:[...QQ.QQ_ACTIONS,...(tasks?QQ.QQ_TASK_ACTIONS:[])],allowLocalWrite:true},
     {id:'native',producers:['fixture-native'],actions:[...QQ.QQ_ACTIONS],allowLocalWrite:true,resources:[scene]},
-    ...(tasks?[{id:'qq-task',producers:['qq-tasks'],actions:[...QQ.QQ_ACTIONS,'dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true,resources:[{...scene,id:otherGroup}]}]:[]),
+    ...(tasks?[{id:'qq-task',producers:['qq-tasks'],actions:[...QQ.QQ_ACTIONS,'dafeiyu_task_intent','dafeiyu_task_object',...extraTaskActions],allowLocalWrite:true,resources:[{...scene,id:otherGroup}]}]:[]),
   ]});
   const config:QQ.Config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group,otherGroup],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,
     tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks},naturalNames:['大肥鱼']};
