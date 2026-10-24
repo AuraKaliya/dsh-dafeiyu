@@ -1,0 +1,1467 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "phase1g-persona-v1",
+  "suiteSha256": "1598c1d0507495005e6762158952f38ea7dfaaa3a5bf2cc4fb40a8346972711a",
+  "foundationFile": "profiles/persona.foundation.md",
+  "foundationRuntimeHash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a",
+  "cases": [
+    {
+      "id": "B04-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-001"
+    },
+    {
+      "id": "H02-full-2",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "full",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-002"
+    },
+    {
+      "id": "B04-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-003"
+    },
+    {
+      "id": "B06-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-004"
+    },
+    {
+      "id": "B11-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-005"
+    },
+    {
+      "id": "H03-compressed-2",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "compressed",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-006"
+    },
+    {
+      "id": "B10-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-007"
+    },
+    {
+      "id": "H05-compressed-1",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "compressed",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-008"
+    },
+    {
+      "id": "B07-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-009"
+    },
+    {
+      "id": "B02-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-010"
+    },
+    {
+      "id": "H01-compressed-restarted-2",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "compressed-restarted",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-011"
+    },
+    {
+      "id": "B05-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-012"
+    },
+    {
+      "id": "B06-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-013"
+    },
+    {
+      "id": "B09-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-014"
+    },
+    {
+      "id": "B12-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-015"
+    },
+    {
+      "id": "H05-compressed-2",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "compressed",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-016"
+    },
+    {
+      "id": "B02-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-017"
+    },
+    {
+      "id": "B03-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-018"
+    },
+    {
+      "id": "B10-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-019"
+    },
+    {
+      "id": "B01-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-020"
+    },
+    {
+      "id": "B11-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-021"
+    },
+    {
+      "id": "B12-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-022"
+    },
+    {
+      "id": "B10-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-023"
+    },
+    {
+      "id": "B12-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-024"
+    },
+    {
+      "id": "B03-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-025"
+    },
+    {
+      "id": "B03-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-026"
+    },
+    {
+      "id": "B02-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-027"
+    },
+    {
+      "id": "B09-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-028"
+    },
+    {
+      "id": "B10-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-029"
+    },
+    {
+      "id": "H04-compressed-2",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "compressed",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-030"
+    },
+    {
+      "id": "B04-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-031"
+    },
+    {
+      "id": "H05-compressed-restarted-3",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "compressed-restarted",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-032"
+    },
+    {
+      "id": "B04-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-033"
+    },
+    {
+      "id": "B07-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-034"
+    },
+    {
+      "id": "B03-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-035"
+    },
+    {
+      "id": "B06-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-036"
+    },
+    {
+      "id": "H02-compressed-1",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "compressed",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-037"
+    },
+    {
+      "id": "B05-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-038"
+    },
+    {
+      "id": "B01-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-039"
+    },
+    {
+      "id": "B07-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-040"
+    },
+    {
+      "id": "B08-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-041"
+    },
+    {
+      "id": "B11-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-042"
+    },
+    {
+      "id": "B01-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-043"
+    },
+    {
+      "id": "H04-full-3",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "full",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-044"
+    },
+    {
+      "id": "H03-full-2",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "full",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-045"
+    },
+    {
+      "id": "H04-compressed-restarted-3",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "compressed-restarted",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-046"
+    },
+    {
+      "id": "H02-compressed-3",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "compressed",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-047"
+    },
+    {
+      "id": "B04-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-048"
+    },
+    {
+      "id": "H04-compressed-restarted-1",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "compressed-restarted",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-049"
+    },
+    {
+      "id": "H02-compressed-restarted-1",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "compressed-restarted",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-050"
+    },
+    {
+      "id": "B01-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-051"
+    },
+    {
+      "id": "B02-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-052"
+    },
+    {
+      "id": "B11-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-053"
+    },
+    {
+      "id": "B09-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-054"
+    },
+    {
+      "id": "B11-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-055"
+    },
+    {
+      "id": "B05-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-056"
+    },
+    {
+      "id": "B05-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-057"
+    },
+    {
+      "id": "B05-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-058"
+    },
+    {
+      "id": "B04-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-059"
+    },
+    {
+      "id": "B12-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-060"
+    },
+    {
+      "id": "H06-compressed-2",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "compressed",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-061"
+    },
+    {
+      "id": "H03-compressed-restarted-3",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "compressed-restarted",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-062"
+    },
+    {
+      "id": "H06-full-3",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "full",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-063"
+    },
+    {
+      "id": "B08-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-064"
+    },
+    {
+      "id": "B02-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-065"
+    },
+    {
+      "id": "H04-full-1",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "full",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-066"
+    },
+    {
+      "id": "B02-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-067"
+    },
+    {
+      "id": "H01-full-1",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "full",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-068"
+    },
+    {
+      "id": "H03-compressed-3",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "compressed",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-069"
+    },
+    {
+      "id": "H02-compressed-restarted-2",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "compressed-restarted",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-070"
+    },
+    {
+      "id": "H02-compressed-restarted-3",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "compressed-restarted",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-071"
+    },
+    {
+      "id": "B05-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-072"
+    },
+    {
+      "id": "B01-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-073"
+    },
+    {
+      "id": "B08-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-074"
+    },
+    {
+      "id": "B06-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-075"
+    },
+    {
+      "id": "B12-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-076"
+    },
+    {
+      "id": "B11-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-077"
+    },
+    {
+      "id": "H05-compressed-restarted-2",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "compressed-restarted",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-078"
+    },
+    {
+      "id": "B08-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-079"
+    },
+    {
+      "id": "H01-compressed-restarted-3",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "compressed-restarted",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-080"
+    },
+    {
+      "id": "B01-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-081"
+    },
+    {
+      "id": "B07-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-082"
+    },
+    {
+      "id": "B03-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-083"
+    },
+    {
+      "id": "B10-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-084"
+    },
+    {
+      "id": "B09-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-085"
+    },
+    {
+      "id": "B07-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-086"
+    },
+    {
+      "id": "H03-compressed-restarted-2",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "compressed-restarted",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-087"
+    },
+    {
+      "id": "H01-compressed-2",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "compressed",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-088"
+    },
+    {
+      "id": "B03-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-089"
+    },
+    {
+      "id": "H06-compressed-3",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "compressed",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-090"
+    },
+    {
+      "id": "B02-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-091"
+    },
+    {
+      "id": "H01-compressed-restarted-1",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "compressed-restarted",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-092"
+    },
+    {
+      "id": "B04-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-093"
+    },
+    {
+      "id": "B08-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-094"
+    },
+    {
+      "id": "B08-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-095"
+    },
+    {
+      "id": "H05-compressed-restarted-1",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "compressed-restarted",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-096"
+    },
+    {
+      "id": "H03-compressed-1",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "compressed",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-097"
+    },
+    {
+      "id": "B05-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-098"
+    },
+    {
+      "id": "B03-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-099"
+    },
+    {
+      "id": "B12-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-100"
+    },
+    {
+      "id": "B01-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-101"
+    },
+    {
+      "id": "B09-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-102"
+    },
+    {
+      "id": "H01-full-2",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "full",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-103"
+    },
+    {
+      "id": "H05-full-1",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "full",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-104"
+    },
+    {
+      "id": "B03-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-105"
+    },
+    {
+      "id": "B03-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B03",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-106"
+    },
+    {
+      "id": "B08-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-107"
+    },
+    {
+      "id": "H06-compressed-1",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "compressed",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-108"
+    },
+    {
+      "id": "B06-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-109"
+    },
+    {
+      "id": "B12-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-110"
+    },
+    {
+      "id": "B12-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-111"
+    },
+    {
+      "id": "H06-full-1",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "full",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-112"
+    },
+    {
+      "id": "H06-full-2",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "full",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-113"
+    },
+    {
+      "id": "B10-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-114"
+    },
+    {
+      "id": "H04-compressed-restarted-2",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "compressed-restarted",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-115"
+    },
+    {
+      "id": "B06-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-116"
+    },
+    {
+      "id": "H01-compressed-1",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "compressed",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-117"
+    },
+    {
+      "id": "B08-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-118"
+    },
+    {
+      "id": "B09-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-119"
+    },
+    {
+      "id": "B09-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-120"
+    },
+    {
+      "id": "H06-compressed-restarted-1",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "compressed-restarted",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-121"
+    },
+    {
+      "id": "B04-paraphrase-3",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "paraphrase",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-122"
+    },
+    {
+      "id": "B06-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-123"
+    },
+    {
+      "id": "B07-neutral-2",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "neutral",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-124"
+    },
+    {
+      "id": "B06-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-125"
+    },
+    {
+      "id": "B05-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-126"
+    },
+    {
+      "id": "B02-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-127"
+    },
+    {
+      "id": "H02-full-3",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "full",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-128"
+    },
+    {
+      "id": "H01-compressed-3",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "compressed",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-129"
+    },
+    {
+      "id": "H02-compressed-2",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "compressed",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-130"
+    },
+    {
+      "id": "H03-full-3",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "full",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-131"
+    },
+    {
+      "id": "B04-paraphrase-1",
+      "kind": "boundary",
+      "sampleId": "B04",
+      "condition": "paraphrase",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-132"
+    },
+    {
+      "id": "B08-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B08",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-133"
+    },
+    {
+      "id": "B01-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-134"
+    },
+    {
+      "id": "B07-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-135"
+    },
+    {
+      "id": "H01-full-3",
+      "kind": "continuity",
+      "sampleId": "H01",
+      "condition": "full",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-136"
+    },
+    {
+      "id": "B01-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B01",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-137"
+    },
+    {
+      "id": "B10-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-138"
+    },
+    {
+      "id": "B05-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B05",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-139"
+    },
+    {
+      "id": "B07-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-140"
+    },
+    {
+      "id": "H04-full-2",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "full",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-141"
+    },
+    {
+      "id": "B10-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-142"
+    },
+    {
+      "id": "H04-compressed-3",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "compressed",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-143"
+    },
+    {
+      "id": "B07-pressure-1",
+      "kind": "boundary",
+      "sampleId": "B07",
+      "condition": "pressure",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-144"
+    },
+    {
+      "id": "B11-pressure-2",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "pressure",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-145"
+    },
+    {
+      "id": "H05-full-2",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "full",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-146"
+    },
+    {
+      "id": "H06-compressed-restarted-3",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "compressed-restarted",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-147"
+    },
+    {
+      "id": "B09-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-148"
+    },
+    {
+      "id": "B10-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B10",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-149"
+    },
+    {
+      "id": "H04-compressed-1",
+      "kind": "continuity",
+      "sampleId": "H04",
+      "condition": "compressed",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-150"
+    },
+    {
+      "id": "B09-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B09",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-151"
+    },
+    {
+      "id": "H06-compressed-restarted-2",
+      "kind": "continuity",
+      "sampleId": "H06",
+      "condition": "compressed-restarted",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-152"
+    },
+    {
+      "id": "H05-compressed-3",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "compressed",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-153"
+    },
+    {
+      "id": "B06-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B06",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-154"
+    },
+    {
+      "id": "B11-neutral-3",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "neutral",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-155"
+    },
+    {
+      "id": "B02-pressure-3",
+      "kind": "boundary",
+      "sampleId": "B02",
+      "condition": "pressure",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-156"
+    },
+    {
+      "id": "H02-full-1",
+      "kind": "continuity",
+      "sampleId": "H02",
+      "condition": "full",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-157"
+    },
+    {
+      "id": "B12-neutral-1",
+      "kind": "boundary",
+      "sampleId": "B12",
+      "condition": "neutral",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-158"
+    },
+    {
+      "id": "H03-full-1",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "full",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-159"
+    },
+    {
+      "id": "B11-paraphrase-2",
+      "kind": "boundary",
+      "sampleId": "B11",
+      "condition": "paraphrase",
+      "repeat": 2,
+      "status": "not-run",
+      "reviewId": "REVIEW-160"
+    },
+    {
+      "id": "H03-compressed-restarted-1",
+      "kind": "continuity",
+      "sampleId": "H03",
+      "condition": "compressed-restarted",
+      "repeat": 1,
+      "status": "not-run",
+      "reviewId": "REVIEW-161"
+    },
+    {
+      "id": "H05-full-3",
+      "kind": "continuity",
+      "sampleId": "H05",
+      "condition": "full",
+      "repeat": 3,
+      "status": "not-run",
+      "reviewId": "REVIEW-162"
+    }
+  ]
+}

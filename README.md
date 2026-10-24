@@ -1,8 +1,8 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前仓库包版本仍为0.19.0，Host为0.1.0；正式阶段版本与标签在1G统一验收后处理。统一运行入口已可用，见[本地使用说明](docs/host-usage.md)。真实QQ新任务流程和服务器切换尚未实施。
+当前仓库包版本仍为0.19.0，Host为0.1.0；正式阶段版本与标签在统一验收后处理。统一运行入口已可用，见[本地使用说明](docs/host-usage.md)。真实QQ新任务流程和服务器切换尚未实施。
 
-第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，当前529项回归通过。1G完整场景与资源验收仍待完成；1A音画探针单独记录，现有QQ和服务器未切换。
+第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，当前529项回归通过。用户于2026-10-25决定将真实模型与整体验收延后至整体开发完成；[162次场景样本已保留](docs/phase1g-deferred-samples.md)，1G尚未通过，继续阶段2开发并保留本地程序回归。1A音画探针单独记录，现有QQ和服务器未切换。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
@@ -40,6 +40,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [大肥鱼统一运行、唤醒与插件协作接口方案（1.2）](docs/unified-runtime-wakeup-plugin-plan.md)：渠道／能力分离、自主活动、记忆E、音画理解、人格职责及各阶段依赖；按阶段实施，尚未整体完成。
 - [第一阶段：核心与统一运行入口开发方案（1.1）](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、底色与阶段状态、无聊天任务、增量迁移与验收；1A—1F完成，1G待实施。
 - [本地统一入口使用说明](docs/host-usage.md)：配置模板、命令、诊断、迁移与数据保护。
+- [1G样本留存与验收延期](docs/phase1g-deferred-samples.md)：162次待执行清单、判定标准、尚未批准的预算和后续统一验收要求。
 - [1F统一入口实施拆分](docs/phase1f-implementation-plan.md)及[最终验收](docs/phase1f3-cli-acceptance.md)：三个子步骤独立测试、记录和提交，真实模型／模拟模型／实际终端分开计量。
 - [第一阶段1A适配前提验收](docs/phase1a-adaptation.md)：DSH程序来源、真实模型工具续轮与持久化、真实图像和本地音频探针。
 - [第一阶段1B接口与生命周期验收](docs/phase1b-lifecycle.md)：v2/v3兼容、启动准入、恢复／激活分离、延迟分析与QQ连接。

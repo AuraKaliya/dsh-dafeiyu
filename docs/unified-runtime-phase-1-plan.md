@@ -6,6 +6,8 @@
 
 实施状态：**1A—1F已完成，1G尚未完成**，结果见[1A验收](phase1a-adaptation.md)、[1B验收](phase1b-lifecycle.md)、[1C验收](phase1c-storage.md)、[1D验收](phase1d-execution.md)及1E／1F记录。本方案编写时仅交付文档，原核验过程保留在第16节；当前实施进度以各子步骤验收为准。正式Host入口已完成，尚未迁移用户真实数据库或切换QQ／服务器。
 
+2026-10-25顺序修订：用户决定真实模型及整体验收在整体开发完成后统一进行。保留[1G全部162次样本与标准](phase1g-deferred-samples.md)，预算未批准，不发起实跑。允许以1A—1F开发基线继续阶段2，子步骤仍运行本地程序回归；本修订不宣称1G通过，也不触发正式发布／标签。
+
 1E进度：已完成[1E-1底色／契约／增量存储](phase1e1-foundation-storage.md)、[1E-2显式阶段状态](phase1e2-stage-persona.md)与[1E-3观察／贡献、TaskIntent及压缩连续性](phase1e3-execution-continuity.md)。当前501项回归通过，memory v8/runtime v2迁移复验通过；新底色用于有限的真实模型接口及压缩样例，不等同1G完整人格行为验收。正文中“拟／后续”保留方案提交基线，实际实现以各步验收及其接口细化为准。
 
 历史：1D中途实现和接续事项见[开发检查点](phase1d-checkpoint.md)。方案修订提交时按用户认可的边界新增[大肥鱼人格成长与连续性方案](persona-growth-continuity-plan.md)，当时只改文档；随后用户授权继续开发，已按子步骤完成以上内容。正式底色在本项目新建，不采用管理中心现有人格文件；正式人格与成长的1G整体评价仍未完成。
