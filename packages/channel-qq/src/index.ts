@@ -46,6 +46,9 @@ export class QqChannel extends Service {
   private lastPong = 0;
   private stopped = false;
   private quiescing = false;
+  private ingressHeld=false;
+  private buffered:string[]=[];
+  private bufferedBytes=0;
   private state: Status = 'starting';
   private error: string | null = null;
   private readonly controller = new AbortController();
@@ -76,6 +79,9 @@ export class QqChannel extends Service {
     if(this.quiescing||this.stopped)throw new Error('CHANNEL_STOPPING');
     await this.connect();
   }
+  holdIngress():void {this.ingressHeld=true;}
+  releaseIngress():void {if(this.stopped||this.quiescing)throw new Error('CHANNEL_STOPPING');this.ingressHeld=false;const buffered=this.buffered;this.buffered=[];this.bufferedBytes=0;
+    for(const text of buffered)this.queue=this.queue.then(()=>this.receive(text));}
   quiesce():void {
     this.quiescing=true;
     if(this.retry)clearTimeout(this.retry);this.retry=null;
@@ -124,6 +130,7 @@ export class QqChannel extends Service {
   }
   private receive(text: string): void {
     if (this.stopped || this.quiescing || this.state !== 'online') return;
+    if(this.ingressHeld){const bytes=Buffer.byteLength(text,'utf8');if(this.bufferedBytes+bytes>2*1024*1024){this.error='INGRESS_BUFFER_FULL';this.state='offline';this.socket?.terminate();return;}this.buffered.push(text);this.bufferedBytes+=bytes;return;}
     let raw: unknown;
     try { raw = JSON.parse(text); } catch { this.counters.ignored++; return; }
     const decoded = messageSchema.safeParse(raw);

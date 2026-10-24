@@ -2,7 +2,7 @@
 
 日期：2026-10-24（北京时间）。方案版本：1.1（人格成长与连续性修订）。
 
-1F实施补充：按[三个子步骤](phase1f-implementation-plan.md)推进；[1F-1配置、预检与初始化](phase1f1-profile-inspection.md)已完成，511项回归通过。1F-2／1F-3及1G仍待完成，下文方案原始设计状态保留历史含义。
+1F实施补充：按[三个子步骤](phase1f-implementation-plan.md)推进；[1F-1配置、预检与初始化](phase1f1-profile-inspection.md)、[1F-2装配、准入与关闭](phase1f2-managed-runtime.md)已完成，522项回归通过。1F-3及1G仍待完成，下文方案原始设计状态保留历史含义。
 
 实施状态：**1A—1E已完成，1F—1G尚未完成**，结果见[1A验收](phase1a-adaptation.md)、[1B验收](phase1b-lifecycle.md)、[1C验收](phase1c-storage.md)、[1D验收](phase1d-execution.md)及下列1E记录。本方案编写时仅交付文档，原核验过程保留在第16节；当前实施进度以各子步骤验收为准。尚未创建正式Host运行入口、迁移真实数据库或切换QQ／服务器。
 

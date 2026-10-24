@@ -1,0 +1,20 @@
+{
+  "stage": "1F-2",
+  "at": "2026-10-24T15:58:05.506Z",
+  "kind": "real-dsh-sqlite-processes-scripted-model-and-loopback-qq-fixture",
+  "serverAccess": false,
+  "realModelCalls": 0,
+  "realPlatformAccess": false,
+  "command": "npm.cmd test",
+  "tests": {
+    "total": 522,
+    "passed": 522,
+    "failed": 0,
+    "skipped": 0,
+    "newTests": 11,
+    "durationMs": 58737.4286
+  },
+  "sourceRevision": "47e021b",
+  "sourceWorktreeDirty": true,
+  "passed": true
+}

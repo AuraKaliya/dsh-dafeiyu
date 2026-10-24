@@ -73,6 +73,7 @@ export class DafeiyuService extends Service {
   private closing: Promise<void> | null = null;
   private closed = false;
   private readonly gate = new ServiceGate();
+  private admissionHeld=false;
   private readonly readyListeners = new Set<() => void>();
   private readonly registryV3 = new CapabilityRegistryV3();
   private repositoryPort:TaskRepositoryPort|undefined;
@@ -124,24 +125,30 @@ export class DafeiyuService extends Service {
     }
     this.gate.recovered();
   }
-  activate():void {
+  activate(options:{deferWork?:boolean;resumeMessages?:boolean;resumeExecutions?:boolean}={}):void {
     this.assertOpen();
-    if(this.gate.active)return;
+    if(this.gate.active){if(this.admissionHeld&&!options.deferWork)this.releaseAdmission(options);return;}
     if([...this.extensions.values()].some(entry=>entry.extension.lifecycleReady&&!entry.extension.lifecycleReady()))throw new Error('DEPENDENCY_UNAVAILABLE');
     this.registryV3.checkReady(this.features());
     this.gate.activate();
+    this.admissionHeld=true;if(!options.deferWork)this.releaseAdmission(options);
+  }
+  private releaseAdmission(options:{resumeMessages?:boolean;resumeExecutions?:boolean}):void {
+    this.admissionHeld=false;
     try{for(const listener of this.readyListeners)listener();}catch(error){this.gate.quiesce();throw error;}
-    for(const item of this.journal.list(['accepted','reply-ready']))if(this.extensions.get(item.extensionId)?.active)this.schedule(item);
-    this.executions?.activate();
+    if(options.resumeMessages!==false)for(const item of this.journal.list(['accepted','reply-ready']))if(this.extensions.get(item.extensionId)?.active)this.schedule(item);
+    if(options.resumeExecutions!==false)this.executions?.activate();
   }
   onReady(listener:()=>void):()=>void {
     this.assertOpen();this.readyListeners.add(listener);if(this.accepting)listener();
     return ()=>{this.readyListeners.delete(listener);};
   }
   quiesce():void {this.gate.quiesce();}
+  cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
   private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
-  get accepting(){return this.gate.active&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
+  capabilityManifest(){return {features:this.features(),actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
+  get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {
     try {
       if(this.executions&&(!this.repositoryPort?.ready()||this.executions.health.error)||!this.personas.ready)return false;
@@ -149,7 +156,7 @@ export class DafeiyuService extends Service {
       this.registryV3.checkReady(this.features());return true;
     }catch{return false;}
   }
-  private assertAccepting():void {this.assertOpen();this.gate.assertActive();if(!this.dependenciesReady())throw new Error('DEPENDENCY_UNAVAILABLE');}
+  private assertAccepting():void {this.assertOpen();this.gate.assertActive();if(this.admissionHeld)throw new Error('HOST_NOT_READY');if(!this.dependenciesReady())throw new Error('DEPENDENCY_UNAVAILABLE');}
   bindTaskRepository(port:TaskRepositoryPort):()=>void {
     this.assertOpen();if(this.repositoryPort)throw new Error('DUPLICATE_PROVIDER');const bound:TaskRepositoryPort=Object.freeze({ready:port.ready.bind(port),create:port.create.bind(port),findRequest:port.findRequest.bind(port),
       readState:port.readState.bind(port),readSelectedInputs:port.readSelectedInputs.bind(port),update:port.update.bind(port)});this.repositoryPort=bound;
@@ -389,7 +396,7 @@ export class DafeiyuService extends Service {
     };
   }
   private schedule(item: PendingMessage): void {
-    if(!this.gate.active)return;
+    if(!this.gate.active||this.admissionHeld)return;
     if (this.scheduled.has(item.id)) return;
     this.scheduled.add(item.id);
     const previous = this.queues.get(item.route) ?? Promise.resolve();
@@ -536,7 +543,7 @@ export class DafeiyuService extends Service {
     this.schedule(item);
   }
   getStatus() {
-    return { agentId: this.config.agentId, state: this.fatal ? 'error' : this.controller.signal.aborted ? 'closed' : this.gate.active?(this.dependenciesReady()?'ready':'degraded'):this.gate.state==='quiescing'?'draining':'composing',
+    return { agentId: this.config.agentId, state: this.fatal ? 'error' : this.controller.signal.aborted ? 'closed' : this.gate.active?(this.admissionHeld?'composing':this.dependenciesReady()?'ready':'degraded'):this.gate.state==='quiescing'?'draining':'composing',
       lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null, extensions: [...new Set([...this.extensions.keys(),...this.registryV3.ids()])], queuedRoutes: this.queues.size,
       messages: this.closed ? [] : this.journal.list().map(item => ({ id: item.id, state: item.state, sessionId: item.sessionId })) };
   }

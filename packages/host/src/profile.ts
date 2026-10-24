@@ -44,9 +44,9 @@ function migrated(config:PreparedHostConfig):boolean{const file=join(config.path
     const manifest=z.object({phase:z.literal('complete'),plan:z.object({bundle:z.object({coreDir:z.string(),memoryDir:z.string(),sessionsDir:z.string(),identity:z.object({profileId:z.string(),agentId:z.string()})})})}).parse(JSON.parse(readFileSync(marker.manifest,'utf8'))),bundle=manifest.plan.bundle;
     return pathIdentity(bundle.coreDir)===pathIdentity(config.paths.core)&&pathIdentity(bundle.memoryDir)===pathIdentity(config.paths.memory)&&pathIdentity(bundle.sessionsDir)===pathIdentity(config.paths.sessions)&&bundle.identity.profileId===config.config.profileId&&bundle.identity.agentId===config.config.agent.id;
   }catch(error){if(error instanceof Error&&error.message==='HOST_MIGRATION_INCOMPLETE')throw error;throw new Error('HOST_MIGRATION_PROOF_INVALID');}}
-export function inspectHost(config:PreparedHostConfig,coordination?:string):HostInspection{
+export function inspectHost(config:PreparedHostConfig,coordination?:string,ownInstanceId?:string):HostInspection{
   assertPaths(config);const codes:string[]=[],identity={agentId:config.config.agent.id,profileId:config.config.profileId};let occupied=false,manifest:ProfileManifest|null=null,hasMigration=false;
-  try{occupied=!!conflict(config.resources,coordination);if(occupied)codes.push('HOST_ALREADY_OWNED');}catch{codes.push('HOST_COORDINATION_UNAVAILABLE');}
+  try{const found=conflict(config.resources,coordination);occupied=!!found&&found.instanceId!==ownInstanceId;if(occupied)codes.push('HOST_ALREADY_OWNED');}catch{codes.push('HOST_COORDINATION_UNAVAILABLE');}
   try{manifest=readManifest(config);hasMigration=migrated(config);if(manifest&&manifest.state!=='initialized')codes.push('HOST_INITIALIZATION_INCOMPLETE');}catch(error){codes.push(error instanceof Error?error.message:'HOST_PROFILE_MANIFEST_INVALID');}
   const stores=storageFiles(config).map(item=>{
     const concrete=physicalPath(item.file);if(concrete!==item.file&&!within(concrete,dirname(item.file)))codes.push('HOST_STORAGE_PATH_CHANGED');

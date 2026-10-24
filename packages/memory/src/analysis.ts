@@ -34,6 +34,8 @@ export class MemoryAnalysis {
   recover():void {this.queue.recover();}
   activate():void {this.enabled=true;this.start();}
   quiesce():void {this.enabled=false;}
+  cancelRunning():void {this.quiesce();this.active?.abort.abort();}
+  get health(){return {state:this.stopping?'stopped' as const:this.faulted?'failed' as const:this.enabled?'ready' as const:'paused' as const,active:!!this.active};}
   start():void {
     if(this.stopping||this.faulted||this.worker||!this.enabled||!this.canRun())return;
     // Schedule outside submit; authority does not depend on the initiating action's lifetime.

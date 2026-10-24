@@ -141,6 +141,7 @@ export class MemoryService extends Service {
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
   get lifecycleState(){return this.gate.state;}
+  runtimeHealth(){return {lifecycle:this.gate.state,analysis:this.analysis?.health??{state:'not-configured' as const,active:false},retrieval:this.config.retrieval?'configured' as const:'not-configured' as const,compaction:this.config.compaction?'configured' as const:'not-configured' as const};}
   recover():void {
     if(this.closed)throw new Error('Memory capability is unregistered');
     if(this.gate.state==='recovered'||this.gate.active)return;
@@ -149,6 +150,8 @@ export class MemoryService extends Service {
   }
   activate():void {if(this.closed)throw new Error('Memory capability is unregistered');this.gate.activate();this.analysis?.activate();}
   quiesce():void {this.gate.quiesce();this.analysis?.quiesce();}
+  stopBackground():void {this.analysis?.quiesce();}
+  cancelRunning():void {this.analysis?.cancelRunning();}
   async whenIdle():Promise<void>{await this.analysis?.whenIdle();}
   close():Promise<void>{
     if(this.closing)return this.closing;
