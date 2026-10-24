@@ -15,6 +15,7 @@ import { QqCapabilities, QqCapabilitiesConfigSchema, QQ_ACTIONS, qqResourceRoute
 import { QqSegmentedTransport } from './transport.js';
 import { DatabaseSync } from 'node:sqlite';
 import { QqDeliveryLedger } from './delivery.js';
+import { QqTaskCapabilities,QqTasksConfigSchema,QQ_TASK_ACTIONS } from './tasks.js';
 export { QqStore } from './store.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
@@ -24,6 +25,7 @@ export type { QqCacheProof } from './cache.js';
 export { QQ_ACTIONS } from './capabilities.js';
 export { splitQqText, qqDeliveryPlan } from './delivery.js';
 export type { QqDeliveryProgress, QqDeliveryPlan } from './delivery.js';
+export { QQ_TASK_ACTIONS,qqTaskDirective } from './tasks.js';
 
 export const name = 'dafeiyu-channel-qq';
 export const inject = ['dafeiyu'];
@@ -33,6 +35,7 @@ const configSchema = z.strictObject({
   naturalNames: z.array(z.string().trim().min(2).max(32).regex(/^[\p{L}\p{N}_-]+$/u)).max(16).default([]),
   groupSync: GroupSyncConfigSchema.prefault({}),
   capabilities: QqCapabilitiesConfigSchema.prefault({}),
+  tasks: QqTasksConfigSchema.prefault({}),
   httpURL: z.string(), wsURL: z.string(), tokenFile: z.string(), dataDir: z.string(),
   lifecycleMode:LifecycleModeSchema.default('legacy'),
   requestTimeoutMs: z.number().int().min(100).max(30000).default(10000),
@@ -64,6 +67,7 @@ export class QqChannel extends Service {
   private readonly groups: GroupDirectory;
   private readonly handle: ExtensionHandle;
   private readonly capabilities: QqCapabilities|undefined;
+  private readonly tasks:QqTaskCapabilities|undefined;
   private readonly token: string;
   private socket: WebSocket | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
@@ -83,7 +87,7 @@ export class QqChannel extends Service {
   private counters = { received: 0, accepted: 0, ignored: 0, unsupported: 0, delivered: 0, segmentsConfirmed:0, reconnects: 0, recalled: 0 };
   constructor(ctx: Context, raw: Config) {
     super(ctx, 'dafeiyuQQ'); this.config = configSchema.parse(raw);
-    if(this.config.capabilities.enabled&&this.config.lifecycleMode!=='managed')throw new Error('QQ_CAPABILITIES_REQUIRE_MANAGED');
+    if((this.config.capabilities.enabled||this.config.tasks.enabled)&&this.config.lifecycleMode!=='managed')throw new Error('QQ_CAPABILITIES_REQUIRE_MANAGED');
     this.config.httpURL = loopbackURL(this.config.httpURL, 'http:'); this.config.wsURL = loopbackURL(this.config.wsURL, 'ws:');
     this.token = readFileSync(this.config.tokenFile, 'utf8').trim();
     if (this.token.length < 32) throw new Error('OneBot token must be at least 32 characters');
@@ -103,7 +107,8 @@ export class QqChannel extends Service {
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority) }] });
       if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing)});
-    } catch (error) {this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
+      if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,naturalNames:this.config.naturalNames});
+    } catch (error) {this.tasks?.close();this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'qq.close');
   }
   private observation(type: Parameters<ExtensionHandle['observe']>[0]['type'], code: string, conversation?: Conversation): void {
@@ -111,7 +116,7 @@ export class QqChannel extends Service {
     this.handle.observe({ conversation: conversation ?? { channel: 'qq', account: this.config.botId, kind: 'local', id: '__transport__' }, type, data: { code } });
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
-    groupIds: [...this.config.groupIds], groupSync: this.groups.status(), delivery:this.closedDeliveryCounts??this.store.delivery.counts(),capabilities:{enabled:this.config.capabilities.enabled,registered:!!this.capabilities&&!this.stopped,actions:this.capabilities&&!this.stopped?[...QQ_ACTIONS]:[]},counters: { ...this.counters }, at: new Date().toISOString() }; }
+    groupIds: [...this.config.groupIds], groupSync: this.groups.status(), delivery:this.closedDeliveryCounts??this.store.delivery.counts(),tasks:{enabled:this.config.tasks.enabled,registered:!!this.tasks&&!this.stopped,actions:this.tasks&&!this.stopped?[...QQ_TASK_ACTIONS]:[]},capabilities:{enabled:this.config.capabilities.enabled,registered:!!this.capabilities&&!this.stopped,actions:this.capabilities&&!this.stopped?[...QQ_ACTIONS]:[]},counters: { ...this.counters }, at: new Date().toISOString() }; }
   private cacheRoute(scene:Conversation):string {return this.config.capabilities.enabled?qqResourceRoute(scene):JSON.stringify([scene.kind,scene.id]);}
   private allowed(scene:Conversation):boolean {return !this.stopped&&this.state!=='rejected'&&scene.channel==='qq'&&scene.account===this.config.botId&&
     (scene.kind==='private'?scene.id===this.config.ownerId:scene.kind==='group'&&this.groups.effective().includes(scene.id));}
@@ -225,7 +230,7 @@ export class QqChannel extends Service {
     if (!content.trim()) content = '[对方提及了你，没有附加文字。]';
     const receipt = this.handle.ingest({ id: message.message_id, occurredAt: new Date(message.time * 1000).toISOString(),
       conversation, sender: { id: message.user_id, displayName: (message.sender?.card || message.sender?.nickname || message.user_id).slice(0,200) },
-      text: content.slice(0,32000), ...(quoteId.success ? { replyTo: quoteId.data } : {}) });
+      text: content.slice(0,32000),mainText:plain.slice(0,32000), ...(quoteId.success ? { replyTo: quoteId.data } : {}) });
     this.store.acknowledge(route, message.message_id);
     if (!receipt.duplicate) this.counters.accepted++;
   }
@@ -266,6 +271,7 @@ export class QqChannel extends Service {
     if (this.stopped) return;
     this.stopped = true; this.state = 'stopped'; this.controller.abort();
     this.capabilities?.close();
+    this.tasks?.close();
     this.groups.pause(); await this.groups.whenIdle();
     if (this.retry) clearTimeout(this.retry); if (this.heartbeat) clearInterval(this.heartbeat);
     this.socket?.terminate(); await this.queue; this.handle.dispose();

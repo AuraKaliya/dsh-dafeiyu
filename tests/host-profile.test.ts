@@ -41,6 +41,12 @@ test('Host validates QQ observation dependencies and policy before any connector
     assert.throws(await changed(f,{...base,plugins,authorityPolicies}),/HOST_QQ_CAPABILITY_POLICY_REQUIRED/);
   const prepared=(await changed(f,{...base,plugins}))();assert.ok(prepared.order.indexOf('core-execution')<prepared.order.indexOf('channel-qq'));
   assert.ok(prepared.order.indexOf('memory')<prepared.order.indexOf('channel-qq'));
+  const taskQq={...qq,config:{...qq.config,tasks:{enabled:true}}},taskPlugins=[...plugins.filter(p=>p.id!=='channel-qq'),taskQq];
+  assert.throws(await changed(f,{...base,plugins:taskPlugins}),/HOST_QQ_TASK_POLICY_REQUIRED/);
+  const taskPolicy={id:'qq-task',producers:['qq-tasks'],actions:['dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true};
+  const taskConversation={...policy,actions:[...policy.actions,'qq_task_submit','qq_task_status']};
+  assert.throws(await changed(f,{...base,plugins:taskPlugins,authorityPolicies:[taskConversation,{...taskPolicy,allowLocalWrite:false}]}),/HOST_QQ_TASK_POLICY_REQUIRED/);
+  assert.doesNotThrow((await changed(f,{...base,plugins:taskPlugins,authorityPolicies:[taskConversation,taskPolicy]})));
 });
 
 test('Host rejects invalid UTF8, unknown keys, missing providers and dependency cycles before initialization',async()=>{const f=await fixture();

@@ -22,6 +22,7 @@ export * from './execution-ports.js';
 export * from './persona.js';
 export * from './execution-memory.js';
 export * from './resource-observation.js';
+export * from './message-task.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
@@ -38,6 +39,7 @@ export const MessageSchema = z.strictObject({
   conversation: ConversationSchema,
   sender: z.strictObject({ id, displayName: z.string().max(200) }),
   text: z.string().min(1).max(32_000),
+  mainText: z.string().max(32_000).optional(),
   replyTo: id.optional(),
 });
 export type InboundMessage = z.infer<typeof MessageSchema>;

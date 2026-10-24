@@ -26,7 +26,7 @@ export function outcomes(request:GenerateOptions){return request.messages.flatMa
 const browseData=z.object({snapshotId:z.uuid(),nextCursor:z.uuid().nullable(),page:z.record(z.string(),z.json()).and(z.object({messages:z.array(z.object({id:z.string(),text:z.string(),occurredAt:z.string().nullable(),unsupported:z.array(z.string())})),limitations:z.array(z.string())}))});
 export function lastPage(request:GenerateOptions){const pages=outcomes(request).flatMap(outcome=>{const result=browseData.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(pages.length,'model must actually see a QQ page');return pages.at(-1)!;}
 
-export async function qqCapabilityFixture(){
+export async function qqCapabilityFixture({tasks=false}:{tasks?:boolean}={}){
   const root=await mkdtemp(join(testTempDir(),'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
     afterSend:async(_count:number):Promise<void>=>{},beforeVerify:async():Promise<void>=>{}};
@@ -46,11 +46,12 @@ export async function qqCapabilityFixture(){
   await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});
   const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed',sourceTracking:true});
   h.core.configureExecution({profileId:'qq-capability-fixture',createStore:true,policies:[
-    {id:'conversation',producers:['channel-qq'],actions:[...QQ.QQ_ACTIONS],allowLocalWrite:true},
+    {id:'conversation',producers:['channel-qq'],actions:[...QQ.QQ_ACTIONS,...(tasks?QQ.QQ_TASK_ACTIONS:[])],allowLocalWrite:true},
     {id:'native',producers:['fixture-native'],actions:[...QQ.QQ_ACTIONS],allowLocalWrite:true,resources:[scene]},
+    ...(tasks?[{id:'qq-task',producers:['qq-tasks'],actions:[...QQ.QQ_ACTIONS,'dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true,resources:[{...scene,id:otherGroup}]}]:[]),
   ]});
   const config:QQ.Config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group,otherGroup],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,
-    tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true}};
+    tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks},naturalNames:['大肥鱼']};
   // Unbound v2 cache is deliberately retained, but must never appear in new account-bound pages.
   const old=new QQ.QqStore(join(root,'qq','qq.sqlite'));old.remember(JSON.stringify(['group',group]),'900',owner,'UNBOUND_CACHE_SENTINEL');old.close();
   let fiber=await h.ctx.plugin(QQ,config);
@@ -58,8 +59,8 @@ export async function qqCapabilityFixture(){
   const ready=async()=>{await h.ctx.dafeiyuQQ.start();await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&wss.clients.size>0);};await ready();
   const emit=(event:object)=>{for(const ws of wss.clients)if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(event));};
   let nextId=1;
-  const message=async(text:string,{target=scene,trigger=false,media=false,id=String(nextId++)}:{target?:Conversation;trigger?:boolean;media?:boolean;id?:string}={})=>{
-    const event={post_type:'message',self_id:Number(bot),message_id:Number(id),message_type:target.kind,user_id:Number(owner),...(target.kind==='group'?{group_id:Number(target.id)}:{}),time:1792886400,
+  const message=async(text:string,{target=scene,trigger=false,media=false,id=String(nextId++),sender=owner}:{target?:Conversation;trigger?:boolean;media?:boolean;id?:string;sender?:string}={})=>{
+    const event={post_type:'message',self_id:Number(bot),message_id:Number(id),message_type:target.kind,user_id:Number(sender),...(target.kind==='group'?{group_id:Number(target.id)}:{}),time:1792886400,
       message:[...(trigger&&target.kind==='group'?[{type:'at',data:{qq:bot}}]:[]),{type:'text',data:{text}},...(media?[{type:'image',data:{url:'https://invalid.example/fictional-image'}}]:[])],sender:{nickname:'虚构主人'}};
     const count=h.ctx.dafeiyuQQ.getStatus().counters.received;emit(event);await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received>count);await h.core.whenIdle();return {id,event};};
   const rows=()=>{const db=new DatabaseSync(join(root,'memory','memory.sqlite'),{readOnly:true});try{return {

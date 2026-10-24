@@ -20,6 +20,7 @@ import type { Conversation,ObservationAuthority } from '@dafeiyu/contracts';
 import { TaskCoordinator,bindTaskProvider,bindTaskMemoryProvider,bindExpressionProvider } from './task-coordinator.js';
 import { TaskDelivery } from './task-delivery.js';
 import { prepareReplySources } from './reply-sources.js';
+import type { MessageTaskBinding } from '@dafeiyu/contracts';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
 import { CapabilityRegistryV3 } from './registry-v3.js';
@@ -150,7 +151,12 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  bindMessageTasks(binding:MessageTaskBinding){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const channel=this.extensions.get(binding.channelExtensionId);
+    if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
+    return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
+  submitMessageTask(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.submitMessageTask(context,pluginId,input);}
+  messageTaskStatus(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.messageTaskStatus(context,pluginId,input);}
   capabilityManifest(){return {features:[...new Set([...this.features(),...this.registryV3.providedFeatures()])],actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
   get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {

@@ -109,7 +109,7 @@ export class ManagedHost {
       if(!existsSync(qq.tokenFile)){if(this.health.find(p=>p.id==='channel-qq')?.required)throw new Error('HOST_QQ_CREDENTIAL_FILE_MISSING');this.plugin('channel-qq','degraded','HOST_QQ_CREDENTIAL_FILE_MISSING');}
       else{await ctx.plugin(QQ,{agentId:this.config.config.agent.id,dataDir:this.config.paths.channels['channel-qq']!,lifecycleMode:'managed',...qq});this.qqValue=ctx.dafeiyuQQ;this.qqValue.holdIngress();this.plugin('channel-qq','starting');}
     }else if(qq)this.plugin('channel-qq','disabled','HOST_SINGLE_RUN');
-    const producerActive=(producer:string)=>producer==='channel-qq'?!!this.qqValue:producer==='channel-simulator'?!!simulator&&this.mode==='daemon':true;
+    const producerActive=(producer:string)=>producer==='channel-qq'?!!this.qqValue:producer==='qq-tasks'?!!this.qqValue?.getStatus().tasks.registered:producer==='channel-simulator'?!!simulator&&this.mode==='daemon':true;
     if(this.config.config.authorityPolicies.filter(policy=>policy.producers.some(producerActive)).some(policy=>policy.actions.some(action=>!this.core.capabilityManifest().actions.some(actual=>actual.id===action))))throw new Error('HOST_POLICY_ACTION_UNAVAILABLE');
     this.mark('recovering');this.memoryValue?.recover();this.memoryValue?.activate();if(memory)await this.core.recoverExecutions();this.core.recover();
     const resume={resumeMessages:this.mode==='daemon',resumeExecutions:this.mode==='daemon'};if(this.mode==='single-run')this.memoryValue?.stopBackground();
