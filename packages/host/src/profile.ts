@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { initializeCoreStorage } from '@dafeiyu/core';
 import { initializeMemoryStorage } from '@dafeiyu/memory';
-import { QqStore } from '@dafeiyu/channel-qq';
+import { QqStore, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
 import { inspectStorage } from './storage-inspection.js';
 import type { StorageKind,StorageInspection } from './storage-inspection.js';
 import { claim,conflict } from './coordination.js';
@@ -20,7 +20,7 @@ export type ProfileManifest=z.infer<typeof ProfileManifestSchema>;
 export interface HostInspection {readonly schemaVersion:1;readonly profileId:string;readonly agentId:string;readonly configHash:string;readonly foundationHash:string;
   readonly ready:boolean;readonly canInitialize:boolean;readonly codes:readonly string[];readonly occupied:boolean;
   readonly stores:readonly (StorageInspection&{name:string})[];readonly plugins:readonly {id:string;enabled:boolean;required:boolean;version:string|null;state:'configured'|'disabled'}[];readonly order:readonly string[]}
-const target:Partial<Record<StorageKind,number>>={journal:2,memory:8,runtime:2,delivery:1,analysis:1,working:1,feedback:1,qq:0,query:8,retrieval:2};
+const target:Partial<Record<StorageKind,number>>={journal:2,memory:8,runtime:2,delivery:1,analysis:1,working:1,feedback:1,qq:QQ_SCHEMA_VERSION,query:8,retrieval:2};
 export function layoutPaths(config:PreparedHostConfig){return Object.fromEntries(config.resources.map((resource,index)=>[String(index),resource.identity]));}
 export const manifestFile=(config:PreparedHostConfig)=>join(config.paths.core,'host-profile.json');
 export function readManifest(config:PreparedHostConfig):ProfileManifest|null{if(!existsSync(manifestFile(config)))return null;

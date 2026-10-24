@@ -4,9 +4,10 @@ import { inspectJournal } from '@dafeiyu/journal';
 import { RUNTIME_APPLICATION_ID, RuntimeIdentitySchema } from '@dafeiyu/core/runtime-store';
 import type { RuntimeIdentity } from '@dafeiyu/core/runtime-store';
 import { MEMORY_APPLICATION_ID } from '@dafeiyu/memory/store';
+import { inspectQqSchema } from '@dafeiyu/channel-qq';
 
 export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query';
-const definitions:Record<Exclude<StorageKind,'journal'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
+const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
   query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
   memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
   runtime:{app:RUNTIME_APPLICATION_ID,versions:[1,2],tables:['runtime_metadata','runtime_ownership','execution_requests','runs','run_operations','runtime_outbox']},
@@ -15,7 +16,6 @@ const definitions:Record<Exclude<StorageKind,'journal'>,{app:number;versions:rea
   working:{app:0x44465731,versions:[1],tables:['states','revisions','requests','outbox']},
   feedback:{app:0x44464631,versions:[1],tables:['archives','states','requests','events','outbox']},
   retrieval:{app:0x44465232,versions:[1,2],tables:['chunks','snapshots','vector_cache']},
-  qq:{app:0,versions:[0],tables:['messages','receipts','handled']},
 };
 export interface StorageInspection {kind:StorageKind;exists:boolean;version:number;applicationId:number;supported:boolean;activeOwner:boolean;integrity:boolean;identityMatches:boolean}
 
@@ -27,9 +27,10 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
     db=new DatabaseSync(file,{readOnly:true});
     const version=Number(db.prepare('PRAGMA user_version').get()?.user_version),applicationId=Number(db.prepare('PRAGMA application_id').get()?.application_id);
     const tables=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>String(row.name)));
-    const definition=kind==='journal'?null:definitions[kind];
+    const definition=kind==='journal'||kind==='qq'?null:definitions[kind];
     let supported=definition?applicationId===definition.app&&definition.versions.includes(version)&&definition.tables.every(table=>tables.has(table)):true;
     let activeOwner=false;
+    if(kind==='qq')supported=inspectQqSchema(db).supported;
     if(kind==='journal'){const journal=inspectJournal(file);supported=journal.supported;activeOwner=journal.activeOwner;}
     else {
       const ownerTable=tables.has('runtime_ownership')?'runtime_ownership':tables.has('ownership')?'ownership':null;

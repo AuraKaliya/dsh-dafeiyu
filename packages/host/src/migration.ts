@@ -9,6 +9,7 @@ import { Journal } from '@dafeiyu/journal';
 import { MemoryStore,MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { RuntimeStore, RuntimeIdentitySchema,RUNTIME_SCHEMA_VERSION } from '@dafeiyu/core/runtime-store';
 import type { RuntimeIdentity } from '@dafeiyu/core/runtime-store';
+import { QqStore, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
 import { inspectStorage } from './storage-inspection.js';
 import type { StorageKind, StorageInspection } from './storage-inspection.js';
 
@@ -31,8 +32,9 @@ function currentEngineHash():string {
   const journal=fileURLToPath(import.meta.resolve('@dafeiyu/journal')),memory=fileURLToPath(import.meta.resolve('@dafeiyu/memory/store'));
   const contracts=fileURLToPath(import.meta.resolve('@dafeiyu/contracts'));
   const core=fileURLToPath(import.meta.resolve('@dafeiyu/core/runtime-store'));
+  const qq=fileURLToPath(import.meta.resolve('@dafeiyu/channel-qq'));
   const files=[fileURLToPath(import.meta.url),
-    ...[dirname(core),dirname(journal),dirname(memory),dirname(contracts)].flatMap(directory=>readdirSync(directory).filter(name=>name.endsWith('.js')).sort().map(name=>join(directory,name)))];
+    ...[dirname(core),dirname(journal),dirname(memory),dirname(contracts),dirname(qq)].flatMap(directory=>readdirSync(directory).filter(name=>name.endsWith('.js')).sort().map(name=>join(directory,name)))];
   const hash=createHash('sha256');hash.update(JSON.stringify({node:process.versions.node,sqlite:process.versions.sqlite}));
   for(const file of files)hash.update(readFileSync(file));return hash.digest('hex');
 }
@@ -78,7 +80,7 @@ export async function planMigration(input:MigrationBundle):Promise<MigrationPlan
   if(isWithin(bundle.backupDir,bundle.sessionsDir))throw new Error('BACKUP_INSIDE_SESSION_SOURCE');
   const items:{kind:StorageKind;file:string;target?:number}[]=[{kind:'journal',file:join(bundle.coreDir,'journal.sqlite'),target:2},{kind:'memory',file:join(bundle.memoryDir,'memory.sqlite'),target:MEMORY_SCHEMA_VERSION},
     {kind:'runtime',file:join(bundle.coreDir,'runtime.sqlite'),target:RUNTIME_SCHEMA_VERSION},{kind:'delivery',file:join(bundle.coreDir,'delivery.sqlite')},
-    ...(['analysis','working','feedback'] as const).map(kind=>({kind,file:join(bundle.memoryDir,kind+'.sqlite')})),...(bundle.qqFiles??[]).map(file=>({kind:'qq' as const,file}))];
+    ...(['analysis','working','feedback'] as const).map(kind=>({kind,file:join(bundle.memoryDir,kind+'.sqlite')})),...(bundle.qqFiles??[]).map(file=>({kind:'qq' as const,file,target:QQ_SCHEMA_VERSION}))];
   if(new Set(items.map(item=>pathKey(item.file))).size!==items.length)throw new Error('ALIASED_DATABASE_PATH');
   const files:FilePlan[]=items.map(item=>{const before=inspectStorage(item.file,item.kind,bundle.identity);assertInspection(before);
     return {kind:item.kind,file:concretePath(item.file),before,rows:before.exists?rowsSnapshot(item.file):[],targetVersion:item.target??before.version};});
@@ -100,7 +102,7 @@ function checkPlan(plan:MigrationPlan):void {
   if(plan.files.length!==expected.size||plan.files.some(file=>expected.get(pathKey(file.file))!==file.kind))throw new Error('MIGRATION_PLAN_PATH_MISMATCH');
   if(!plan.files.find(file=>file.kind==='journal')?.before.exists||!plan.files.find(file=>file.kind==='memory')?.before.exists)throw new Error('LEGACY_BUNDLE_REQUIRED_USE_INIT_FOR_NEW_PROFILE');
   if(new Set(plan.files.map(file=>pathKey(file.file))).size!==plan.files.length)throw new Error('ALIASED_DATABASE_PATH');
-  for(const file of plan.files){const target=file.kind==='journal'?2:file.kind==='memory'?MEMORY_SCHEMA_VERSION:file.kind==='runtime'?RUNTIME_SCHEMA_VERSION:file.before.version;
+  for(const file of plan.files){const target=file.kind==='journal'?2:file.kind==='memory'?MEMORY_SCHEMA_VERSION:file.kind==='runtime'?RUNTIME_SCHEMA_VERSION:file.kind==='qq'?QQ_SCHEMA_VERSION:file.before.version;
     if(file.before.kind!==file.kind||file.targetVersion!==target||new Set(file.rows.map(row=>row.table)).size!==file.rows.length)throw new Error('MIGRATION_PLAN_SCHEMA_MISMATCH');assertInspection(file.before);}
   if(plan.sessions.some(item=>isAbsolute(item.relative)||!isWithin(join(plan.bundle.sessionsDir,item.relative),plan.bundle.sessionsDir)))throw new Error('MIGRATION_SESSION_PATH_ESCAPE');
 }
@@ -145,6 +147,7 @@ async function applyLocked(plan:MigrationPlan,options:{afterStep?:(kind:StorageK
       if(item.kind==='journal'){const store=new Journal(item.file);store.close();}
       else if(item.kind==='memory'){const store=new MemoryStore(item.file);store.close();}
       else if(item.kind==='runtime'){const store=new RuntimeStore(item.file,plan.bundle.identity,{create:true,migrate:true});store.close();}
+      else if(item.kind==='qq'&&item.before.exists){const store=new QqStore(item.file,{migrate:true});store.close();}
       const after=inspectStorage(item.file,item.kind,plan.bundle.identity);assertInspection(after);
       if((item.before.exists||item.kind==='runtime')&&after.version!==item.targetVersion)throw new Error('MIGRATION_TARGET_VERSION');
       if(item.before.exists)assertRows(item);

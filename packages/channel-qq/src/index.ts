@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { loopbackURL, OneBot, platformId } from './onebot.js';
 import { QqStore } from './store.js';
 export { QqStore } from './store.js';
+export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 
 export const name = 'dafeiyu-channel-qq';
 export const inject = ['dafeiyu'];

@@ -2,15 +2,20 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
+import { inspectQqSchema, initializeQqSchema, QQ_SCHEMA_VERSION } from './schema.js';
 const remembered = z.object({ id: z.string(), sender: z.string(), text: z.string() });
 export class QqStore {
   private readonly db: DatabaseSync;
-  constructor(file: string) {
+  constructor(file: string, options: { migrate?: boolean } = {}) {
     mkdirSync(dirname(file), { recursive: true }); this.db = new DatabaseSync(file);
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-      CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,route TEXT NOT NULL,id TEXT NOT NULL,sender TEXT NOT NULL,text TEXT NOT NULL,UNIQUE(route,id));
-      CREATE TABLE IF NOT EXISTS receipts(reply_id TEXT PRIMARY KEY,platform_id TEXT NOT NULL);`);
-    this.db.exec('CREATE TABLE IF NOT EXISTS handled(route TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(route,id));');
+    try {
+      // Refuse unknown/legacy stores before changing their persistent journal mode.
+      const current = inspectQqSchema(this.db);
+      if (!current.fresh && !current.supported) throw new Error('QQ_STORAGE_UNSUPPORTED');
+      if (!current.fresh && current.version < QQ_SCHEMA_VERSION && !options.migrate) throw new Error('QQ_MIGRATION_REQUIRED');
+      this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+      initializeQqSchema(this.db, options.migrate ?? false);
+    } catch (error) { this.db.close(); throw error; }
   }
   remember(route: string, id: string, sender: string, text: string): void {
     this.db.prepare('INSERT OR IGNORE INTO messages(route,id,sender,text) VALUES(?,?,?,?)').run(route, id, sender, text.slice(0,32000));
