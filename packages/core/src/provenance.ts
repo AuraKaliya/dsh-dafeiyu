@@ -2,8 +2,9 @@ import { appendPluginRecord } from '@deepseek-ai/dsh-session';
 import type { Session,SessionEvent } from '@deepseek-ai/dsh-session';
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { SourceDependencySchema } from '@dafeiyu/contracts';
-import type { CompactionProvider,CompactionScope,SourceDependency,PendingMessage } from '@dafeiyu/contracts';
-import type { ContextRuntime } from './context-runtime.js';
+import type { CompactionProvider,CompactionScope,SourceDependency } from '@dafeiyu/contracts';
+import type { ContextEvidenceView } from './context-runtime.js';
+import type { HistoryFrame } from './history-frame.js';
 import { digestSource,unionDependencies,readProvenance,eventText } from './source-records.js';
 import type { SourceRecord } from './source-records.js';
 export * from './source-records.js';
@@ -16,7 +17,7 @@ type Binding={owner:string;version:string;provider:CompactionProvider};
 /** Immutable per-message provenance. Requests inherit every actually exposed input; model
  * citations never reduce this union. The reverse map is a rebuildable in-process index. */
 export class SourceTracker {
-  private item:PendingMessage|undefined;
+  private item:HistoryFrame|undefined;
   private session:Session|undefined;
   private offset=0;
   private inputId:string|undefined;
@@ -27,10 +28,11 @@ export class SourceTracker {
   private validationStamp='';
   private validationProvider:CompactionProvider|undefined;
   private validationCache=new Map<string,boolean>();
-  constructor(private readonly agentId:string,private readonly binding:()=>Binding|undefined,private readonly context:ContextRuntime){}
-  begin(item:PendingMessage,session:Session,offset:number):void{this.item=item;this.session=session;this.offset=offset;this.admitted=[];this.indexed=-1;this.inputId=undefined;}
+  constructor(private readonly agentId:string,private readonly binding:()=>Binding|undefined,private readonly context:ContextEvidenceView){}
+  begin(item:HistoryFrame,session:Session,offset:number):void{this.item=item;this.session=session;this.offset=offset;this.admitted=[];this.indexed=-1;this.inputId=undefined;}
   expectInput(id:string):void{this.inputId=id;}
   end():void{this.item=undefined;this.admitted=[];}
+  exposed():readonly SourceDependency[]{return structuredClone(this.admitted);}
   private scope():CompactionScope{if(!this.item)throw new Error('No source scope');return {agentId:this.agentId,route:this.item.route,traceId:this.item.id};}
   private common(){const b=this.binding();if(!b)throw new Error('Source provider unavailable');return {...this.scope(),owner:b.owner,producerVersion:b.version};}
   private index():void{
@@ -87,7 +89,7 @@ export class SourceTracker {
     const open=events.slice(this.offset).find(e=>e.type==='turn/start');const turn=open?.type==='turn/start'?open.data.turn:-1;
     for(const event of events.slice(this.offset)){
       if(this.get(event.seq))continue;
-      if(event.type==='user/message'&&event.data.source.kind==='user'&&event.data.id===this.inputId)this.write(event,b.provider.sources.inbound(this.scope(),this.item.message.id),[]);
+      if(event.type==='user/message'&&event.data.source.kind===this.item.inputKind&&event.data.id===this.inputId)this.write(event,b.provider.sources.inbound(this.scope(),this.item.inputSourceId),[]);
       if(event.type==='assistant/message'&&event.data.turn===turn){
         const request=requests.findLast(r=>r.data.turn===event.data.turn&&r.data.step===event.data.step&&r.seq<event.seq);
         this.write(event,request?.data.dependencies??[{agentId:this.agentId,route:this.item!.route,kind:'unavailable',reason:'missing-request-record'}],request?.data.parents??[],request?.seq);
@@ -123,7 +125,7 @@ export class SourceTracker {
     for(const seq of this.session.surface.nodes){
       const e=events[seq];const message=e?.type==='user/message'?e.data:e?.type==='assistant/message'||e?.type==='tool/result'?e.data.message:undefined;
       if(!message||!visible.has(message.id))continue;
-      if(e?.type==='user/message'&&e.data.source.kind!=='user'&&e.data.source.kind!=='compact-checkpoint'&&e.data.source.kind!=='dafeiyu-summary-view')continue;
+      if(e?.type==='user/message'&&e.data.source.kind!==this.item.inputKind&&e.data.source.kind!=='compact-checkpoint'&&e.data.source.kind!=='dafeiyu-summary-view')continue;
       deps.push(this.dependenciesFor(seq,legacy(seq)));parents.push(seq);
     }
     for(const region of this.context.sourceItems()){

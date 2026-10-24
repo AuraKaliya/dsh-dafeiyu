@@ -23,6 +23,7 @@ import { visibleStream } from './visible-stream.js';
 import { NativeRuntime } from './native-runtime.js';
 import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame } from './execution-frame.js';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
+import { conversationHistory } from './history-frame.js';
 
 interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime;delivery?:RuntimeDelivery;lastRequest?:GenerateOptions }
 export interface RuntimeDelivery {id:string;guard:()=>void;finalize:(result:RunResult,guard:()=>void)=>Promise<void>}
@@ -121,7 +122,7 @@ export class DshRuntime {
     signal.addEventListener('abort', abort, { once: true });
     try {
       if(delivery)disposers.push(owned.scope.systemPrompt.section({name:'dafeiyu-task-delivery',order:22,interpolate:false,text:'本轮是当前任务的结果交付整理。依据 task-delivery 的已核验材料，以大肥鱼人格自然回答原问题；草稿不是要直接转发的执行器报告。保留事实、限定与不确定性，不新增结论，不重复工具操作，不声称消息已经发送。只输出准备发送的回答正文。'}));
-      owned.compaction.begin(item,agent);
+      owned.compaction.begin(conversationHistory(item),agent);
       // DSH restrict() filters inherited GLOBAL tools; locally registered tools remain visible.
       disposers.push(owned.scope.tools.restrict({ allow: [] }));
       for (const action of actions) {

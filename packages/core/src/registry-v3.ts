@@ -5,7 +5,7 @@ import { toolParameters } from './tool-schema.js';
 
 interface ReservedNames { ids: readonly string[]; actions: readonly string[]; channels: readonly string[] }
 export interface BoundActionV3 {
-  readonly id: string; readonly owner: string; readonly version: string; readonly description: string;
+  readonly id: string; readonly owner: string; readonly version: string;readonly pluginVersion:string; readonly description: string;
   readonly input: Record<string, unknown>; readonly effects: ActionCapabilityV3['effects']; readonly requiresTask: boolean;
   readonly parameters:ReturnType<typeof toolParameters>;
   readonly active: () => boolean;
@@ -35,6 +35,7 @@ function freezeTree(value: unknown): void {
 
 /** Registration snapshots. Invocation authority is issued by the core Run coordinator. */
 export class CapabilityRegistryV3 {
+  contributors(){return [...this.entries.values()].filter(entry=>entry.active&&entry.ready()).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,version:entry.metadata.version,context,active:()=>entry.active&&entry.ready(),signal:entry.controller.signal})));}
   private readonly entries = new Map<string, Entry>();
   hasId(id: string): boolean { return this.entries.has(id); }
   actionNames(): string[] { return this.actions().map(action => action.id); }
@@ -67,7 +68,7 @@ export class CapabilityRegistryV3 {
       const parameters=toolParameters(input);freezeTree(parameters);
       const parseInput = action.inputSchema.parse.bind(action.inputSchema), parseOutput = action.outputSchema.parse.bind(action.outputSchema), execute = action.execute.bind(action);
       const validateInput=(raw:unknown):Json=>{let parsed:Json;try{parsed=z.json().parse(parseInput(raw));}catch{throw new Error('INVALID_INPUT');}if(Buffer.byteLength(JSON.stringify(parsed),'utf8')>128000)throw new Error('ACTION_INPUT_TOO_LARGE');return parsed;};
-      bound.push(Object.freeze({ ...meta, owner: metadata.id, input: Object.freeze(input),parameters, signal:entry.controller.signal,active: () => entry.active&&entry.ready(),validateInput,
+      bound.push(Object.freeze({ ...meta, owner: metadata.id,pluginVersion:metadata.version, input: Object.freeze(input),parameters, signal:entry.controller.signal,active: () => entry.active&&entry.ready(),validateInput,
         execute: async (raw: unknown, context: ExecutionContextV3):Promise<ActionOutcome> => {
           if (!entry.active || !entry.ready()) throw new Error('CAPABILITY_UNAVAILABLE');
           context.signal.throwIfAborted();

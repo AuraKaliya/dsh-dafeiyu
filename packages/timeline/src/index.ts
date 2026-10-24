@@ -56,7 +56,11 @@ export class TimelineService extends Service {
       requires:['execution.task.v1'],actions:[{id:'dafeiyu_execution_events',version:'1',description:'读取当前内部任务的操作事件；不读取其它任务或聊天，不重新执行工具。返回独立的execution-event引用。',effects:'read',requiresTask:true,
         inputSchema:z.strictObject({beforeSeq:z.number().int().nonnegative().optional(),limit:z.number().int().min(1).max(30).default(10)}),outputSchema:z.json(),
         execute:async(raw,context)=>{const input=z.object({beforeSeq:z.number().optional(),limit:z.number()}).parse(raw),events=this.executionEvents(context).filter(event=>input.beforeSeq===undefined||event.seq<input.beforeSeq).reverse().slice(0,input.limit);
-          return {status:'succeeded',effects:'none',completeness:'complete',data:toJson(events.map(event=>({...event,ref:`dafeiyu:execution-event:${event.id}`}))),sources:[],receipts:[]};}}]});
+          // Operational indexes must not turn derived/free-form audit text into fresh evidence.
+          const keys=new Set(['id','runId','taskId','operationId','sourceId','memoryId','checkpointId','requestId','action','plugin','state','status','effects','completeness','errorCode','version','revision','stageRevision','selectionVersion','deleted','blocking','category','resolves','hash']);
+          return {status:'succeeded',effects:'none',completeness:'complete',data:toJson(events.map(event=>({...event,
+            data:Object.fromEntries(Object.entries(event.data).filter(([key,value])=>keys.has(key)&&(value===null||typeof value==='boolean'||typeof value==='number'||typeof value==='string'&&/^[a-zA-Z0-9._:-]{1,160}$/.test(value)))),
+            contentUse:'operational-index-only',ref:`dafeiyu:execution-event:${event.id}`}))),sources:[],receipts:[]};}}]});
     ctx.effect(() => () => { this.closed = true; this.executionHandle?.dispose();this.handle.dispose(); }, 'timeline.unregister');
   }
   executionEvents(context:ExecutionContextV3){if(this.closed)throw new Error('CAPABILITY_UNAVAILABLE');return this.ctx.dafeiyu.executionEvents(context,'timeline-execution');}

@@ -31,7 +31,7 @@ import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
 export { readFoundation } from './foundation.js';
 import type { StoredRun } from './runtime-store.js';
-import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider,PersonaProvider } from '@dafeiyu/contracts';
+import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider,PersonaProvider,ExecutionMemoryPort } from '@dafeiyu/contracts';
 export type { ExecutionOptions } from './execution-coordinator.js';
 export { EXECUTION_MESSAGE_SOURCE } from './native-runtime.js';
 export type { CompactionBinding } from './compaction-runtime.js';
@@ -75,6 +75,7 @@ export class DafeiyuService extends Service {
   private readonly readyListeners = new Set<() => void>();
   private readonly registryV3 = new CapabilityRegistryV3();
   private repositoryPort:TaskRepositoryPort|undefined;
+  private executionMemoryPort:ExecutionMemoryPort|undefined;
   private executions:ExecutionCoordinator|undefined;
   private runStore:RuntimeStore|undefined;
   private scheduler:RunScheduler|undefined;
@@ -93,7 +94,7 @@ export class DafeiyuService extends Service {
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
       (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text),this.config.agentId,()=>this.compactionBinding(),
-      (item,data,seqs)=>{this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.config.lifecycleMode==='managed');
+      (frame,data,seqs)=>{const item=this.journal.get(frame.id);this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.config.lifecycleMode==='managed');
     try{this.taskDelivery=new TaskDelivery(resolve(this.config.dataDir,'delivery.sqlite'),{agentId:this.config.agentId,journal:this.journal,contexts:this.contexts,runtime:this.runtime,signal:this.controller.signal,
       turnTimeoutMs:this.config.turnTimeoutMs,deliveryTimeoutMs:this.config.deliveryTimeoutMs,assertOpen:()=>this.assertOpen(),persona:()=>this.persona(),model:()=>this.analysisModelRoute(),
       sourceTracking:()=>!!this.compactionBinding()?.provider.sources,
@@ -138,7 +139,7 @@ export class DafeiyuService extends Service {
   }
   quiesce():void {this.gate.quiesce();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   get accepting(){return this.gate.active&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {
     try {
@@ -154,6 +155,12 @@ export class DafeiyuService extends Service {
     return ()=>{if(this.repositoryPort===bound)this.repositoryPort=undefined;};
   }
   bindPersonaProvider(provider:PersonaProvider):()=>void{this.assertOpen();const unbind=this.personas.bind(provider),unpin=this.contexts.pinRegion('memory:growth');return ()=>{unbind();unpin();};}
+  bindExecutionMemory(port:ExecutionMemoryPort):()=>void{this.assertOpen();if(this.executionMemoryPort)throw new Error('DUPLICATE_PROVIDER');
+    const bound:ExecutionMemoryPort=Object.freeze({ready:port.ready.bind(port),validate:port.validate.bind(port),operationSources:port.operationSources.bind(port),outcomeSources:port.outcomeSources.bind(port),
+      prepareContext:port.prepareContext.bind(port),validateContext:port.validateContext.bind(port),captureContinuity:port.captureContinuity.bind(port),checkpoint:port.checkpoint.bind(port),bindResult:port.bindResult.bind(port),
+      generation:port.generation.bind(port),acceptIntent:port.acceptIntent.bind(port),intent:port.intent.bind(port),resolveIntent:port.resolveIntent.bind(port),summarize:port.summarize.bind(port),
+      ...(port.compactionPolicy?{compactionPolicy:Object.freeze({...port.compactionPolicy})}:{}),...(port.summarizeFragments?{summarizeFragments:port.summarizeFragments.bind(port)}:{})});
+    this.executionMemoryPort=bound;return ()=>{if(this.executionMemoryPort===bound)this.executionMemoryPort=undefined;};}
   personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.personaAccess(context,pluginId,effect);}
   personaContext(request:ContextRequest){const scope=this.scopeForContext(request),id=this.runStore?.findRequest('conversation',scope.traceId)?.runId;const persona=id?this.personas.current(id):undefined;persona?.guard();return persona?.items??[];}
   configureExecution(raw:ExecutionOptions):void {
@@ -162,11 +169,11 @@ export class DafeiyuService extends Service {
     this.runStore=store;this.scheduler=new RunScheduler(options.maxConcurrentRuns);
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,personas:this.personas,
-      repository:()=>this.repositoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
+      repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
       turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal});
   }
   async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}
-  executionProducer(id:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id);}
+  executionProducer(id:string,options?:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id,options);}
   bindWakeAuthority(provider:WakeAuthorityProvider){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindWake(provider);}
   executionAuthority(context:ExecutionContextV3,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authority(context,pluginId);}
   executionEvents(context:ExecutionContextV3,pluginId:string){const authority=this.executionAuthority(context,pluginId);if(authority.scope.kind!=='task')throw new Error('UNSUPPORTED_EXECUTION_ORIGIN');return this.journal.executionEvents(authority.agentId,authority.scope.taskId);}

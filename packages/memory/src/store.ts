@@ -5,9 +5,11 @@ import { dirname } from 'node:path';
 import { z } from 'zod';
 import type { Json, OperationScope, TimelineScope } from '@dafeiyu/contracts';
 import type { NewEvent } from '@dafeiyu/journal';
+import { ExecutionEventInputSchema } from '@dafeiyu/contracts';
+import type { NewExecutionEvent } from '@dafeiyu/contracts';
 import { configureSqlite } from '@dafeiyu/journal';
 import { MEMORY_VERSION, MemoryError, memoryRef, receiptSchema, revisionSchema } from './types.js';
-import type { Command, MutationReceipt, ReadMode, Revision, WriteContent } from './types.js';
+import type { Command, MutationReceipt, ReadMode, Revision, WriteContent,Evidence } from './types.js';
 import { MemoryBoundarySchema,boundaryAllows } from '@dafeiyu/contracts';
 import type { MemoryBoundary,MemoryAccessPurpose,MemoryWriteBinding } from '@dafeiyu/contracts';
 import { conservativeBoundary,restrictBoundary,boundaryDigest } from './boundary.js';
@@ -23,6 +25,7 @@ import { migratePersona } from './migrate-persona.js';
 import { PersonaStore } from './persona-store.js';
 import type { PersonaResolver } from './persona-store.js';
 import { ExecutionSources } from './execution-sources.js';
+import { ExecutionMemoryState } from './execution-memory-state.js';
 
 export const MEMORY_APPLICATION_ID = 0x44464d31;
 export const MEMORY_SCHEMA_VERSION = 8;
@@ -56,6 +59,7 @@ export class MemoryStore {
   private transactionDepth=0;
   private taskSourceValidator:((agentId:string,jobId:string,purpose:MemoryAccessPurpose)=>'valid'|'deleted'|'changed'|'unavailable')|undefined;
   private readonly validatingTaskSources=new Set<string>();
+  private executionValidator:((scope:TimelineScope,source:Extract<Evidence,{kind:'execution'}>,purpose:MemoryAccessPurpose)=>'valid'|'changed'|'deleted'|'unavailable')|undefined;
   readonly observations:ObservationStore;
   constructor(file: string) {
     mkdirSync(dirname(file), { recursive: true });
@@ -123,8 +127,10 @@ export class MemoryStore {
   taskMemory(tasks:TaskWorkspace,retrieval:MemoryRetrieval|null){return new TaskMemory(this.db,work=>this.transaction(work),this,tasks,retrieval);}
   personaStore(resolve:PersonaResolver){return new PersonaStore(this.db,work=>this.transaction(work),resolve);}
   executionSources(resolve:PersonaResolver){return new ExecutionSources(this.db,work=>this.transaction(work),resolve);}
+  executionState(sources:ExecutionSources,resolve:PersonaResolver){return new ExecutionMemoryState(this.db,this,sources,resolve);}
   /** Trusted same-store composition; callers must keep this synchronous. */
   atomic<T>(work:()=>T):T{return this.transaction(work);}
+  withExecutionValidator<T>(validator:NonNullable<MemoryStore['executionValidator']>,work:()=>T):T{const previous=this.executionValidator;this.executionValidator=validator;try{return work();}finally{this.executionValidator=previous;}}
   taskExpression(tasks:TaskWorkspace,ctx:Context){return new TaskExpression(this.db,work=>this.transaction(work),this,tasks,ctx);}
   private item(scope: TimelineScope, id: string): Item | null {
     const row = this.db.prepare('SELECT * FROM memory_items WHERE id=? AND agent_id=? AND route=?').get(id, scope.agentId, scope.route);
@@ -221,10 +227,12 @@ export class MemoryStore {
         const source=this.observations.source(scope,evidence.ref,purpose);
         if(!source){inaccessible=true;continue;}boundaries.push(source.boundary);
         sourceDeleted ||= source.deleted;sourceChanged ||= source.version!==evidence.version||source.hash!==evidence.contentHash;
+      }else if(evidence.kind==='execution'){
+        const state=this.executionValidator?.(scope,evidence,purpose)??'unavailable';sourceDeleted ||=state==='deleted';sourceChanged ||=state==='changed';inaccessible ||=state==='unavailable';
       }
     }
     const effectiveAccess:MemoryView['effectiveAccess']={
-      internalUse:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'internal'))?{kind:'conversation',route:scope.route}:{kind:'none'},
+      internalUse:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'internal'))?(boundaries[0]?.schemaVersion===2?{kind:'task',route:scope.route,taskId:boundaries[0].task.id}:{kind:'conversation',route:scope.route}):{kind:'none'},
       externalExpression:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'expression'))?{kind:'conversation',route:scope.route}:{kind:'none'},
     };
     return { inaccessible,effectiveAccess, deleted: sourceDeleted||rows.some(row => row.deleted === 1), changed: sourceChanged||rows.some(row => row.head !== row.revision),
@@ -276,6 +284,9 @@ export class MemoryStore {
       ? Buffer.from(JSON.stringify({ v: 1, fingerprint, generation, before: last.ordinal })).toString('base64url') : null };
   }
   private validateSources(scope: TimelineScope, value: WriteContent, target?: string): void {
+    for(const source of value.sources)if(source.kind==='execution'){
+      if(this.executionValidator?.(scope,source,'internal')!=='valid'||this.suppressedEvidence(scope,source.contentHash,ref=>ref===source.ref))throw new MemoryError('source_unavailable');
+    }
     for(const source of value.sources)if(source.kind==='observation'){
       const state=this.observations.source(scope,source.ref,'internal');
       if(!state||state.deleted||state.version!==source.version||state.hash!==source.contentHash||this.suppressedEvidence(scope,state.hash,ref=>ref===source.ref))throw new MemoryError('source_unavailable');
@@ -352,7 +363,8 @@ export class MemoryStore {
         causedBy: scope.startedEventId, type, plugin: 'memory', pluginVersion: MEMORY_VERSION, occurredAt: new Date().toISOString(),
         sources: [{ kind: 'event', id: scope.startedEventId, route: scope.route }],
         data: { memoryId: item.id, revision: item.head, version: item.version, deleted: item.deleted, deletionScope: 'memory-item-and-revisions' } };
-      this.db.prepare('INSERT INTO memory_events(id,body,reason) VALUES(?,?,?)').run(eventId, JSON.stringify(event), 'reason' in command ? command.reason : '');
+      const execution=binding.executionScope;const storedEvent=execution?.kind==='task'?ExecutionEventInputSchema.parse({...event,taskId:execution.taskId,runId:scope.traceId}):event;
+      this.db.prepare('INSERT INTO memory_events(id,body,reason) VALUES(?,?,?)').run(eventId, JSON.stringify(storedEvent), 'reason' in command ? command.reason : '');
       this.db.prepare('INSERT INTO outbox(event_id) VALUES(?)').run(eventId);
       this.db.prepare('INSERT INTO scope_generations(agent_id,route,generation) VALUES(?,?,1) ON CONFLICT(agent_id,route) DO UPDATE SET generation=generation+1')
         .run(scope.agentId, scope.route);
@@ -363,9 +375,11 @@ export class MemoryStore {
     });
   }
   /** At-least-once delivery with a stable event ID. Publishing must be idempotent. */
-  drainOutbox(publish: (event: NewEvent, id: string) => void): number {
+  drainOutbox(publish: (event: NewEvent, id: string) => void,publishExecution?:(event:NewExecutionEvent,id:string)=>void): number {
     for (const row of this.db.prepare('SELECT e.id,e.body FROM memory_events e JOIN outbox o ON o.event_id=e.id WHERE o.delivered=0 ORDER BY e.rowid').iterate()) {
       try {
+        const body:unknown=JSON.parse(string(row.body)),execution=ExecutionEventInputSchema.safeParse(body);
+        if(execution.success){if(!publishExecution)break;publishExecution(execution.data,string(row.id));this.db.prepare('UPDATE outbox SET delivered=1 WHERE event_id=?').run(row.id!);continue;}
         const parsed = z.strictObject({ agentId: z.string(), route: z.string(), traceId: z.string(), operationId: z.string(),
           causedBy: z.string().nullable(), type: z.enum(['memory.created', 'memory.revised', 'memory.deleted', 'memory.restored','observation.recorded','observation.source.deleted','observation.source.restored',
             'task.created','task.updated','task.scene.joined','task.scene.selected','task.sources.linked','task.work.started','task.observation.linked','task.work.completed','task.work.late','task.work.interrupted',
@@ -373,7 +387,7 @@ export class MemoryStore {
             'task.expression.policy','task.expression.prepared','task.expression.withdrawn','task.expression.started','task.expression.completed','task.expression.failed','task.expression.interrupted']),
           plugin: z.string().min(1), pluginVersion: z.string().min(1).max(80), occurredAt: z.iso.datetime({offset:true}),
           sources: z.array(z.strictObject({ kind: z.literal('event'), id: z.string(), route: z.string() })),
-          data: z.record(z.string(), z.json()) }).parse(JSON.parse(string(row.body)));
+          data: z.record(z.string(), z.json()) }).parse(body);
         const event: NewEvent = parsed;
         publish(event, string(row.id));
         this.db.prepare('UPDATE outbox SET delivered=1 WHERE event_id=?').run(string(row.id));

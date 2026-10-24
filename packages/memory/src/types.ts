@@ -11,6 +11,7 @@ export const sourceFenceSchema=z.strictObject({ref:z.string(),contentHash:z.stri
 export const keySchema = z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/);
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const evidenceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({kind:z.literal('execution'),ref:z.string().regex(/^dafeiyu:execution-source:[a-f0-9-]{36}$/),version:versionSchema,contentHash:hashSchema}),
   z.strictObject({kind:z.literal('observation'),ref:z.string().regex(/^dafeiyu:observation-source:[a-f0-9-]{36}$/),version:versionSchema,contentHash:hashSchema}),
   z.strictObject({ kind: z.literal('timeline'), ref: z.string().max(300), contentHash: hashSchema }),
   z.strictObject({ kind: z.literal('memory'), id: z.uuid(), revision: versionSchema, contentHash: hashSchema }),

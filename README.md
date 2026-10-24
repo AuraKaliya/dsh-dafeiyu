@@ -2,9 +2,9 @@
 
 当前项目版本0.19.0：contracts/core/memory 0.15.0完成D3交付凭据与模拟闭环；journal/channel-simulator为0.4.0。先在目标DSH人格会话整理，再核验目标、来源、版本与授权，使用持久凭据发送最终正文；迟到、重复、撤销和不确定状态不会盲目重发。本机421项测试及模拟渠道演示通过；本轮使用虚构样本与脚本模型，真实QQ未接入，服务器未修改。
 
-第一阶段实施进度：1A适配探针、1B契约与受控生命周期、1C存储与迁移、1D任务执行已完成。当前470项回归通过；1D另有真实模型多步任务与重启续接验收，1A音画探针单独记录。1E人格成长／连续性及正式Host仍待后续子步骤，现有QQ和服务器未切换。
+第一阶段实施进度：1A适配探针、1B契约与受控生命周期、1C存储与迁移、1D任务执行和1E人格基础／连续性已完成。当前501项回归通过；1A音画探针单独记录，现有QQ和服务器未切换。1F正式Host入口和1G完整场景验收尚未开始。
 
-1D已完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，当前488项回归通过。1E-2另有新底色与虚构候选的真实模型接口验收。1E-3完整观察／贡献、任务意图和压缩连续性仍待完成；正式底色新建于本项目，不使用管理中心现有人格文件。
+1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
 ## 开始使用
 
@@ -37,13 +37,14 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [大肥鱼人格成长与连续性方案（1.0）](docs/persona-growth-continuity-plan.md)：爱世界的底色、阶段人格、独立判断与任务责任、污染／漂移防护、压缩接续、数据演进与验收。
 - [本轮人格方案文档核验](docs/persona-growth-continuity-review.md)：文档范围、既有代码回归、链接／编号检查和原有修改保留；不作为新功能验收。
 - [大肥鱼统一运行、唤醒与插件协作接口方案（1.2）](docs/unified-runtime-wakeup-plugin-plan.md)：渠道／能力分离、自主活动、记忆E、音画理解、人格职责及各阶段依赖；按阶段实施，尚未整体完成。
-- [第一阶段：核心与统一运行入口开发方案（1.1）](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、底色与阶段状态、无聊天任务、增量迁移与验收；1A—1C完成、1D中途、1E—1G待实施。
+- [第一阶段：核心与统一运行入口开发方案（1.1）](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、底色与阶段状态、无聊天任务、增量迁移与验收；1A—1E完成，1F—1G待实施。
 - [第一阶段1A适配前提验收](docs/phase1a-adaptation.md)：DSH程序来源、真实模型工具续轮与持久化、真实图像和本地音频探针。
 - [第一阶段1B接口与生命周期验收](docs/phase1b-lifecycle.md)：v2/v3兼容、启动准入、恢复／激活分离、延迟分析与QQ连接。
 - [第一阶段1C存储与迁移验收](docs/phase1c-storage.md)：Run账本、Task事件、增量schema、只读预检、备份和中断续接；使用虚构旧库。
 - [第一阶段1D任务执行验收](docs/phase1d-execution.md)：470项回归、v3渠道与动作、取消／恢复边界及真实模型任务续接；首轮失败与成功复测分别保留。
 - [第一阶段1E-1底色与存储验收](docs/phase1e1-foundation-storage.md)：新底色、严格读取、人格数据契约、memory v8/runtime v2、旧Run兼容和增量迁移。
 - [第一阶段1E-2显式阶段状态验收](docs/phase1e2-stage-persona.md)：候选、采用／撤下、受控投影、来源变化与真实模型接口验证；失败及修正单列。
+- [第一阶段1E-3内部观察与连续性验收](docs/phase1e3-execution-continuity.md)：任务内部记忆、动机与异议、来源失效、检查点、DSH压缩／恢复；501项回归与有限真实验收。
 - [架构与开发决策](docs/architecture.md)
 - [记忆、行为时间线、压缩和检索](docs/memory.md)
 - [记忆能力插件完整开发方案（2026-10-23）](docs/memory-plugin-plan.md)

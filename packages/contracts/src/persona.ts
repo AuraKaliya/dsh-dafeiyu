@@ -3,6 +3,7 @@ import { ExecutionScopeSchema } from './execution.js';
 import type { ExecutionView } from './execution.js';
 import type { ExecutionInput } from './execution-ports.js';
 import type { ContextItem } from './context.js';
+import type { SourceDependency } from './compaction.js';
 import { TaskMemoryAuthorizationSchema } from './task-memory.js';
 
 const hash=z.string().regex(/^[a-f0-9]{64}$/),id=z.uuid(),version=z.number().int().positive();
@@ -41,12 +42,15 @@ export type PersonaManifest=z.infer<typeof PersonaManifestSchema>;
 export const ContinuityCheckpointSchema=z.strictObject({schemaVersion:z.literal(1),id,agentId:z.string().min(1).max(100),runId:id,taskId:id,taskEpoch:version,
   scope:ExecutionScopeSchema,foundationHash:hash,stageRevision:z.number().int().nonnegative(),sessionId:z.string().min(1).max(300),throughSeq:z.number().int().nonnegative(),
   dependencies:z.array(PersonaSourceRefSchema).max(64),completedOperations:z.array(id).max(1000),unknownOperations:z.array(id).max(1000),
+  historyHash:hash.optional(),intentEvents:z.array(id).max(1000).optional(),
   summary:z.string().max(8000),gaps:z.array(z.string().min(1).max(1000)).max(32),createdAt:z.iso.datetime()})
   .refine(value=>value.scope.kind==='task'&&value.scope.agentId===value.agentId&&value.scope.taskId===value.taskId,'Checkpoint scope mismatch');
 export type ContinuityCheckpoint=z.infer<typeof ContinuityCheckpointSchema>;
 export const TaskIntentEventSchema=z.strictObject({schemaVersion:z.literal(1),id,agentId:z.string().min(1).max(100),taskId:id,taskEpoch:version,runId:id,
   requestId:PersonaRequestIdSchema,producer:z.string().min(1).max(100),kind:z.enum(['accepted','objection','resolved']),motivation:MotivationSchema,
   category:z.enum(['preference','method','premise','missing-information','scope','none']),blocking:z.boolean(),reason:z.string().min(1).max(1000),
+  actions:z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).max(32).optional(),
+  historyHash:hash.optional(),
   evidence:z.array(PersonaSourceRefSchema).max(32),resolves:id.nullable(),createdAt:z.iso.datetime()});
 export type TaskIntentEvent=z.infer<typeof TaskIntentEventSchema>;
 
@@ -55,6 +59,11 @@ export interface PersonaAccess {
   readonly view:ExecutionView;readonly producer:string;readonly operationId:string;readonly startedEventId:string|null;
   readonly intentVersion:number;readonly motivation:Motivation;readonly inputs:readonly ExecutionInput[];
   readonly admittedSources:readonly PersonaSourceRef[];readonly guard:()=>void;readonly commitGuard?:()=>void;
+  readonly sourceRules?:readonly string[];
+  readonly historyDependencies?:readonly SourceDependency[];
+  readonly validateHistory?:(dependencies:readonly SourceDependency[])=>boolean;
+  readonly operationFinished?:(id:string)=>boolean;
+  readonly verifyMemorySource?:(ref:PersonaSourceRef)=>{text:string;rootSources:readonly string[]}|null;
 }
 export interface PreparedPersonaEntry {
   readonly candidate:z.infer<typeof PersonaEntryRefSchema>;readonly contentRef:PersonaSourceRef;readonly dependencies:readonly PersonaSourceRef[];

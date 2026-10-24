@@ -1,5 +1,6 @@
 import { ContextItemSchema,PersonaManifestSchema } from '@dafeiyu/contracts';
-import type { PersonaAccess,PersonaProvider,PersonaManifest,PreparedPersonaEntry,ExecutionInput,ContextItem } from '@dafeiyu/contracts';
+import type { PersonaAccess,PersonaProvider,PersonaManifest,PreparedPersonaEntry,ExecutionInput,ContextItem,SourceDependency } from '@dafeiyu/contracts';
+import { digestSource } from './source-records.js';
 import type { StoredRun } from './runtime-store.js';
 import { runtimeHash } from './runtime-store.js';
 import { foundationManifest } from './persona-manifest.js';
@@ -14,6 +15,7 @@ export interface RunPersona {
 export class PersonaRuntime {
   private provider:PersonaProvider|undefined;
   private readonly active=new Map<string,RunPersona>();
+  enrich:(access:PersonaAccess,run:StoredRun)=>PersonaAccess=access=>access;
   constructor(private readonly config:z.output<typeof contextConfigSchema>){}
   bind(provider:PersonaProvider):()=>void{if(this.provider)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({ready:provider.ready.bind(provider),prepare:provider.prepare.bind(provider),validate:provider.validate.bind(provider)});this.provider=bound;
     return ()=>{if(this.provider===bound)this.provider=undefined;};}
@@ -40,8 +42,11 @@ export class PersonaRuntime {
       dispose:()=>{if(this.active.get(run.id)===result)this.active.delete(run.id);}};
     this.active.set(run.id,result);return result;
   }
-  access(run:StoredRun,inputs:readonly ExecutionInput[],signal:AbortSignal,guard:()=>void):PersonaAccess{return Object.freeze({view:Object.freeze({runId:run.id,taskId:run.definition.taskId,scope:run.definition.scope,origin:run.definition.origin,signal}),
-    producer:'core-persona',operationId:run.id,startedEventId:null,intentVersion:run.definition.intentVersion,motivation:{kind:'unknown' as const,basis:[]},inputs,admittedSources:[],guard});}
+  access(run:StoredRun,inputs:readonly ExecutionInput[],signal:AbortSignal,guard:()=>void):PersonaAccess{return this.enrich(Object.freeze({view:Object.freeze({runId:run.id,taskId:run.definition.taskId,scope:run.definition.scope,origin:run.definition.origin,signal}),
+    producer:'core-persona',operationId:run.id,startedEventId:null,intentVersion:run.definition.intentVersion,motivation:{kind:'unknown' as const,basis:[]},inputs,admittedSources:[],guard}),run);}
+  historical(access:PersonaAccess,dependency:Extract<SourceDependency,{kind:'context'}>):boolean{const provider=this.provider;if(!provider?.ready())return false;
+    const entry=provider.prepare(access).entries.find(entry=>entry.item.id===dependency.id&&entry.item.version===dependency.version&&digestSource(JSON.stringify([entry.item.text,entry.item.sources]))===dependency.hash);
+    return !!entry&&provider.validate(access,entry);}
   current(runId:string){return this.active.get(runId);}
   validateStored(run:StoredRun,manifest:PersonaManifest,inputs:readonly ExecutionInput[],signal:AbortSignal,guard:()=>void):void{
     guard();if(!manifest.entries.length)return;const provider=this.provider;if(!provider?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');

@@ -2,10 +2,14 @@ import type { TimelineScope } from './history.js';
 import { z } from 'zod';
 import type { ContextItem } from './context.js';
 import type { SemanticRequest,SemanticResult } from './semantic.js';
+import { PersonaSourceRefSchema } from './persona.js';
 
 const scopeFields={agentId:z.string(),route:z.string()};
 /** Immutable input dependencies, supplied by trusted producers rather than model citations. */
 export const SourceDependencySchema=z.discriminatedUnion('kind',[
+  z.strictObject({...scopeFields,kind:z.literal('execution-source'),ref:PersonaSourceRefSchema}),
+  z.strictObject({...scopeFields,kind:z.literal('execution-input'),runId:z.uuid(),hash:z.string().regex(/^[a-f0-9]{64}$/)}),
+  z.strictObject({...scopeFields,kind:z.literal('execution-operation'),runId:z.uuid(),operationId:z.uuid(),hash:z.string().regex(/^[a-f0-9]{64}$/),inputHash:z.string().regex(/^[a-f0-9]{64}$/)}),
   z.strictObject({...scopeFields,kind:z.literal('memory'),id:z.string(),revision:z.number().int().positive(),version:z.number().int().positive(),hash:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('inbound'),id:z.string(),hash:z.string(),fence:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('timeline'),ref:z.string(),hash:z.string(),fence:z.string()}),
@@ -30,9 +34,12 @@ export interface CompactionBasis {
   /** Monotonic scope state fingerprint; restoring data must produce a new fingerprint. */
   readonly epoch: string;
   readonly taskId: string | null;
+  /** Native tasks keep their current input outside compression while completed earlier Runs may compact. */
+  readonly protectedRunId?:string;
   readonly versions: Readonly<Record<string, number>>;
 }
 export interface CompactionPolicy {
+  readonly enabled?:boolean;
   readonly inputTokens: number;
   readonly thresholdRatio: number;
   readonly targetRatio: number;

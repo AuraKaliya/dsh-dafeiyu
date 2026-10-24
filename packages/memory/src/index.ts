@@ -134,7 +134,7 @@ export class MemoryService extends Service {
     ctx.effect(() => () => this.close(), 'memory.close');
     if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
       ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
-    if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active);
+    if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction);
     ctx.effect(()=>ctx.dafeiyu.onReady(()=>{if(this.gate.active)this.analysis?.start();}),'memory.core-ready');
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
@@ -170,7 +170,7 @@ export class MemoryService extends Service {
     throw error;
   }
   private flush(): boolean {
-    return this.store.drainOutbox((event, id) => { this.ctx.dafeiyu.journal.appendOnce(event, id); }) > 0;
+    return this.store.drainOutbox((event, id) => { this.ctx.dafeiyu.journal.appendOnce(event, id); },(event,id)=>{this.ctx.dafeiyu.journal.appendExecutionOnce(event,id);}) > 0;
   }
   private audit(scope: OperationScope, type: string, data: Record<string, Json>): void {
     this.ctx.dafeiyu.journal.append({ agentId: scope.agentId, route: scope.route, traceId: scope.traceId,

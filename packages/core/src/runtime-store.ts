@@ -175,15 +175,23 @@ export class RuntimeStore {
       if(this.operations(id).some(operation=>operation.state==='started'))throw new Error('OPERATION_PENDING');
       this.db.prepare('UPDATE runs SET result=? WHERE id=?').run(JSON.stringify(result),id);return this.transitionInside(id,version,'completed');});
   }
-  beginOperation(runId:string,callId:string,action:string,plugin:string,pluginVersion:string,input:unknown){
-    key.parse(callId);key.parse(action);key.parse(plugin);key.parse(pluginVersion);const fingerprint=runtimeHash({action,plugin,pluginVersion,input});
+  beginOperation(runId:string,callId:string,action:string,plugin:string,pluginVersion:string,input:unknown,actionVersion=pluginVersion){
+    key.parse(callId);key.parse(action);key.parse(plugin);key.parse(pluginVersion);key.parse(actionVersion);const fingerprint=runtimeHash({action,plugin,pluginVersion,actionVersion,input});
     return this.transaction(()=>{const run=this.get(runId);if(run.state!=='running')throw new Error('RUN_NOT_RUNNING');const old=this.db.prepare('SELECT id,fingerprint FROM run_operations WHERE run_id=? AND call_id=?').get(runId,callId);
       if(old){if(old.fingerprint!==fingerprint)throw new Error('IDEMPOTENCY_CONFLICT');return {...this.operation(string(old.id)),reused:true};}
       const id=randomUUID(),eventId=this.event(runId,'operation.started',{operationId:id,action,plugin});
-      this.db.prepare("INSERT INTO run_operations(id,run_id,call_id,fingerprint,action,plugin,plugin_version,state,outcome,started_event) VALUES(?,?,?,?,?,?,?,'started',NULL,?)").run(id,runId,callId,fingerprint,action,plugin,pluginVersion,eventId);return {...this.operation(id),reused:false};});
+      this.db.prepare("INSERT INTO run_operations(id,run_id,call_id,fingerprint,action,plugin,plugin_version,state,outcome,started_event) VALUES(?,?,?,?,?,?,?,'started',NULL,?)").run(id,runId,callId,fingerprint,action,plugin,pluginVersion,eventId);
+      this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,`operation-version:${id}`,JSON.stringify({schemaVersion:1,pluginVersion,actionVersion}));return {...this.operation(id),reused:false};});
   }
   operation(id:string){this.open();const row=this.db.prepare('SELECT * FROM run_operations WHERE id=?').get(id);if(!row)throw new Error('OPERATION_NOT_FOUND');
-    return {id,runId:string(row.run_id),callId:string(row.call_id),fingerprint:string(row.fingerprint),action:string(row.action),plugin:string(row.plugin),pluginVersion:string(row.plugin_version),state:z.enum(['started','finished','unknown']).parse(row.state),startedEventId:string(row.started_event),outcome:row.outcome===null?null:ActionOutcomeSchema.parse(JSON.parse(string(row.outcome)))};}
+    const versionRow=this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(row.run_id!,`operation-version:${id}`);
+    const versions=versionRow?z.strictObject({schemaVersion:z.literal(1),pluginVersion:z.string(),actionVersion:z.string()}).parse(JSON.parse(string(versionRow.body))):null;
+    return {id,runId:string(row.run_id),callId:string(row.call_id),fingerprint:string(row.fingerprint),action:string(row.action),plugin:string(row.plugin),pluginVersion:string(row.plugin_version),actionVersion:versions?.actionVersion??null,versionsBound:versions!==null,state:z.enum(['started','finished','unknown']).parse(row.state),startedEventId:string(row.started_event),outcome:row.outcome===null?null:ActionOutcomeSchema.parse(JSON.parse(string(row.outcome)))};}
+  bindInput(runId:string,id:string,body:unknown):void{const value=z.json().parse(body);this.transaction(()=>{const run=this.get(runId);if(!['accepted','queued','running','cancelling'].includes(run.state))throw new Error('RUN_NOT_RUNNING');
+    const old=this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId,id);if(old){if(runtimeHash(JSON.parse(string(old.body)))!==runtimeHash(value))throw new Error('INPUT_BINDING_CONFLICT');return;}this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,id,JSON.stringify(value));});}
+  readInput(runId:string,id:string):Json|null{this.get(runId);const row=this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId,id);return row?z.json().parse(JSON.parse(string(row.body))):null;}
+  findContext(id:string):Json|null{this.open();const row=this.db.prepare('SELECT body FROM run_inputs WHERE input_id=? ORDER BY rowid DESC LIMIT 1').get(id);return row?z.json().parse(JSON.parse(string(row.body))):null;}
+  appendExecutionEvent(runId:string,type:string,data:Record<string,Json>):string{return this.transaction(()=>{this.get(runId);return this.event(runId,type,data);});}
   operations(runId:string){this.open();return this.db.prepare('SELECT id FROM run_operations WHERE run_id=? ORDER BY ordinal').all(runId).map(row=>this.operation(string(row.id)));}
   finishOperation(id:string,raw:unknown){const outcome=ActionOutcomeSchema.parse(raw);return this.transaction(()=>{const operation=this.operation(id);if(operation.outcome){if(runtimeHash(operation.outcome)!==runtimeHash(outcome))throw new Error('OPERATION_OUTCOME_CONFLICT');return operation;}
     if(operation.state!=='started')throw new Error('OPERATION_UNCERTAIN');this.db.prepare("UPDATE run_operations SET state='finished',outcome=? WHERE id=?").run(JSON.stringify(outcome),id);this.event(operation.runId,`operation.${outcome.status}`,{operationId:id,effects:outcome.effects});return this.operation(id);});}

@@ -4,7 +4,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions,ContextFormed } from '@deepseek-ai/dsh-llm';
 import { joinContextSections,renderContextSections,renderPrompt } from '@deepseek-ai/dsh-system-prompt';
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt';
-import type { PendingMessage } from '@dafeiyu/contracts';
+import type { PendingMessage,ContextItem } from '@dafeiyu/contracts';
 import type { SourceDependency,CompactionScope } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import { ContextCoordinator,CONTEXT_CARRIER,bytes } from './context.js';
@@ -12,6 +12,11 @@ import type { PreparedRegion,ContextPacket } from './context.js';
 import { priceRetirement } from './compaction-runtime.js';
 
 // DSH 0.2.1-rc.2 implements this public event shape but its package root omits the augmentation.
+export interface ContextEvidenceView {
+  sourceItems():{owner:string;region:string;item:ContextItem}[];
+  nativeDependencies(scope:CompactionScope):SourceDependency[];
+  validateHistorical(dependency:Extract<SourceDependency,{kind:'context'}>):boolean;
+}
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
   'runtime-context': {kind:'runtime-context'} & ContextFormed;
   'dafeiyu-context-retirement': {kind:'dafeiyu-context-retirement'} & ContextFormed;

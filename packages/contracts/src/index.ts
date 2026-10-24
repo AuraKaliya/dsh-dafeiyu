@@ -20,6 +20,7 @@ export * from './host-config.js';
 export * from './execution-event.js';
 export * from './execution-ports.js';
 export * from './persona.js';
+export * from './execution-memory.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';

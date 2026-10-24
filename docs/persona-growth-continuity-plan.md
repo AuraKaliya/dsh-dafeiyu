@@ -8,7 +8,7 @@
 
 本方案与[统一运行总方案](unified-runtime-wakeup-plugin-plan.md)、[第一阶段开发方案](unified-runtime-phase-1-plan.md)共同使用。人格语义与本轮新增验收以本文为准；执行、权限和持久化继续遵守这两份方案。历史验收报告保持当时含义。
 
-实施进度补充：本方案提交后已继续完成[1D执行验收](phase1d-execution.md)。以上状态与第10节代码核对保留方案撰写基线；1E人格／迁移与连续性仍待实施，不能由1D结果推定通过。
+实施进度补充：本方案提交后已继续完成[1D执行验收](phase1d-execution.md)、[1E-1底色与增量存储](phase1e1-foundation-storage.md)、[1E-2显式阶段状态](phase1e2-stage-persona.md)及[1E-3观察、任务意图与连续性](phase1e3-execution-continuity.md)。以上状态与第10节代码核对保留方案撰写基线；当前501项回归及有限真实模型接口／压缩验收通过。1G完整场景评估、记忆E自动归纳、真实活动调度与长期成长尚未完成。
 
 ## 1. 目标、依据与完成边界
 

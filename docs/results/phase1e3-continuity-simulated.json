@@ -1,0 +1,43 @@
+{
+  "stage": "1E-3",
+  "kind": "real-dsh-real-sqlite-scripted-model-fictional-data",
+  "at": "2026-10-24T15:06:58.623Z",
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "command": "npm.cmd test",
+  "tests": {
+    "total": 501,
+    "passed": 501,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 54602.9871,
+    "newExecutionContinuityTests": 13,
+    "priorRegressionTests": 488
+  },
+  "coverage": [
+    "task-scoped-observation-and-contribution",
+    "unicode-pages-and-excerpts",
+    "transaction-rollback-and-idempotency",
+    "source-delete-restore-and-paired-history-retirement",
+    "current-context-invalidation",
+    "independent-task-isolation",
+    "goal-epoch-vs-historical-evidence",
+    "motivation-vs-origin",
+    "nonblocking-and-related-action-objections",
+    "trusted-resolution-and-resume",
+    "dsh-compaction-and-restart",
+    "orphan-checkpoint-not-adopted",
+    "outbox-projection-recovery-without-replay",
+    "unknown-effect-replay-blocked",
+    "plugin-and-action-version-binding",
+    "operational-index-excludes-free-text"
+  ],
+  "realModelReport": "phase1e3-continuity-real.json",
+  "migrationReport": "phase1e3-storage.json",
+  "formalPersonaEvaluationComplete": false,
+  "preservedUncommitted": {
+    "path": "docs/memory-phase-1.md",
+    "sha256": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+  },
+  "passed": true
+}
