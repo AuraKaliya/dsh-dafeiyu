@@ -35,7 +35,7 @@ export class NativeTaskDelivery {
       const item=ContextItemSchema.parse({id:`task-control:${operation.id}`,version:'1',text:JSON.stringify({kind:'task-control-receipt',status:result.status,effects:result.effects,data:data.success?data.data:null,code:result.errorCode??null,note:'核心保存的本轮任务控制回执。效果未知时不得当成未执行并重复写入。'}),expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:`dafeiyu:operation:${operation.id}`,version:'1',hash:nativeDeliveryHash(result)}]});
       views.set(item.id,{hash:nativeDeliveryHash(item),guard:()=>{this.host.contexts.scopeFor(request);if(nativeDeliveryHash(this.host.store.operation(operation.id).outcome)!==nativeDeliveryHash(result))throw new Error('SOURCE_STALE');}});items.push(item);
     }
-    const rows=this.host.store.nativeDeliveries.list().filter(row=>row.state==='sent'&&conversationKey(scope.agentId,row.anchor.target)===scope.route).slice(-2).reverse();
+    const rows=this.host.store.nativeDeliveries.recent(request.conversation).filter(row=>conversationKey(scope.agentId,row.anchor.target)===scope.route);
     for(const row of rows){try{const provider=this.host.expression();if(!provider?.ready()||!row.material)continue;const access=await this.host.access(row.runId);request.signal.throwIfAborted();const packet=provider.open(access,row.material.packetId,'context');
       const guard=()=>{this.host.contexts.scopeFor(request);if(this.host.expression()!==provider||this.host.store.nativeDeliveries.get(row.runId)?.state!=='sent')throw new Error('SOURCE_STALE');access.guard();if(provider.open(access,packet.id,'context').sourceStamp!==row.material!.sourceStamp)throw new Error('SOURCE_STALE');};guard();
       const body=this.host.store.nativeDeliveries.verifyCredential(row.runId),characters=Array.from(body),excerpt=characters.slice(0,1000).join('');
@@ -50,7 +50,7 @@ export class NativeTaskDelivery {
     const pending=this.active.get(runId);if(pending)return pending;if(terminal.has(record.state)||!this.host.accepting())return Promise.resolve(this.host.store.nativeDeliveries.status(runId));
     const work=this.host.enqueue(description.item.route,()=>this.execute(runId,description.item)).finally(()=>this.active.delete(runId));this.active.set(runId,work);return work;
   }
-  activate(){for(const run of this.host.store.list(['completed','waiting']))if(this.host.describe(run.id)?.autoDeliver)void this.request(run.id,true).catch(()=>{});}
+  activate(){for(const runId of this.host.store.nativeDeliveryCandidates())if(this.host.describe(runId)?.autoDeliver)void this.request(runId,true).catch(()=>{});}
   async whenIdle(){while(this.active.size)await Promise.allSettled([...this.active.values()]);}
   get pending(){return this.active.size;}
   close(){this.unregister();}

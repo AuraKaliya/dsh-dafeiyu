@@ -2,7 +2,7 @@ import { createHash,randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { TaskResultAnchorSchema } from '@dafeiyu/contracts';
-import type { Json,TaskResultAnchor } from '@dafeiyu/contracts';
+import type { Json,TaskResultAnchor,Conversation } from '@dafeiyu/contracts';
 const canonical=(value:Json):string=>value===null||typeof value!=='object'?JSON.stringify(value):Array.isArray(value)?`[${value.map(canonical).join(',')}]`:`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key]!)}`).join(',')}}`;
 export const nativeDeliveryHash=(value:unknown)=>createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');
 const stateSchema=z.enum(['accepted','rendering','verifying','ready','sending','sent','not-sent','partial','uncertain','rejected','interrupted']);
@@ -41,7 +41,10 @@ export class NativeDeliveryStore {
   finish(runId:string,state:'sent'|'not-sent'|'partial'|'uncertain',receipt:string|null,code:string|null){return this.atomic(()=>{if(this.get(runId)?.state!=='sending')throw new Error('DELIVERY_STATE_CONFLICT');if(state==='sent'&&!receipt)throw new Error('DELIVERY_RECEIPT_REQUIRED');this.db.prepare('UPDATE native_deliveries SET receipt=? WHERE run_id=?').run(receipt,runId);return this.advance(runId,'sending',state,code);});}
   reject(runId:string,code:string){return this.atomic(()=>{const row=this.get(runId);if(!row||!['accepted','rendering','verifying','ready'].includes(row.state))throw new Error('DELIVERY_STATE_CONFLICT');return this.advance(runId,row.state,'rejected',code);});}
   interrupt(runId:string){return this.atomic(()=>{const row=this.get(runId);if(!row||!['accepted','rendering','verifying','ready'].includes(row.state))throw new Error('DELIVERY_STATE_CONFLICT');return this.advance(runId,row.state,'interrupted','DELIVERY_CANCELLED');});}
-  recover(){return this.atomic(()=>{for(const row of this.list())if(['rendering','verifying','sending'].includes(row.state))this.advance(row.runId,row.state,row.state==='sending'?'uncertain':'interrupted','PROCESS_INTERRUPTED');});}
-  list(){return this.db.prepare('SELECT run_id FROM native_deliveries ORDER BY rowid').all().map(row=>this.get(String(row.run_id))!);}
+  recover(){return this.atomic(()=>{for(const row of this.list(['rendering','verifying','sending']))this.advance(row.runId,row.state,row.state==='sending'?'uncertain':'interrupted','PROCESS_INTERRUPTED');});}
+  list(states?:readonly NativeDeliveryState[]){const filtered=states?.map(state=>stateSchema.parse(state));if(filtered?.length===0)return [];return this.db.prepare('SELECT run_id FROM native_deliveries'+(filtered?' WHERE state IN ('+filtered.map(()=>'?').join(',')+')':'')+' ORDER BY rowid').all(...(filtered??[])).map(row=>this.get(String(row.run_id))!);}
+  recent(target:Conversation){return this.db.prepare("SELECT run_id FROM native_deliveries WHERE state='sent' AND json_extract(anchor,'$.target.channel')=? AND json_extract(anchor,'$.target.account')=? AND json_extract(anchor,'$.target.kind')=? AND json_extract(anchor,'$.target.id')=? ORDER BY rowid DESC LIMIT 2").all(target.channel,target.account,target.kind,target.id).map(row=>this.get(String(row.run_id))!);}
+  counts(){const values=new Map(this.db.prepare('SELECT state,count(*) AS n FROM native_deliveries GROUP BY state').all().map(row=>[stateSchema.parse(row.state),Number(row.n)])),sum=(states:readonly NativeDeliveryState[])=>states.reduce((n,state)=>n+(values.get(state)??0),0);
+    return {total:[...values.values()].reduce((a,b)=>a+b,0),pending:sum(['accepted','rendering','verifying','ready','sending']),sent:sum(['sent']),partial:sum(['partial']),uncertain:sum(['uncertain']),blocked:sum(['not-sent','rejected','interrupted'])};}
   status(runId:string){const row=this.get(runId);return row?{deliveryId:row.id,runId:row.runId,taskId:row.anchor.taskId,state:row.state,version:row.version,receiptId:row.receipt,error:row.error}:null;}
 }

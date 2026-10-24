@@ -30,6 +30,12 @@ test('Host rejects arbitrary imports, inline secrets, actor overrides and test m
   ])assert.throws(await changed(f,raw),error=>error instanceof Error&&/^HOST_/.test(error.message)&&!error.message.includes('PRIVATE_SENTINEL'));
 });
 
+test('the checked-in QQ example declares the actual task, observation and delivery dependencies',()=>{
+  const config=loadHostConfig(resolve('profiles/host.qq.example.json')),qq=config.plugins.find(plugin=>plugin.id==='channel-qq')!;
+  assert.deepEqual(qq.config.tasks,{enabled:true,deliverResults:true,policyId:'qq-task'});assert.ok(config.order.indexOf('core-execution')<config.order.indexOf('channel-qq'));
+  const native=config.config.authorityPolicies.find(policy=>policy.id==='qq-task')!;assert.deepEqual(native.producers,['qq-tasks']);assert.deepEqual(native.resources,[]);assert.ok(native.actions.includes('dafeiyu_task_object'));
+});
+
 test('Host validates QQ observation dependencies and policy before any connector opens',async()=>{const f=await fixture();
   const qq={id:'channel-qq',required:true,config:{botId:'12345678',ownerId:'87654321',groupIds:['11223344'],httpURL:'http://127.0.0.1:1/',wsURL:'ws://127.0.0.1:1/',tokenFile:'./fictional-token',capabilities:{enabled:true}}};
   const policy={id:'conversation',producers:['channel-qq'],actions:['qq_groups','qq_browse','qq_observe_select'],allowLocalWrite:true};

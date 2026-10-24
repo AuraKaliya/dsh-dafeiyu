@@ -17,7 +17,7 @@ export class QqTaskCapabilities {
   private readonly unbind:()=>void;
   private closed=false;
   constructor(private readonly ctx:Context,config:{agentId:string;botId:string;ownerId:string;policyId:string;naturalNames:readonly string[];deliverResults:boolean;expressionPolicy?:{id:string;version:number}}){
-    this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'qq-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1'],provides:['qq.tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
+    this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'qq-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1',...(config.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])],provides:['qq.tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
     try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'qq-tasks',pluginId:'qq-tasks',channelExtensionId:'channel-qq',channel:'qq',account:config.botId,ownerId:config.ownerId,policyId:config.policyId,version:'1',autoDeliver:config.deliverResults,...(config.expressionPolicy?{expressionPolicy:config.expressionPolicy}:{}),classify:message=>qqTaskDirective(message,config.naturalNames),active:()=>!this.closed});}
     catch(error){this.handle.dispose();throw error;}
   }

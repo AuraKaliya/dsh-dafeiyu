@@ -64,6 +64,7 @@ declare module '@deepseek-ai/cordis' { interface Context { dafeiyu: DafeiyuServi
 /** Owns a logical persona and its independent conversations; extensions own platform-specific work. */
 export class DafeiyuService extends Service {
   private nativeTaskDelivery:NativeTaskDelivery|undefined;
+  private closedNativeDelivery:ReturnType<RuntimeStore['nativeDeliveries']['counts']>|null=null;
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
   private nativeExpressionPort:NativeExpressionPort|undefined;
@@ -161,7 +162,7 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   bindMessageTasks(binding:MessageTaskBinding){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const channel=this.extensions.get(binding.channelExtensionId);
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
@@ -620,7 +621,7 @@ export class DafeiyuService extends Service {
   }
   getStatus() {
     return { agentId: this.config.agentId, state: this.fatal ? 'error' : this.controller.signal.aborted ? 'closed' : this.gate.active?(this.admissionHeld?'composing':this.dependenciesReady()?'ready':'degraded'):this.gate.state==='quiescing'?'draining':'composing',
-      lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null, extensions: [...new Set([...this.extensions.keys(),...this.registryV3.ids()])], queuedRoutes: this.queues.size,
+      lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null,nativeDelivery:this.closed?this.closedNativeDelivery:this.runStore?.nativeDeliveries.counts()??null, extensions: [...new Set([...this.extensions.keys(),...this.registryV3.ids()])], queuedRoutes: this.queues.size,
       messages: this.closed ? [] : this.journal.list().map(item => ({ id: item.id, state: item.state, sessionId: item.sessionId })) };
   }
   async whenIdle(): Promise<void> {
@@ -633,7 +634,7 @@ export class DafeiyuService extends Service {
     this.controller.abort();
     this.closing = (async () => {
       try{await Promise.all([...this.queues.values()]);await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}
-      finally{try { await this.runtime.close(); } finally {this.nativeTaskDelivery?.close();this.runStore?.close();this.taskDelivery.close();this.closed = true;this.gate.close(); this.journal.close(); }}
+      finally{try { await this.runtime.close(); } finally {this.nativeTaskDelivery?.close();this.closedNativeDelivery=this.runStore?.nativeDeliveries.counts()??null;this.runStore?.close();this.taskDelivery.close();this.closed = true;this.gate.close(); this.journal.close(); }}
     })();
     return this.closing;
   }

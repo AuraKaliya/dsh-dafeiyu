@@ -22,4 +22,7 @@ for(const [scenario,name] of [
   ['optional-capabilities','an absent optional QQ observation channel does not block unrelated native tasks'],
   ['qq-segments','Host records complete segmented QQ delivery without exposing body in status'],
   ['qq-partial','Host preserves unknown QQ segment counters through orderly shutdown'],
+  ['qq-tasks','Host assembles automatic native QQ task delivery and persists truthful counts'],
+  ['qq-tasks-wait','Host sends a verified discussion message for a blocked task without completing its Run'],
+  ['single-tasks','single-run mode leaves the configured QQ task pipeline dormant'],
 ] as const)test(name,async()=>{const {stdout}=await execute(process.execPath,[resolve('build-tests/host-runtime-fixture.js'),scenario],{cwd:resolve('.'),timeout:20000,maxBuffer:200000});const report=JSON.parse(stdout.trim().split('\n').at(-1)!);assert.equal(report.passed,true);assert.equal(report.serverAccess,false);});
