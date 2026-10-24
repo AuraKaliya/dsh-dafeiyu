@@ -19,7 +19,7 @@ test('task directives use only direct main text and support a configured name pr
 
 test('a real owner instruction creates one native Task with immutable message goal and separate internal result',async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let step=0;
-  h.setResponse(request=>{if(native(request))return textReply('INTERNAL_TASK_REPORT_SENTINEL');return ++step<=2?call('qq_task_submit',{requestId:'same',title:'虚构任务'}):textReply('已受理，将按指示执行');});
+  h.setResponse(request=>{if(native(request))return textReply('INTERNAL_TASK_REPORT_SENTINEL');return ++step<=2?call('qq_task_submit',{requestId:'attempt-'+step,title:'虚构任务'}):textReply('已受理，将按指示执行');});
   await h.message('大肥鱼，任务：整理当前会话的讨论',{trigger:true});const rows=taskRows(h.root);assert.equal(rows.length,1);assert.equal(rows[0]?.state,'completed');
   const saved=JSON.parse(String(rows[0]!.body)),definition=JSON.parse(String(rows[0]!.definition));assert.equal(saved.input.goal,'整理当前会话的讨论');assert.equal(definition.origin.kind,'native');assert.equal(saved.motivation.kind,'explicit-task');assert.equal(saved.messageSource.conversation.id,scene.id);
   assert.equal(h.core.journal.list().length,1);assert.equal(h.platform.sent.length,1);assert.ok(!JSON.stringify(h.platform.sent).includes('INTERNAL_TASK_REPORT_SENTINEL'));

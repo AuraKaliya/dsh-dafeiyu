@@ -157,6 +157,7 @@ export class DafeiyuService extends Service {
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
   submitMessageTask(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.submitMessageTask(context,pluginId,input);}
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.messageTaskStatus(context,pluginId,input);}
+  controlMessageTask(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.controlMessageTask(context,pluginId,input);}
   capabilityManifest(){return {features:[...new Set([...this.features(),...this.registryV3.providedFeatures()])],actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
   get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {

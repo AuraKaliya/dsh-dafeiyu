@@ -44,7 +44,7 @@ test('Host validates QQ observation dependencies and policy before any connector
   const taskQq={...qq,config:{...qq.config,tasks:{enabled:true}}},taskPlugins=[...plugins.filter(p=>p.id!=='channel-qq'),taskQq];
   assert.throws(await changed(f,{...base,plugins:taskPlugins}),/HOST_QQ_TASK_POLICY_REQUIRED/);
   const taskPolicy={id:'qq-task',producers:['qq-tasks'],actions:['dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true};
-  const taskConversation={...policy,actions:[...policy.actions,'qq_task_submit','qq_task_status']};
+  const taskConversation={...policy,actions:[...policy.actions,'qq_task_submit','qq_task_status','qq_task_control']};
   assert.throws(await changed(f,{...base,plugins:taskPlugins,authorityPolicies:[taskConversation,{...taskPolicy,allowLocalWrite:false}]}),/HOST_QQ_TASK_POLICY_REQUIRED/);
   assert.doesNotThrow((await changed(f,{...base,plugins:taskPlugins,authorityPolicies:[taskConversation,taskPolicy]})));
 });

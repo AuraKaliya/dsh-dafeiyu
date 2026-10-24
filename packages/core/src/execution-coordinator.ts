@@ -15,7 +15,7 @@ import type { NativeAction } from './execution-frame.js';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
 import { SourceDependencySchema } from '@dafeiyu/contracts';
-import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskSourceSchema } from '@dafeiyu/contracts';
+import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskSourceSchema,MessageTaskControlSchema } from '@dafeiyu/contracts';
 import type { MessageTaskBinding,MessageTaskSource } from '@dafeiyu/contracts';
 import { ExecutionEvidence } from './execution-evidence.js';
 import type { NativeContext } from './execution-evidence.js';
@@ -78,13 +78,51 @@ export class ExecutionCoordinator {
     if(input.kind==='explicit-task'&&(item.message.sender.id!==binding.ownerId||directive.kind!=='submit'))throw new Error('TASK_DIRECTIVE_REQUIRED');
     const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:[])].map(scene=>[runtimeHash(scene),scene])).values()];
     const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources});
-    const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.requestId]),title:input.title,goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId});
+    const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:null]),title:input.title,goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId});
     this.validateMessageSource(source);const accepted=this.submit(binding.id,request,undefined,null,null,{kind:input.kind,basis:[`message:${item.id}`]},source);
     return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:input.kind,sourceInboundId:item.id};
   }
-  messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw);
-    const run=this.d.store.list().findLast(run=>{if(run.definition.taskId!==taskId)return false;const request=this.d.store.request(run.requestKey),saved=savedSchema.safeParse(request.payload);return request.producer===binding.id&&saved.success&&saved.data.messageSource&&runtimeHash(saved.data.messageSource.conversation)===runtimeHash(item.message.conversation);});
-    if(!run)throw new Error('SCOPE_DENIED');const task=this.repository().readState(this.d.agentId,taskId);return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,title:task.title,goal:task.goal,motivation:this.motivation(run).kind};}
+  private findMessageTask(binding:MessageTaskBinding,scene:Conversation,taskId:string){
+    const run=this.d.store.list().findLast(run=>{if(run.definition.taskId!==taskId)return false;const request=this.d.store.request(run.requestKey),saved=savedSchema.safeParse(request.payload);return request.producer===binding.id&&saved.success&&saved.data.messageSource&&runtimeHash(saved.data.messageSource.conversation)===runtimeHash(scene);});
+    if(!run)throw new Error('SCOPE_DENIED');return run;}
+  private messageIntent(run:StoredRun){const task=this.repository().readState(this.d.agentId,run.definition.taskId!);if(task.epoch!==run.definition.intentVersion)return null;
+    return this.d.memory()?.intent(this.d.personas.access(run,this.inputsFor(run),this.d.signal,()=>{if(this.repository().readState(this.d.agentId,task.id).epoch!==task.epoch)throw new Error('TASK_NOT_ACTIVE');}))??null;}
+  messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
+    const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run);return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:task.title,goal:task.goal,motivation:this.motivation(run).kind,
+      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+  controlMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskControlSchema.parse(raw),directive=binding.classify(item.message);
+    if(item.message.sender.id!==binding.ownerId||directive.kind!==input.action)throw new Error('TASK_DIRECTIVE_REQUIRED');
+    if(redactJson(z.json().parse(directive)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
+    const latest=this.findMessageTask(binding,item.message.conversation,input.taskId),requestId=runtimeHash([item.id,input.taskId,input.action,input.objectionId??null]),producer=`message-control:${binding.id}`,old=this.d.store.findRequest(producer,requestId);
+    const run=old?this.d.store.get(z.object({runId:z.uuid()}).parse(old.payload).runId):latest;
+    const control=this.d.store.prepareRequest(producer,requestId,{kind:'message-control',runId:run.id,issuerRunId:context.runId,input,inboundId:item.id,messageHash:runtimeHash(item.message),directive});
+    const receiptId=`message-control:${control.id}`,receipt=this.d.store.readInput(context.runId,receiptId);if(receipt)return z.record(z.string(),z.json()).parse(receipt);
+    const port=this.producer(binding.id),taskRef=port.openTask(input.taskId);let resumed:{task:TaskRef;run:RunRef;state:string}|undefined,changed=false;
+    try {
+    if(input.action==='resolve'){
+      const task=this.repository().readState(this.d.agentId,input.taskId);if(task.version!==input.expectedVersion||task.status!=='active'||run.definition.intentVersion!==task.epoch)throw new Error('VERSION_CONFLICT');
+      if(run.state!=='waiting')throw new Error('RUN_NOT_QUIESCENT');
+      if(this.d.store.operations(run.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('OPERATION_UNCERTAIN');
+      port.resolveObjection(taskRef,{requestId:control.id,objectionId:input.objectionId,reason:directive.text||'主人在当前真实消息中确认继续'});
+      changed=true;
+      if(!this.messageIntent(run)?.blocking){const checkpoint=this.d.store.checkpoints(run.id).at(-1);if(!checkpoint)throw new Error('SOURCE_STALE');
+        resumed=port.resume(taskRef,{requestId:runtimeHash([control.id,'resume']),taskId:input.taskId,expectedVersion:task.version,policyId:binding.policyId,parentRunId:run.id,checkpointId:checkpoint});}
+    }else{
+      if(input.action==='revise')z.string().trim().min(1).max(2000).parse(directive.text);
+      const updated=port.updateTask(taskRef,{requestId:control.id,expectedVersion:input.expectedVersion,...(input.action==='cancel'?{status:'paused'}:{status:'active',goal:directive.text})});
+      changed=true;
+      if(updated.version!==input.expectedVersion+1)throw new Error('CONTROL_SUPERSEDED');
+      for(const previous of this.d.store.list(['accepted','queued','running','waiting']))if(previous.definition.taskId===input.taskId)this.control(binding.id,previous,{requestId:runtimeHash([control.id,previous.id,'cancel']),expectedVersion:previous.version,reason:'主人修改或取消任务'},'cancel');
+      if(input.action==='revise'){
+        const resources=[...new Map([item.message.conversation,...this.policy(binding.id,binding.policyId).resources].map(scene=>[runtimeHash(scene),scene])).values()];
+        const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:'explicit-task',resources});
+        resumed=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([control.id,'revise']),taskId:input.taskId,expectedVersion:updated.version,policyId:binding.policyId}),undefined,null,null,{kind:'explicit-task',basis:[`message:${item.id}`]},source);
+      }
+    }
+    const task=this.repository().readState(this.d.agentId,input.taskId),result=z.json().parse({taskId:input.taskId,action:input.action,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,runId:resumed?.run.id??run.id});
+    this.d.store.bindInput(context.runId,receiptId,result);return result;
+    }catch(error){if(changed)throw new Error('TASK_CONTROL_INCOMPLETE');throw error;}
+  }
   authorizeResource(context:ExecutionContextV3,pluginId:string,scene:Conversation){this.authority(context,pluginId);if(!this.allowedResource(this.d.store.get(context.runId),scene))throw new Error('RESOURCE_SCOPE_DENIED');}
   private motivation(run:StoredRun):Motivation{return savedSchema.parse(this.d.store.request(run.requestKey).payload).motivation??{kind:'unknown',basis:[]};}
   private evidenceFor(run:StoredRun,access:PersonaAccess){const current=this.evidence.get(run.id);if(current)return current;const request=this.d.store.request(run.requestKey);
@@ -127,7 +165,7 @@ export class ExecutionCoordinator {
         if(this.d.store.operations(parent.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('OPERATION_UNCERTAIN');
         this.d.store.readCheckpoint(parent.id,input.checkpointId);
         const {parentRunId,checkpointId,...request}=input;
-        return this.submit(producer,request,{kind:'continuation',parentRunId,checkpointId},parentRunId,checkpointId,declared?.motivation??this.motivation(parent));},
+        return this.submit(producer,request,{kind:'continuation',parentRunId,checkpointId},parentRunId,checkpointId,declared?.motivation??this.motivation(parent),savedSchema.parse(this.d.store.request(parent.requestKey).payload).messageSource);},
       acceptWake:(raw:unknown,task:TaskRef)=>{const input=WakeRequestSchema.parse(raw),{origin,...request}=input;if(this.resolveTask(producer,task)!==input.taskId)throw new Error('SCOPE_DENIED');
         if(origin.producerId!==producer||request.requestId!==origin.occurrenceId)throw new Error('SCOPE_DENIED');
         return this.submit(producer,request,origin,null,null,declared?.motivation??{kind:'unknown',basis:[]});},
