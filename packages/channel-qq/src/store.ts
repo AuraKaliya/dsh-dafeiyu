@@ -5,10 +5,14 @@ import { z } from 'zod';
 import { inspectQqSchema, initializeQqSchema, QQ_SCHEMA_VERSION } from './schema.js';
 import { GroupListSchema, GroupSnapshotSchema, QqAccountIdSchema } from './groups.js';
 import type { GroupInfo, GroupSnapshot } from './groups.js';
+import { QqCache } from './cache.js';
+import type { QqCacheOptions } from './cache.js';
+import { redactContent } from '@dafeiyu/contracts';
 const remembered = z.object({ id: z.string(), sender: z.string(), text: z.string() });
 export class QqStore {
   private readonly db: DatabaseSync;
-  constructor(file: string, options: { migrate?: boolean } = {}) {
+  readonly cache: QqCache;
+  constructor(file: string, options: { migrate?: boolean; cache?: QqCacheOptions } = {}) {
     mkdirSync(dirname(file), { recursive: true }); this.db = new DatabaseSync(file);
     try {
       // Refuse unknown/legacy stores before changing their persistent journal mode.
@@ -17,13 +21,11 @@ export class QqStore {
       if (!current.fresh && current.version < QQ_SCHEMA_VERSION && !options.migrate) throw new Error('QQ_MIGRATION_REQUIRED');
       this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       initializeQqSchema(this.db, options.migrate ?? false);
+      this.cache = new QqCache(this.db, options.cache);
     } catch (error) { this.db.close(); throw error; }
   }
-  remember(route: string, id: string, sender: string, text: string): void {
-    this.db.prepare('INSERT OR IGNORE INTO messages(route,id,sender,text) VALUES(?,?,?,?)').run(route, id, sender, text.slice(0,32000));
-    this.db.prepare('DELETE FROM messages WHERE route=? AND seq NOT IN(SELECT seq FROM messages WHERE route=? ORDER BY seq DESC LIMIT 200)').run(route, route);
-  }
-  find(route: string, id: string) { const row = this.db.prepare('SELECT id,sender,text FROM messages WHERE route=? AND id=?').get(route,id); return row ? remembered.parse(row) : null; }
+  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string; unsupported: readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
+  find(route: string, id: string) { const row = this.db.prepare('SELECT id,sender,text FROM messages WHERE route=? AND id=?').get(route,id); if (!row) return null; const value = remembered.parse(row); return { ...value, text: redactContent(value.text).value }; }
   receipt(id: string): string | null { const row = this.db.prepare('SELECT platform_id FROM receipts WHERE reply_id=?').get(id); return row ? z.string().parse(row.platform_id) : null; }
   handled(route: string, id: string): boolean { return !!this.db.prepare('SELECT 1 FROM handled WHERE route=? AND id=?').get(route,id); }
   acknowledge(route: string, id: string): void { this.db.prepare('INSERT OR IGNORE INTO handled VALUES(?,?)').run(route,id); }

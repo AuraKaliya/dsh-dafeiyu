@@ -15,6 +15,8 @@ export { QqStore } from './store.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
 export { naturallyAddressed } from './trigger.js';
+export { QqBrowseInputSchema, QqCacheProofSchema } from './cache.js';
+export type { QqCacheProof } from './cache.js';
 
 export const name = 'dafeiyu-channel-qq';
 export const inject = ['dafeiyu'];

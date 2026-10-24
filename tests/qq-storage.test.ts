@@ -80,12 +80,12 @@ test('Host init uses the QQ schema target and read-only inspection requests migr
     persona: { fixedFile: './persona.md', kind: 'test' }, modelRoutes: { chat: { provider: 'local-test', model: 'scripted' } },
     plugins: [{ id: 'model-scripted', config: {} }, { id: 'channel-qq', config: { botId: '12345678', ownerId: '87654321', groupIds: [], httpURL: 'http://127.0.0.1:1/', wsURL: 'ws://127.0.0.1:1/', tokenFile: './token' } }] }));
   const prepared = loadHostConfig(configFile); assert.equal(initializeProfile(prepared, coordination).ready, true);
-  const path = join(root, 'data/qq/qq.sqlite'), db = new DatabaseSync(path); db.exec('DROP TABLE qq_group_snapshots; PRAGMA user_version=0; PRAGMA application_id=0;'); db.close();
+  const path = join(root, 'data/qq/qq.sqlite'), db = new DatabaseSync(path); db.exec('DROP TABLE qq_browse_snapshots; DROP TABLE qq_cache_state; DROP TABLE qq_message_meta; DROP TABLE qq_group_snapshots; PRAGMA user_version=0; PRAGMA application_id=0;'); db.close();
   const before = await readFile(path), result = inspectHost(prepared, coordination);
   assert.ok(result.codes.includes('HOST_MIGRATION_REQUIRED')); assert.equal(result.ready, false); assert.deepEqual(await readFile(path), before);
 });
 
-test('QQ v1 upgrades additively to v2 and stores account-bound membership without changing old receipts', async () => {
+test('QQ v1 upgrades additively and stores account-bound membership without changing old receipts', async () => {
   const path = await file(); legacy(path); const db = new DatabaseSync(path); db.exec(`PRAGMA user_version=1; PRAGMA application_id=${QQ_APPLICATION_ID};`); db.close();
   const before = await readFile(path); assert.equal(inspectStorage(path, 'qq').supported, true); assert.throws(() => new QqStore(path), /MIGRATION_REQUIRED/); assert.deepEqual(await readFile(path), before);
   const store = new QqStore(path, { migrate: true });

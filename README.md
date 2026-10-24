@@ -48,6 +48,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [阶段2：QQ文字能力与流程整合方案](docs/qq-capabilities-plan.md)：2A—2F步骤、依赖、触发／群同步、浏览记忆、任务交付与迁移；真实平台验收延期。
 - [QQ 2A存储基础检查](docs/qq-phase2a-storage.md)：QQ库显式升级、Host备份迁移和旧数据保护，534项本地回归通过。
 - [QQ 2B自然称呼与群同步检查](docs/qq-phase2b-triggers-groups.md)：中文直接称呼、动态群范围、陈旧与重启门禁、Host健康状态；真实QQ验收待执行。
+- [QQ 2C实施细化](docs/qq-phase2c-plan.md)及[2C-1缓存检查](docs/qq-phase2c1-cache.md)：QQ库v3、固定水位分页、短期快照和来源版本；授权及记忆接入继续按子步骤推进。
 - [1F统一入口实施拆分](docs/phase1f-implementation-plan.md)及[最终验收](docs/phase1f3-cli-acceptance.md)：三个子步骤独立测试、记录和提交，真实模型／模拟模型／实际终端分开计量。
 - [第一阶段1A适配前提验收](docs/phase1a-adaptation.md)：DSH程序来源、真实模型工具续轮与持久化、真实图像和本地音频探针。
 - [第一阶段1B接口与生命周期验收](docs/phase1b-lifecycle.md)：v2/v3兼容、启动准入、恢复／激活分离、延迟分析与QQ连接。
