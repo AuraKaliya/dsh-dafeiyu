@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 export const QQ_APPLICATION_ID = 0x44465131;
-export const QQ_SCHEMA_VERSION = 3;
+export const QQ_SCHEMA_VERSION = 4;
 
 const tables = {
   messages: 'CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,route TEXT NOT NULL,id TEXT NOT NULL,sender TEXT NOT NULL,text TEXT NOT NULL,UNIQUE(route,id))',
@@ -16,6 +16,10 @@ const cacheTables = {
   qq_cache_state: 'CREATE TABLE qq_cache_state(route TEXT PRIMARY KEY,epoch INTEGER NOT NULL)',
   qq_browse_snapshots: 'CREATE TABLE qq_browse_snapshots(id TEXT PRIMARY KEY,instance_id TEXT NOT NULL,owner TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,expires_at INTEGER NOT NULL,UNIQUE(instance_id,owner,request_id))',
 };
+const deliveryTables = {
+  qq_delivery_plans: 'CREATE TABLE qq_delivery_plans(reply_id TEXT PRIMARY KEY,plan_hash TEXT NOT NULL,body TEXT NOT NULL)',
+  qq_delivery_segments: 'CREATE TABLE qq_delivery_segments(reply_id TEXT NOT NULL,position INTEGER NOT NULL,state TEXT NOT NULL,receipt TEXT,code TEXT,PRIMARY KEY(reply_id,position))',
+};
 export interface QqSchemaInspection {
   version: number;
   applicationId: number;
@@ -29,12 +33,12 @@ export function inspectQqSchema(db: DatabaseSync): QqSchemaInspection {
   const applicationId = Number(db.prepare('PRAGMA application_id').get()?.application_id);
   const objects = db.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all();
   const fresh = version === 0 && applicationId === 0 && objects.length === 0;
-  const expected = [...Object.entries(tables), ...(version >= 2 ? [['qq_group_snapshots', groupTable]] as const : []), ...(version >= 3 ? Object.entries(cacheTables) : [])];
+  const expected = [...Object.entries(tables), ...(version >= 2 ? [['qq_group_snapshots', groupTable]] as const : []), ...(version >= 3 ? Object.entries(cacheTables) : []), ...(version >= 4 ? Object.entries(deliveryTables) : [])];
   const structure = objects.length === expected.length && expected.every(([name, sql]) => {
     const found = objects.find(item => item.name === name);
     return found?.type === 'table' && typeof found.sql === 'string' && normalize(found.sql) === normalize(sql);
   });
-  const supported = structure && (version === 0 && applicationId === 0 || [1, 2, 3].includes(version) && applicationId === QQ_APPLICATION_ID);
+  const supported = structure && (version === 0 && applicationId === 0 || [1, 2, 3, 4].includes(version) && applicationId === QQ_APPLICATION_ID);
   return { version, applicationId, fresh, supported };
 }
 
@@ -48,6 +52,7 @@ export function initializeQqSchema(db: DatabaseSync, migrate: boolean): void {
     if (current.fresh) for (const sql of Object.values(tables)) db.exec(sql);
     if (current.fresh || current.version < 2) db.exec(groupTable);
     if (current.fresh || current.version < 3) for (const sql of Object.values(cacheTables)) db.exec(sql);
+    if (current.fresh || current.version < 4) for (const sql of Object.values(deliveryTables)) db.exec(sql);
     if (current.fresh || current.version < QQ_SCHEMA_VERSION) {
       db.exec(`PRAGMA application_id=${QQ_APPLICATION_ID}; PRAGMA user_version=${QQ_SCHEMA_VERSION};`);
     }

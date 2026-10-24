@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { QqStore, QQ_APPLICATION_ID } from '@dafeiyu/channel-qq';
+import { QqStore, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
 import { inspectStorage } from '@dafeiyu/host';
 import { testTempDir as tmpdir } from './test-temp.js';
 
@@ -25,7 +25,7 @@ test('QQ v2 migration preserves existing cache and receipts without inventing me
     assert.equal(store.receipt('reply'), '-20'); const page = store.cache.browse(route, owner, { requestId: 'old' });
     assert.equal(page.page.messages[0]?.text, '旧缓存 token=[REDACTED]'); assert.equal(store.find(route, '-10')?.text, '旧缓存 token=[REDACTED]'); assert.equal(page.page.messages[0]?.occurredAt, null); assert.equal(page.page.messages[0]?.legacyMetadata, true); assert.equal(page.page.messages[0]?.cacheTextTruncated, null);
   } finally { store.close(); }
-  assert.equal(inspectStorage(path, 'qq').version, 3);
+  assert.equal(inspectStorage(path, 'qq').version, QQ_SCHEMA_VERSION);
 });
 
 test('QQ cache pagination fixes a receive watermark and repeated requests keep the same page', async () => {

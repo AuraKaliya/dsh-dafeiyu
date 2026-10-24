@@ -8,10 +8,12 @@ import type { GroupInfo, GroupSnapshot } from './groups.js';
 import { QqCache } from './cache.js';
 import type { QqCacheOptions } from './cache.js';
 import { redactContent } from '@dafeiyu/contracts';
+import { QqDeliveryLedger } from './delivery.js';
 const remembered = z.object({ id: z.string(), sender: z.string(), text: z.string() });
 export class QqStore {
   private readonly db: DatabaseSync;
   readonly cache: QqCache;
+  readonly delivery: QqDeliveryLedger;
   constructor(file: string, options: { migrate?: boolean; cache?: QqCacheOptions } = {}) {
     mkdirSync(dirname(file), { recursive: true }); this.db = new DatabaseSync(file);
     try {
@@ -22,6 +24,7 @@ export class QqStore {
       this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       initializeQqSchema(this.db, options.migrate ?? false);
       this.cache = new QqCache(this.db, options.cache);
+      this.delivery = new QqDeliveryLedger(this.db);
     } catch (error) { this.db.close(); throw error; }
   }
   remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string; unsupported: readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }

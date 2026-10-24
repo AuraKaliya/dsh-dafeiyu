@@ -19,6 +19,8 @@ export { naturallyAddressed } from './trigger.js';
 export { QqBrowseInputSchema, QqCacheProofSchema } from './cache.js';
 export type { QqCacheProof } from './cache.js';
 export { QQ_ACTIONS } from './capabilities.js';
+export { splitQqText, qqDeliveryPlan } from './delivery.js';
+export type { QqDeliveryProgress, QqDeliveryPlan } from './delivery.js';
 
 export const name = 'dafeiyu-channel-qq';
 export const inject = ['dafeiyu'];
