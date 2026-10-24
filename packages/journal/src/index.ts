@@ -228,6 +228,13 @@ export class Journal {
     const row = this.db.prepare('SELECT id FROM inbox WHERE route=? AND message_id=?').get(scope.route, messageId);
     return row ? this.get(text(row.id)) : null;
   }
+  /** Revocation facts remain in the audit log; the original inbox row is not erased. */
+  messageRecalled(scope: TimelineScope, messageId: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM events WHERE ${this.scopePredicate()} AND json_extract(body,'$.type')='message.recalled' AND json_extract(body,'$.data.messageId')=? LIMIT 1`).get(scope.route,scope.agentId,scope.route,messageId);
+  }
+  messageSourceEpoch(scope: TimelineScope): number {
+    return Number(this.db.prepare(`SELECT coalesce(max(seq),0) AS seq FROM events WHERE ${this.scopePredicate()} AND json_extract(body,'$.type')='message.recalled'`).get(scope.route,scope.agentId,scope.route)?.seq??0);
+  }
   /** Snapshot keyset pagination. Cursor binds the scope and normalized query; it grants no access. */
   searchTimeline(scope: TimelineScope, input: TimelineQuery) {
     const parsed = TimelineQuerySchema.parse(input);

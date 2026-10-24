@@ -8,14 +8,17 @@
 
 ```powershell
 npm.cmd ci --ignore-scripts
-npm.cmd test
-npm.cmd run demo
+npm.cmd test -- build-tests/qq.test.js build-tests/qq-cache.test.js
 git diff --check
 ```
 
-测试与demo不使用API密钥。profiles/persona.test.md为可公开审阅的虚构样本。运行数据默认不入Git。首次真实模型验收要单独配置测试实例，不能将模拟结果当作真实模型验收。
+上例针对QQ缓存改动，实际测试文件按改动范围选择。测试与demo不使用API密钥。profiles/persona.test.md为可公开审阅的虚构样本。运行数据默认不入Git。首次真实模型验收要单独配置测试实例，不能将模拟结果当作真实模型验收。
 
-测试必须通过受管入口 `npm.cmd test` 运行；定向检查可用 `npm.cmd test -- build-tests/qq.test.js`。临时目录和测试子进程环境统一隔离到D盘 `.runtime/tests/`，成功自动清理，失败最多3次／72小时／合计1 GiB。直接运行依赖临时夹具的旧 `node --test` 命令会拒绝创建目录。清理失败会使本次入口失败；运行报告在 `.runtime/test-reports/`，正式验收材料另行保留。详见[测试临时文件治理](test-storage-governance.md)。
+2026-10-25按用户修订：**开发阶段只运行本次改动相关测试，部署／发布阶段才运行全量回归**。例如 `npm.cmd test -- build-tests/qq.test.js build-tests/qq-cache.test.js`；无文件参数的 `npm.cmd test`用于全量回归。记录实际选择的范围及未覆盖项，不能把定向通过写成全量通过。
+
+开发检查包含新增／修改行为、直接调用方与接口兼容风险；此前已有的无关测试不重跑。受管入口仍执行类型构建，执行用例限定为所选文件。失败修复后只复测相关范围；已有检查通过且代码未再变化时不为凑次数重复运行。共享接口影响多个插件时，选择实际受影响的集成检查并说明原因。发布／部署前再运行完整用例集，真实模型和平台验收仍按已批准的范围、样本与预算单独进行。
+
+测试仍必须通过上述受管入口。临时目录和子进程环境统一隔离到D盘 `.runtime/tests/`，成功自动清理，失败最多3次／72小时／合计1 GiB。直接运行依赖临时夹具的旧 `node --test` 命令会拒绝创建目录。清理失败会使本次入口失败；运行报告在 `.runtime/test-reports/`，正式验收材料另行保留。详见[测试临时文件治理](test-storage-governance.md)。
 
 ## 当前布局
 

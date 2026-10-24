@@ -30,6 +30,19 @@ test('Host rejects arbitrary imports, inline secrets, actor overrides and test m
   ])assert.throws(await changed(f,raw),error=>error instanceof Error&&/^HOST_/.test(error.message)&&!error.message.includes('PRIVATE_SENTINEL'));
 });
 
+test('Host validates QQ observation dependencies and policy before any connector opens',async()=>{const f=await fixture();
+  const qq={id:'channel-qq',required:true,config:{botId:'12345678',ownerId:'87654321',groupIds:['11223344'],httpURL:'http://127.0.0.1:1/',wsURL:'ws://127.0.0.1:1/',tokenFile:'./fictional-token',capabilities:{enabled:true}}};
+  const policy={id:'conversation',producers:['channel-qq'],actions:['qq_groups','qq_browse','qq_observe_select'],allowLocalWrite:true};
+  const base={...f.config,paths:{...f.config.paths,channels:{'channel-qq':'./data/qq'}},authorityPolicies:[...f.config.authorityPolicies,policy]};
+  assert.throws(await changed(f,{...base,plugins:[{id:'model-scripted',required:true},qq]}),/HOST_QQ_MEMORY_REQUIRED/);
+  assert.throws(await changed(f,{...base,plugins:[...f.config.plugins,qq]}),/HOST_QQ_SOURCE_TRACKING_REQUIRED/);
+  const plugins=[...f.config.plugins.map(p=>p.id==='memory'?{...p,config:{sourceTracking:true}}:p),qq];
+  for(const authorityPolicies of [f.config.authorityPolicies,[{...policy,allowLocalWrite:false}],[{...policy,actions:['qq_browse']}]] )
+    assert.throws(await changed(f,{...base,plugins,authorityPolicies}),/HOST_QQ_CAPABILITY_POLICY_REQUIRED/);
+  const prepared=(await changed(f,{...base,plugins}))();assert.ok(prepared.order.indexOf('core-execution')<prepared.order.indexOf('channel-qq'));
+  assert.ok(prepared.order.indexOf('memory')<prepared.order.indexOf('channel-qq'));
+});
+
 test('Host rejects invalid UTF8, unknown keys, missing providers and dependency cycles before initialization',async()=>{const f=await fixture();
   await writeFile(f.file,Buffer.from([0xff,0xfe]));assert.throws(()=>loadHostConfig(f.file),/HOST_CONFIG_INVALID/);
   assert.throws(await changed(f,{...f.config,unknown:true}),/HOST_CONFIG_INVALID/);

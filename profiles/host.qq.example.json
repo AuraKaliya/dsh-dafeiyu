@@ -8,14 +8,18 @@
   "plugins": [
     {"id": "model-scripted", "required": true},
     {"id": "timeline", "required": true, "config": {"execution": true}},
-    {"id": "memory", "required": true},
+    {"id": "memory", "required": true, "config": {"sourceTracking": true}},
     {"id": "channel-qq", "required": true, "config": {
       "botId": "12345678", "ownerId": "87654321", "groupIds": ["11223344"],
       "naturalNames": ["大肥鱼", "蓝色大肥鱼"],
+      "capabilities": {"enabled": true},
       "groupSync": {"enabled": true, "mode": "allowlist", "intervalMs": 30000, "maxStaleMs": 120000},
       "httpURL": "http://127.0.0.1:13000/", "wsURL": "ws://127.0.0.1:13001/",
       "tokenFile": "../.runtime/qq-local-development/onebot.token"
     }}
   ],
-  "authorityPolicies": [{"id": "local-task", "producers": ["host-cli"], "actions": ["dafeiyu_task_intent"], "allowLocalWrite": false}]
+  "authorityPolicies": [
+    {"id": "local-task", "producers": ["host-cli"], "actions": ["dafeiyu_task_intent"], "allowLocalWrite": false},
+    {"id": "conversation", "producers": ["channel-qq"], "actions": ["qq_groups", "qq_browse", "qq_observe_select"], "allowLocalWrite": true}
+  ]
 }

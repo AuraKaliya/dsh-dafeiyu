@@ -83,8 +83,8 @@ export class MemoryService extends Service {
           if(this.closed||scope.agentId!==this.config.agentId)throw new Error('Compaction scope unavailable');
           const work=this.working?.compactionBasis(scope);
           const selection=this.tasks.selection(scope),activeTask=this.tasks.activeTask(scope),taskId=activeTask?`agent-task:${activeTask}`:work?.taskId??null;
-          const versions={memoryMutations:this.store.mutationEpoch(scope),working:work?.working??0,evidence:work?.evidence??0,feedbackMutations:this.feedbackArchive?.mutationEpoch(scope)??0,taskSelection:selection.version};
-          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId,resources:ctx.dafeiyu.capabilityResourceEpoch()})).digest('hex'),taskId,
+          const versions={memoryMutations:this.store.mutationEpoch(scope),working:work?.working??0,evidence:work?.evidence??0,feedbackMutations:this.feedbackArchive?.mutationEpoch(scope)??0,taskSelection:selection.version,messageSources:ctx.dafeiyu.journal.messageSourceEpoch(scope)};
+          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId,resources:ctx.dafeiyu.capabilityResourceEpoch(scope)})).digest('hex'),taskId,
             versions:{...versions,memoryGeneration:this.store.generation(scope)}};
     };
     const sourcePolicy=new MemorySourcePolicy(ctx,this.store,this.working,this.feedbackArchive,scope=>basis(scope).epoch);
@@ -144,7 +144,7 @@ export class MemoryService extends Service {
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
   get lifecycleState(){return this.gate.state;}
-  runtimeHealth(){return {lifecycle:this.gate.state,analysis:this.analysis?.health??{state:'not-configured' as const,active:false},retrieval:this.config.retrieval?'configured' as const:'not-configured' as const,compaction:this.config.compaction?'configured' as const:'not-configured' as const};}
+  runtimeHealth(){return {lifecycle:this.gate.state,analysis:this.analysis?.health??{state:'not-configured' as const,active:false},retrieval:this.config.retrieval?'configured' as const:'not-configured' as const,compaction:this.config.compaction?'configured' as const:'not-configured' as const,sourceTracking:this.config.sourceTracking||this.config.compaction?'configured' as const:'not-configured' as const};}
   recover():void {
     if(this.closed)throw new Error('Memory capability is unregistered');
     if(this.gate.state==='recovered'||this.gate.active)return;

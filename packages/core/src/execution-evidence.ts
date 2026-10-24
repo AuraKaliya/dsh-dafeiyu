@@ -64,7 +64,7 @@ export class ExecutionEvidence {
     if(this.bound)return this.bound;
     const port=this.memory(),scopeFields={agentId:this.base.view.scope.agentId,route:this.route()};
     const provider:CompactionProvider={policy:port?.compactionPolicy??{enabled:false,inputTokens:8192,thresholdRatio:0.75,targetRatio:0.58,minGrowthTokens:1024,minSavingsTokens:512,cooldownMs:60000,retainTurns:2,maxSourceBytes:65536,maxSummaryChars:2000},
-      basis:()=>{const generation=port?.generation(this.access())??0;return {epoch:runtimeHash([generation,port?.resourceEpoch?.()??null]),taskId:this.run.definition.taskId,protectedRunId:this.run.id,versions:{memory:generation}};},
+      basis:()=>{const generation=port?.generation(this.access())??0;return {epoch:runtimeHash([generation,port?.resourceEpoch?.(this.access())??null]),taskId:this.run.definition.taskId,protectedRunId:this.run.id,versions:{memory:generation}};},
       sources:{
         inbound:(_scope,id)=>{const body=this.store.readInput(id,'native-program');if(!body)return this.unavailable('missing-native-input');const proof=inputProof.parse(body);
           return [{...scopeFields,kind:'execution-input',runId:id,hash:runtimeHash(proof)},...proof.sources.map(ref=>({...scopeFields,kind:'execution-source' as const,ref}))];},

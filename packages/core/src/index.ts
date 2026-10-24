@@ -150,7 +150,7 @@ export class DafeiyuService extends Service {
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
   private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
-  capabilityManifest(){return {features:this.features(),actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
+  capabilityManifest(){return {features:[...new Set([...this.features(),...this.registryV3.providedFeatures()])],actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
   get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {
     try {
@@ -189,7 +189,7 @@ export class DafeiyuService extends Service {
     if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const scene=ConversationSchema.parse(raw);this.executions.authorizeResource(context,pluginId,scene);return scene;
   }
   capabilityResourceCurrent(raw:unknown):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registryV3.resourceCurrent(proof.data);}
-  capabilityResourceEpoch():string {return this.registryV3.resourceEpoch();}
+  capabilityResourceEpoch(scope?:TimelineScope):string {return this.registryV3.resourceEpoch(scope);}
   capabilityHistoryCurrent(scope:TimelineScope,deps:readonly SourceDependency[]):boolean {
     const session=this.journal.sessionFor(scope);return !!session&&this.runtime.summarySourcesCurrent(session,deps);
   }

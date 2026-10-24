@@ -104,7 +104,7 @@ export class TimelineService extends Service {
     if (source.route !== undefined && source.route !== scope.route) return false;
     switch (source.kind) {
       case 'session': return source.seq !== undefined && this.ctx.dafeiyu.journal.sessionFor(scope) === source.id;
-      case 'message': return this.ctx.dafeiyu.journal.messageFor(scope, source.id) !== null;
+      case 'message': return this.ctx.dafeiyu.journal.messageFor(scope, source.id) !== null && !this.ctx.dafeiyu.journal.messageRecalled(scope,source.id);
       case 'event': return this.ctx.dafeiyu.journal.scopedEvent(scope, source.id) !== null;
     }
   }
@@ -195,7 +195,7 @@ export class TimelineService extends Service {
         try {
           const window = await this.ctx.sessionQuery.readEvent({ sessionId:SessionId(source.id),seq:SessionSeq(source.seq),before:0,after:0 },signal);
           guard();
-          if((window.target.type==='assistant/message'||window.target.type==='tool/result')&&!this.ctx.dafeiyu.historicalSourceCurrent(scope,source.id,source.seq))return {status:'not_exported' as const};
+          if((window.target.type==='assistant/message'||window.target.type==='tool/result'||window.target.type==='user/message')&&!this.ctx.dafeiyu.historicalSourceCurrent(scope,source.id,source.seq))return {status:'not_exported' as const};
           if(window.target.type==='user/message'&&(window.target.data.source.kind==='compact-checkpoint'||window.target.data.source.kind==='dafeiyu-summary-view')){
             const text=window.target.data.content.filter(b=>b.type==='text').map(b=>b.text).join('\n');
             if(text.includes('"kind":"dafeiyu-incremental-summary"')&&!this.ctx.dafeiyu.compactionViewCurrent(scope,text,window.target.data.source.compactionId))return {status:'not_exported' as const};

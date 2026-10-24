@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ActionOutcomeSchema, ExtensionMetadataV3Schema, dependencyOrder,redactJson } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3, ExtensionV3, ExtensionHandleV3, ExecutionContextV3, ActionOutcome, Json, ContextContributorV3, ResourceProof, ResourceProofProvider } from '@dafeiyu/contracts';
+import type { ActionCapabilityV3, ExtensionV3, ExtensionHandleV3, ExecutionContextV3, ActionOutcome, Json, ContextContributorV3, ResourceProof, ResourceProofProvider, TimelineScope } from '@dafeiyu/contracts';
 import { toolParameters } from './tool-schema.js';
 
 interface ReservedNames { ids: readonly string[]; actions: readonly string[]; channels: readonly string[] }
@@ -36,9 +36,9 @@ function freezeTree(value: unknown): void {
 
 /** Registration snapshots. Invocation authority is issued by the core Run coordinator. */
 export class CapabilityRegistryV3 {
-  private resourceState(entry:Entry){try{const epoch=entry.resourceProofs?.epoch();return typeof epoch==='string'&&epoch.length<=8000?{ready:entry.active&&entry.ready(),epoch}:{ready:false,epoch:'INVALID_RESOURCE_EPOCH'};}catch{return {ready:false,epoch:'RESOURCE_UNAVAILABLE'};}}
+  private resourceState(entry:Entry,scope?:TimelineScope){try{const epoch=entry.resourceProofs?.epoch(scope);return typeof epoch==='string'&&epoch.length<=8000?{ready:entry.active&&entry.ready(),epoch}:{ready:false,epoch:'INVALID_RESOURCE_EPOCH'};}catch{return {ready:false,epoch:'RESOURCE_UNAVAILABLE'};}}
   resourceCurrent(proof:ResourceProof):boolean {const entry=this.entries.get(proof.provider);try{return !!entry&&this.resourceState(entry).ready&&entry.resourceProofs?.current(proof)===true;}catch{return false;}}
-  resourceEpoch():string{return JSON.stringify([...this.entries.values()].filter(entry=>entry.active&&entry.resourceProofs).map(entry=>[entry.metadata.id,this.resourceState(entry)]));}
+  resourceEpoch(scope?:TimelineScope):string{return JSON.stringify([...this.entries.values()].filter(entry=>entry.active&&entry.resourceProofs).flatMap(entry=>{const state=this.resourceState(entry,scope);return state.epoch===''?[]:[[entry.metadata.id,state]];}));}
   contributors(){return [...this.entries.values()].filter(entry=>entry.active&&entry.ready()).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,version:entry.metadata.version,context,active:()=>entry.active&&entry.ready(),signal:entry.controller.signal})));}
   private readonly entries = new Map<string, Entry>();
   hasId(id: string): boolean { return this.entries.has(id); }
@@ -47,6 +47,7 @@ export class CapabilityRegistryV3 {
   ids(): string[] { return [...this.entries.keys()]; }
   contexts(){return [...this.entries.values()].filter(entry=>entry.active).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,context,active:()=>entry.active&&entry.ready()})));}
   actions(): BoundActionV3[] { return [...this.entries.values()].filter(entry => entry.active).flatMap(entry => [...entry.actions]); }
+  providedFeatures(): string[] { return [...this.entries.values()].filter(entry => entry.active && entry.ready()).flatMap(entry => entry.metadata.provides); }
   checkReady(available: readonly string[] = []): void {
     dependencyOrder([...this.entries.values()].filter(entry => entry.active).map(entry => entry.metadata), available);
     if ([...this.entries.values()].some(entry => entry.active && !entry.ready())) throw new Error('DEPENDENCY_UNAVAILABLE');

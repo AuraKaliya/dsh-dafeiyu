@@ -18,7 +18,7 @@ export class MemorySourcePolicy implements SourcePolicy {
   private missing(scope:CompactionScope):SourceDependency[]{return [{...scoped(scope),kind:'unavailable',reason:'source-unavailable'}];}
   private match(scope:CompactionScope,id:string){return (ref:string)=>this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope,ref)===id;}
   private message(scope:CompactionScope,id:string):string|null {
-    const item=this.ctx.dafeiyu.journal.messageFor(scope,id);if(!item)return null;
+    const item=this.ctx.dafeiyu.journal.messageFor(scope,id);if(!item||this.ctx.dafeiyu.journal.messageRecalled(scope,id))return null;
     return redactContent(JSON.stringify(redactJson({sender:item.message.sender,occurredAt:item.message.occurredAt,text:item.message.text}).value,null,2)).value;
   }
   inbound(scope:CompactionScope,id:string):SourceDependency[]{

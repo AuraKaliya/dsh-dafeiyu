@@ -32,6 +32,8 @@ export class QqCache {
   }
   private atomic<T>(work: () => T): T { this.db.exec('BEGIN IMMEDIATE'); try { const value = work(); this.db.exec('COMMIT'); return value; } catch (error) { this.db.exec('ROLLBACK'); throw error; } }
   private epoch(route: string): number { return Number(this.db.prepare('SELECT epoch FROM qq_cache_state WHERE route=?').get(route)?.epoch ?? 0); }
+  generation(route?:string):number {return route?this.epoch(route):Number(this.db.prepare('SELECT coalesce(sum(epoch),0) AS n FROM qq_cache_state').get()?.n);}
+  known(route:string,id:string):boolean{return !!this.db.prepare('SELECT 1 FROM qq_message_meta WHERE route=? AND id=?').get(route,id)||!!this.db.prepare('SELECT 1 FROM messages WHERE route=? AND id=?').get(route,id);}
   private bump(route: string): void { this.db.prepare('INSERT INTO qq_cache_state VALUES(?,1) ON CONFLICT(route) DO UPDATE SET epoch=epoch+1').run(route); }
   private meta(route: string, row: CachedRow) {
     const existing = this.db.prepare('SELECT version,hash,body,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, row.id);
@@ -63,16 +65,17 @@ export class QqCache {
       return true;
     });
   }
-  revoke(route: string, id: string): void {
+  revoke(route: string, id: string): boolean {
     routeSchema.parse(route); z.string().min(1).max(80).parse(id);
-    this.atomic(() => {
+    return this.atomic(() => {
       const cached = this.db.prepare('SELECT seq,id,sender,text FROM messages WHERE route=? AND id=?').get(route, id);
       if (cached) this.meta(route, rowSchema.parse(cached));
-      const old = this.db.prepare('SELECT deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id); if (old?.deleted === 1) return;
+      const old = this.db.prepare('SELECT deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id); if (old?.deleted === 1) return false;
       this.db.prepare('INSERT INTO qq_message_meta VALUES(?,?,1,?,1,?) ON CONFLICT(route,id) DO UPDATE SET version=version+1,deleted=1')
         .run(route, id, digest(['unseen', route, id]), JSON.stringify({ occurredAt: null, unsupported: [], truncated: null, known: false }));
       this.db.prepare('DELETE FROM messages WHERE route=? AND id=?').run(route, id); this.bump(route);
       this.db.prepare("DELETE FROM qq_browse_snapshots WHERE json_extract(body,'$.proof.route')=?").run(route);
+      return true;
     });
   }
   proofCurrent(raw: unknown): boolean {

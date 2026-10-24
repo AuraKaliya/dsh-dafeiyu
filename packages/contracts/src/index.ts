@@ -43,7 +43,7 @@ export const MessageSchema = z.strictObject({
 export type InboundMessage = z.infer<typeof MessageSchema>;
 export const ObservationSchema = z.strictObject({
   conversation: ConversationSchema,
-  type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported']),
+  type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled']),
   data: z.record(z.string(), z.union([z.string().max(200), z.number().finite(), z.boolean(), z.null()])),
 });
 export type Observation = z.infer<typeof ObservationSchema>;

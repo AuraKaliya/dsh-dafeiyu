@@ -4,7 +4,7 @@
 
 第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，1F结束时529项回归通过。用户于2026-10-25决定将真实模型与整体验收延后至整体开发完成；[162次场景样本已保留](docs/phase1g-deferred-samples.md)，1G尚未通过，继续阶段2开发并保留本地程序回归。1A音画探针单独记录，现有QQ和服务器未切换。
 
-阶段2已完成[2A存储迁移基础](docs/qq-phase2a-storage.md)和[2B自然称呼／群同步](docs/qq-phase2b-triggers-groups.md)的本地开发，2B结束时546项业务回归通过。QQ库为v2，已有数据需显式备份升级；旧配置默认保留静态群白名单和at／引用触发。2C浏览记忆、2D分段、2E新任务流程和2F整体装配检查待实施。
+阶段2已完成[2A存储迁移基础](docs/qq-phase2a-storage.md)、[2B自然称呼／群同步](docs/qq-phase2b-triggers-groups.md)和[2C浏览／观察／选择性记忆](docs/qq-phase2c3-integration.md)的本地开发。QQ库为v3、memory为v9，已有数据需显式备份升级；浏览能力默认关闭，样例明确开启，旧配置保留原触发方式。2C最终定向检查174项通过；2D分段、2E新任务流程和2F整体装配检查待实施，真实模型／QQ验收继续延期。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
@@ -12,11 +12,11 @@
 
 环境：Windows 本地验收使用 Node.js 24.13.0。项目固定 DSH 0.2.1-rc.2、Cordis 4.0.5，依赖锁在 `package-lock.json`。
 
-测试已迁到D盘项目专用目录并自动清理；失败现场按最多3次、72小时、合计1 GiB保留，期限由下次测试／清理入口执行。请使用下面的 `npm.cmd test` 入口，不再直接运行旧测试命令。治理记录见[方案与规则](docs/test-storage-governance.md)、[TG1检查](docs/test-storage-tg1.md)及[TG2历史清理](docs/test-storage-tg2.md)：已删除29,729个历史目录，最终560项回归通过。本轮未继续2C。
+测试已迁到D盘项目专用目录并自动清理；失败现场按最多3次、72小时、合计1 GiB保留，期限由下次测试／清理入口执行。开发时通过下面的受管入口选择与改动相关的测试；全量回归仅在部署／发布阶段运行，见[开发约定](docs/development.md)。治理记录见[方案与规则](docs/test-storage-governance.md)、[TG1检查](docs/test-storage-tg1.md)及[TG2历史清理](docs/test-storage-tg2.md)：历史清理阶段已删除29,729个目录，当时560项回归通过。
 
 ```powershell
 npm.cmd ci --ignore-scripts
-npm.cmd test
+npm.cmd test -- build-tests/qq-capabilities.test.js build-tests/qq.test.js
 npm.cmd run demo
 ```
 
@@ -46,6 +46,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [本地统一入口使用说明](docs/host-usage.md)：配置模板、命令、诊断、迁移与数据保护。
 - [1G样本留存与验收延期](docs/phase1g-deferred-samples.md)：162次待执行清单、判定标准、尚未批准的预算和后续统一验收要求。
 - [阶段2：QQ文字能力与流程整合方案](docs/qq-capabilities-plan.md)：2A—2F步骤、依赖、触发／群同步、浏览记忆、任务交付与迁移；真实平台验收延期。
+- [2C分步实施方案](docs/qq-phase2c-plan.md)、[缓存检查](docs/qq-phase2c1-cache.md)、[通用观察接口检查](docs/qq-phase2c2-observations.md)、[QQ与Host联调检查](docs/qq-phase2c3-integration.md)。
 - [QQ 2A存储基础检查](docs/qq-phase2a-storage.md)：QQ库显式升级、Host备份迁移和旧数据保护，534项本地回归通过。
 - [QQ 2B自然称呼与群同步检查](docs/qq-phase2b-triggers-groups.md)：中文直接称呼、动态群范围、陈旧与重启门禁、Host健康状态；真实QQ验收待执行。
 - [QQ 2C实施细化](docs/qq-phase2c-plan.md)及[2C-1缓存检查](docs/qq-phase2c1-cache.md)：QQ库v3、固定水位分页、短期快照和来源版本；授权及记忆接入继续按子步骤推进。

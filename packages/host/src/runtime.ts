@@ -43,7 +43,7 @@ export interface HostRuntimeOptions {
 export interface PluginHealth {id:string;required:boolean;state:'configured'|'starting'|'ready'|'degraded'|'disabled'|'not-configured'|'failed'|'stopped';version:string|null;code:string|null}
 export interface HostSnapshot {schemaVersion:1;profileId:string;agentId:string;instanceId:string;pid:number;at:string;configHash:string;foundationHash:string;
   phase:HostPhase;mode:'daemon'|'single-run';accepting:boolean;error:string|null;plugins:PluginHealth[];features:string[];
-  services:{memory:ReturnType<Memory.MemoryService['runtimeHealth']>|null;qq:{state:string;groupSync:string;groupError:string|null;effectiveGroups:number;lastGroupSync:string|null}|null};
+  services:{memory:ReturnType<Memory.MemoryService['runtimeHealth']>|null;qq:{state:string;groupSync:string;groupError:string|null;effectiveGroups:number;lastGroupSync:string|null;capabilities:boolean}|null};
   counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:2;memory:9;runtime:2};}
 export interface HostRunResult {taskId:string;runId:string;state:string;error:string|null;result:string|null}
 class FixedModel extends LlmAdapter {
@@ -109,7 +109,8 @@ export class ManagedHost {
       if(!existsSync(qq.tokenFile)){if(this.health.find(p=>p.id==='channel-qq')?.required)throw new Error('HOST_QQ_CREDENTIAL_FILE_MISSING');this.plugin('channel-qq','degraded','HOST_QQ_CREDENTIAL_FILE_MISSING');}
       else{await ctx.plugin(QQ,{agentId:this.config.config.agent.id,dataDir:this.config.paths.channels['channel-qq']!,lifecycleMode:'managed',...qq});this.qqValue=ctx.dafeiyuQQ;this.qqValue.holdIngress();this.plugin('channel-qq','starting');}
     }else if(qq)this.plugin('channel-qq','disabled','HOST_SINGLE_RUN');
-    if(this.config.config.authorityPolicies.some(policy=>policy.actions.some(action=>!this.core.capabilityManifest().actions.some(actual=>actual.id===action))))throw new Error('HOST_POLICY_ACTION_UNAVAILABLE');
+    const producerActive=(producer:string)=>producer==='channel-qq'?!!this.qqValue:producer==='channel-simulator'?!!simulator&&this.mode==='daemon':true;
+    if(this.config.config.authorityPolicies.filter(policy=>policy.producers.some(producerActive)).some(policy=>policy.actions.some(action=>!this.core.capabilityManifest().actions.some(actual=>actual.id===action))))throw new Error('HOST_POLICY_ACTION_UNAVAILABLE');
     this.mark('recovering');this.memoryValue?.recover();this.memoryValue?.activate();if(memory)await this.core.recoverExecutions();this.core.recover();
     const resume={resumeMessages:this.mode==='daemon',resumeExecutions:this.mode==='daemon'};if(this.mode==='single-run')this.memoryValue?.stopBackground();
     this.core.activate({deferWork:true,...resume});
@@ -132,7 +133,7 @@ export class ManagedHost {
     if(!existsSync(file))continue;const db=new DatabaseSync(file,{readOnly:true});try{for(const table of tables)if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))count+=Number(db.prepare(`SELECT count(*) AS n FROM ${table} WHERE delivered=0`).get()?.n);}finally{db.close();}}return count;}
   snapshot():HostSnapshot{const core=this.coreValue?.getStatus(),qq=this.qqValue?.getStatus();return {schemaVersion:1,profileId:this.config.config.profileId,agentId:this.config.config.agent.id,instanceId:this.instanceId,pid:process.pid,at:new Date().toISOString(),configHash:this.config.hash,foundationHash:this.config.foundation.hash,
       phase:this.phase,mode:this.mode,accepting:['ready','degraded'].includes(this.phase)&&!!this.coreValue?.accepting,error:this.error,plugins:this.health.map(p=>({...p})),features:this.coreValue?.capabilityManifest().features??[],
-      services:{memory:this.memoryValue?.runtimeHealth()??null,qq:qq?{state:qq.state,groupSync:qq.groupSync.state,groupError:qq.groupSync.error,effectiveGroups:qq.groupSync.effectiveIds.length,lastGroupSync:qq.groupSync.lastSuccessAt}:null},
+      services:{memory:this.memoryValue?.runtimeHealth()??null,qq:qq?{state:qq.state,groupSync:qq.groupSync.state,groupError:qq.groupSync.error,effectiveGroups:qq.groupSync.effectiveIds.length,lastGroupSync:qq.groupSync.lastSuccessAt,capabilities:qq.capabilities.registered}:null},
       counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:2,memory:9,runtime:2}};}
   publish(){if(!this.lease)return;const file=join(this.config.paths.core,'host-status.json'),temp=file+'.'+randomUUID()+'.tmp';writeFileSync(temp,JSON.stringify(this.snapshot(),null,2)+'\n',{flag:'wx'});renameSync(temp,file);}
   run(raw:unknown):Promise<HostRunResult>{if(!['ready','degraded'].includes(this.phase))throw new Error('HOST_NOT_READY');if(!this.memoryValue)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');

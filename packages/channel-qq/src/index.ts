@@ -1,7 +1,7 @@
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
-import { API_VERSION, LifecycleModeSchema } from '@dafeiyu/contracts';
+import { API_VERSION, LifecycleModeSchema, conversationKey } from '@dafeiyu/contracts';
 import type { Conversation, DeliveryResult, ExtensionHandle, Reply } from '@dafeiyu/contracts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -11,12 +11,14 @@ import { loopbackURL, OneBot, platformId } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
 import { naturallyAddressed } from './trigger.js';
+import { QqCapabilities, QqCapabilitiesConfigSchema, QQ_ACTIONS, qqResourceRoute } from './capabilities.js';
 export { QqStore } from './store.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
 export { naturallyAddressed } from './trigger.js';
 export { QqBrowseInputSchema, QqCacheProofSchema } from './cache.js';
 export type { QqCacheProof } from './cache.js';
+export { QQ_ACTIONS } from './capabilities.js';
 
 export const name = 'dafeiyu-channel-qq';
 export const inject = ['dafeiyu'];
@@ -25,6 +27,7 @@ const configSchema = z.strictObject({
   groupIds: z.array(z.string().regex(/^[1-9]\d{4,14}$/)).max(10),
   naturalNames: z.array(z.string().trim().min(2).max(32).regex(/^[\p{L}\p{N}_-]+$/u)).max(16).default([]),
   groupSync: GroupSyncConfigSchema.prefault({}),
+  capabilities: QqCapabilitiesConfigSchema.prefault({}),
   httpURL: z.string(), wsURL: z.string(), tokenFile: z.string(), dataDir: z.string(),
   lifecycleMode:LifecycleModeSchema.default('legacy'),
   requestTimeoutMs: z.number().int().min(100).max(30000).default(10000),
@@ -34,11 +37,15 @@ export type Config = z.input<typeof configSchema>;
 export const QqPluginConfigSchema=configSchema.omit({agentId:true,dataDir:true,lifecycleMode:true});
 const segmentSchema = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
 const messageSchema = z.object({
-  post_type: z.literal('message'), self_id: platformId, message_id: platformId,
+  post_type: z.literal('message'), self_id: platformId, message_id: platformId.pipe(z.string().max(80)),
   message_type: z.enum(['private','group']), user_id: platformId, group_id: platformId.optional(),
-  time: z.number().finite().nonnegative().max(8_640_000_000_000), message: z.array(segmentSchema).max(1000),
+  time: z.number().finite().nonnegative().max(253402300799), message: z.array(segmentSchema).max(1000),
   sender: z.object({ nickname: z.string().optional(), card: z.string().optional() }).optional(),
 });
+const recallSchema=z.discriminatedUnion('notice_type',[
+  z.object({post_type:z.literal('notice'),notice_type:z.literal('group_recall'),self_id:platformId,group_id:platformId,message_id:platformId.pipe(z.string().max(80))}),
+  z.object({post_type:z.literal('notice'),notice_type:z.literal('friend_recall'),self_id:platformId,user_id:platformId,message_id:platformId.pipe(z.string().max(80))}),
+]);
 declare module '@deepseek-ai/cordis' { interface Context { dafeiyuQQ: QqChannel } }
 type Status = 'starting' | 'online' | 'offline' | 'rejected' | 'stopped';
 
@@ -49,6 +56,7 @@ export class QqChannel extends Service {
   private readonly store: QqStore;
   private readonly groups: GroupDirectory;
   private readonly handle: ExtensionHandle;
+  private readonly capabilities: QqCapabilities|undefined;
   private readonly token: string;
   private socket: WebSocket | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +64,7 @@ export class QqChannel extends Service {
   private lastPong = 0;
   private stopped = false;
   private quiescing = false;
+  private verified = false;
   private ingressHeld=false;
   private buffered:string[]=[];
   private bufferedBytes=0;
@@ -64,23 +73,27 @@ export class QqChannel extends Service {
   private readonly controller = new AbortController();
   private queue: Promise<void> = Promise.resolve();
   private readonly sending = new Set<Promise<DeliveryResult>>();
-  private counters = { received: 0, accepted: 0, ignored: 0, unsupported: 0, delivered: 0, reconnects: 0 };
+  private counters = { received: 0, accepted: 0, ignored: 0, unsupported: 0, delivered: 0, reconnects: 0, recalled: 0 };
   constructor(ctx: Context, raw: Config) {
     super(ctx, 'dafeiyuQQ'); this.config = configSchema.parse(raw);
+    if(this.config.capabilities.enabled&&this.config.lifecycleMode!=='managed')throw new Error('QQ_CAPABILITIES_REQUIRE_MANAGED');
     this.config.httpURL = loopbackURL(this.config.httpURL, 'http:'); this.config.wsURL = loopbackURL(this.config.wsURL, 'ws:');
     this.token = readFileSync(this.config.tokenFile, 'utf8').trim();
     if (this.token.length < 32) throw new Error('OneBot token must be at least 32 characters');
     this.api = new OneBot(this.config.httpURL, this.token, this.config.botId, this.config.requestTimeoutMs);
-    this.store = new QqStore(resolve(this.config.dataDir, 'qq.sqlite'));
+    this.store = new QqStore(resolve(this.config.dataDir, 'qq.sqlite'),{cache:this.config.capabilities});
+    let registration:ExtensionHandle|undefined;
     try {
       this.groups = new GroupDirectory({ account: this.config.botId, allowed: this.config.groupIds, config: this.config.groupSync, store: this.store,
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
-        rejectIdentity: () => { this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
-      this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
+        rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
+      this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
         channels: [{ channel: 'qq', account: this.config.botId,
           description: '当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
           deliver: (reply, signal) => this.deliver(reply, signal) }] });
-    } catch (error) { this.store.close(); throw error; }
+      if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
+        allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing)});
+    } catch (error) {this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'qq.close');
   }
   private observation(type: Parameters<ExtensionHandle['observe']>[0]['type'], code: string, conversation?: Conversation): void {
@@ -88,7 +101,10 @@ export class QqChannel extends Service {
     this.handle.observe({ conversation: conversation ?? { channel: 'qq', account: this.config.botId, kind: 'local', id: '__transport__' }, type, data: { code } });
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
-    groupIds: [...this.config.groupIds], groupSync: this.groups.status(), counters: { ...this.counters }, at: new Date().toISOString() }; }
+    groupIds: [...this.config.groupIds], groupSync: this.groups.status(), capabilities:{enabled:this.config.capabilities.enabled,registered:!!this.capabilities&&!this.stopped,actions:this.capabilities&&!this.stopped?[...QQ_ACTIONS]:[]},counters: { ...this.counters }, at: new Date().toISOString() }; }
+  private cacheRoute(scene:Conversation):string {return this.config.capabilities.enabled?qqResourceRoute(scene):JSON.stringify([scene.kind,scene.id]);}
+  private allowed(scene:Conversation):boolean {return !this.stopped&&this.state!=='rejected'&&scene.channel==='qq'&&scene.account===this.config.botId&&
+    (scene.kind==='private'?scene.id===this.config.ownerId:scene.kind==='group'&&this.groups.effective().includes(scene.id));}
   /** Program-side refresh; no model invocation, privilege expansion or history replay. */
   refreshGroups(): Promise<void> { return this.groups.refresh(); }
   async start(): Promise<void> {
@@ -112,11 +128,13 @@ export class QqChannel extends Service {
     try { await this.api.verify(this.controller.signal); }
     catch (error) {
       if (this.stopped) return;
+      this.verified=false;
       this.error = error instanceof Error && error.message === 'ACCOUNT_MISMATCH' ? 'ACCOUNT_MISMATCH' : 'IDENTITY_UNAVAILABLE';
       this.state = this.error === 'ACCOUNT_MISMATCH' ? 'rejected' : 'offline';
       this.observation('connection.rejected', this.error); this.retryLater(); return;
     }
     if (this.stopped || this.quiescing) return;
+    this.verified=true;
     this.error = null;
     await this.groups.start();
     if (this.stopped || this.quiescing) return;
@@ -155,6 +173,15 @@ export class QqChannel extends Service {
     if(this.ingressHeld){const bytes=Buffer.byteLength(text,'utf8');if(this.bufferedBytes+bytes>2*1024*1024){this.error='INGRESS_BUFFER_FULL';this.state='offline';this.socket?.terminate();return;}this.buffered.push(text);this.bufferedBytes+=bytes;return;}
     let raw: unknown;
     try { raw = JSON.parse(text); } catch { this.counters.ignored++; return; }
+    const recalled=recallSchema.safeParse(raw);
+    if(recalled.success){const notice=recalled.data;if(notice.self_id!==this.config.botId)return;
+      const scene:Conversation={channel:'qq',account:this.config.botId,kind:notice.notice_type==='group_recall'?'group':'private',id:notice.notice_type==='group_recall'?notice.group_id:notice.user_id};
+      const route=this.cacheRoute(scene);if(!this.allowed(scene)&&!this.store.cache.known(route,notice.message_id))return;
+      const changed=this.store.cache.revoke(route,notice.message_id);if(changed)this.counters.recalled++;
+      // A repeated notice can complete an audit append interrupted after the cache tombstone.
+      if(!this.ctx.dafeiyu.journal.messageRecalled({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},notice.message_id))
+        this.handle.observe({conversation:scene,type:'message.recalled',data:{messageId:notice.message_id,code:'CACHE_SOURCE_REVOKED'}});return;
+    }
     const decoded = messageSchema.safeParse(raw);
     if (!decoded.success) return; // Heartbeats, lifecycle, requests and unsupported envelopes cannot trigger a turn.
     const message = decoded.data; this.counters.received++;
@@ -165,8 +192,7 @@ export class QqChannel extends Service {
     const conversation: Conversation = { channel: 'qq', account: this.config.botId, kind: message.message_type, id: message.group_id ?? message.user_id };
     // Private messages must never take a supplied group_id as their route.
     if (message.message_type === 'private') conversation.id = message.user_id;
-    const route = JSON.stringify([conversation.kind, conversation.id]);
-    if (this.store.handled(route, message.message_id)) { this.counters.ignored++; return; }
+    const route = this.cacheRoute(conversation);
     const plain = message.message.filter(s => s.type === 'text').map(s => typeof s.data.text === 'string' ? s.data.text : '').join('');
     const replyId = message.message.find(s => s.type === 'reply')?.data.id;
     const quoteId = platformId.safeParse(replyId);
@@ -174,7 +200,10 @@ export class QqChannel extends Service {
     const mentioned = message.message.some(s => s.type === 'at' && String(s.data.qq) === this.config.botId);
     const triggered = message.message_type === 'private' || mentioned || quote?.sender === this.config.botId || naturallyAddressed(plain, this.config.naturalNames);
     const unsupported = [...new Set(message.message.filter(s => !['text','at','reply'].includes(s.type)).map(s => s.type))];
-    this.store.remember(route, message.message_id, message.user_id, plain || '[非文字消息]');
+    const retained=this.store.remember(route, message.message_id, message.user_id, plain || '[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported});
+    if(!retained||this.store.handled(route,message.message_id)||this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},message.message_id)){
+      this.store.acknowledge(route,message.message_id);this.counters.ignored++;return;
+    }
     if (!triggered) { this.store.acknowledge(route, message.message_id); this.counters.ignored++; return; }
     let content = plain;
     if (unsupported.length) {
@@ -207,10 +236,12 @@ export class QqChannel extends Service {
     if (this.stopped || this.state !== 'online') return { status: 'not-sent', code: 'CHANNEL_OFFLINE' };
     if (!reply.text || reply.text.length > 4000) return { status: 'not-sent', code: 'TEXT_SIZE_UNSUPPORTED' };
     try { await this.api.verify(signal); signal.throwIfAborted(); }
-    catch { this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate(); return { status: 'not-sent', code: 'IDENTITY_UNAVAILABLE' }; }
+    catch { this.verified=false;this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate(); return { status: 'not-sent', code: 'IDENTITY_UNAVAILABLE' }; }
     if (conversation.kind === 'group' && !this.groups.effective().includes(conversation.id)) return { status: 'not-sent', code: 'TARGET_NOT_ALLOWED' };
-    const route = JSON.stringify([conversation.kind, conversation.id]);
-    const source = this.store.find(route, reply.sourceMessageId);
+    const route = this.cacheRoute(conversation);
+    // A pending legacy reply already has an authoritative core inbound. Use its old cache only as a quote ID, never as new browse text.
+    const bound=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},reply.sourceMessageId);
+    const source = this.store.find(route, reply.sourceMessageId)??(bound&&!this.store.cache.known(route,reply.sourceMessageId)?this.store.find(JSON.stringify([conversation.kind,conversation.id]),reply.sourceMessageId):null);
     if (!source) return { status: 'not-sent', code: 'SOURCE_MESSAGE_NOT_FOUND' };
     const message = [ ...(conversation.kind === 'group' ? [{ type: 'reply', data: { id: source.id } }] : []), { type: 'text', data: { text: reply.text } } ];
     try {
@@ -224,6 +255,7 @@ export class QqChannel extends Service {
   async close(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true; this.state = 'stopped'; this.controller.abort();
+    this.capabilities?.close();
     this.groups.pause(); await this.groups.whenIdle();
     if (this.retry) clearTimeout(this.retry); if (this.heartbeat) clearInterval(this.heartbeat);
     this.socket?.terminate(); await this.queue; this.handle.dispose();

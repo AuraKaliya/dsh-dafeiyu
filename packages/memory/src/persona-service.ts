@@ -33,7 +33,7 @@ export class PersonaService {
     this.sources=memory.executionSources((access,ref)=>this.resolve(access,ref));this.store=memory.personaStore((access,ref)=>this.resolve(access,ref));
     this.executionState=memory.executionState(this.sources,(access,ref)=>this.resolve(access,ref));
     const compact=compaction?new MemoryCompaction(ctx,compaction,scope=>({epoch:String(memory.generation(scope)),taskId:null,versions:{memory:memory.generation(scope)}}),{inbound:()=>[],context:()=>[],tool:()=>[],validate:()=>false}):null;
-    const port:ExecutionMemoryPort={ready,resourceEpoch:()=>ctx.dafeiyu.capabilityResourceEpoch(),validate:(access,ref)=>!!this.resolve(access,ref),
+    const port:ExecutionMemoryPort={ready,resourceEpoch:access=>ctx.dafeiyu.capabilityResourceEpoch({agentId:access.view.scope.agentId,route:personaScope(access.view.scope)}),validate:(access,ref)=>!!this.resolve(access,ref),
       operationSources:(access,id)=>uniqueSources([...this.sources.operationSources(access,id),...this.executionState.operationSources(access,id),...memory.capabilities.operationSources(access,id)]),
       outcomeSources:(access,refs)=>refs.map(ref=>{const source=this.sources.reference(access,ref.id)??memory.capabilities.reference({agentId,route:personaScope(access.view.scope)},ref.id);if(!source||source.scopeKey!==ref.scopeKey||source.version!==ref.version||source.contentHash!==ref.contentHash||!this.resolve(access,source))throw new Error('SOURCE_STALE');return source;}),
       prepareContext:access=>this.executionState.context(access),validateContext:(access,item)=>this.executionState.validateContext(access,item),

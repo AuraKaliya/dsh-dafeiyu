@@ -57,6 +57,7 @@ export class GroupDirectory {
     if (this.state() !== 'current') return [];
     return (this.snapshot?.groups ?? []).map(group => group.id).filter(id => this.options.config.mode === 'joined' || this.options.allowed.includes(id));
   }
+  info(id:string):GroupInfo|null {const group=this.snapshot?.groups.find(group=>group.id===id);return group?{...group}:null;}
   status() {
     return { enabled: this.options.config.enabled, mode: this.options.config.mode, state: this.state(), paused: !this.running,
       lastSuccessAt: this.snapshot?.at ?? null, verifiedThisProcess: this.verifiedAt !== null, revision: this.snapshot?.revision ?? null,
