@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ActionOutcomeSchema, ExtensionMetadataV3Schema, dependencyOrder,redactJson } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3, ExtensionV3, ExtensionHandleV3, ExecutionContextV3, ActionOutcome, Json, ContextContributorV3 } from '@dafeiyu/contracts';
+import type { ActionCapabilityV3, ExtensionV3, ExtensionHandleV3, ExecutionContextV3, ActionOutcome, Json, ContextContributorV3, ResourceProof, ResourceProofProvider } from '@dafeiyu/contracts';
 import { toolParameters } from './tool-schema.js';
 
 interface ReservedNames { ids: readonly string[]; actions: readonly string[]; channels: readonly string[] }
@@ -16,8 +16,9 @@ export interface BoundActionV3 {
 interface Entry {
   metadata: z.infer<typeof ExtensionMetadataV3Schema>; active: boolean;controller:AbortController;
   actions: readonly BoundActionV3[]; channels: readonly string[]; contexts: readonly ContextContributorV3[]; ready: () => boolean;
+  resourceProofs?: ResourceProofProvider;
 }
-const allowedExtensionKeys = new Set(['protocolVersion', 'id', 'version', 'agentId', 'provides', 'requires', 'actions', 'channels', 'contexts', 'lifecycleReady']);
+const allowedExtensionKeys = new Set(['protocolVersion', 'id', 'version', 'agentId', 'provides', 'requires', 'actions', 'channels', 'contexts', 'lifecycleReady', 'resourceProofs']);
 const actionMetaSchema = z.strictObject({ id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), version: z.string().min(1).max(80),
   description: z.string().min(1).max(4000), effects: z.enum(['read', 'local-write', 'external-write']), requiresTask: z.boolean().default(false) });
 
@@ -35,6 +36,9 @@ function freezeTree(value: unknown): void {
 
 /** Registration snapshots. Invocation authority is issued by the core Run coordinator. */
 export class CapabilityRegistryV3 {
+  private resourceState(entry:Entry){try{const epoch=entry.resourceProofs?.epoch();return typeof epoch==='string'&&epoch.length<=8000?{ready:entry.active&&entry.ready(),epoch}:{ready:false,epoch:'INVALID_RESOURCE_EPOCH'};}catch{return {ready:false,epoch:'RESOURCE_UNAVAILABLE'};}}
+  resourceCurrent(proof:ResourceProof):boolean {const entry=this.entries.get(proof.provider);try{return !!entry&&this.resourceState(entry).ready&&entry.resourceProofs?.current(proof)===true;}catch{return false;}}
+  resourceEpoch():string{return JSON.stringify([...this.entries.values()].filter(entry=>entry.active&&entry.resourceProofs).map(entry=>[entry.metadata.id,this.resourceState(entry)]));}
   contributors(){return [...this.entries.values()].filter(entry=>entry.active&&entry.ready()).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,version:entry.metadata.version,context,active:()=>entry.active&&entry.ready(),signal:entry.controller.signal})));}
   private readonly entries = new Map<string, Entry>();
   hasId(id: string): boolean { return this.entries.has(id); }
@@ -56,6 +60,8 @@ export class CapabilityRegistryV3 {
     const names = new Set([...reserved.actions, ...this.actionNames()]), channels = new Set([...reserved.channels, ...this.channelKeys()]);
     if(extension.lifecycleReady!==undefined&&typeof extension.lifecycleReady!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
     const entry: Entry = { metadata, active: true, controller:new AbortController(),actions: [], channels: [], contexts: [], ready: extension.lifecycleReady?.bind(extension) ?? (() => true) };
+    if(extension.resourceProofs){if(typeof extension.resourceProofs.current!=='function'||typeof extension.resourceProofs.epoch!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
+      entry.resourceProofs=Object.freeze({current:extension.resourceProofs.current.bind(extension.resourceProofs),epoch:extension.resourceProofs.epoch.bind(extension.resourceProofs)});}
     const bound: BoundActionV3[] = [];
     for (const action of extension.actions ?? []) {
       const meta = actionMetaSchema.parse({ id: action.id, version: action.version, description: action.description, effects: action.effects, requiresTask: action.requiresTask ?? false });

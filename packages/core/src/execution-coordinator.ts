@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ExecutionRequestSchema,ResumeRunSchema,WakeRequestSchema,RunControlSchema,ProducerSchema,taskScopeKey,HostConfigSchema,TaskUpdateSchema,redactJson,RunOriginSchema,MotivationSchema,ContextItemSchema,ContinuityCheckpointSchema } from '@dafeiyu/contracts';
-import type { TaskRepositoryPort,TaskRef,RunRef,RunOrigin,ExecutionContextV3,ExecutionGrant,ExecutionInput,WakeAuthorityProvider,HostConfig,Json,PersonaAccess } from '@dafeiyu/contracts';
+import type { TaskRepositoryPort,TaskRef,RunRef,RunOrigin,ExecutionContextV3,ExecutionGrant,ExecutionInput,WakeAuthorityProvider,HostConfig,Json,PersonaAccess,Conversation } from '@dafeiyu/contracts';
 import type { PersonaRuntime,RunPersona } from './persona-runtime.js';
 import type { FoundationSnapshot } from './foundation.js';
 import { foundationManifest } from './persona-manifest.js';
@@ -29,6 +29,7 @@ interface Dependencies {
   memory:()=>ExecutionMemoryPort|undefined;
   accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
   turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number;maxBytes:number;prepareTimeoutMs:number};signal:AbortSignal;
+  projectConversation?:()=>Promise<void>;
 }
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null}
 type Request=z.output<typeof ExecutionRequestSchema>;
@@ -45,7 +46,17 @@ export class ExecutionCoordinator {
   private readonly wakes=new Map<string,WakeAuthorityProvider>();
   private failure:string|null=null;
   private readonly evidence=new Map<string,ExecutionEvidence>();
-  constructor(private readonly d:Dependencies){d.personas.enrich=(access,run)=>run.definition.scope.kind==='task'?this.evidenceFor(run,access).access({...access,motivation:this.motivation(run)}):access;}
+  constructor(private readonly d:Dependencies){d.personas.enrich=(access,run)=>{if(run.definition.scope.kind!=='task')return access;
+    const scoped={...access,motivation:this.motivation(run),resourceAllowed:(scene:Conversation)=>this.allowedResource(run,scene)};return this.evidenceFor(run,scoped).access(scoped);};}
+  private allowedResource(run:StoredRun,scene:Conversation):boolean {
+    if(run.definition.origin.kind==='message')return runtimeHash(scene)===runtimeHash(this.d.journal.get(run.definition.origin.inboundId).message.conversation);
+    if(run.definition.scope.kind!=='task')return false;
+    const request=this.d.store.request(run.requestKey),policy=this.policy(request.producer,run.definition.policyId);
+    return policy.resources.some(resource=>runtimeHash(resource)===runtimeHash(scene));
+  }
+  resources(context:ExecutionContextV3,pluginId:string):readonly Conversation[]{this.authority(context,pluginId);const run=this.d.store.get(context.runId);
+    return run.definition.origin.kind==='message'?[this.d.journal.get(run.definition.origin.inboundId).message.conversation]:this.policy(this.d.store.request(run.requestKey).producer,run.definition.policyId).resources.map(scene=>({...scene}));}
+  authorizeResource(context:ExecutionContextV3,pluginId:string,scene:Conversation){this.authority(context,pluginId);if(!this.allowedResource(this.d.store.get(context.runId),scene))throw new Error('RESOURCE_SCOPE_DENIED');}
   private motivation(run:StoredRun):Motivation{return savedSchema.parse(this.d.store.request(run.requestKey).payload).motivation??{kind:'unknown',basis:[]};}
   private evidenceFor(run:StoredRun,access:PersonaAccess){const current=this.evidence.get(run.id);if(current)return current;const request=this.d.store.request(run.requestKey);
     const value=new ExecutionEvidence(run,this.d.store,this.d.memory,this.d.personas,this.d.registry,this.repository(),this.policy(request.producer,run.definition.policyId).sourceRules,access);this.evidence.set(run.id,value);return value;}
@@ -225,7 +236,7 @@ export class ExecutionCoordinator {
     }return value;};
     return {definition:action,metadata:value=>value&&typeof value==='object'?metadata.get(value):undefined,execute:async(raw,callId,toolSignal)=>{
       guard();const input=action.validateInput(raw);
-      if(action.effects!=='read'&&this.d.store.list().filter(value=>value.definition.taskId===run.definition.taskId).some(value=>this.d.store.operations(value.id).some(operation=>operation.plugin===action.owner&&(operation.state==='unknown'||operation.outcome?.effects==='unknown'))))throw new Error('OPERATION_UNCERTAIN');
+      if(action.effects!=='read'&&this.d.store.list().filter(value=>runtimeHash(value.definition.scope)===runtimeHash(run.definition.scope)).some(value=>this.d.store.operations(value.id).some(operation=>operation.plugin===action.owner&&(operation.state==='unknown'||operation.outcome?.effects==='unknown'))))throw new Error('OPERATION_UNCERTAIN');
       if(action.effects!=='read'&&run.definition.parentRunId){let parentId:string|null=run.definition.parentRunId;
         const fingerprint=runtimeHash({action:action.id,plugin:action.owner,pluginVersion:action.pluginVersion,actionVersion:action.version,input});
         while(parentId){const parent=this.d.store.get(parentId);if(this.d.store.operations(parentId).some(op=>op.fingerprint===fingerprint&&op.outcome?.effects==='confirmed'))throw new Error('OPERATION_ALREADY_CONFIRMED');parentId=parent.definition.parentRunId;}}
@@ -242,7 +253,7 @@ export class ExecutionCoordinator {
       const context:ExecutionContextV3=Object.freeze({agentId:this.d.agentId,taskId:run.definition.taskId,runId:run.id,operationId:operation.id,
         origin:freezeOrigin(run.definition.origin),scope:Object.freeze({...run.definition.scope}),intentVersion:run.definition.intentVersion,grant,signal:AbortSignal.any([signal,toolSignal,action.signal])});
       this.grants.set(context,{action,runId:run.id,guard,commitGuard});this.flushEvents();
-      try{const outcome=await action.execute(input,context);
+      try{if(run.definition.scope.kind==='conversation')await this.d.projectConversation?.();guard();const outcome=await action.execute(input,context);
         this.d.store.finishOperation(operation.id,outcome);this.flushEvents();let value:Json;try{value=result(operation.id,callId,outcome);}catch(error){this.evidence.get(run.id)?.invalidate();throw error;}guard();return value;
       }catch(error){if(this.d.store.operation(operation.id).state==='started')this.d.store.finishOperation(operation.id,{status:'unknown',effects:action.effects==='read'?'none':'unknown',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:safeCode(error)});
         throw new Error(safeCode(error));

@@ -7,6 +7,7 @@ import { PersonaSourceRefSchema } from './persona.js';
 const scopeFields={agentId:z.string(),route:z.string()};
 /** Immutable input dependencies, supplied by trusted producers rather than model citations. */
 export const SourceDependencySchema=z.discriminatedUnion('kind',[
+  z.strictObject({...scopeFields,kind:z.literal('capability'),ref:PersonaSourceRefSchema}),
   z.strictObject({...scopeFields,kind:z.literal('execution-source'),ref:PersonaSourceRefSchema}),
   z.strictObject({...scopeFields,kind:z.literal('execution-input'),runId:z.uuid(),hash:z.string().regex(/^[a-f0-9]{64}$/)}),
   z.strictObject({...scopeFields,kind:z.literal('execution-operation'),runId:z.uuid(),operationId:z.uuid(),hash:z.string().regex(/^[a-f0-9]{64}$/),inputHash:z.string().regex(/^[a-f0-9]{64}$/)}),

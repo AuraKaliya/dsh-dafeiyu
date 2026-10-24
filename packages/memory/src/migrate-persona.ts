@@ -6,7 +6,7 @@ export const PERSONA_TABLES=['persona_candidates','persona_candidate_revisions',
 /** v8 adds independent persona aggregates. No existing memory, boundary or task body is rewritten. */
 export function migratePersona(db:DatabaseSync):void{
   const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===8){for(const table of PERSONA_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+if(version===8||version===9){for(const table of PERSONA_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==7)throw new Error('Unsupported persona memory schema');
   db.exec(`
     CREATE TABLE persona_candidates(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),state TEXT NOT NULL);

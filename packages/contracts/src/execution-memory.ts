@@ -14,6 +14,7 @@ export const ExecutionContributionSchema=z.strictObject({requestId:PersonaReques
   text:z.string().trim().min(1).max(8000).optional(),reason:z.string().trim().min(1).max(1000)});
 export interface ExecutionMemoryPort {
   ready():boolean;
+  resourceEpoch?():string;
   validate(access:PersonaAccess,ref:PersonaSourceRef):boolean;
   operationSources(access:PersonaAccess,operationId:string):readonly PersonaSourceRef[];
   outcomeSources(access:PersonaAccess,refs:readonly ExecutionSourceRef[]):readonly PersonaSourceRef[];

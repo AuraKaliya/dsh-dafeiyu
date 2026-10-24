@@ -33,9 +33,9 @@ export class PersonaService {
     this.sources=memory.executionSources((access,ref)=>this.resolve(access,ref));this.store=memory.personaStore((access,ref)=>this.resolve(access,ref));
     this.executionState=memory.executionState(this.sources,(access,ref)=>this.resolve(access,ref));
     const compact=compaction?new MemoryCompaction(ctx,compaction,scope=>({epoch:String(memory.generation(scope)),taskId:null,versions:{memory:memory.generation(scope)}}),{inbound:()=>[],context:()=>[],tool:()=>[],validate:()=>false}):null;
-    const port:ExecutionMemoryPort={ready,validate:(access,ref)=>!!this.resolve(access,ref),
-      operationSources:(access,id)=>uniqueSources([...this.sources.operationSources(access,id),...this.executionState.operationSources(access,id)]),
-      outcomeSources:(access,refs)=>refs.map(ref=>{const source=this.sources.reference(access,ref.id);if(!source||source.scopeKey!==ref.scopeKey||source.version!==ref.version||source.contentHash!==ref.contentHash||!this.resolve(access,source))throw new Error('SOURCE_STALE');return source;}),
+    const port:ExecutionMemoryPort={ready,resourceEpoch:()=>ctx.dafeiyu.capabilityResourceEpoch(),validate:(access,ref)=>!!this.resolve(access,ref),
+      operationSources:(access,id)=>uniqueSources([...this.sources.operationSources(access,id),...this.executionState.operationSources(access,id),...memory.capabilities.operationSources(access,id)]),
+      outcomeSources:(access,refs)=>refs.map(ref=>{const source=this.sources.reference(access,ref.id)??memory.capabilities.reference({agentId,route:personaScope(access.view.scope)},ref.id);if(!source||source.scopeKey!==ref.scopeKey||source.version!==ref.version||source.contentHash!==ref.contentHash||!this.resolve(access,source))throw new Error('SOURCE_STALE');return source;}),
       prepareContext:access=>this.executionState.context(access),validateContext:(access,item)=>this.executionState.validateContext(access,item),
       captureContinuity:(access,checkpoint)=>{try{return this.executionState.capture(access,checkpoint);}finally{this.flush();}},checkpoint:(access,id,historical)=>this.executionState.checkpoint(access,id,historical),
       bindResult:(task,run,epoch,body)=>this.executionState.bindResult(task,run,epoch,body),generation:access=>this.executionState.generation(access),
@@ -52,9 +52,9 @@ export class PersonaService {
     access.guard();if(!this.ready()||ref.agentId!==this.agentId||access.view.scope.agentId!==this.agentId)return null;
     const key=`${access.view.runId}:${sourceKey(ref)}`;if(this.resolving.has(key)||this.resolving.size>=64)return null;this.resolving.add(key);
     try{
-      if(ref.kind==='execution-source')return this.sources.open(access,ref);
+      if(ref.kind==='execution-source')return this.memory.capabilities.material(access,ref)??this.sources.open(access,ref);
       if(access.view.scope.kind==='task'){
-        if(ref.scopeKey===access.view.scope.scopeKey)return this.executionState.memoryMaterial(access,ref);
+        if(ref.scopeKey===access.view.scope.scopeKey)return this.memory.capabilities.memoryMaterial(access,ref)??this.executionState.memoryMaterial(access,ref);
         const input=access.inputs.find(input=>input.sourceRef&&personaDigest(input.sourceRef)===personaDigest(ref));
         if(input)return {text:input.text,dependencies:[ref],rootSources:input.rootSources??[sourceKey(ref)]};
         const material=access.verifyMemorySource?.(ref);return material?{text:material.text,dependencies:[ref],rootSources:[...material.rootSources]}:null;
@@ -86,7 +86,8 @@ export class PersonaService {
   openSource(context:ExecutionContextV3,raw:unknown,pluginId='memory-execution'){
     const input=z.strictObject({source:PersonaSourceRefSchema,offset:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(8000).default(2000)}).parse(raw),access=this.access(context,pluginId,false),material=this.resolve(access,input.source);
     if(!material)throw new Error('SOURCE_STALE');const chars=Array.from(material.text);if(input.offset>chars.length)throw new Error('INVALID_INPUT');const end=Math.min(chars.length,input.offset+input.limit);
-    try{this.executionState.expose(access,input.source);const meta=input.source.kind==='execution-source'?this.sources.metadata(access,input.source):null;return {source:input.source,view:'page',text:chars.slice(input.offset,end).join(''),offset:input.offset,end,total:chars.length,nextOffset:end<chars.length?end:null,
+    try{this.executionState.expose(access,input.source);const capability=this.memory.capabilities.reference({agentId:access.view.scope.agentId,route:personaScope(access.view.scope)},input.source.id);
+      const meta=input.source.kind==='execution-source'&&!capability?this.sources.metadata(access,input.source):null;return {source:input.source,view:capability?'observation-metadata':'page',rawAvailable:!capability,text:chars.slice(input.offset,end).join(''),offset:input.offset,end,total:chars.length,nextOffset:end<chars.length?end:null,
       sourceKind:meta?.kind??'contribution',sourceCompleteness:meta?.schemaVersion===2?meta.completeness:'unknown',coverage:meta?.schemaVersion===2?meta.coverage:[],pageCompleteness:input.offset===0&&end===chars.length?'complete':'partial'};}finally{this.flush();}
   }
   contribute(context:ExecutionContextV3,raw:unknown,pluginId='memory-execution'){try{return this.executionState.contribute(this.access(context,pluginId,true),raw);}finally{this.flush();}}

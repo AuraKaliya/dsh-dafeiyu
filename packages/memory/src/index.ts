@@ -24,13 +24,14 @@ import type { TaskWorkspace } from './task-workspace.js';
 import type { TaskExpression } from './expression.js';
 import { taskRepository } from './task-repository-adapter.js';
 import { PersonaService } from './persona-service.js';
+import { CapabilityObservationService } from './capability-service.js';
 export type { MemoryView } from './store.js';
 export { initializeMemoryStorage } from './storage-initialization.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), lifecycleMode:LifecycleModeSchema.default('legacy'), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional() });
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), lifecycleMode:LifecycleModeSchema.default('legacy'), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional(),sourceTracking:z.boolean().default(false) });
 export const MemoryPluginConfigSchema=configSchema.omit({agentId:true,dataDir:true,lifecycleMode:true});
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
@@ -64,6 +65,7 @@ export class MemoryService extends Service {
   private closing:Promise<void>|undefined;
   private unbindRepository:(()=>void)|undefined;
   readonly persona:PersonaService|undefined;
+  private readonly capabilityService:CapabilityObservationService|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
     this.config = configSchema.parse(config);
@@ -82,9 +84,10 @@ export class MemoryService extends Service {
           const work=this.working?.compactionBasis(scope);
           const selection=this.tasks.selection(scope),activeTask=this.tasks.activeTask(scope),taskId=activeTask?`agent-task:${activeTask}`:work?.taskId??null;
           const versions={memoryMutations:this.store.mutationEpoch(scope),working:work?.working??0,evidence:work?.evidence??0,feedbackMutations:this.feedbackArchive?.mutationEpoch(scope)??0,taskSelection:selection.version};
-          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId})).digest('hex'),taskId,
+          return {epoch:createHash('sha256').update(JSON.stringify({versions,taskId,resources:ctx.dafeiyu.capabilityResourceEpoch()})).digest('hex'),taskId,
             versions:{...versions,memoryGeneration:this.store.generation(scope)}};
     };
+    const sourcePolicy=new MemorySourcePolicy(ctx,this.store,this.working,this.feedbackArchive,scope=>basis(scope).epoch);
     try {
       const taskMemory=this.store.taskMemory(this.tasks,this.retrieval);
       this.expression=this.store.taskExpression(this.tasks,ctx);
@@ -129,14 +132,14 @@ export class MemoryService extends Service {
           validate:(request:import('@dafeiyu/contracts').ContextRequest,item:import('@dafeiyu/contracts').ContextItem)=>ctx.dafeiyu.personaContext(request).some(current=>JSON.stringify(current)===JSON.stringify(item))}]:[]),{id:'task-workspace',kind:'working-state',
           prepare:async request=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)),
           validate:(request,item)=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)).some(current=>JSON.stringify(ContextItemSchema.parse(current))===JSON.stringify(item))}],
-        ...(this.config.compaction?{compactionProvider:new MemoryCompaction(ctx,this.config.compaction,basis,
-          new MemorySourcePolicy(ctx,this.store,this.working,this.feedbackArchive,scope=>basis(scope).epoch))}:{}),
+        ...(this.config.compaction||this.config.sourceTracking?{compactionProvider:new MemoryCompaction(ctx,this.config.compaction??{inputTokens:1000000},basis,sourcePolicy,!this.config.compaction)}:{}),
         ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'memory.close');
     if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
       ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
     if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction);
+    if(this.config.lifecycleMode==='managed')this.capabilityService=new CapabilityObservationService(ctx,this.store,()=>!this.closed&&this.gate.active,sourcePolicy,()=>{this.flush();this.persona?.flush();});
     ctx.effect(()=>ctx.dafeiyu.onReady(()=>{if(this.gate.active)this.analysis?.start();}),'memory.core-ready');
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
@@ -155,7 +158,7 @@ export class MemoryService extends Service {
   async whenIdle():Promise<void>{await this.analysis?.whenIdle();}
   close():Promise<void>{
     if(this.closing)return this.closing;
-    this.quiesce();this.closed=true;this.persona?.close();this.handle.dispose();this.unbindRepository?.();
+    this.quiesce();this.closed=true;this.capabilityService?.close();this.persona?.close();this.handle.dispose();this.unbindRepository?.();
     this.closing=(async()=>{try{await this.expression.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
     return this.closing;
   }

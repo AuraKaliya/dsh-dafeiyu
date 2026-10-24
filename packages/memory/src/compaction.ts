@@ -31,9 +31,9 @@ export const compactionConfigSchema = z.strictObject({
 /** A purpose-specific, tool-free auxiliary call through DSH's LLM seam, like its compactor.
  * It uses a fresh non-chat request identity. No bypass of the main session's context guards. */
 export class MemoryCompaction implements CompactionProvider {
-  readonly policy: z.output<typeof compactionConfigSchema>;
+  readonly policy: z.output<typeof compactionConfigSchema>&{enabled?:boolean};
   constructor(private readonly ctx: Context, config: z.input<typeof compactionConfigSchema>,
-    readonly basis: CompactionProvider['basis'],readonly sources:SourcePolicy) { this.policy = compactionConfigSchema.parse(config); }
+    readonly basis: CompactionProvider['basis'],readonly sources:SourcePolicy,trackingOnly=false) { this.policy = {...compactionConfigSchema.parse(config),...(trackingOnly?{enabled:false}:{})}; }
   async summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal,checkSources?:()=>void): Promise<string> {
     return (await this.generate(scope,sources,signal,checkSources,this.policy.maxSummaryChars)).map(f=>f.text).join('\n');
   }

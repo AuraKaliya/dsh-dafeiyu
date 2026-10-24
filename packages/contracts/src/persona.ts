@@ -61,9 +61,11 @@ export interface PersonaAccess {
   readonly admittedSources:readonly PersonaSourceRef[];readonly guard:()=>void;readonly commitGuard?:()=>void;
   readonly sourceRules?:readonly string[];
   readonly historyDependencies?:readonly SourceDependency[];
+  readonly historyTracked?:boolean;
   readonly validateHistory?:(dependencies:readonly SourceDependency[])=>boolean;
   readonly operationFinished?:(id:string)=>boolean;
   readonly verifyMemorySource?:(ref:PersonaSourceRef)=>{text:string;rootSources:readonly string[]}|null;
+  readonly resourceAllowed?:(scene:import('./conversation.js').Conversation)=>boolean;
 }
 export interface PreparedPersonaEntry {
   readonly candidate:z.infer<typeof PersonaEntryRefSchema>;readonly contentRef:PersonaSourceRef;readonly dependencies:readonly PersonaSourceRef[];

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ConversationSchema } from './conversation.js';
 import type { Json, ChannelCapability, Receipt } from './index.js';
 import type { ContextItem } from './context.js';
+import type { ResourceProofProvider } from './resource-observation.js';
 
 export const EXTENSION_PROTOCOL_VERSION = 3 as const;
 export const FeatureSchema = z.string().regex(/^[a-z][a-z0-9.-]{1,100}$/);
@@ -61,6 +62,7 @@ export interface ExtensionV3 {
   readonly actions?: readonly ActionCapabilityV3[]; readonly channels?: readonly ChannelCapability[];
   readonly contexts?: readonly ContextContributorV3[];
   readonly lifecycleReady?: () => boolean;
+  readonly resourceProofs?: ResourceProofProvider;
 }
 export interface ExtensionHandleV3 { readonly ingest?: (message:unknown)=>Receipt; dispose(): void }
 

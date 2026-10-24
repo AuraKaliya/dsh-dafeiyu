@@ -186,6 +186,9 @@ export class DshRuntime {
   summarySourcesCurrent(sessionId:string,dependencies:readonly import('@dafeiyu/contracts').SourceDependency[]):boolean{
     return this.handles.get(sessionId)?.compaction.validateDependencies(dependencies)??false;
   }
+  exposedDependencies(sessionId:string):readonly import('@dafeiyu/contracts').SourceDependency[]|null {
+    const owned=this.handles.get(sessionId);return owned?.lastRequest&&this.compactionBinding()?.provider.sources?owned.compaction.exposedDependencies():null;
+  }
   sourceCurrent(sessionId:string,seq:number):boolean{return this.handles.get(sessionId)?.compaction.sourceCurrent(seq)??false;}
   fragmentViewCurrent(sessionId:string,id:string,text:string):boolean{return this.handles.get(sessionId)?.compaction.fragmentViewCurrent(id,text)??false;}
   readSummaryReference(sessionId:string,ref:string){return this.handles.get(sessionId)?.compaction.readSummaryReference(ref)??{status:'not_found' as const};}

@@ -26,9 +26,10 @@ import { PersonaStore } from './persona-store.js';
 import type { PersonaResolver } from './persona-store.js';
 import { ExecutionSources } from './execution-sources.js';
 import { ExecutionMemoryState } from './execution-memory-state.js';
+import { CapabilityObservations, migrateCapabilityObservations } from './capability-observations.js';
 
 export const MEMORY_APPLICATION_ID = 0x44464d31;
-export const MEMORY_SCHEMA_VERSION = 8;
+export const MEMORY_SCHEMA_VERSION = 9;
 const APPLICATION_ID = MEMORY_APPLICATION_ID;
 const string = (value: unknown): string => z.string().parse(value);
 const integer = (value: unknown): number => z.number().int().safe().parse(value);
@@ -61,6 +62,7 @@ export class MemoryStore {
   private readonly validatingTaskSources=new Set<string>();
   private executionValidator:((scope:TimelineScope,source:Extract<Evidence,{kind:'execution'}>,purpose:MemoryAccessPurpose)=>'valid'|'changed'|'deleted'|'unavailable')|undefined;
   readonly observations:ObservationStore;
+  readonly capabilities:CapabilityObservations;
   constructor(file: string) {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
@@ -71,7 +73,7 @@ export class MemoryStore {
       const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
       const tables = this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
       const fresh = app === 0 && version === 0 && tables === 0;
-      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7&&version!==8))) throw new Error('Unsupported memory database identity or schema');
+      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7&&version!==8&&version!==9))) throw new Error('Unsupported memory database identity or schema');
       configureSqlite(this.db);
       if (fresh) this.transaction(() => this.db.exec(`
         CREATE TABLE memory_items(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,
@@ -106,6 +108,8 @@ export class MemoryStore {
       this.transaction(()=>migrateExpression(this.db));
       this.transaction(()=>migrateExecutionMemory(this.db));
       this.transaction(()=>migratePersona(this.db));
+      this.transaction(()=>migrateCapabilityObservations(this.db));
+      this.capabilities=new CapabilityObservations(this.db,this);
     } catch (error) { this.db.close(); throw error; }
   }
   private transaction<T>(work: () => T): T {
@@ -229,6 +233,9 @@ export class MemoryStore {
         sourceDeleted ||= source.deleted;sourceChanged ||= source.version!==evidence.version||source.hash!==evidence.contentHash;
       }else if(evidence.kind==='execution'){
         const state=this.executionValidator?.(scope,evidence,purpose)??'unavailable';sourceDeleted ||=state==='deleted';sourceChanged ||=state==='changed';inaccessible ||=state==='unavailable';
+      }else if(evidence.kind==='capability'){
+        const source=this.capabilities.source(scope,evidence.ref.slice('dafeiyu:capability:'.length),purpose);
+        if(!source){inaccessible=true;continue;}boundaries.push(source.boundary);sourceChanged ||=source.version!==evidence.version||source.hash!==evidence.contentHash;
       }
     }
     const effectiveAccess:MemoryView['effectiveAccess']={
@@ -284,6 +291,10 @@ export class MemoryStore {
       ? Buffer.from(JSON.stringify({ v: 1, fingerprint, generation, before: last.ordinal })).toString('base64url') : null };
   }
   private validateSources(scope: TimelineScope, value: WriteContent, target?: string): void {
+    for(const source of value.sources)if(source.kind==='capability'){
+      const state=this.capabilities.source(scope,source.ref.slice('dafeiyu:capability:'.length),'internal');
+      if(!state||state.version!==source.version||state.hash!==source.contentHash||this.suppressedEvidence(scope,state.hash,ref=>ref===source.ref))throw new MemoryError('source_unavailable');
+    }
     for(const source of value.sources)if(source.kind==='execution'){
       if(this.executionValidator?.(scope,source,'internal')!=='valid'||this.suppressedEvidence(scope,source.contentHash,ref=>ref===source.ref))throw new MemoryError('source_unavailable');
     }
@@ -350,6 +361,9 @@ export class MemoryStore {
         }
         for(const source of value.sources)if(source.kind==='observation'){
           const state=this.observations.source(scope,source.ref,'internal');if(!state)throw new MemoryError('source_unavailable');ancestors.push(state.boundary);
+        }
+        for(const source of value.sources)if(source.kind==='capability'){
+          const state=this.capabilities.source(scope,source.ref.slice('dafeiyu:capability:'.length),'internal');if(!state)throw new MemoryError('source_unavailable');ancestors.push(state.boundary);
         }
         const boundary=restrictBoundary(conservativeBoundary(scope,'conservative-create',binding),ancestors,command.boundaryPolicy);
         this.db.prepare('INSERT INTO memory_boundaries(id,revision,body,boundary_hash) VALUES(?,?,?,?)').run(item.id,item.head,JSON.stringify(boundary),boundaryDigest(boundary));

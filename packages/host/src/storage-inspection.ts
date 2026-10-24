@@ -9,7 +9,7 @@ import { inspectQqSchema } from '@dafeiyu/channel-qq';
 export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query';
 const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
   query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
-  memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
+  memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8,9],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
   runtime:{app:RUNTIME_APPLICATION_ID,versions:[1,2],tables:['runtime_metadata','runtime_ownership','execution_requests','runs','run_operations','runtime_outbox']},
   delivery:{app:0x44464433,versions:[1],tables:['deliveries','events']},
   analysis:{app:0x44464131,versions:[1],tables:['jobs','ownership','audit_outbox']},
@@ -45,7 +45,8 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
         4:['task_workspaces','task_revisions','task_members','task_selections','task_links','task_jobs','task_slots','task_requests','task_observations'],
         5:['task_memory_policies','task_memory_policy_revisions','task_memory_grants','task_memory_requests','task_memory_hits'],6:['expression_policies','expression_policy_revisions','expression_requests','expression_packets','expression_jobs'],
         7:['execution_scopes','execution_sources','execution_observations','execution_contributions','growth_selections','growth_revisions','growth_requests','task_execution_results','execution_memory_requests','execution_memory_outbox'],
-        8:['persona_candidates','persona_candidate_revisions','persona_profiles','persona_profile_revisions','persona_dependencies','persona_requests','persona_outbox','continuity_checkpoints','task_intent_events']};
+        8:['persona_candidates','persona_candidate_revisions','persona_profiles','persona_profile_revisions','persona_dependencies','persona_requests','persona_outbox','continuity_checkpoints','task_intent_events'],
+        9:['capability_observations','capability_selections']};
       supported=Object.entries(stages).every(([stage,names])=>version<Number(stage)||names.every(name=>tables.has(name)));
     }
     const integrity=Object.values(db.prepare('PRAGMA quick_check').get()??{})[0]==='ok'&&db.prepare('PRAGMA foreign_key_check').get()===undefined;

@@ -33,6 +33,8 @@ export { readFoundation } from './foundation.js';
 export { initializeCoreStorage } from './storage-initialization.js';
 import type { StoredRun } from './runtime-store.js';
 import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider,PersonaProvider,ExecutionMemoryPort } from '@dafeiyu/contracts';
+import { ResourceProofSchema,CapabilityObservationSchema,CapabilitySelectionSchema,ConversationSchema } from '@dafeiyu/contracts';
+import type { CapabilityObservationPort,PersonaAccess,PersonaSourceRef,SourceDependency,TimelineScope } from '@dafeiyu/contracts';
 export type { ExecutionOptions } from './execution-coordinator.js';
 export { EXECUTION_MESSAGE_SOURCE } from './native-runtime.js';
 export type { CompactionBinding } from './compaction-runtime.js';
@@ -78,6 +80,7 @@ export class DafeiyuService extends Service {
   private readonly registryV3 = new CapabilityRegistryV3();
   private repositoryPort:TaskRepositoryPort|undefined;
   private executionMemoryPort:ExecutionMemoryPort|undefined;
+  private capabilityObservationPort:CapabilityObservationPort|undefined;
   private executions:ExecutionCoordinator|undefined;
   private runStore:RuntimeStore|undefined;
   private scheduler:RunScheduler|undefined;
@@ -146,7 +149,7 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   capabilityManifest(){return {features:this.features(),actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
   get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {
@@ -164,12 +167,48 @@ export class DafeiyuService extends Service {
   }
   bindPersonaProvider(provider:PersonaProvider):()=>void{this.assertOpen();const unbind=this.personas.bind(provider),unpin=this.contexts.pinRegion('memory:growth');return ()=>{unbind();unpin();};}
   bindExecutionMemory(port:ExecutionMemoryPort):()=>void{this.assertOpen();if(this.executionMemoryPort)throw new Error('DUPLICATE_PROVIDER');
-    const bound:ExecutionMemoryPort=Object.freeze({ready:port.ready.bind(port),validate:port.validate.bind(port),operationSources:port.operationSources.bind(port),outcomeSources:port.outcomeSources.bind(port),
+    const bound:ExecutionMemoryPort=Object.freeze({ready:port.ready.bind(port),...(port.resourceEpoch?{resourceEpoch:port.resourceEpoch.bind(port)}:{}),validate:port.validate.bind(port),operationSources:port.operationSources.bind(port),outcomeSources:port.outcomeSources.bind(port),
       prepareContext:port.prepareContext.bind(port),validateContext:port.validateContext.bind(port),captureContinuity:port.captureContinuity.bind(port),checkpoint:port.checkpoint.bind(port),bindResult:port.bindResult.bind(port),
       generation:port.generation.bind(port),acceptIntent:port.acceptIntent.bind(port),intent:port.intent.bind(port),resolveIntent:port.resolveIntent.bind(port),summarize:port.summarize.bind(port),
       ...(port.compactionPolicy?{compactionPolicy:Object.freeze({...port.compactionPolicy})}:{}),...(port.summarizeFragments?{summarizeFragments:port.summarizeFragments.bind(port)}:{})});
     this.executionMemoryPort=bound;return ()=>{if(this.executionMemoryPort===bound)this.executionMemoryPort=undefined;};}
-  personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.personaAccess(context,pluginId,effect);}
+  personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'):PersonaAccess {
+    if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const access=this.executions.personaAccess(context,pluginId,effect);
+    if(context.scope.kind==='task')return access;
+    const scope={agentId:context.agentId,route:context.scope.route},session=this.journal.sessionFor(scope),history=session?this.runtime.exposedDependencies(session):null;
+    return {...access,historyTracked:history!==null,historyDependencies:history??[],validateHistory:deps=>this.capabilityHistoryCurrent(scope,deps),
+      resourceAllowed:scene=>{try{this.executions!.authorizeResource(context,pluginId,scene);return true;}catch{return false;}}};
+  }
+  bindCapabilityObservations(port:CapabilityObservationPort):()=>void {
+    this.assertOpen();if(this.capabilityObservationPort)throw new Error('DUPLICATE_PROVIDER');
+    const bound=Object.freeze({ready:port.ready.bind(port),record:port.record.bind(port),select:port.select.bind(port),valid:port.valid.bind(port)});this.capabilityObservationPort=bound;
+    return ()=>{if(this.capabilityObservationPort===bound)this.capabilityObservationPort=undefined;};
+  }
+  capabilityResources(context:ExecutionContextV3,pluginId:string):readonly Conversation[]{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.resources(context,pluginId);}
+  authorizeCapabilityResource(context:ExecutionContextV3,pluginId:string,raw:unknown):Conversation {
+    if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const scene=ConversationSchema.parse(raw);this.executions.authorizeResource(context,pluginId,scene);return scene;
+  }
+  capabilityResourceCurrent(raw:unknown):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registryV3.resourceCurrent(proof.data);}
+  capabilityResourceEpoch():string {return this.registryV3.resourceEpoch();}
+  capabilityHistoryCurrent(scope:TimelineScope,deps:readonly SourceDependency[]):boolean {
+    const session=this.journal.sessionFor(scope);return !!session&&this.runtime.summarySourcesCurrent(session,deps);
+  }
+  capabilityObservationCurrent(scope:TimelineScope,source:PersonaSourceRef,exposedHash?:string):boolean {
+    return !!this.capabilityObservationPort?.ready()&&this.capabilityObservationPort.valid(scope,source,exposedHash);
+  }
+  recordCapabilityObservation(context:ExecutionContextV3,pluginId:string,raw:unknown) {
+    const input=CapabilityObservationSchema.parse(raw);if(input.proof.provider!==pluginId)throw new Error('SCOPE_DENIED');
+    const scene=this.authorizeCapabilityResource(context,pluginId,input.proof.scene),execution=this.personaAccess(context,pluginId);
+    const port=this.capabilityObservationPort;if(!port?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
+    const guard=()=>{execution.guard();this.authorizeCapabilityResource(context,pluginId,scene);if(this.capabilityObservationPort!==port||!port.ready()||!this.capabilityResourceCurrent(input.proof))throw new Error('SOURCE_STALE');};
+    guard();return port.record({execution,scene,guard},input);
+  }
+  selectCapabilityObservation(context:ExecutionContextV3,pluginId:string,sceneInput:unknown,raw:unknown,actualView:string) {
+    const scene=this.authorizeCapabilityResource(context,pluginId,sceneInput),execution=this.personaAccess(context,pluginId,'local-write'),input=CapabilitySelectionSchema.parse(raw);
+    const port=this.capabilityObservationPort;if(!port?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
+    const guard=()=>{execution.guard();this.authorizeCapabilityResource(context,pluginId,scene);if(this.capabilityObservationPort!==port||!port.ready())throw new Error('DEPENDENCY_UNAVAILABLE');};
+    guard();return port.select({execution,scene,guard},input,actualView);
+  }
   personaContext(request:ContextRequest){const scope=this.scopeForContext(request),id=this.runStore?.findRequest('conversation',scope.traceId)?.runId;const persona=id?this.personas.current(id):undefined;persona?.guard();return persona?.items??[];}
   configureExecution(raw:ExecutionOptions):void {
     this.assertOpen();if(this.config.lifecycleMode!=='managed'||this.gate.state!=='registered'||this.executions)throw new Error('SERVICE_LIFECYCLE_CONFLICT');
@@ -178,7 +217,7 @@ export class DafeiyuService extends Service {
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,personas:this.personas,
       repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
-      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal});
+      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal,projectConversation:()=>this.conversationRuns!.project()});
   }
   async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}
   executionProducer(id:string,options?:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id,options);}

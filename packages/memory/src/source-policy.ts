@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { redactContent,redactJson,FeedbackMetaSchema } from '@dafeiyu/contracts';
+import { redactContent,redactJson,FeedbackMetaSchema,PersonaSourceRefSchema,ActionOutcomeSchema } from '@dafeiyu/contracts';
 import type { SourceDependency,SourcePolicy,CompactionScope,ContextItem } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import type { WorkingMemory } from './working.js';
@@ -59,6 +59,13 @@ export class MemorySourcePolicy implements SourcePolicy {
   tool(scope:CompactionScope,name:string,text:string,meta:unknown):SourceDependency[]{
     try{
       const data:unknown=JSON.parse(text);
+      if(name==='qq_browse'){
+        const outcome=ActionOutcomeSchema.parse(data);if(outcome.data===null)return [];
+        const view=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema})}).parse(outcome.data),ref=view.observation.source;
+        if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,ref,digest(JSON.stringify(view.page))))return this.missing(scope);
+        return [{...scoped(scope),kind:'capability',ref}];
+      }
+      if(name==='qq_groups'||name==='qq_observe_select')return [];
       if(name==='dafeiyu_source_open'||name.includes('_deleted_')||name==='dafeiyu_memory_analysis_open'
         ||name==='dafeiyu_tool_feedback_open'||/deleted_lookup_only|historical_evidence_only/.test(text))return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];
       const feedback=z.object({dafeiyuFeedback:FeedbackMetaSchema}).safeParse(meta);
@@ -92,6 +99,7 @@ export class MemorySourcePolicy implements SourcePolicy {
   validate(scope:CompactionScope,dep:SourceDependency):boolean {
     if(dep.agentId!==scope.agentId||dep.route!==scope.route)return false;
     try{switch(dep.kind){
+      case 'capability':return this.ctx.dafeiyu.capabilityObservationCurrent(scope,dep.ref);
       case 'memory':{const item=this.memory.read(scope,dep.id,'normal',dep.revision);return !!item&&item.version===dep.version&&item.contentHash===dep.hash;}
       case 'inbound':{const text=this.message(scope,dep.id),match=this.match(scope,dep.id);return text!==null&&digest(text)===dep.hash&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
       case 'timeline':{const match=this.match(scope,this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope,dep.ref)??'');return this.ctx.dafeiyuTimeline.checkArchivedSource(scope,dep.ref,dep.hash)&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
