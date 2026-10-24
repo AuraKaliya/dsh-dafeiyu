@@ -1,0 +1,35 @@
+{
+  "stage": "1E-2",
+  "kind": "real-model-real-dsh-fictional-persona-data",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "at": "2026-10-24T13:10:37.870Z",
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "newFoundationUsed": true,
+  "fullPersonaEvaluation": false,
+  "checks": [
+    {
+      "name": "actual-candidate-review-and-publish",
+      "passed": false
+    }
+  ],
+  "calls": [
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 157,
+      "usage": null,
+      "status": "failed",
+      "finish": "error"
+    }
+  ],
+  "passed": false,
+  "error": "PERSONA_ACCEPTANCE_FAILED",
+  "operations": [],
+  "finishedAt": "2026-10-24T13:10:38.213Z"
+}

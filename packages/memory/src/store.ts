@@ -20,6 +20,9 @@ import type { Context } from '@deepseek-ai/cordis';
 import { TaskExpression,migrateExpression } from './expression.js';
 import { migrateExecutionMemory } from './migrate-execution.js';
 import { migratePersona } from './migrate-persona.js';
+import { PersonaStore } from './persona-store.js';
+import type { PersonaResolver } from './persona-store.js';
+import { ExecutionSources } from './execution-sources.js';
 
 export const MEMORY_APPLICATION_ID = 0x44464d31;
 export const MEMORY_SCHEMA_VERSION = 8;
@@ -118,6 +121,10 @@ export class MemoryStore {
     this.validatingTaskSources.add(key);try{return this.taskSourceValidator(agentId,jobId,purpose);}catch{return 'unavailable';}finally{this.validatingTaskSources.delete(key);}
   }
   taskMemory(tasks:TaskWorkspace,retrieval:MemoryRetrieval|null){return new TaskMemory(this.db,work=>this.transaction(work),this,tasks,retrieval);}
+  personaStore(resolve:PersonaResolver){return new PersonaStore(this.db,work=>this.transaction(work),resolve);}
+  executionSources(resolve:PersonaResolver){return new ExecutionSources(this.db,work=>this.transaction(work),resolve);}
+  /** Trusted same-store composition; callers must keep this synchronous. */
+  atomic<T>(work:()=>T):T{return this.transaction(work);}
   taskExpression(tasks:TaskWorkspace,ctx:Context){return new TaskExpression(this.db,work=>this.transaction(work),this,tasks,ctx);}
   private item(scope: TimelineScope, id: string): Item | null {
     const row = this.db.prepare('SELECT * FROM memory_items WHERE id=? AND agent_id=? AND route=?').get(id, scope.agentId, scope.route);

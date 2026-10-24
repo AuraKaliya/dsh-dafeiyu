@@ -23,6 +23,7 @@ import type { CompactionScope } from '@dafeiyu/contracts';
 import type { TaskWorkspace } from './task-workspace.js';
 import type { TaskExpression } from './expression.js';
 import { taskRepository } from './task-repository-adapter.js';
+import { PersonaService } from './persona-service.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
@@ -60,6 +61,7 @@ export class MemoryService extends Service {
   private readonly gate=new ServiceGate();
   private closing:Promise<void>|undefined;
   private unbindRepository:(()=>void)|undefined;
+  readonly persona:PersonaService|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
     this.config = configSchema.parse(config);
@@ -120,7 +122,9 @@ export class MemoryService extends Service {
         memoryObservationProvider:{submit:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.submit(authority,input);return {...receipt,auditPending:this.flush()};},
           open:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');return this.store.observations.open(authority,input);},
           change:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.change(authority,input);return {...receipt,auditPending:this.flush()};}},
-        agentId: this.config.agentId, actions: this.actions(),contexts:[...(this.working?.contributors()??[]),{id:'task-workspace',kind:'working-state',
+        agentId: this.config.agentId, actions: this.actions(),contexts:[...(this.working?.contributors()??[]),...(this.config.lifecycleMode==='managed'?[{id:'growth',kind:'working-state' as const,
+          prepare:async(request:import('@dafeiyu/contracts').ContextRequest)=>ctx.dafeiyu.personaContext(request),
+          validate:(request:import('@dafeiyu/contracts').ContextRequest,item:import('@dafeiyu/contracts').ContextItem)=>ctx.dafeiyu.personaContext(request).some(current=>JSON.stringify(current)===JSON.stringify(item))}]:[]),{id:'task-workspace',kind:'working-state',
           prepare:async request=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)),
           validate:(request,item)=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)).some(current=>JSON.stringify(ContextItemSchema.parse(current))===JSON.stringify(item))}],
         ...(this.config.compaction?{compactionProvider:new MemoryCompaction(ctx,this.config.compaction,basis,
@@ -129,7 +133,8 @@ export class MemoryService extends Service {
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'memory.close');
     if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
-      ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();}));
+      ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
+    if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active);
     ctx.effect(()=>ctx.dafeiyu.onReady(()=>{if(this.gate.active)this.analysis?.start();}),'memory.core-ready');
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
@@ -138,14 +143,14 @@ export class MemoryService extends Service {
     if(this.closed)throw new Error('Memory capability is unregistered');
     if(this.gate.state==='recovered'||this.gate.active)return;
     if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');
-    this.tasks.recover(this.config.agentId);this.expression.recover(this.config.agentId);this.analysis?.recover();this.flush();this.gate.recovered();
+    this.tasks.recover(this.config.agentId);this.expression.recover(this.config.agentId);this.analysis?.recover();this.flush();this.persona?.flush();this.gate.recovered();
   }
   activate():void {if(this.closed)throw new Error('Memory capability is unregistered');this.gate.activate();this.analysis?.activate();}
   quiesce():void {this.gate.quiesce();this.analysis?.quiesce();}
   async whenIdle():Promise<void>{await this.analysis?.whenIdle();}
   close():Promise<void>{
     if(this.closing)return this.closing;
-    this.quiesce();this.closed=true;this.handle.dispose();this.unbindRepository?.();
+    this.quiesce();this.closed=true;this.persona?.close();this.handle.dispose();this.unbindRepository?.();
     this.closing=(async()=>{try{await this.expression.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
     return this.closing;
   }

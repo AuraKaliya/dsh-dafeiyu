@@ -4,7 +4,7 @@
 
 实施状态：**1A—1D已完成，1E—1G尚未完成**，结果见[1A验收](phase1a-adaptation.md)、[1B验收](phase1b-lifecycle.md)、[1C验收](phase1c-storage.md)、[1D验收](phase1d-execution.md)。本方案编写时仅交付文档，原核验过程保留在第16节；当前实施进度以各子步骤验收为准。尚未创建正式Host运行入口、迁移真实数据库或切换QQ／服务器。
 
-1E进度：已完成[1E-1底色／契约／增量存储](phase1e1-foundation-storage.md)，新库目标memory v8/runtime v2可用；1E-2阶段服务、1E-3连续性业务及完整1E验收仍待完成。正式底色已按新方案创建，但尚未通过真实人格行为验收。
+1E进度：已完成[1E-1底色／契约／增量存储](phase1e1-foundation-storage.md)与[1E-2显式阶段状态](phase1e2-stage-persona.md)；新库目标memory v8/runtime v2可用。1E-3连续性业务及完整1E验收仍待完成。正式底色已创建并用于有限的真实模型接口样例，不等同1G完整人格行为验收。
 
 1D中途实现和接续事项见[开发检查点](phase1d-checkpoint.md)。本轮按用户认可的边界新增[大肥鱼人格成长与连续性方案](persona-growth-continuity-plan.md)，同步修订本方案；只改文档，不继续功能开发。正式底色将按新方案后续新建，不采用管理中心现有人格文件；正式人格与成长验收仍未完成。
 
@@ -352,6 +352,8 @@ managed运行读取明确配置的UTF-8底色文件，检查非空、合法编�
 阶段人格以memory中的认识和证据为权威，允许为空、暂定或保留分歧。GrowthProvider保留`select/prepare/validate/status`；新增PersonaGrowthPort的显式候选、复核、发布和撤下语义，及ContinuityPort检查点。阶段聚合保存条目引用与版本；growth_selections保存场景选择，所有写入通过同一提供者协调，不能形成两套竞争状态。
 
 本阶段实现受信请求或当前大肥鱼明确提出的候选／选择路径、trial／adopted／withdrawn等版本状态和原子发布；日常状态更新不增加逐项人工审批。自动从全库经历归纳兴趣、关系、经验的算法仍是整体阶段3的记忆E。held表示证据不足或需要比较，不自动表示人工审批。
+
+1E-2的依赖细化：先实现显式候选所需的内部self-report文字来源，记录当前Run及真实输入依赖，避免将新认识正文塞入底色或复用虚构Conversation。完整能力观察、选择性长期贡献与检查点整理仍在1E-3；这一小段来源写入不等于完整ExecutionMemoryPort已经验收。
 
 运行中经`memory:growth`装配适用于当前场景的条目，统一接受总预算、版本和来源校验。阶段人格、当前临时状态、任务要求分开；成长正文不升级成权限规则。私有材料抽象为性格描述也必须继承实际输入限制，不能因agent所有权而对所有群可见。
 

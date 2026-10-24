@@ -4,7 +4,7 @@
 
 第一阶段实施进度：1A适配探针、1B契约与受控生命周期、1C存储与迁移、1D任务执行已完成。当前470项回归通过；1D另有真实模型多步任务与重启续接验收，1A音画探针单独记录。1E人格成长／连续性及正式Host仍待后续子步骤，现有QQ和服务器未切换。
 
-1D从[开发检查点](docs/phase1d-checkpoint.md)完成[执行验收](docs/phase1d-execution.md)，1E-1已完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，476项回归通过。后续按[人格成长方案](docs/persona-growth-continuity-plan.md)继续阶段状态与连续性业务；正式底色新建于本项目，不使用管理中心现有人格文件。memory v8/runtime v2已实现，但完整人格服务仍待后续子步骤。
+1D已完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，当前488项回归通过。1E-2另有新底色与虚构候选的真实模型接口验收。1E-3完整观察／贡献、任务意图和压缩连续性仍待完成；正式底色新建于本项目，不使用管理中心现有人格文件。
 
 ## 开始使用
 
@@ -43,6 +43,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第一阶段1C存储与迁移验收](docs/phase1c-storage.md)：Run账本、Task事件、增量schema、只读预检、备份和中断续接；使用虚构旧库。
 - [第一阶段1D任务执行验收](docs/phase1d-execution.md)：470项回归、v3渠道与动作、取消／恢复边界及真实模型任务续接；首轮失败与成功复测分别保留。
 - [第一阶段1E-1底色与存储验收](docs/phase1e1-foundation-storage.md)：新底色、严格读取、人格数据契约、memory v8/runtime v2、旧Run兼容和增量迁移。
+- [第一阶段1E-2显式阶段状态验收](docs/phase1e2-stage-persona.md)：候选、采用／撤下、受控投影、来源变化与真实模型接口验证；失败及修正单列。
 - [架构与开发决策](docs/architecture.md)
 - [记忆、行为时间线、压缩和检索](docs/memory.md)
 - [记忆能力插件完整开发方案（2026-10-23）](docs/memory-plugin-plan.md)

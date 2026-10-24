@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ExecutionRequestSchema,ResumeRunSchema,WakeRequestSchema,RunControlSchema,ProducerSchema,taskScopeKey,HostConfigSchema,TaskUpdateSchema,redactJson,RunOriginSchema } from '@dafeiyu/contracts';
-import type { TaskRepositoryPort,TaskRef,RunRef,RunOrigin,ExecutionContextV3,ExecutionGrant,ExecutionInput,WakeAuthorityProvider,HostConfig,Json } from '@dafeiyu/contracts';
+import type { TaskRepositoryPort,TaskRef,RunRef,RunOrigin,ExecutionContextV3,ExecutionGrant,ExecutionInput,WakeAuthorityProvider,HostConfig,Json,PersonaAccess } from '@dafeiyu/contracts';
+import type { PersonaRuntime,RunPersona } from './persona-runtime.js';
 import type { FoundationSnapshot } from './foundation.js';
 import { foundationManifest } from './persona-manifest.js';
 import type { Journal } from '@dafeiyu/journal';
@@ -20,6 +21,7 @@ export type ExecutionOptions=z.input<typeof ExecutionOptionsSchema>;
 interface Dependencies {
   agentId:string;store:RuntimeStore;journal:Journal;runtime:DshRuntime;registry:CapabilityRegistryV3;scheduler:RunScheduler;
   options:z.output<typeof ExecutionOptionsSchema>;repository:()=>TaskRepositoryPort|undefined;
+  personas:PersonaRuntime;
   accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
   turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number};signal:AbortSignal;
 }
@@ -31,7 +33,7 @@ const savedSchema=z.strictObject({kind:z.literal('execution'),input:ExecutionReq
 export class ExecutionCoordinator {
   private readonly refs=new WeakMap<RunRef,{producer:string;id:string}>();
   private readonly tasks=new WeakMap<TaskRef,{producer:string;id:string}>();
-  private readonly grants=new WeakMap<ExecutionContextV3,{action:BoundActionV3;runId:string;guard:()=>void}>();
+  private readonly grants=new WeakMap<ExecutionContextV3,{action:BoundActionV3;runId:string;guard:()=>void;commitGuard:()=>void}>();
   private readonly active=new Map<string,Active>();
   private readonly queued=new Map<string,Promise<void>>();
   private readonly taskQueues=new Map<string,Promise<void>>();
@@ -56,7 +58,8 @@ export class ExecutionCoordinator {
         const guard=()=>{const task=this.repository().readState(this.d.agentId,run.definition.taskId!),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),policy=this.policy(producer,run.definition.policyId);
           if(task.epoch!==run.definition.intentVersion)throw new Error('SOURCE_STALE');const inputs=this.repository().readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules);
           if(runtimeHash(inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey})))!==runtimeHash(run.snapshot?.inputs))throw new Error('SOURCE_STALE');};
-        guard();const text=await this.d.runtime.readResult(run.result);guard();return text;},
+        guard();const binding=this.d.store.personaBinding(run.id);if(binding.kind==='bound')this.d.personas.validateStored(run,binding.manifest,this.inputsFor(run),this.d.signal,guard);
+        const text=await this.d.runtime.readResult(run.result);guard();if(binding.kind==='bound')this.d.personas.validateStored(run,binding.manifest,this.inputsFor(run),this.d.signal,guard);return text;},
       cancel:(ref:RunRef,input:unknown)=>this.control(producer,this.resolve(producer,ref),input,'cancel'),
       pause:(ref:RunRef,input:unknown)=>this.control(producer,this.resolve(producer,ref),input,'pause'),
       resume:(ref:TaskRef,raw:unknown)=>{this.d.assertAccepting();const input=ResumeRunSchema.parse(raw);
@@ -121,7 +124,7 @@ export class ExecutionCoordinator {
   private async process(id:string):Promise<void>{
     const release=await this.d.scheduler.acquire(false);
     try{if(!this.d.accepting()||this.failure)return;let run=this.d.store.get(id);if(!['accepted','queued'].includes(run.state))return;
-      const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);
+      const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);let runPersona:RunPersona|undefined;
       try{
         if(run.state==='accepted')run=this.d.store.transition(id,run.version,'queued');
         const request=this.d.store.request(run.requestKey),saved=savedSchema.parse(request.payload),policy=this.policy(request.producer,run.definition.policyId),repository=this.repository();
@@ -131,31 +134,34 @@ export class ExecutionCoordinator {
         const inputs=repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules),inputHash=runtimeHash(inputs),authorityVersion=runtimeHash(policy);
         const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite));
         const registryVersion=runtimeHash(actions.map(action=>[action.id,action.owner,action.version,action.input,action.effects]));
-        const sessionId=this.d.store.session(runtimeHash({task:task.id,epoch:task.epoch,authorityVersion,inputHash,registryVersion})),persona=this.d.persona();
+        const persona=this.d.persona();
         const signal=AbortSignal.any([this.d.signal,controller.signal,...actions.map(action=>action.signal),AbortSignal.timeout(this.d.turnTimeoutMs)]);
         const guard=()=>{signal.throwIfAborted();if(!repository.ready()||this.d.repository()!==repository)throw new Error('DEPENDENCY_UNAVAILABLE');
           const current=repository.readState(this.d.agentId,task.id);if(current.epoch!==task.epoch||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');
           if(run.definition.origin.kind==='wake'&&!this.wakes.get(request.producer)?.validate(run.definition.origin,current))throw new Error('WAKE_NOT_AUTHORIZED');
           if(runtimeHash(repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules))!==inputHash)throw new Error('SOURCE_STALE');
           if(actions.some(action=>!action.active()))throw new Error('DEPENDENCY_UNAVAILABLE');};
+        runPersona=this.d.personas.prepare(run,persona,this.d.model,inputs,signal,guard);
+        const sessionId=this.d.store.session(runtimeHash({task:task.id,epoch:task.epoch,authorityVersion,inputHash,registryVersion,persona:runPersona.projectionKey}));
         run=this.d.store.start(id,run.version,{sessionId,personaVersion:persona.version,model:this.d.model,registryVersion,authorityVersion,
-          inputs:inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey}))},foundationManifest(run,persona,this.d.model));
+          inputs:inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey}))},runPersona.manifest);
         this.d.store.checkpoint(id,{kind:'run-start',intentVersion:task.epoch});this.flushEvents();
         const view=Object.freeze({runId:id,taskId:task.id,scope:Object.freeze({...run.definition.scope}),origin:Object.freeze({...run.definition.origin}),signal});
-        const bound=actions.map(action=>this.bindAction(run,action,signal,guard));
-        const result=await this.d.runtime.runExecution({mode:'task',sessionId,view,persona,goal:task.goal,inputs,actions:bound,guard,...this.d.context});
-        guard();run=this.d.store.get(id);this.d.store.complete(id,run.version,result.resultRef);
+        const admittedGuard=()=>{guard();runPersona!.guard();},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
+        const result=await this.d.runtime.runExecution({mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:task.goal,inputs,actions:bound,guard:admittedGuard,...this.d.context});
+        admittedGuard();run=this.d.store.get(id);this.d.store.complete(id,run.version,result.resultRef);
       }catch(error){run=this.d.store.get(id);
         if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
-      }finally{this.active.delete(id);this.flushEvents();}
+      }finally{runPersona?.dispose();this.active.delete(id);this.flushEvents();}
     }finally{release();}
   }
-  private bindAction(run:StoredRun,action:BoundActionV3,signal:AbortSignal,guard:()=>void):NativeAction{
+  private bindAction(run:StoredRun,action:BoundActionV3,signal:AbortSignal,guard:()=>void,commitGuard:()=>void=guard):NativeAction{
     return {definition:action,execute:async(raw,callId,toolSignal)=>{
       guard();const input=action.validateInput(raw);
+      if(action.effects!=='read'&&this.d.store.operations(run.id).some(operation=>operation.plugin===action.owner&&(operation.state==='unknown'||operation.outcome?.effects==='unknown')))throw new Error('OPERATION_UNCERTAIN');
       if(action.effects!=='read'&&run.definition.parentRunId){let parentId:string|null=run.definition.parentRunId;
         const fingerprint=runtimeHash({action:action.id,plugin:action.owner,pluginVersion:action.version,input});
         while(parentId){const parent=this.d.store.get(parentId);if(this.d.store.operations(parentId).some(op=>op.fingerprint===fingerprint&&op.outcome?.effects==='confirmed'))throw new Error('OPERATION_ALREADY_CONFIRMED');parentId=parent.definition.parentRunId;}}
@@ -165,7 +171,7 @@ export class ExecutionCoordinator {
       const grant=Object.freeze({id:randomUUID()}) as ExecutionGrant;
       const context:ExecutionContextV3=Object.freeze({agentId:this.d.agentId,taskId:run.definition.taskId,runId:run.id,operationId:operation.id,
         origin:freezeOrigin(run.definition.origin),scope:Object.freeze({...run.definition.scope}),intentVersion:run.definition.intentVersion,grant,signal:AbortSignal.any([signal,toolSignal,action.signal])});
-      this.grants.set(context,{action,runId:run.id,guard});this.flushEvents();
+      this.grants.set(context,{action,runId:run.id,guard,commitGuard});this.flushEvents();
       try{const outcome=await action.execute(input,context);
         // Sources are only accepted through the source port (added with execution memory in 1E).
         if(outcome.sources.length)throw new Error('SOURCE_STALE');
@@ -178,14 +184,22 @@ export class ExecutionCoordinator {
   conversationActions(run:StoredRun,producer:string,signal:AbortSignal,guard:()=>void):NativeAction[]{
     const policy=this.d.options.policies.find(policy=>policy.id==='conversation'&&policy.producers.includes(producer));if(!policy)return [];
     return this.d.registry.actions().filter(action=>!action.requiresTask&&policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
-      .map(action=>this.bindAction(run,action,signal,()=>{signal.throwIfAborted();guard();if(!action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');}));
+      .map(action=>{const base=()=>{signal.throwIfAborted();guard();if(!action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');};return this.bindAction(run,action,signal,()=>{base();this.d.personas.current(run.id)?.guard();},base);});
   }
   conversationSnapshot(producer:string){const policy=this.d.options.policies.find(policy=>policy.id==='conversation'&&policy.producers.includes(producer));
     return {policyId:policy?.id??'conversation-v2',authority:policy??null,actions:this.d.registry.actions()
       .filter(action=>policy?.actions.includes(action.id)&&!action.requiresTask&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .map(action=>({id:action.id,owner:action.owner,version:action.version,input:action.input,effects:action.effects}))};}
-  authority(context:ExecutionContextV3,pluginId:string){const grant=this.grants.get(context);
-    if(!grant||grant.action.owner!==pluginId||!grant.action.active()||this.d.store.get(grant.runId).state!=='running')throw new Error('SCOPE_DENIED');grant.guard();return context;
+  authority(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'){const grant=this.grants.get(context);
+    if(!grant||grant.action.owner!==pluginId||!grant.action.active()||effect==='local-write'&&grant.action.effects!=='local-write'||this.d.store.get(grant.runId).state!=='running')throw new Error('SCOPE_DENIED');grant.guard();return context;
+  }
+  private inputsFor(run:StoredRun):ExecutionInput[]{if(!run.definition.taskId)return [];const request=this.d.store.request(run.requestKey),saved=savedSchema.parse(request.payload);return this.repository().readSelectedInputs(this.d.agentId,run.definition.taskId,saved.input.inputRefs,this.policy(request.producer,run.definition.policyId).sourceRules);}
+  personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'):PersonaAccess{
+    const grant=this.grants.get(context);this.authority(context,pluginId,effect);if(!grant||effect==='local-write'&&grant.action.effects!=='local-write')throw new Error('SCOPE_DENIED');
+    const run=this.d.store.get(context.runId),prepared=this.d.personas.current(run.id);const guard=()=>{this.authority(context,pluginId,effect);prepared?.guard();};
+    const commitGuard=()=>{context.signal.throwIfAborted();const current=this.grants.get(context);if(current!==grant||!grant.action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');grant.commitGuard();};
+    return Object.freeze({...this.d.personas.access(run,this.inputsFor(run),context.signal,guard),commitGuard,producer:pluginId,operationId:context.operationId,startedEventId:this.d.store.operation(context.operationId).startedEventId,
+      admittedSources:prepared?.manifest.entries.flatMap(entry=>[entry.contentRef,...entry.dependencies])??[]});
   }
   flushEvents():void{for(const event of this.d.store.outbox()){
     const run=this.d.store.get(event.runId);if(run.definition.scope.kind!=='task')continue;

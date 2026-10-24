@@ -28,7 +28,10 @@ export async function* visibleStream(input:AsyncIterable<StreamChunk>):AsyncIter
         yield {type:'block-end',index:entry.index,block:{type:'tool-call',id:chunk.block.id,name:chunk.block.name,arguments:chunk.block.arguments}};
       }
     }else if(chunk.type==='usage')yield {type:'usage',usage:chunk.usage};
-    else yield {type:'finish',reason:chunk.reason.kind==='error'||chunk.reason.kind==='aborted'
-      ?{kind:chunk.reason.kind,failure:{code:'MODEL_INCOMPLETE',message:'Model did not complete'}}:chunk.reason};
+    else {const reason=chunk.reason;if(reason.kind==='error'||reason.kind==='aborted'){
+      const code=reason.failure.code.toUpperCase(),status=reason.failure.status;
+      yield {type:'finish',reason:{kind:reason.kind,failure:{code:/^[A-Z][A-Z0-9_]{0,63}$/.test(code)?code:'MODEL_INCOMPLETE',message:'Model did not complete',
+        ...(typeof status==='number'&&Number.isInteger(status)&&status>=100&&status<600?{status}:{})}}};
+    }else yield {type:'finish',reason};}
   }
 }

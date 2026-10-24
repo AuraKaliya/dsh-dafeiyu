@@ -32,6 +32,8 @@ export class ContextCoordinator {
   readonly config:z.output<typeof contextConfigSchema>;
   private readonly entries=new Map<string,Entry>();
   private readonly scopes=new WeakMap<ContextRequest,{scope:OperationScope;entry:Entry}>();
+  private readonly pinnedRegions=new Set<string>();
+  pinRegion(name:string):()=>void{this.pinnedRegions.add(name);return ()=>{this.pinnedRegions.delete(name);};}
   constructor(private readonly agentId:string,private readonly journal:Journal,config:z.input<typeof contextConfigSchema>={}){
     this.config=contextConfigSchema.parse(config);
     if(this.config.outputReserveBytes>=this.config.requestMaxBytes)throw new Error('Invalid context reserve');
@@ -95,17 +97,18 @@ export class ContextCoordinator {
       const decision={owner:entry.owner,region:entry.contributor.id,available:region.items.length,selected:0,invalid:0,overBudget:0,
         unavailable:region.unavailable||!entry.active,maxBytes:policy.maxBytes,priority:policy.priority};decisions.push(decision);
       if(!entry.active)continue;
-      if(region.unavailable){if(policy.required)throw new Error('Required context unavailable');continue;}
+      const required=policy.required||this.pinnedRegions.has(`${entry.owner}:${entry.contributor.id}`);
+      if(region.unavailable){if(required)throw new Error('Required context unavailable');continue;}
       const accepted:ContextItem[]=[],seen=new Set<string>();
       const output={owner:entry.owner,region:entry.contributor.id,kind:entry.contributor.kind,items:accepted};
       regions.push(output);
       for(const item of region.items){
         let valid=false;try{this.scopeFor(request);valid=Date.parse(item.expiresAt)>Date.now()&&entry.contributor.validate(request,item);}catch{valid=false;}
-        if(!valid){decision.invalid++;if(policy.required)throw new Error('Required context stale');continue;}
+        if(!valid){decision.invalid++;if(required)throw new Error('Required context stale');continue;}
         const identity=JSON.stringify([item.text,item.sources]);if(seen.has(identity))continue;seen.add(identity);
         accepted.push(item);
         if(bytes(output)>policy.maxBytes||bytes(render())>Math.max(0,Math.min(allowance,this.config.maxBytes))){
-          accepted.pop();decision.overBudget++;if(policy.required)throw new Error('Required context exceeds budget');
+          accepted.pop();decision.overBudget++;if(required)throw new Error('Required context exceeds budget');
         }
       }
       if(!accepted.length)regions.pop();

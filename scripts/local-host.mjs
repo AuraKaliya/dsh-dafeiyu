@@ -60,7 +60,7 @@ export async function localHost(root, { simulator = true, realModel = true, adap
       calls.push(entry); const start = Date.now();
       try {
         for await (const chunk of next()) { if (chunk.type === 'usage') entry.usage = chunk.usage;
-          if(chunk.type==='finish'){entry.finish=chunk.reason.kind;if(chunk.reason.kind==='error'||chunk.reason.kind==='aborted')entry.status='failed';}
+          if(chunk.type==='finish'){entry.finish=chunk.reason.kind;if(chunk.reason.kind==='error'||chunk.reason.kind==='aborted'){entry.status='failed';entry.errorCode=/^[A-Z][A-Z0-9_]{0,63}$/.test(chunk.reason.failure.code)?chunk.reason.failure.code:'MODEL_ERROR';entry.httpStatus=chunk.reason.failure.status??null;}}
           yield chunk; }
         if(entry.status!=='failed')entry.status = 'completed';
       } catch (error) {

@@ -22,6 +22,7 @@ import { openAgentSession,runAgentTurn,readPersistedResult } from './agent-sessi
 import { visibleStream } from './visible-stream.js';
 import { NativeRuntime } from './native-runtime.js';
 import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame } from './execution-frame.js';
+import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 
 interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime;delivery?:RuntimeDelivery;lastRequest?:GenerateOptions }
 export interface RuntimeDelivery {id:string;guard:()=>void;finalize:(result:RunResult,guard:()=>void)=>Promise<void>}
@@ -46,6 +47,7 @@ export class DshRuntime {
     const sessions=this.handles;
     ctx.on('llm/stream',async function*(options,next){
       const owned=options.sessionId?sessions.get(options.sessionId):undefined;
+      if(owned)await yieldEventLoop();
       if(owned)owned.lastRequest=options;
       const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
       const feedback=options.sessionId?sessions.get(options.sessionId)?.feedback:undefined;

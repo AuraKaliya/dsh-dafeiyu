@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ConversationSchema } from '@dafeiyu/contracts';
-import type { PendingMessage,PersonaSnapshot,HostConfig } from '@dafeiyu/contracts';
+import type { PendingMessage,HostConfig,PersonaManifest } from '@dafeiyu/contracts';
 import { eventFor } from '@dafeiyu/journal';
 import type { Journal } from '@dafeiyu/journal';
 import type { Context } from '@deepseek-ai/cordis';
@@ -18,13 +18,13 @@ const projectionSchema=z.strictObject({inboundId:z.uuid(),startedEventId:z.uuid(
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 /** The journal owns delivery. The Run owns only the durable model execution and its projection. */
 export class ConversationRuns {
-  constructor(private readonly ctx:Context,private readonly store:RuntimeStore,private readonly journal:Journal,private readonly agentId:string){}
-  begin(item:PendingMessage,persona:FoundationSnapshot,model:HostConfig['modelRoutes']['chat'],registry:unknown,execution:{policyId:string;authority:unknown;actions:unknown}={policyId:'conversation-v2',authority:null,actions:[]}):StoredRun{
+  constructor(private readonly ctx:Context,private readonly store:RuntimeStore,private readonly journal:Journal,private readonly agentId:string,private readonly validatePersona:(run:StoredRun)=>void=()=>{}){}
+  begin(item:PendingMessage,persona:FoundationSnapshot,model:HostConfig['modelRoutes']['chat'],registry:unknown,execution:{policyId:string;authority:unknown;actions:unknown}={policyId:'conversation-v2',authority:null,actions:[]},preparePersona?:(run:StoredRun)=>PersonaManifest):StoredRun{
     const request=this.store.prepareRequest('conversation',item.id,{kind:'message',inboundId:item.id,messageHash:runtimeHash(item.message)});
     let run=this.store.acceptRun(request.id,{taskId:null,scope:{kind:'conversation',agentId:this.agentId,route:item.route},origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},intentVersion:0,policyId:execution.policyId});
     if(run.state==='accepted')run=this.store.transition(run.id,run.version,'queued');
     if(run.state!=='queued')throw new Error('RUN_INTERRUPTED');
-    return this.store.start(run.id,run.version,{sessionId:item.sessionId,personaVersion:persona.version,model,registryVersion:runtimeHash({legacy:registry,v3:execution.actions}),authorityVersion:runtimeHash({extension:item.extensionId,route:item.route,policy:execution.authority}),inputs:[]},foundationManifest(run,persona,model));
+    return this.store.start(run.id,run.version,{sessionId:item.sessionId,personaVersion:persona.version,model,registryVersion:runtimeHash({legacy:registry,v3:execution.actions}),authorityVersion:runtimeHash({extension:item.extensionId,route:item.route,policy:execution.authority}),inputs:[]},preparePersona?.(run)??foundationManifest(run,persona,model));
   }
   complete(run:StoredRun,item:PendingMessage,result:RunResult,startedEventId:string):void{
     if(!result.resultRef)throw new Error('PERSISTENCE_FAILED');
@@ -40,6 +40,7 @@ export class ConversationRuns {
         ||projection.reply.id!==`${item.id}:reply`||runtimeHash(projection.reply.conversation)!==runtimeHash(item.message.conversation)
         ||run.definition.scope.kind!=='conversation'||run.definition.scope.route!==item.route||ref.sessionId!==item.sessionId||ref.textHash!==hash(projection.reply.text))throw new Error('RESULT_BINDING_CONFLICT');
       if(item.state==='processing'){
+        try{this.validatePersona(run);}catch{this.journal.transition(item.id,'processing','failed',eventFor(this.agentId,item,'delivery.blocked','core',CORE_VERSION,item.id,null,{runId:run.id,code:'SOURCE_STALE'}));this.store.acknowledgeEvent(event.id);continue;}
         // Read persisted DSH facts, without creating an Agent or running a model.
         await readPersistedResult(this.ctx,ref);
         this.journal.transition(item.id,'processing','reply-ready',{...eventFor(this.agentId,item,'turn.completed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id}),

@@ -1,0 +1,215 @@
+{
+  "stage": "1E-2",
+  "kind": "real-model-real-dsh-fictional-persona-data",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "at": "2026-10-24T13:13:53.194Z",
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "newFoundationUsed": true,
+  "fullPersonaEvaluation": false,
+  "checks": [
+    {
+      "name": "actual-candidate-review-and-publish",
+      "passed": true
+    },
+    {
+      "name": "new-session-after-restart-uses-stage-reference",
+      "passed": true
+    },
+    {
+      "name": "different-task-does-not-get-private-stage-text",
+      "passed": true
+    },
+    {
+      "name": "persisted-visible-content-only",
+      "passed": true
+    }
+  ],
+  "calls": [
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1558,
+      "usage": {
+        "inputTokens": 1732,
+        "outputTokens": 148,
+        "cacheReadTokens": 384,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2264
+      },
+      "status": "completed",
+      "finish": "tool-calls"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1862,
+      "usage": {
+        "inputTokens": 150,
+        "outputTokens": 260,
+        "cacheReadTokens": 2176,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2586
+      },
+      "status": "completed",
+      "finish": "tool-calls"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1526,
+      "usage": {
+        "inputTokens": 230,
+        "outputTokens": 164,
+        "cacheReadTokens": 2432,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2826
+      },
+      "status": "completed",
+      "finish": "tool-calls"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1244,
+      "usage": {
+        "inputTokens": 214,
+        "outputTokens": 132,
+        "cacheReadTokens": 2688,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3034
+      },
+      "status": "completed",
+      "finish": "tool-calls"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1236,
+      "usage": {
+        "inputTokens": 175,
+        "outputTokens": 60,
+        "cacheReadTokens": 2944,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3179
+      },
+      "status": "completed",
+      "finish": "tool-calls"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 2036,
+      "usage": {
+        "inputTokens": 208,
+        "outputTokens": 271,
+        "cacheReadTokens": 3072,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3551
+      },
+      "status": "completed",
+      "finish": "stop"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 2594,
+      "usage": {
+        "inputTokens": 512,
+        "outputTokens": 312,
+        "cacheReadTokens": 1792,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2616
+      },
+      "status": "completed",
+      "finish": "tool-calls"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 4978,
+      "usage": {
+        "inputTokens": 157,
+        "outputTokens": 733,
+        "cacheReadTokens": 2560,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3450
+      },
+      "status": "completed",
+      "finish": "stop"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 2071,
+      "usage": {
+        "inputTokens": 183,
+        "outputTokens": 218,
+        "cacheReadTokens": 1792,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2193
+      },
+      "status": "completed",
+      "finish": "stop"
+    }
+  ],
+  "passed": true,
+  "operations": [
+    {
+      "action": "dafeiyu_persona_status",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "none",
+      "errorCode": null
+    },
+    {
+      "action": "dafeiyu_persona_propose",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "confirmed",
+      "errorCode": null
+    },
+    {
+      "action": "dafeiyu_persona_review",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "confirmed",
+      "errorCode": null
+    },
+    {
+      "action": "dafeiyu_persona_publish",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "confirmed",
+      "errorCode": null
+    },
+    {
+      "action": "dafeiyu_persona_status",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "none",
+      "errorCode": null
+    },
+    {
+      "action": "dafeiyu_persona_status",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "none",
+      "errorCode": null
+    }
+  ],
+  "finishedAt": "2026-10-24T13:14:13.031Z"
+}
