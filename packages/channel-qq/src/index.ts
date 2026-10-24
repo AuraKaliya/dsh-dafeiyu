@@ -1,7 +1,7 @@
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
-import { API_VERSION } from '@dafeiyu/contracts';
+import { API_VERSION, LifecycleModeSchema } from '@dafeiyu/contracts';
 import type { Conversation, DeliveryResult, ExtensionHandle, Reply } from '@dafeiyu/contracts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -16,6 +16,7 @@ const configSchema = z.strictObject({
   agentId: z.string().min(1), botId: z.string().regex(/^[1-9]\d{4,14}$/), ownerId: z.string().regex(/^[1-9]\d{4,14}$/),
   groupIds: z.array(z.string().regex(/^[1-9]\d{4,14}$/)).max(10),
   httpURL: z.string(), wsURL: z.string(), tokenFile: z.string(), dataDir: z.string(),
+  lifecycleMode:LifecycleModeSchema.default('legacy'),
   requestTimeoutMs: z.number().int().min(100).max(30000).default(10000),
   reconnectMs: z.number().int().min(100).max(60000).default(3000),
 });
@@ -42,6 +43,7 @@ export class QqChannel extends Service {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastPong = 0;
   private stopped = false;
+  private quiescing = false;
   private state: Status = 'starting';
   private error: string | null = null;
   private readonly controller = new AbortController();
@@ -67,9 +69,20 @@ export class QqChannel extends Service {
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
     groupIds: this.config.groupIds, counters: { ...this.counters }, at: new Date().toISOString() }; }
-  async start(): Promise<void> { await this.connect(); }
+  async start(): Promise<void> {
+    if(this.config.lifecycleMode==='managed'&&this.ctx.dafeiyu.lifecycleState!=='active')throw new Error('HOST_NOT_READY');
+    if(this.quiescing||this.stopped)throw new Error('CHANNEL_STOPPING');
+    await this.connect();
+  }
+  quiesce():void {
+    this.quiescing=true;
+    if(this.retry)clearTimeout(this.retry);this.retry=null;
+    if(this.heartbeat)clearInterval(this.heartbeat);this.heartbeat=null;
+    this.socket?.close();
+  }
+  async whenIdle():Promise<void>{await this.queue;await Promise.allSettled([...this.sending]);}
   private async connect(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped||this.quiescing) return;
     try { await this.api.verify(this.controller.signal); }
     catch (error) {
       if (this.stopped) return;
@@ -104,11 +117,11 @@ export class QqChannel extends Service {
     });
   }
   private retryLater(): void {
-    if (this.stopped || this.retry) return;
+    if (this.stopped || this.quiescing || this.retry) return;
     this.retry = setTimeout(() => { this.retry = null; this.counters.reconnects++; void this.connect().catch(() => { this.error = 'CONNECT_FAILED'; }); }, this.config.reconnectMs);
   }
   private receive(text: string): void {
-    if (this.stopped || this.state !== 'online') return;
+    if (this.stopped || this.quiescing || this.state !== 'online') return;
     let raw: unknown;
     try { raw = JSON.parse(text); } catch { this.counters.ignored++; return; }
     const decoded = messageSchema.safeParse(raw);
@@ -184,4 +197,4 @@ export class QqChannel extends Service {
     await Promise.allSettled([...this.sending]); this.store.close();
   }
 }
-export async function apply(ctx: Context, config: Config): Promise<void> { const channel = new QqChannel(ctx, config); await channel.start(); }
+export async function apply(ctx: Context, config: Config): Promise<void> { const channel = new QqChannel(ctx, config); if(config.lifecycleMode!=='managed')await channel.start(); }

@@ -1,0 +1,38 @@
+{
+  "stage": "1B",
+  "kind": "real-dsh-scripted-model-simulated-channel",
+  "at": "2026-10-24T08:47:55.803Z",
+  "serverAccess": false,
+  "realQQ": false,
+  "checks": [
+    {
+      "name": "no-processing-during-registration",
+      "passed": true
+    },
+    {
+      "name": "reject-before-acceptance",
+      "passed": true
+    },
+    {
+      "name": "require-memory-readiness",
+      "passed": true
+    },
+    {
+      "name": "model-still-not-started",
+      "passed": true
+    },
+    {
+      "name": "one-pending-message-delivered",
+      "passed": true
+    },
+    {
+      "name": "quiesce-stops-new-acceptance",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "phases": {
+    "core": "quiescing",
+    "memory": "active"
+  }
+}

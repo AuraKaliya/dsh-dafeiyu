@@ -2,7 +2,7 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import type {} from '@dafeiyu/timeline';
-import { API_VERSION, redactContent,ContextItemSchema } from '@dafeiyu/contracts';
+import { API_VERSION, redactContent,ContextItemSchema, LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ActionCapability, ActionContext, ExtensionHandle, Json, OperationScope } from '@dafeiyu/contracts';
 import { resolve } from 'node:path';
 import { z } from 'zod';
@@ -27,7 +27,7 @@ export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional() });
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), lifecycleMode:LifecycleModeSchema.default('legacy'), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional() });
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
   sourceRefs: z.array(z.string().min(1).max(300)).min(1).max(8) };
@@ -56,6 +56,8 @@ export class MemoryService extends Service {
   private readonly tasks:TaskWorkspace;
   private readonly expression:TaskExpression;
   private closed = false;
+  private readonly gate=new ServiceGate();
+  private closing:Promise<void>|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
     this.config = configSchema.parse(config);
@@ -63,7 +65,7 @@ export class MemoryService extends Service {
     this.tasks=this.store.taskWorkspace((scope,ref,hash)=>ctx.dafeiyuTimeline.checkArchivedSource(scope,ref,hash),(scope,a,b)=>ctx.dafeiyuTimeline.sameArchivedSource(scope,a,b));
     try { this.retrieval = this.config.retrieval ? new MemoryRetrieval(this.store, this.config.dataDir, this.config.retrieval, dependencies) : null; }
     catch (error) { this.store.close(); throw error; }
-    try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis):null; }
+    try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis,this.config.lifecycleMode==='managed',()=>ctx.dafeiyu.accepting&&this.gate.active):null; }
     catch(error){this.retrieval?.close();this.store.close();throw error;}
     try{this.working=this.config.context?new WorkingMemory(ctx,this.store,this.retrieval,this.config.dataDir,(c,refs)=>this.evidence(c,refs),!!this.config.compaction):null;}
     catch(error){void this.analysis?.close();this.retrieval?.close();this.store.close();throw error;}
@@ -80,7 +82,7 @@ export class MemoryService extends Service {
     try {
       const taskMemory=this.store.taskMemory(this.tasks,this.retrieval);
       this.expression=this.store.taskExpression(this.tasks,ctx);
-      this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
+      this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,lifecycleReady:()=>this.gate.active,
         taskExpressionProvider:{
           deliveryMaterial:(agent,task,job,target)=>{this.assertTasks();return this.expression.deliveryMaterial(agent,task,job,target);},
           verifyDelivery:async(agent,task,job,target,answer,signal,guard)=>{this.assertTasks();await this.expression.verifyDelivery(agent,task,job,target,answer,signal,()=>{this.assertTasks();guard();});},
@@ -123,19 +125,34 @@ export class MemoryService extends Service {
           new MemorySourcePolicy(ctx,this.store,this.working,this.feedbackArchive,scope=>basis(scope).epoch))}:{}),
         ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
-    ctx.effect(() => async () => { this.closed = true; this.handle.dispose();await this.expression.close(); await this.analysis?.close();this.feedbackArchive?.close();this.working?.close(); this.retrieval?.close(); this.store.close(); }, 'memory.close');
-    this.flush();
-    this.tasks.recover(this.config.agentId);this.flush();
-    this.expression.recover(this.config.agentId);this.flush();
-    this.analysis?.start();
+    ctx.effect(() => () => this.close(), 'memory.close');
+    ctx.effect(()=>ctx.dafeiyu.onReady(()=>{if(this.gate.active)this.analysis?.start();}),'memory.core-ready');
+    if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
+  }
+  get lifecycleState(){return this.gate.state;}
+  recover():void {
+    if(this.closed)throw new Error('Memory capability is unregistered');
+    if(this.gate.state==='recovered'||this.gate.active)return;
+    if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');
+    this.tasks.recover(this.config.agentId);this.expression.recover(this.config.agentId);this.analysis?.recover();this.flush();this.gate.recovered();
+  }
+  activate():void {if(this.closed)throw new Error('Memory capability is unregistered');this.gate.activate();this.analysis?.activate();}
+  quiesce():void {this.gate.quiesce();this.analysis?.quiesce();}
+  async whenIdle():Promise<void>{await this.analysis?.whenIdle();}
+  close():Promise<void>{
+    if(this.closing)return this.closing;
+    this.quiesce();this.closed=true;this.handle.dispose();
+    this.closing=(async()=>{try{await this.expression.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
+    return this.closing;
   }
   private scope(context: ActionContext): OperationScope {
     if (this.closed) throw new Error('Memory capability is unregistered');
+    this.gate.assertActive();
     const scope = this.ctx.dafeiyu.scopeFor(context);
     if (scope.agentId !== this.config.agentId) throw new Error('Wrong memory agent');
     return scope;
   }
-  private assertTasks(){if(this.closed)throw new Error('Task workspace provider unavailable');}
+  private assertTasks(){if(this.closed)throw new Error('Task workspace provider unavailable');this.gate.assertActive();}
   private failure(error: unknown): Failure {
     if(error instanceof AnalysisError)return {status:error.code};
     if (error instanceof MemoryError) return { status: error.code };

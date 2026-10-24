@@ -24,7 +24,8 @@ export class TaskDelivery {
   private readonly store:DeliveryStore;
   private readonly active=new Map<string,{item:ContextItem;guard:()=>void}>();
   private unregister:(()=>void)|undefined;
-  constructor(file:string,private readonly host:DeliveryHost){this.store=new DeliveryStore(file,host.agentId,host.journal);}
+  constructor(file:string,private readonly host:DeliveryHost,deferRecovery=false){this.store=new DeliveryStore(file,host.agentId,host.journal,deferRecovery);}
+  recover(){this.store.recover();}
   private context(){if(this.unregister)return;
     this.unregister=this.host.contexts.register('task-delivery',CORE_VERSION,[{id:'material',kind:'evidence',
       prepare:async request=>{const scope=this.host.contexts.scopeFor(request),entry=this.active.get(scope.route);if(!entry)return [];entry.guard();return [entry.item];},

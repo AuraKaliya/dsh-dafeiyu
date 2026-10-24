@@ -14,7 +14,7 @@ export type DeliveryBinding=z.infer<typeof deliveryBindingSchema>;
 const string=(v:unknown)=>z.string().parse(v);
 export class DeliveryStore {
   private readonly db:DatabaseSync;
-  constructor(file:string,private readonly agentId:string,private readonly journal:Journal){
+  constructor(file:string,private readonly agentId:string,private readonly journal:Journal,deferRecovery=false){
     this.db=new DatabaseSync(file);try{this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
     const version=this.db.prepare('PRAGMA user_version').get()?.user_version,app=this.db.prepare('PRAGMA application_id').get()?.application_id;
     const fresh=version===0&&app===0&&this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n===0;
@@ -28,9 +28,10 @@ export class DeliveryStore {
       CREATE TRIGGER event_body_immutable BEFORE UPDATE OF id,body ON events BEGIN SELECT RAISE(ABORT,'Immutable delivery event'); END;
       CREATE TRIGGER event_retain BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'Retain delivery event'); END;
       PRAGMA application_id=${0x44464433};PRAGMA user_version=1;COMMIT;`);
-    this.transaction(()=>{for(const row of this.db.prepare("SELECT id,state FROM deliveries WHERE agent_id=? AND state IN ('rendering','ready','sending')").all(agentId))this.transitionInside(string(row.id),stateSchema.parse(row.state),row.state==='sending'?'uncertain':'interrupted');});this.flush();
+    if(!deferRecovery)this.recover();
     }catch(error){this.db.close();throw error;}
   }
+  recover(){this.transaction(()=>{for(const row of this.db.prepare("SELECT id,state FROM deliveries WHERE agent_id=? AND state IN ('rendering','ready','sending')").all(this.agentId))this.transitionInside(string(row.id),stateSchema.parse(row.state),row.state==='sending'?'uncertain':'interrupted');});this.flush();}
   private transaction<T>(fn:()=>T){this.db.exec('BEGIN IMMEDIATE');try{const result=fn();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   private event(id:string,state:TaskDeliveryState,sources:readonly SourceRef[]=[]){const row=this.get(id);this.db.prepare('INSERT INTO events(id,body) VALUES(?,?)').run(randomUUID(),JSON.stringify({agentId:this.agentId,route:row.binding.route,traceId:row.binding.material.inboundId,operationId:id,causedBy:null,
     type:`task.delivery.${state}`,plugin:'core',pluginVersion:CORE_VERSION,occurredAt:new Date().toISOString(),sources,data:{deliveryId:id,taskId:row.taskId,jobId:row.binding.material.jobId,status:state}}));}

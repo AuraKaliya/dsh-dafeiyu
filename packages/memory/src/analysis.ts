@@ -23,14 +23,19 @@ export class MemoryAnalysis {
   private stopping=false;
   private faulted=false;
   private readonly cancelled=new Set<string>();
-  constructor(private readonly ctx:Context,private readonly memories:MemoryStore,directory:string,config:z.input<typeof analysisConfigSchema>){
+  private enabled:boolean;
+  constructor(private readonly ctx:Context,private readonly memories:MemoryStore,directory:string,config:z.input<typeof analysisConfigSchema>,managed=false,private readonly canRun:()=>boolean=()=>true){
+    this.enabled=!managed;
     this.config=analysisConfigSchema.parse(config);
-    this.queue=new AnalysisStore(resolve(directory,'analysis.sqlite'));
+    this.queue=new AnalysisStore(resolve(directory,'analysis.sqlite'),managed);
     this.sources=new AnalysisSources(ctx,memories);
     this.runtime=new AnalysisRuntime(ctx,resolve(directory,'analysis-sessions'));
   }
+  recover():void {this.queue.recover();}
+  activate():void {this.enabled=true;this.start();}
+  quiesce():void {this.enabled=false;}
   start():void {
-    if(this.stopping||this.faulted||this.worker)return;
+    if(this.stopping||this.faulted||this.worker||!this.enabled||!this.canRun())return;
     // Schedule outside submit; authority does not depend on the initiating action's lifetime.
     this.worker=new Promise<void>(resolve=>setImmediate(resolve)).then(()=>this.drain())
       .catch(()=>{this.faulted=true;}).finally(()=>{this.worker=undefined;});
@@ -44,7 +49,7 @@ export class MemoryAnalysis {
       review:job.candidates.filter(c=>c.status==='needs_review').length},error:this.faulted?'worker_unavailable':job.error??null,contextInjected:false};}
   async submit(context:ActionContext,raw:unknown){
     const scope=this.ctx.dafeiyu.scopeFor(context),input=submitSchema.parse(raw);
-    if(this.stopping||this.faulted)throw new AnalysisError('worker_unavailable');
+    if(this.stopping||this.faulted||!this.enabled||!this.canRun())throw new AnalysisError('worker_unavailable');
     const normalized={...input,sourceRefs:[...new Set(input.sourceRefs)].sort(),targetIds:[...new Set(input.targetIds)].sort()};
     const fingerprint=createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
     const previous=this.queue.request(scope,input.requestId,fingerprint);
@@ -174,7 +179,7 @@ export class MemoryAnalysis {
   }
   private async drain():Promise<void>{
     this.flush();
-    while(!this.stopping){
+    while(!this.stopping&&this.enabled&&this.canRun()){
       const job=this.queue.firstPending();
       if(!job)break;
       const abort=new AbortController();this.active={id:job.id,abort};

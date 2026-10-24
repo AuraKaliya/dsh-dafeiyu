@@ -16,7 +16,7 @@ const auditSchema=z.strictObject({id:z.uuid(),scope:authoritySchema,jobId:z.uuid
 export class AnalysisStore {
   private readonly db: DatabaseSync;
   private readonly nonce = randomUUID();
-  constructor(file: string) {
+  constructor(file: string,deferRecovery=false) {
     mkdirSync(dirname(file),{recursive:true});
     this.db=new DatabaseSync(file);
     try {
@@ -43,9 +43,10 @@ export class AnalysisStore {
         this.db.prepare('INSERT OR REPLACE INTO ownership VALUES(1,?,?)').run(process.pid,this.nonce);
         this.db.exec('COMMIT');
       } catch(error){this.db.exec('ROLLBACK');throw error;}
-      for(const job of this.pending())if(job.state==='running'){job.state='queued';this.save(job);}
+      if(!deferRecovery)this.recover();
     } catch(error){this.db.close();throw error;}
   }
+  recover():void{for(const job of this.pending())if(job.state==='running'){job.state='queued';this.save(job);}}
   private decode(body: unknown): AnalysisJob { return jobSchema.parse(JSON.parse(z.string().parse(body))); }
   get(scope: TimelineScope, id: string): AnalysisJob|null {
     const row=this.db.prepare('SELECT body FROM jobs WHERE agent_id=? AND route=? AND id=?').get(scope.agentId,scope.route,id);

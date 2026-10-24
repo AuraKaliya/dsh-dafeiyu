@@ -11,6 +11,10 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./v3": {
+      "types": "./lib/v3.d.ts",
+      "default": "./lib/v3.js"
     }
   },
   "main": "./lib/index.js"

@@ -14,6 +14,9 @@ export * from './task-workspace.js';
 export * from './task-memory.js';
 export * from './expression.js';
 export * from './delivery.js';
+export * from './lifecycle.js';
+export * from './execution.js';
+export * from './host-config.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
@@ -89,6 +92,8 @@ export interface Extension {
   readonly version: string;
   readonly apiVersion: number;
   readonly agentId: string;
+  /** Optional managed-host readiness; no change to legacy action or message contracts. */
+  readonly lifecycleReady?: () => boolean;
   readonly channels?: readonly ChannelCapability[];
   readonly actions?: readonly ActionCapability[];
   readonly contexts?: readonly ContextContributor[];
