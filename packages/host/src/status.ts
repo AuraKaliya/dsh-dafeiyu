@@ -9,7 +9,8 @@ const snapshotSchema=z.strictObject({schemaVersion:z.literal(1),profileId:id,age
   phase:state,mode:z.enum(['daemon','single-run']),accepting:z.boolean(),error:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),
   plugins:z.array(z.strictObject({id,required:z.boolean(),state:z.enum(['configured','starting','ready','degraded','disabled','not-configured','failed','stopped']),version:z.string().max(80).nullable(),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable()})).max(70),
   features:z.array(z.string().regex(/^[a-z][a-z0-9._-]{0,119}$/)).max(256),
-  services:z.strictObject({memory:z.strictObject({lifecycle:z.enum(['registered','recovered','active','quiescing','closed']),analysis:z.strictObject({state:z.enum(['ready','failed','paused','stopped','not-configured']),active:z.boolean()}),retrieval:z.enum(['configured','not-configured']),compaction:z.enum(['configured','not-configured'])}).nullable()}),
+  services:z.strictObject({memory:z.strictObject({lifecycle:z.enum(['registered','recovered','active','quiescing','closed']),analysis:z.strictObject({state:z.enum(['ready','failed','paused','stopped','not-configured']),active:z.boolean()}),retrieval:z.enum(['configured','not-configured']),compaction:z.enum(['configured','not-configured'])}).nullable(),
+    qq:z.strictObject({state:z.enum(['starting','online','offline','rejected','stopped']),groupSync:z.enum(['disabled','unavailable','current','stale']),groupError:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),effectiveGroups:count,lastGroupSync:z.iso.datetime().nullable()}).nullable().optional()}),
   counts:z.strictObject({activeRuns:count,queuedRuns:count,queuedRoutes:count,pendingMessages:count,outbox:count}),schemas:z.strictObject({journal:z.literal(2),memory:z.literal(8),runtime:z.literal(2)})});
 export type SavedHostSnapshot=z.infer<typeof snapshotSchema>;
 /** An old or edited file is evidence of a snapshot, never proof of a live healthy instance. */

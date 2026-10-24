@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GroupListSchema, QqAccountIdSchema } from './groups.js';
 
 /** No remote OneBot endpoints or credential-bearing URLs in this local development connector. */
 export function loopbackURL(value: string, protocol: 'http:' | 'ws:'): string {
@@ -11,7 +12,7 @@ export const platformId = z.union([z.string().regex(/^-?\d+$/), z.number().int()
 const responseSchema = z.object({ status: z.string(), retcode: z.number(), data: z.unknown() });
 export class OneBot {
   constructor(private readonly base: string, private readonly token: string, readonly botId: string, private readonly timeoutMs: number) {}
-  async call(action: 'get_login_info' | 'get_status' | 'send_private_msg' | 'send_group_msg', params: object, signal?: AbortSignal): Promise<unknown> {
+  async call(action: 'get_login_info' | 'get_status' | 'get_group_list' | 'send_private_msg' | 'send_group_msg', params: object, signal?: AbortSignal): Promise<unknown> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const response = await fetch(new URL(action, this.base), { method: 'POST', redirect: 'error',
       headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json' }, body: JSON.stringify(params),
@@ -26,5 +27,12 @@ export class OneBot {
     if (info.user_id !== this.botId) throw new Error('ACCOUNT_MISMATCH');
     const status = z.object({ online: z.boolean() }).parse(await this.call('get_status', {}, signal));
     if (!status.online) throw new Error('QQ_OFFLINE');
+  }
+  async groups(signal: AbortSignal) {
+    await this.verify(signal);
+    const response = await this.call('get_group_list', {}, signal);
+    const list = z.array(z.object({ group_id: platformId.pipe(QqAccountIdSchema), group_name: z.string().max(200) })).max(2000).parse(response);
+    await this.verify(signal);
+    return GroupListSchema.parse(list.map(group => ({ id: group.group_id, name: group.group_name })));
   }
 }

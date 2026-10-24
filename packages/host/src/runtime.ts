@@ -43,7 +43,7 @@ export interface HostRuntimeOptions {
 export interface PluginHealth {id:string;required:boolean;state:'configured'|'starting'|'ready'|'degraded'|'disabled'|'not-configured'|'failed'|'stopped';version:string|null;code:string|null}
 export interface HostSnapshot {schemaVersion:1;profileId:string;agentId:string;instanceId:string;pid:number;at:string;configHash:string;foundationHash:string;
   phase:HostPhase;mode:'daemon'|'single-run';accepting:boolean;error:string|null;plugins:PluginHealth[];features:string[];
-  services:{memory:ReturnType<Memory.MemoryService['runtimeHealth']>|null};
+  services:{memory:ReturnType<Memory.MemoryService['runtimeHealth']>|null;qq:{state:string;groupSync:string;groupError:string|null;effectiveGroups:number;lastGroupSync:string|null}|null};
   counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:2;memory:8;runtime:2};}
 export interface HostRunResult {taskId:string;runId:string;state:string;error:string|null;result:string|null}
 class FixedModel extends LlmAdapter {
@@ -115,22 +115,24 @@ export class ManagedHost {
     this.core.activate({deferWork:true,...resume});
     if(this.qqValue){await this.qqValue.start();const deadline=Date.now()+6000;while(this.qqValue.getStatus().state==='starting'&&Date.now()<deadline)await delay(20);
       const state=this.qqValue.getStatus();if(state.state!=='online'){if(this.health.find(p=>p.id==='channel-qq')?.required)throw new Error('HOST_REQUIRED_QQ_UNAVAILABLE');
-        this.qqValue.quiesce();await this.qqValue.close();this.qqValue=undefined;this.plugin('channel-qq','degraded',state.error??'HOST_QQ_UNAVAILABLE');}else this.plugin('channel-qq','ready');}
+        this.qqValue.quiesce();await this.qqValue.close();this.qqValue=undefined;this.plugin('channel-qq','degraded',state.error??'HOST_QQ_UNAVAILABLE');}else this.qqHealth();}
     this.options.signal?.throwIfAborted();this.core.activate(resume);this.qqValue?.releaseIngress();this.mark(this.health.some(p=>p.state==='degraded')?'degraded':'ready');
     this.publish();this.timer=setInterval(()=>{try{this.refresh();this.publish();}catch(error){this.error=stableCode(error,'HOST_DIAGNOSTICS_FAILED');void this.close('diagnostics-failed').catch(()=>{});}},this.config.config.diagnostics.snapshotIntervalMs);if(this.mode==='single-run')this.timer.unref();
   }
   private refresh(){if(!['ready','degraded'].includes(this.phase))return;const qq=this.qqValue?.getStatus();if(qq&&qq.state!=='online'){
-      if(this.health.find(p=>p.id==='channel-qq')?.required){this.error='HOST_REQUIRED_QQ_UNAVAILABLE';this.core.quiesce();void this.close('required-channel-failed').catch(()=>{});return;}this.plugin('channel-qq','degraded',qq.error??'HOST_QQ_UNAVAILABLE');}else if(qq)this.plugin('channel-qq','ready');
+      if(this.health.find(p=>p.id==='channel-qq')?.required){this.error='HOST_REQUIRED_QQ_UNAVAILABLE';this.core.quiesce();void this.close('required-channel-failed').catch(()=>{});return;}this.plugin('channel-qq','degraded',qq.error??'HOST_QQ_UNAVAILABLE');}else if(qq)this.qqHealth();
     if(!this.core.accepting){this.error='HOST_CORE_UNAVAILABLE';void this.close('core-unavailable').catch(()=>{});return;}
     if(this.memoryValue?.runtimeHealth().analysis.state==='failed')this.plugin('memory','degraded','HOST_ANALYSIS_WORKER_FAILED');
     this.phase=this.health.some(p=>p.state==='degraded')?'degraded':'ready';}
+  private qqHealth(){const status=this.qqValue?.getStatus().groupSync;if(!status)return;
+    if(status.enabled&&(status.state!=='current'||status.error))this.plugin('channel-qq','degraded',status.error??'GROUP_SYNC_UNAVAILABLE');else this.plugin('channel-qq','ready');}
   private outbox(){let count=0;for(const [file,tables] of [[join(this.config.paths.core,'runtime.sqlite'),['runtime_outbox']],[join(this.config.paths.core,'delivery.sqlite'),['events']],
     [join(this.config.paths.memory,'memory.sqlite'),['outbox','persona_outbox','execution_memory_outbox']],[join(this.config.paths.memory,'analysis.sqlite'),['audit_outbox']],
     [join(this.config.paths.memory,'working.sqlite'),['outbox']],[join(this.config.paths.memory,'feedback.sqlite'),['outbox']]] as const){
     if(!existsSync(file))continue;const db=new DatabaseSync(file,{readOnly:true});try{for(const table of tables)if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))count+=Number(db.prepare(`SELECT count(*) AS n FROM ${table} WHERE delivered=0`).get()?.n);}finally{db.close();}}return count;}
-  snapshot():HostSnapshot{const core=this.coreValue?.getStatus();return {schemaVersion:1,profileId:this.config.config.profileId,agentId:this.config.config.agent.id,instanceId:this.instanceId,pid:process.pid,at:new Date().toISOString(),configHash:this.config.hash,foundationHash:this.config.foundation.hash,
+  snapshot():HostSnapshot{const core=this.coreValue?.getStatus(),qq=this.qqValue?.getStatus();return {schemaVersion:1,profileId:this.config.config.profileId,agentId:this.config.config.agent.id,instanceId:this.instanceId,pid:process.pid,at:new Date().toISOString(),configHash:this.config.hash,foundationHash:this.config.foundation.hash,
       phase:this.phase,mode:this.mode,accepting:['ready','degraded'].includes(this.phase)&&!!this.coreValue?.accepting,error:this.error,plugins:this.health.map(p=>({...p})),features:this.coreValue?.capabilityManifest().features??[],
-      services:{memory:this.memoryValue?.runtimeHealth()??null},
+      services:{memory:this.memoryValue?.runtimeHealth()??null,qq:qq?{state:qq.state,groupSync:qq.groupSync.state,groupError:qq.groupSync.error,effectiveGroups:qq.groupSync.effectiveIds.length,lastGroupSync:qq.groupSync.lastSuccessAt}:null},
       counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:2,memory:8,runtime:2}};}
   publish(){if(!this.lease)return;const file=join(this.config.paths.core,'host-status.json'),temp=file+'.'+randomUUID()+'.tmp';writeFileSync(temp,JSON.stringify(this.snapshot(),null,2)+'\n',{flag:'wx'});renameSync(temp,file);}
   run(raw:unknown):Promise<HostRunResult>{if(!['ready','degraded'].includes(this.phase))throw new Error('HOST_NOT_READY');if(!this.memoryValue)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');

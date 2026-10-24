@@ -9,14 +9,20 @@ import WebSocket from 'ws';
 import { z } from 'zod';
 import { loopbackURL, OneBot, platformId } from './onebot.js';
 import { QqStore } from './store.js';
+import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
+import { naturallyAddressed } from './trigger.js';
 export { QqStore } from './store.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
+export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
+export { naturallyAddressed } from './trigger.js';
 
 export const name = 'dafeiyu-channel-qq';
 export const inject = ['dafeiyu'];
 const configSchema = z.strictObject({
   agentId: z.string().min(1), botId: z.string().regex(/^[1-9]\d{4,14}$/), ownerId: z.string().regex(/^[1-9]\d{4,14}$/),
   groupIds: z.array(z.string().regex(/^[1-9]\d{4,14}$/)).max(10),
+  naturalNames: z.array(z.string().trim().min(2).max(32).regex(/^[\p{L}\p{N}_-]+$/u)).max(16).default([]),
+  groupSync: GroupSyncConfigSchema.prefault({}),
   httpURL: z.string(), wsURL: z.string(), tokenFile: z.string(), dataDir: z.string(),
   lifecycleMode:LifecycleModeSchema.default('legacy'),
   requestTimeoutMs: z.number().int().min(100).max(30000).default(10000),
@@ -39,6 +45,7 @@ export class QqChannel extends Service {
   private readonly config: z.output<typeof configSchema>;
   private readonly api: OneBot;
   private readonly store: QqStore;
+  private readonly groups: GroupDirectory;
   private readonly handle: ExtensionHandle;
   private readonly token: string;
   private socket: WebSocket | null = null;
@@ -63,10 +70,15 @@ export class QqChannel extends Service {
     if (this.token.length < 32) throw new Error('OneBot token must be at least 32 characters');
     this.api = new OneBot(this.config.httpURL, this.token, this.config.botId, this.config.requestTimeoutMs);
     this.store = new QqStore(resolve(this.config.dataDir, 'qq.sqlite'));
-    this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
-      channels: [{ channel: 'qq', account: this.config.botId,
-        description: '当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
-        deliver: (reply, signal) => this.deliver(reply, signal) }] });
+    try {
+      this.groups = new GroupDirectory({ account: this.config.botId, allowed: this.config.groupIds, config: this.config.groupSync, store: this.store,
+        fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
+        rejectIdentity: () => { this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
+      this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
+        channels: [{ channel: 'qq', account: this.config.botId,
+          description: '当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
+          deliver: (reply, signal) => this.deliver(reply, signal) }] });
+    } catch (error) { this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'qq.close');
   }
   private observation(type: Parameters<ExtensionHandle['observe']>[0]['type'], code: string, conversation?: Conversation): void {
@@ -74,7 +86,9 @@ export class QqChannel extends Service {
     this.handle.observe({ conversation: conversation ?? { channel: 'qq', account: this.config.botId, kind: 'local', id: '__transport__' }, type, data: { code } });
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
-    groupIds: this.config.groupIds, counters: { ...this.counters }, at: new Date().toISOString() }; }
+    groupIds: [...this.config.groupIds], groupSync: this.groups.status(), counters: { ...this.counters }, at: new Date().toISOString() }; }
+  /** Program-side refresh; no model invocation, privilege expansion or history replay. */
+  refreshGroups(): Promise<void> { return this.groups.refresh(); }
   async start(): Promise<void> {
     if(this.config.lifecycleMode==='managed'&&this.ctx.dafeiyu.lifecycleState!=='active')throw new Error('HOST_NOT_READY');
     if(this.quiescing||this.stopped)throw new Error('CHANNEL_STOPPING');
@@ -85,11 +99,12 @@ export class QqChannel extends Service {
     for(const text of buffered)this.queue=this.queue.then(()=>this.receive(text));}
   quiesce():void {
     this.quiescing=true;
+    this.groups.pause();
     if(this.retry)clearTimeout(this.retry);this.retry=null;
     if(this.heartbeat)clearInterval(this.heartbeat);this.heartbeat=null;
     this.socket?.close();
   }
-  async whenIdle():Promise<void>{await this.queue;await Promise.allSettled([...this.sending]);}
+  async whenIdle():Promise<void>{await this.queue;await this.groups.whenIdle();await Promise.allSettled([...this.sending]);}
   private async connect(): Promise<void> {
     if (this.stopped||this.quiescing) return;
     try { await this.api.verify(this.controller.signal); }
@@ -99,7 +114,11 @@ export class QqChannel extends Service {
       this.state = this.error === 'ACCOUNT_MISMATCH' ? 'rejected' : 'offline';
       this.observation('connection.rejected', this.error); this.retryLater(); return;
     }
-    if (this.stopped) return;
+    if (this.stopped || this.quiescing) return;
+    this.error = null;
+    await this.groups.start();
+    if (this.stopped || this.quiescing) return;
+    if (this.error === 'ACCOUNT_MISMATCH') { this.retryLater(); return; }
     const socket = new WebSocket(this.config.wsURL, { headers: { Authorization: 'Bearer ' + this.token }, handshakeTimeout: 5000, maxPayload: 2 * 1024 * 1024 });
     this.socket = socket;
     socket.on('open', () => {
@@ -122,7 +141,7 @@ export class QqChannel extends Service {
     socket.on('close', () => {
       if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null;
       if (this.stopped || this.socket !== socket) return;
-      this.socket = null; this.state = 'offline'; this.observation('connection.closed', 'EVENT_GAP_POSSIBLE'); this.retryLater();
+      this.socket = null; this.state = this.error === 'ACCOUNT_MISMATCH' ? 'rejected' : 'offline'; this.observation('connection.closed', 'EVENT_GAP_POSSIBLE'); this.retryLater();
     });
   }
   private retryLater(): void {
@@ -139,7 +158,7 @@ export class QqChannel extends Service {
     const message = decoded.data; this.counters.received++;
     if (message.self_id !== this.config.botId || message.user_id === this.config.botId) { this.counters.ignored++; return; }
     const allowed = message.message_type === 'private' ? message.user_id === this.config.ownerId
-      : message.group_id !== undefined && this.config.groupIds.includes(message.group_id);
+      : message.group_id !== undefined && this.groups.effective().includes(message.group_id);
     if (!allowed) { this.counters.ignored++; return; }
     const conversation: Conversation = { channel: 'qq', account: this.config.botId, kind: message.message_type, id: message.group_id ?? message.user_id };
     // Private messages must never take a supplied group_id as their route.
@@ -151,7 +170,7 @@ export class QqChannel extends Service {
     const quoteId = platformId.safeParse(replyId);
     const quote = quoteId.success ? this.store.find(route, quoteId.data) : null;
     const mentioned = message.message.some(s => s.type === 'at' && String(s.data.qq) === this.config.botId);
-    const triggered = message.message_type === 'private' || mentioned || quote?.sender === this.config.botId;
+    const triggered = message.message_type === 'private' || mentioned || quote?.sender === this.config.botId || naturallyAddressed(plain, this.config.naturalNames);
     const unsupported = [...new Set(message.message.filter(s => !['text','at','reply'].includes(s.type)).map(s => s.type))];
     this.store.remember(route, message.message_id, message.user_id, plain || '[非文字消息]');
     if (!triggered) { this.store.acknowledge(route, message.message_id); this.counters.ignored++; return; }
@@ -179,7 +198,7 @@ export class QqChannel extends Service {
     if (this.stopped) return { status: 'not-sent', code: 'CHANNEL_OFFLINE' };
     const conversation = reply.conversation;
     const allowed = conversation.channel === 'qq' && conversation.account === this.config.botId &&
-      (conversation.kind === 'private' ? conversation.id === this.config.ownerId : conversation.kind === 'group' && this.config.groupIds.includes(conversation.id));
+      (conversation.kind === 'private' ? conversation.id === this.config.ownerId : conversation.kind === 'group' && this.groups.effective().includes(conversation.id));
     if (!allowed) return { status: 'not-sent', code: 'TARGET_NOT_ALLOWED' };
     const prior = this.store.receipt(reply.id);
     if (prior) return { status: 'sent', receiptId: prior };
@@ -187,6 +206,7 @@ export class QqChannel extends Service {
     if (!reply.text || reply.text.length > 4000) return { status: 'not-sent', code: 'TEXT_SIZE_UNSUPPORTED' };
     try { await this.api.verify(signal); signal.throwIfAborted(); }
     catch { this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate(); return { status: 'not-sent', code: 'IDENTITY_UNAVAILABLE' }; }
+    if (conversation.kind === 'group' && !this.groups.effective().includes(conversation.id)) return { status: 'not-sent', code: 'TARGET_NOT_ALLOWED' };
     const route = JSON.stringify([conversation.kind, conversation.id]);
     const source = this.store.find(route, reply.sourceMessageId);
     if (!source) return { status: 'not-sent', code: 'SOURCE_MESSAGE_NOT_FOUND' };
@@ -202,6 +222,7 @@ export class QqChannel extends Service {
   async close(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true; this.state = 'stopped'; this.controller.abort();
+    this.groups.pause(); await this.groups.whenIdle();
     if (this.retry) clearTimeout(this.retry); if (this.heartbeat) clearInterval(this.heartbeat);
     this.socket?.terminate(); await this.queue; this.handle.dispose();
     await Promise.allSettled([...this.sending]); this.store.close();

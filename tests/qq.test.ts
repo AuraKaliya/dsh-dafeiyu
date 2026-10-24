@@ -6,7 +6,8 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as QQ from '@dafeiyu/channel-qq';
-import { harness } from './harness.js';
+import { harness, textReply } from './harness.js';
+import type { Response } from './harness.js';
 
 const bot='1994142241', owner='756013063', group='1106067626';
 const token='local-test-token-not-a-real-secret-1234567890';
@@ -15,10 +16,11 @@ async function until(predicate:()=>boolean) {
   while(!predicate()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
   assert.ok(predicate(),'condition did not become true');
 }
-async function setup(initialIdentity=bot) {
+async function setup(initialIdentity=bot, features: Pick<QQ.Config, 'naturalNames' | 'groupSync'> = {}, response?: Response) {
   const root=await mkdtemp(join(tmpdir(),'dafeiyu-qq-'));
   const tokenFile=join(root,'token');await writeFile(tokenFile,token);
-  const platform={ identity:initialIdentity, sent:[] as Record<string,unknown>[], loseResponse:false, nextId:-1000 };
+  const platform={ identity:initialIdentity, sent:[] as Record<string,unknown>[], loseResponse:false, nextId:-1000,
+    groups:[{group_id:Number(group),group_name:'虚构测试群'}],groupCalls:0,failGroups:false };
   const server=createServer(async(req,res)=>{
     if(req.headers.authorization!=='Bearer '+token){res.writeHead(401).end();return;}
     let raw='';for await(const part of req)raw+=String(part);
@@ -26,6 +28,7 @@ async function setup(initialIdentity=bot) {
     let data:unknown;
     if(req.url==='/get_login_info')data={user_id:Number(platform.identity)};
     else if(req.url==='/get_status')data={online:true};
+    else if(req.url==='/get_group_list'){platform.groupCalls++;if(platform.failGroups){res.writeHead(503).end();return;}data=platform.groups;}
     else if(req.url==='/send_private_msg'||req.url==='/send_group_msg'){
       platform.sent.push(params);data={message_id:platform.nextId--};
       if(platform.loseResponse){res.destroy();return;}
@@ -36,9 +39,9 @@ async function setup(initialIdentity=bot) {
   wss.on('connection',(ws,req)=>{if(req.headers.authorization!=='Bearer '+token)ws.close();});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();if(!address||typeof address==='string')throw new Error('No bound test port');
-  const h=await harness(join(root,'core'));
+  const h=await harness(join(root,'core'),response);
   const config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group],httpURL:`http://127.0.0.1:${address.port}/`,
-    wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile,dataDir:join(root,'qq'),reconnectMs:100,requestTimeoutMs:500};
+    wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile,dataDir:join(root,'qq'),reconnectMs:100,requestTimeoutMs:500,...features};
   let fiber=await h.ctx.plugin(QQ,config);
   if(initialIdentity===bot)await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&wss.clients.size>0);
   return {...h,platform,config,wss,
@@ -112,4 +115,30 @@ test('unsupported content is explicitly represented without invented vision',asy
   await until(()=>h.platform.sent.length===1);await h.core.whenIdle();
   assert.match(JSON.stringify(h.adapter.requests[0]),/暂不支持的消息类型 image/);
   assert.equal(h.ctx.dafeiyuQQ.getStatus().counters.unsupported,1);
+});
+
+test('configured Chinese address triggers a group turn without treating a matching nickname or quoted address as input',async t=>{
+  const h=await setup(bot,{naturalNames:['大肥鱼','蓝色大肥鱼']});t.after(h.stop);
+  h.emit({...message('1','group'),sender:{nickname:'大肥鱼'}});
+  h.emit(message('2','group',[{type:'text',data:{text:'“@大肥鱼 你好”是个例子'}}]));
+  await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received===2);assert.equal(h.adapter.requests.length,0);
+  h.emit({...message('3','group',[{type:'text',data:{text:'蓝色大肥鱼你怎么看'}}]),user_id:11223344,sender:{nickname:'虚构群成员'}});
+  await until(()=>h.platform.sent.length===1);await h.core.whenIdle();
+  assert.equal(h.core.journal.list()[0]?.message.sender.id,'11223344');assert.equal(h.platform.groupCalls,0);
+});
+
+test('synchronized membership restricts ingress and rechecks the group after a reply has started rendering',async t=>{
+  let entered!:()=>void,release!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});const gate=new Promise<void>(resolve=>{release=resolve;});
+  const h=await setup(bot,{groupSync:{enabled:true}},async()=>{entered();await gate;return textReply('虚构回复');});t.after(h.stop);
+  assert.deepEqual(h.ctx.dafeiyuQQ.getStatus().groupSync.effectiveIds,[group]);assert.equal(h.adapter.requests.length,0);
+  h.emit(message('1','group',[{type:'at',data:{qq:bot}},{type:'text',data:{text:'测试'}}]));await started;
+  h.platform.groups=[];await h.ctx.dafeiyuQQ.refreshGroups();release();await h.core.whenIdle();assert.equal(h.platform.sent.length,0);
+  h.emit(message('2','group',[{type:'at',data:{qq:bot}}]));await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received===2);assert.equal(h.adapter.requests.length,1);
+});
+
+test('failed group refresh after connector reload cannot authorize persisted group membership but private chat stays available',async t=>{
+  const h=await setup(bot,{groupSync:{enabled:true,mode:'joined'}});t.after(h.stop);h.platform.failGroups=true;await h.reload();
+  const status=h.ctx.dafeiyuQQ.getStatus().groupSync;assert.equal(status.state,'unavailable');assert.equal(status.verifiedThisProcess,false);assert.deepEqual(status.effectiveIds,[]);
+  h.emit(message('1','group',[{type:'at',data:{qq:bot}}]));await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received===1);assert.equal(h.adapter.requests.length,0);
+  h.emit(message('2'));await until(()=>h.platform.sent.length===1);await h.core.whenIdle();assert.equal(h.platform.sent[0]?.user_id,Number(owner));
 });

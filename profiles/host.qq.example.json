@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "profileId": "qq-local-development",
+  "agent": {"id": "dafeiyu"},
+  "paths": {"core": "../.runtime/qq-local-development/core", "memory": "../.runtime/qq-local-development/memory", "sessions": "../.runtime/qq-local-development/sessions", "query": "../.runtime/qq-local-development/query.sqlite", "channels": {"channel-qq": "../.runtime/qq-local-development/qq"}},
+  "modelRoutes": {"chat": {"provider": "local-test", "model": "scripted"}},
+  "persona": {"fixedFile": "./persona.test.md", "kind": "test"},
+  "plugins": [
+    {"id": "model-scripted", "required": true},
+    {"id": "timeline", "required": true, "config": {"execution": true}},
+    {"id": "memory", "required": true},
+    {"id": "channel-qq", "required": true, "config": {
+      "botId": "12345678", "ownerId": "87654321", "groupIds": ["11223344"],
+      "naturalNames": ["大肥鱼", "蓝色大肥鱼"],
+      "groupSync": {"enabled": true, "mode": "allowlist", "intervalMs": 30000, "maxStaleMs": 120000},
+      "httpURL": "http://127.0.0.1:13000/", "wsURL": "ws://127.0.0.1:13001/",
+      "tokenFile": "../.runtime/qq-local-development/onebot.token"
+    }}
+  ],
+  "authorityPolicies": [{"id": "local-task", "producers": ["host-cli"], "actions": ["dafeiyu_task_intent"], "allowLocalWrite": false}]
+}
