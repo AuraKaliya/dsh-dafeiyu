@@ -7,9 +7,10 @@ import { ActionOutcomeSchema, ExecutionScopeSchema, RunOriginSchema, conversatio
 import type { Json } from '@dafeiyu/contracts';
 import { configureSqlite } from '@dafeiyu/journal';
 import { migratePersonaRuntime } from './migrate-persona-runtime.js';
+import { NativeDeliveryStore,migrateNativeDeliveries } from './native-delivery-store.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465231;
-export const RUNTIME_SCHEMA_VERSION = 2;
+export const RUNTIME_SCHEMA_VERSION = 3;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
@@ -42,6 +43,7 @@ export interface StoredRun {id:string;requestKey:string;definition:RunDefinition
 
 /** One-host execution ledger. Task definitions and complete DSH histories remain in their own stores. */
 export class RuntimeStore {
+  readonly nativeDeliveries:NativeDeliveryStore;
   private readonly db:DatabaseSync;
   private readonly nonce=randomUUID();
   private closed=false;
@@ -56,8 +58,8 @@ export class RuntimeStore {
       const count=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n);
       const fresh=version===0&&app===0&&count===0;
       if(fresh&&!options.create)throw new Error('RUNTIME_INITIALIZATION_REQUIRED');
-      if(!fresh&&(![1,2].includes(version)||app!==RUNTIME_APPLICATION_ID))throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
-      if(!fresh&&version===1&&!options.migrate)throw new Error('MIGRATION_REQUIRED');
+      if(!fresh&&(![1,2,3].includes(version)||app!==RUNTIME_APPLICATION_ID))throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
+      if(!fresh&&version<RUNTIME_SCHEMA_VERSION&&!options.migrate)throw new Error('MIGRATION_REQUIRED');
       this.db.exec('PRAGMA busy_timeout=5000;PRAGMA foreign_keys=ON;');
       if(fresh)this.initialize();
       const saved=this.db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();
@@ -68,14 +70,16 @@ export class RuntimeStore {
       this.transaction(()=>{const owner=this.db.prepare('SELECT pid FROM runtime_ownership WHERE singleton=1').get();
         if(owner){let alive=true;try{process.kill(Number(owner.pid),0);}catch(error){if(error instanceof Error&&'code'in error&&error.code==='ESRCH')alive=false;}if(alive)throw new Error('RUNTIME_ALREADY_OWNED');}
         migratePersonaRuntime(this.db);
+        migrateNativeDeliveries(this.db);
         this.db.prepare('INSERT OR REPLACE INTO runtime_ownership VALUES(1,?,?)').run(process.pid,this.nonce);});
+      this.nativeDeliveries=new NativeDeliveryStore(this.db,work=>this.transaction(work),(runId,type,data)=>this.event(runId,type,data));
     }catch(error){this.db.close();throw error;}
   }
   private initialize():void {
     this.db.exec('BEGIN IMMEDIATE');
     try{
       const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
-      if(version===1||version===2){this.db.exec('COMMIT');return;}
+      if(version===1||version===2||version===3){this.db.exec('COMMIT');return;}
       this.db.exec(`
         CREATE TABLE runtime_metadata(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL);
         CREATE TABLE runtime_ownership(singleton INTEGER PRIMARY KEY CHECK(singleton=1),pid INTEGER NOT NULL,nonce TEXT NOT NULL);

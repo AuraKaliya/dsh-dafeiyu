@@ -94,6 +94,7 @@ export class CapabilityRegistryV3 {
     for (const channel of extension.channels ?? []) {
       if(channel.taskDelivery!==undefined&&channel.taskDelivery!=='simulated')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.deliveryValidation!==undefined&&channel.deliveryValidation!=='per-segment')throw new Error('INVALID_DELIVERY_CONTRACT');
+      if(channel.deliverTaskResult!==undefined&&typeof channel.deliverTaskResult!=='function')throw new Error('INVALID_DELIVERY_CONTRACT');
       const key = JSON.stringify([channel.channel, channel.account]);
       if (!channel.channel || !channel.account || typeof channel.deliver !== 'function' || channels.has(key)) throw new Error('DUPLICATE_OR_INVALID_CHANNEL');
       channels.add(key); keys.push(key);

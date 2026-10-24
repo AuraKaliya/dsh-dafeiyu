@@ -22,6 +22,7 @@ import { TaskDelivery } from './task-delivery.js';
 import { prepareReplySources } from './reply-sources.js';
 import type { MessageTaskBinding } from '@dafeiyu/contracts';
 import type { NativeExpressionPort } from '@dafeiyu/contracts';
+import { NativeTaskDelivery } from './native-task-delivery.js';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
 import { CapabilityRegistryV3 } from './registry-v3.js';
@@ -62,8 +63,11 @@ declare module '@deepseek-ai/cordis' { interface Context { dafeiyu: DafeiyuServi
 
 /** Owns a logical persona and its independent conversations; extensions own platform-specific work. */
 export class DafeiyuService extends Service {
+  private nativeTaskDelivery:NativeTaskDelivery|undefined;
+  deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
+  messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
   private nativeExpressionPort:NativeExpressionPort|undefined;
-  bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
+  bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({...(port.signal?{signal:port.signal}:{}),ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
   async prepareMessageTaskExpression(runId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const port=this.nativeExpressionPort,access=await this.executions.nativeResultAccess(runId);if(port!==this.nativeExpressionPort)throw new Error('DEPENDENCY_UNAVAILABLE');return port.prepare(access);}
   async openMessageTaskExpression(runId:string,packetId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.open(await this.executions.nativeResultAccess(runId),packetId);}
   async withdrawMessageTaskExpression(runId:string,packetId:string,version:number){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.withdraw(await this.executions.nativeResultAccess(runId),packetId,version);}
@@ -148,7 +152,7 @@ export class DafeiyuService extends Service {
     this.admissionHeld=false;
     try{for(const listener of this.readyListeners)listener();}catch(error){this.gate.quiesce();throw error;}
     if(options.resumeMessages!==false)for(const item of this.journal.list(['accepted','reply-ready']))if(this.extensions.get(item.extensionId)?.active)this.schedule(item);
-    if(options.resumeExecutions!==false)this.executions?.activate();
+    if(options.resumeExecutions!==false){this.executions?.activate();this.nativeTaskDelivery?.activate();}
   }
   onReady(listener:()=>void):()=>void {
     this.assertOpen();this.readyListeners.add(listener);if(this.accepting)listener();
@@ -162,7 +166,7 @@ export class DafeiyuService extends Service {
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
   submitMessageTask(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.submitMessageTask(context,pluginId,input);}
-  messageTaskStatus(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.messageTaskStatus(context,pluginId,input);}
+  messageTaskStatus(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const status=this.executions.messageTaskStatus(context,pluginId,input);return {...status,delivery:this.messageTaskDeliveryStatus(status.runId)};}
   controlMessageTask(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.controlMessageTask(context,pluginId,input);}
   capabilityManifest(){return {features:[...new Set([...this.features(),...this.registryV3.providedFeatures()])],actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
   get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
@@ -231,7 +235,17 @@ export class DafeiyuService extends Service {
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,personas:this.personas,
       repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
-      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal,projectConversation:()=>this.conversationRuns!.project()});
+      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal,projectConversation:()=>this.conversationRuns!.project(),settled:id=>{void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
+    this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:this.config.turnTimeoutMs*2+this.config.deliveryTimeoutMs,
+      describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
+      model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
+      channel:item=>{const entry=this.extensions.get(item.extensionId),capability=entry?.extension.channels?.find(channel=>channel.channel===item.message.conversation.channel&&channel.account===item.message.conversation.account);
+        return entry?.active&&capability?{identity:entry,id:entry.extension.id,version:entry.extension.version,capability,signal:entry.controller.signal}:null;},
+      enqueue:(route,work)=>this.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire(false),
+      persona:(item,id,signal,guard)=>{const foundation=this.persona(),scope={kind:'conversation' as const,agentId:this.config.agentId,route:item.route};
+        const access:import('@dafeiyu/contracts').PersonaAccess={view:{runId:id,taskId:null,scope,origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},signal},producer:'core-target-persona',operationId:id,startedEventId:null,intentVersion:0,motivation:{kind:'conversation-invitation',basis:[`task-result:${item.id}`]},inputs:[],admittedSources:[],guard};
+        const target=this.personas.prepareTarget(access);return {text:foundation.text,foundationHash:foundation.version,stamp:target.stamp,items:target.items,guard:()=>{guard();if(this.persona().version!==foundation.version)throw new Error('SOURCE_STALE');target.guard();}};},
+    });
   }
   async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}
   executionProducer(id:string,options?:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id,options);}
@@ -247,7 +261,7 @@ export class DafeiyuService extends Service {
     try{
       if(extension.channels?.length){
         const channels=extension.channels.map(channel=>({channel:channel.channel,account:channel.account,deliver:channel.deliver.bind(channel),
-          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{})}));
+          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{})}));
         bridge={active:true,controller:new AbortController(),extension:{apiVersion:2,id:extension.id,version:extension.version,agentId:extension.agentId,channels,
           ...(extension.lifecycleReady?{lifecycleReady:extension.lifecycleReady.bind(extension)}:{})}};
         this.extensions.set(extension.id,bridge);
@@ -356,6 +370,7 @@ export class DafeiyuService extends Service {
     for (const c of extension.channels ?? []) {
       if(c.taskDelivery!==undefined&&c.taskDelivery!=='simulated')throw new Error('Task delivery requires simulated capability');
       if(c.deliveryValidation!==undefined&&c.deliveryValidation!=='per-segment')throw new Error('Invalid delivery validation contract');
+      if(c.deliverTaskResult!==undefined&&typeof c.deliverTaskResult!=='function')throw new Error('Invalid task result delivery contract');
       const key = JSON.stringify([c.channel, c.account]);
       if (!c.channel || !c.account || channelKeys.has(key)) throw new Error('Duplicate or invalid channel/account');
       channelKeys.add(key);
@@ -379,6 +394,7 @@ export class DafeiyuService extends Service {
       channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
         ...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),
         ...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),
+        ...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{}),
         ...(channel.description ? { description: channel.description } : {}),
         deliver: channel.deliver.bind(channel) })),
       actions: (extension.actions ?? []).map(action => ({ name: action.name, description: action.description,
@@ -608,8 +624,7 @@ export class DafeiyuService extends Service {
       messages: this.closed ? [] : this.journal.list().map(item => ({ id: item.id, state: item.state, sessionId: item.sessionId })) };
   }
   async whenIdle(): Promise<void> {
-    while (this.queues.size) await Promise.all([...this.queues.values()]);
-    await this.executions?.whenIdle();
+    do{while(this.queues.size)await Promise.all([...this.queues.values()]);await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}while(this.queues.size||this.nativeTaskDelivery?.pending);
     if (this.fatal) throw new Error(this.fatal);
   }
   close(): Promise<void> {
@@ -617,8 +632,8 @@ export class DafeiyuService extends Service {
     this.quiesce();this.readyListeners.clear();this.registryV3.close();
     this.controller.abort();
     this.closing = (async () => {
-      try{await Promise.all([...this.queues.values()]);await this.executions?.whenIdle();}
-      finally{try { await this.runtime.close(); } finally { this.runStore?.close();this.taskDelivery.close();this.closed = true;this.gate.close(); this.journal.close(); }}
+      try{await Promise.all([...this.queues.values()]);await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}
+      finally{try { await this.runtime.close(); } finally {this.nativeTaskDelivery?.close();this.runStore?.close();this.taskDelivery.close();this.closed = true;this.gate.close(); this.journal.close(); }}
     })();
     return this.closing;
   }

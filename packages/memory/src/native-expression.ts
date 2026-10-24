@@ -19,11 +19,12 @@ export function migrateNativeExpression(db:DatabaseSync){const version=Number(db
 }
 export class NativeExpression implements NativeExpressionPort {
   private readonly stop=new AbortController();
+  readonly signal=this.stop.signal;
   private readonly pending=new Set<Promise<void>>();
   constructor(private readonly ctx:Context,private readonly db:DatabaseSync,private readonly store:MemoryStore,private readonly expression:TaskExpression,readonly ready:()=>boolean,private readonly flush:()=>void){}
   private audit(access:NativeExpressionAccess,type:string,data:unknown){const id=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(id,JSON.stringify({id,type,scope:access.execution.view.scope,runId:access.anchor.runId,origin:access.execution.view.origin,operationId:access.anchor.runId,causedBy:null,producer:'memory-native-expression',at:new Date().toISOString(),data}));}
-  private build(access:NativeExpressionAccess){access.guard();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const anchor=TaskResultAnchorSchema.parse(access.anchor),scope=access.execution.view.scope;
-    if(scope.kind!=='task'||scope.taskId!==anchor.taskId||access.execution.view.runId!==anchor.runId||access.execution.intentVersion!==anchor.intentVersion||Date.parse(anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');
+  private build(access:NativeExpressionAccess,allowExpired=false){access.guard();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const anchor=TaskResultAnchorSchema.parse(access.anchor),scope=access.execution.view.scope;
+    if(scope.kind!=='task'||scope.taskId!==anchor.taskId||access.execution.view.runId!==anchor.runId||access.execution.intentVersion!==anchor.intentVersion||!allowExpired&&Date.parse(anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');
     const candidates=z.array(NativeExpressionCandidateSchema).max(64).parse(access.candidates),evidence:NativeExpressionPacket['evidence']=[],proofs:unknown[]=[];let forbidden=false;
     for(const candidate of candidates){const source=candidate.source;let material:string|null=null,fence:string|null=null;
       if(source.kind==='memory')material=this.expression.nativeMemoryMaterial(scope.agentId,source,anchor.target,access.expressionPolicy??null);
@@ -32,6 +33,7 @@ export class NativeExpression implements NativeExpressionPort {
       evidence.push({id:`S${evidence.length+1}`,kind:'reported',text:material});proofs.push({source,viewHash:hash(material),fence});
     }
     const resultIncluded=!forbidden&&!access.opaqueInfluence;
+    if(anchor.outcome==='waiting')evidence.push({id:'W',kind:'reported',text:'程序状态：任务仍在等待，尚未完成。只能讨论需要补充或确认的事项，不能把它描述为已经完成。'});
     if(resultIncluded)evidence.push({id:'R',kind:'inference',text:z.string().min(1).max(32000).parse(access.output)});
     if(!evidence.length)throw new Error('NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL');
     const question=z.string().min(1).max(2000).parse(access.question);if(Buffer.byteLength(JSON.stringify({question,evidence}))>128000)throw new Error('NATIVE_EXPRESSION_CAPACITY');
@@ -41,12 +43,12 @@ export class NativeExpression implements NativeExpressionPort {
   prepare(access:NativeExpressionAccess){try{return this.store.atomic(()=>{const built=this.build(access),old=this.db.prepare('SELECT id FROM native_expression_packets WHERE agent_id=? AND run_id=?').get(access.execution.view.scope.agentId,built.anchor.runId);
     if(old)return this.open(access,String(old.id));const packet=NativeExpressionPacketSchema.parse({id:randomUUID(),version:1,...built});
     this.db.prepare('INSERT INTO native_expression_packets VALUES(?,?,?,?,1,0,?)').run(packet.id,access.execution.view.scope.agentId,packet.anchor.taskId,packet.anchor.runId,JSON.stringify(packet));this.audit(access,'native.expression.prepared',{packetId:packet.id,evidence:packet.evidence.length,resultIncluded:packet.resultIncluded,sourceStamp:packet.sourceStamp});return packet;});}finally{this.flush();}}
-  open(access:NativeExpressionAccess,id:string){if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const row=this.db.prepare('SELECT version,withdrawn,body FROM native_expression_packets WHERE id=? AND agent_id=? AND task_id=? AND run_id=?').get(z.uuid().parse(id),access.execution.view.scope.agentId,access.anchor.taskId,access.anchor.runId);
-    if(!row||row.withdrawn!==0||row.version!==1)throw new Error('NATIVE_EXPRESSION_UNAVAILABLE');const packet=NativeExpressionPacketSchema.parse(JSON.parse(String(row.body))),current=this.build(access);
+  open(access:NativeExpressionAccess,id:string,purpose:'send'|'context'='send'){if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const row=this.db.prepare('SELECT version,withdrawn,body FROM native_expression_packets WHERE id=? AND agent_id=? AND task_id=? AND run_id=?').get(z.uuid().parse(id),access.execution.view.scope.agentId,access.anchor.taskId,access.anchor.runId);
+    if(!row||row.withdrawn!==0||row.version!==1)throw new Error('NATIVE_EXPRESSION_UNAVAILABLE');const packet=NativeExpressionPacketSchema.parse(JSON.parse(String(row.body))),current=this.build(access,purpose==='context');
     if(packet.sourceStamp!==current.sourceStamp||JSON.stringify(packet.anchor)!==JSON.stringify(current.anchor)||JSON.stringify(packet.evidence)!==JSON.stringify(current.evidence)||packet.question!==current.question||packet.resultIncluded!==current.resultIncluded)throw new Error('SOURCE_STALE');return packet;
   }
   withdraw(access:NativeExpressionAccess,id:string,version:number){try{this.store.atomic(()=>{const packet=this.open(access,id);if(packet.version!==version)throw new Error('VERSION_CONFLICT');this.db.prepare('UPDATE native_expression_packets SET version=version+1,withdrawn=1 WHERE id=? AND version=?').run(id,version);this.audit(access,'native.expression.withdrawn',{packetId:id,version:version+1});});}finally{this.flush();}}
-  async verify(access:NativeExpressionAccess,id:string,answer:string,signal:AbortSignal,guard:()=>void){const packet=this.open(access,id),work=verifyPersonaDelivery(this.ctx,{question:packet.question,evidence:packet.evidence},answer,AbortSignal.any([signal,this.stop.signal]),()=>{guard();this.open(access,id);},{maxAnswerChars:32000,maxInputBytes:256000});this.pending.add(work);try{await work;}finally{this.pending.delete(work);}}
+  async verify(access:NativeExpressionAccess,id:string,answer:string,signal:AbortSignal,guard:()=>void){const packet=this.open(access,id),work=verifyPersonaDelivery(this.ctx,{question:packet.question,evidence:packet.evidence},answer,AbortSignal.any([signal,this.stop.signal]),()=>{guard();this.open(access,id);},{maxAnswerChars:32000,maxInputBytes:Math.min(256000,access.requestMaxBytes)});this.pending.add(work);try{await work;}finally{this.pending.delete(work);}}
   cancel(){this.stop.abort();}
   async whenIdle(){await Promise.allSettled([...this.pending]);}
   async close(){this.cancel();await this.whenIdle();}

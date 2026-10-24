@@ -40,6 +40,13 @@ test('same QQ reply is sent by one concurrent caller and conflicting content is 
   assert.equal(h.platform.sent.map(sentText).join(''),text);assert.equal(h.adapter.requests.length,0);
 });
 
+test('caller-side mutation cannot change a persisted in-flight QQ target, quote anchor or segment body',async t=>{
+  const h=await qqCapabilityFixture();t.after(h.close);const source=await h.message('真实夹具来源'),mutable={id:'snapshot',conversation:{...scene},sourceMessageId:source.id,text};
+  let release!:()=>void,entered!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});h.platform.afterSend=async count=>{if(count===1){entered();await gate;}};
+  const pending=h.ctx.dafeiyuQQ.deliver(mutable,signal());await ready;mutable.conversation.id='22334455';mutable.sourceMessageId='999';mutable.text='不同的正文';release();assert.equal((await pending).status,'sent');
+  assert.ok(h.platform.sent.every(sent=>sent.group_id===Number(scene.id)));assert.equal(h.platform.sent.map(sentText).join(''),text);
+});
+
 test('a missing middle-segment receipt stops delivery and neither reload nor duplicate invocation resends',async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);h.platform.loseAt=2;h.setResponse(()=>textReply(text));await h.message('丢回执',{trigger:true});const item=h.core.journal.list()[0]!;
   assert.equal(item.state,'uncertain');assert.equal(h.platform.sent.length,2);let progress=h.ctx.dafeiyuQQ.deliveryStatus(item.reply!.id)!;

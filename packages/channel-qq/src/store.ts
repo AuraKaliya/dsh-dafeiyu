@@ -27,7 +27,7 @@ export class QqStore {
       this.delivery = new QqDeliveryLedger(this.db);
     } catch (error) { this.db.close(); throw error; }
   }
-  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string; unsupported: readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
+  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
   find(route: string, id: string) { const row = this.db.prepare('SELECT id,sender,text FROM messages WHERE route=? AND id=?').get(route,id); if (!row) return null; const value = remembered.parse(row); return { ...value, text: redactContent(value.text).value }; }
   receipt(id: string): string | null { const row = this.db.prepare('SELECT platform_id FROM receipts WHERE reply_id=?').get(id); return row ? z.string().parse(row.platform_id) : null; }
   handled(route: string, id: string): boolean { return !!this.db.prepare('SELECT 1 FROM handled WHERE route=? AND id=?').get(route,id); }

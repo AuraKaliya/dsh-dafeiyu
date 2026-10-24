@@ -21,6 +21,14 @@ export class PersonaRuntime {
     return ()=>{if(this.provider===bound)this.provider=undefined;};}
   get configured(){return !!this.provider;}
   get ready(){return !this.provider||this.provider.ready();}
+  prepareTarget(access:PersonaAccess){access.guard();const provider=this.provider;if(provider&&!provider.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const prepared=provider?.prepare(access),entries:PreparedPersonaEntry[]=[];
+    const limit=Math.min(this.config.maxBytes,this.config.regions['memory:growth']?.maxBytes??4000);
+    for(const entry of prepared?.entries??[]){if(!provider?.validate(access,entry))continue;const candidate=structuredClone(entry);ContextItemSchema.parse(candidate.item);entries.push(candidate);if(Buffer.byteLength(JSON.stringify(entries.map(value=>value.item)))>limit)entries.pop();}
+    const stamp=runtimeHash({scope:access.view.scope,selection:prepared?.selectionVersion??0,entries:entries.map(entry=>({candidate:entry.candidate,contentRef:entry.contentRef,dependencies:entry.dependencies}))});
+    return {items:entries.map(entry=>entry.item),stamp,guard:()=>{access.guard();if(this.provider!==provider||provider&&!provider.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const current=provider?.prepare(access);
+      const identity=(entry:PreparedPersonaEntry)=>runtimeHash({candidate:entry.candidate,contentRef:entry.contentRef,dependencies:entry.dependencies});
+      if((current?.selectionVersion??0)!==(prepared?.selectionVersion??0)||entries.some(entry=>!provider?.validate(access,entry)||!current?.entries.some(value=>identity(value)===identity(entry))))throw new Error('SOURCE_STALE');}};
+  }
   prepare(run:StoredRun,foundation:FoundationSnapshot,model:unknown,inputs:readonly ExecutionInput[],signal:AbortSignal,guard:()=>void):RunPersona{
     guard();if(this.active.has(run.id))throw new Error('RUN_ALREADY_PREPARED');const access=this.access(run,inputs,signal,guard),provider=this.provider;
     if(provider&&!provider.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const prepared=provider?.prepare(access),admitted:PreparedPersonaEntry[]=[];

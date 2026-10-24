@@ -32,7 +32,7 @@ test('blocking objections keep native execution waiting and explicit owner resol
   h.setResponse(()=>++step===1?call('qq_task_status',{taskId:original.taskId}):textReply('存在信息不足，需要讨论'));await h.message('查看异议',{trigger:true});const status=z.object({blocking:z.boolean(),objections:z.array(z.object({id:z.uuid(),category:z.string()}))}).parse(outcomes(h.adapter.requests.at(-1)!).at(-1)!.data);
   assert.equal(status.blocking,true);assert.ok(!JSON.stringify(h.platform.sent).includes('PRIVATE_OBJECTION_SENTINEL'));
   const result=await control(h,original.taskId,'resolve','确认继续任务：已明确缺少的信息',{objectionId:status.objections[0]!.id});assert.equal(result.status,'succeeded');assert.equal(runs(h).length,2);assert.equal(runs(h).at(-1)?.state,'completed');
-  const old=JSON.parse(String(runs(h)[0]!.body)),next=JSON.parse(String(runs(h)[1]!.body));assert.deepEqual(next.messageSource,old.messageSource);assert.equal(next.origin.kind,'continuation');
+  const old=JSON.parse(String(runs(h)[0]!.body)),next=JSON.parse(String(runs(h)[1]!.body)),{control:proof,...inherited}=next.messageSource;assert.deepEqual(inherited,old.messageSource);assert.ok(proof.inboundId&&proof.messageHash);assert.equal(next.origin.kind,'continuation');
 });
 
 test('preference objections remain recorded but do not block execution or silently alter its goal',async t=>{
@@ -60,4 +60,12 @@ test('a failure after changing the goal reports unknown effect and cannot claim 
   try{const result=await control(h,original.taskId,'revise','修改任务：需要新的处理');assert.equal(result.status,'unknown');assert.equal(result.effects,'unknown');}finally{db.exec('DROP TRIGGER fixture_control_failure');db.close();}
   let step=0;h.setResponse(()=>++step===1?call('qq_task_status',{taskId:original.taskId}):textReply('目标已改变，新的运行未完成'));await h.message('查看目前状态',{trigger:true});
   const state=z.object({resultCurrent:z.boolean(),goal:z.string(),taskVersion:z.number()}).parse(outcomes(h.adapter.requests.at(-1)!).at(-1)!.data);assert.deepEqual(state,{resultCurrent:false,goal:'需要新的处理',taskVersion:2});assert.equal(runs(h).length,1);
+});
+
+test('withdrawing a real resolution message invalidates its resumed result',async t=>{
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const original=await seed(h,'missing-information');let step=0;h.setResponse(()=>++step===1?call('qq_task_status',{taskId:original.taskId}):textReply('等待'));
+  await h.message('状态',{trigger:true});const status=z.object({objections:z.array(z.object({id:z.uuid()}))}).parse(outcomes(h.adapter.requests.at(-1)!).at(-1)!.data);
+  await control(h,original.taskId,'resolve','确认继续任务：补充信息已给出',{objectionId:status.objections[0]!.id});const latest=task(h),row=JSON.parse(String(runs(h).at(-1)!.body));assert.ok(row.messageSource.control);
+  const message=h.core.journal.get(row.messageSource.control.inboundId);h.emit({post_type:'notice',notice_type:'group_recall',self_id:12345678,group_id:Number(scene.id),message_id:Number(message.message.id)});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);
+  const port=h.core.executionProducer('qq-tasks');await assert.rejects(()=>port.readResult(port.restoreRun(latest.runId)),/SOURCE_STALE/);
 });

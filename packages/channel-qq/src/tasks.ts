@@ -4,7 +4,7 @@ import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskControlSchem
 import type { ActionCapabilityV3,ExecutionContextV3,InboundMessage } from '@dafeiyu/contracts';
 
 export const QQ_TASK_ACTIONS=['qq_task_submit','qq_task_status','qq_task_control'] as const;
-export const QqTasksConfigSchema=z.strictObject({enabled:z.boolean().default(false),policyId:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('qq-task'),expressionPolicy:z.strictObject({id:z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),version:z.number().int().positive()}).optional()});
+export const QqTasksConfigSchema=z.strictObject({enabled:z.boolean().default(false),deliverResults:z.boolean().default(true),policyId:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('qq-task'),expressionPolicy:z.strictObject({id:z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),version:z.number().int().positive()}).optional()});
 export function qqTaskDirective(message:Pick<InboundMessage,'mainText'>,names:readonly string[]=[]):{kind:'submit'|'cancel'|'revise'|'resolve'|'none';text:string}{
   let text=message.mainText?.trim()??'';
   for(const name of [...names].sort((a,b)=>b.length-a.length)){const prefix=text.startsWith('@'+name)?'@'+name:text.startsWith(name)?name:null;if(prefix){text=text.slice(prefix.length).replace(/^[\s，,：:！!。]+/u,'');break;}}
@@ -16,9 +16,9 @@ export class QqTaskCapabilities {
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   private readonly unbind:()=>void;
   private closed=false;
-  constructor(private readonly ctx:Context,config:{agentId:string;botId:string;ownerId:string;policyId:string;naturalNames:readonly string[];expressionPolicy?:{id:string;version:number}}){
+  constructor(private readonly ctx:Context,config:{agentId:string;botId:string;ownerId:string;policyId:string;naturalNames:readonly string[];deliverResults:boolean;expressionPolicy?:{id:string;version:number}}){
     this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'qq-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1'],provides:['qq.tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
-    try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'qq-tasks',pluginId:'qq-tasks',channelExtensionId:'channel-qq',channel:'qq',account:config.botId,ownerId:config.ownerId,policyId:config.policyId,version:'1',...(config.expressionPolicy?{expressionPolicy:config.expressionPolicy}:{}),classify:message=>qqTaskDirective(message,config.naturalNames),active:()=>!this.closed});}
+    try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'qq-tasks',pluginId:'qq-tasks',channelExtensionId:'channel-qq',channel:'qq',account:config.botId,ownerId:config.ownerId,policyId:config.policyId,version:'1',autoDeliver:config.deliverResults,...(config.expressionPolicy?{expressionPolicy:config.expressionPolicy}:{}),classify:message=>qqTaskDirective(message,config.naturalNames),active:()=>!this.closed});}
     catch(error){this.handle.dispose();throw error;}
   }
   private actions():ActionCapabilityV3[]{const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,work:(context:ExecutionContextV3,raw:unknown)=>unknown):ActionCapabilityV3=>({id,description,version:'1',inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',

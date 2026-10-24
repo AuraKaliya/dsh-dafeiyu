@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join,resolve,relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
@@ -26,8 +26,9 @@ export function outcomes(request:GenerateOptions){return request.messages.flatMa
 const browseData=z.object({snapshotId:z.uuid(),nextCursor:z.uuid().nullable(),page:z.record(z.string(),z.json()).and(z.object({messages:z.array(z.object({id:z.string(),text:z.string(),occurredAt:z.string().nullable(),unsupported:z.array(z.string())})),limitations:z.array(z.string())}))});
 export function lastPage(request:GenerateOptions){const pages=outcomes(request).flatMap(outcome=>{const result=browseData.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(pages.length,'model must actually see a QQ page');return pages.at(-1)!;}
 
-export async function qqCapabilityFixture({tasks=false,extraTaskActions=[]}:{tasks?:boolean;extraTaskActions?:string[]}={}){
-  const root=await mkdtemp(join(testTempDir(),'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
+export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],deliverResults=false,existingRoot}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];deliverResults?:boolean;existingRoot?:string}={}){
+  const scratch=testTempDir();if(existingRoot){const path=relative(resolve(process.env.DAFEIYU_TEST_RUN!),resolve(existingRoot));if(path.startsWith('..')||/^[A-Za-z]:/.test(path))throw new Error('FIXTURE_ROOT_OUTSIDE_MANAGED_RUN');}
+  const root=existingRoot??await mkdtemp(join(scratch,'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
     afterSend:async(_count:number):Promise<void>=>{},beforeVerify:async():Promise<void>=>{}};
   const server=createServer(async(req,res)=>{if(req.headers.authorization!=='Bearer '+token){res.writeHead(401).end();return;}
@@ -46,17 +47,17 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[]}:{tas
   await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});
   const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed',sourceTracking:true});
   h.core.configureExecution({profileId:'qq-capability-fixture',createStore:true,policies:[
-    {id:'conversation',producers:['channel-qq'],actions:[...QQ.QQ_ACTIONS,...(tasks?QQ.QQ_TASK_ACTIONS:[])],allowLocalWrite:true},
+    {id:'conversation',producers:['channel-qq'],actions:[...QQ.QQ_ACTIONS,...(tasks?QQ.QQ_TASK_ACTIONS:[]),...extraConversationActions],allowLocalWrite:true},
     {id:'native',producers:['fixture-native'],actions:[...QQ.QQ_ACTIONS],allowLocalWrite:true,resources:[scene]},
     ...(tasks?[{id:'qq-task',producers:['qq-tasks'],actions:[...QQ.QQ_ACTIONS,'dafeiyu_task_intent','dafeiyu_task_object',...extraTaskActions],allowLocalWrite:true,resources:[{...scene,id:otherGroup}]}]:[]),
   ]});
   const config:QQ.Config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group,otherGroup],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,
-    tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks},naturalNames:['大肥鱼']};
+    tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks,deliverResults},naturalNames:['大肥鱼']};
   // Unbound v2 cache is deliberately retained, but must never appear in new account-bound pages.
   const old=new QQ.QqStore(join(root,'qq','qq.sqlite'));old.remember(JSON.stringify(['group',group]),'900',owner,'UNBOUND_CACHE_SENTINEL');old.close();
   let fiber=await h.ctx.plugin(QQ,config);
-  h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();await h.core.recoverExecutions();h.core.recover();h.core.activate();
-  const ready=async()=>{await h.ctx.dafeiyuQQ.start();await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&wss.clients.size>0);};await ready();
+  h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();await h.core.recoverExecutions();h.core.recover();h.core.activate({deferWork:true});
+  const ready=async()=>{await h.ctx.dafeiyuQQ.start();await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&wss.clients.size>0);};await ready();h.core.activate();
   const emit=(event:object)=>{for(const ws of wss.clients)if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(event));};
   let nextId=1;
   const message=async(text:string,{target=scene,trigger=false,media=false,id=String(nextId++),sender=owner}:{target?:Conversation;trigger?:boolean;media?:boolean;id?:string;sender?:string}={})=>{

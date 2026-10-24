@@ -42,7 +42,7 @@ export class QqCache {
     this.db.prepare('INSERT INTO qq_message_meta VALUES(?,?,1,?,0,?)').run(route, row.id, hash, JSON.stringify(body));
     return { ...body, version: 1, hash, deleted: false };
   }
-  remember(route: string, id: string, sender: string, raw: string, metadata?: { occurredAt: string; unsupported: readonly string[] }): boolean {
+  remember(route: string, id: string, sender: string, raw: string, metadata?: { occurredAt: string|null; unsupported: readonly string[] }): boolean {
     routeSchema.parse(route); z.string().min(1).max(80).parse(id);
     const sanitized = redactContent(raw).value;
     let text = sanitized.slice(0, 32000);

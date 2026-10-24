@@ -31,6 +31,7 @@ import type { MemoryObservationProvider,ObservationReceipt } from './observation
 import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
 import type { FeedbackProvider } from './feedback.js';
+import type { TaskResultAnchor } from './native-expression.js';
 
 export const API_VERSION = 2 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -66,6 +67,7 @@ export interface Reply {
   readonly conversation: Conversation;
   readonly sourceMessageId: string;
   readonly text: string;
+  readonly taskResult?:TaskResultAnchor;
 }
 export type DeliveryResult =
   | { readonly status: 'sent'; readonly receiptId: string }
@@ -81,6 +83,8 @@ export interface ChannelCapability {
   readonly deliveryValidation?:'per-segment';
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
   deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
+  /** Separate from the legacy simulated-task contract; caller supplies a verified task-result anchor. */
+  deliverTaskResult?(reply:Reply,anchor:TaskResultAnchor,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>;
 }
 export interface ActionContext {
   readonly operationId: string;

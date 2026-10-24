@@ -47,9 +47,9 @@ test('managed runtime requires a matching immutable persona manifest in the same
 
 test('runtime v1 upgrade is explicit and retains old snapshots without inventing persona adoption',async()=>{
   const file=join(await directory(),'runtime.sqlite');let store=new RuntimeStore(file,identity,{create:true});const run=accepted(store);store.start(run.id,run.version,snapshot().body);store.close();
-  const db=new DatabaseSync(file);db.exec('DROP TABLE run_persona_manifests;PRAGMA user_version=1');const before=db.prepare('SELECT * FROM runs').all();db.close();
+  const db=new DatabaseSync(file);db.exec('DROP TABLE native_deliveries;DROP TABLE run_persona_manifests;PRAGMA user_version=1');const before=db.prepare('SELECT * FROM runs').all();db.close();
   const raw=await readFile(file);assert.throws(()=>new RuntimeStore(file,identity),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(file),raw);
-  store=new RuntimeStore(file,identity,{migrate:true});try{assert.equal(store.personaBinding(run.id).kind,'legacy-unbound');const check=new DatabaseSync(file,{readOnly:true});try{assert.deepEqual(check.prepare('SELECT * FROM runs').all(),before);assert.equal(check.prepare('PRAGMA user_version').get()?.user_version,2);}finally{check.close();}}finally{store.close();}
+  store=new RuntimeStore(file,identity,{migrate:true});try{assert.equal(store.personaBinding(run.id).kind,'legacy-unbound');const check=new DatabaseSync(file,{readOnly:true});try{assert.deepEqual(check.prepare('SELECT * FROM runs').all(),before);assert.equal(check.prepare('PRAGMA user_version').get()?.user_version,3);}finally{check.close();}}finally{store.close();}
 });
 
 test('memory v7 upgrade is additive, idempotent and does not promote old growth selections',async()=>{
@@ -71,11 +71,11 @@ test('persona upgrade failure rolls back additions while preserving v7 and its o
 test('profile migration resumes between current memory and runtime v2 with all old Run rows retained',async()=>{
   const fixture=await migrationFixture(),memoryFile=join(fixture.memoryDir,'memory.sqlite'),runtimeFile=join(fixture.coreDir,'runtime.sqlite');new MemoryStore(memoryFile).close();
   const memory=new DatabaseSync(memoryFile);removePersonaTables(memory);memory.close();const original=new RuntimeStore(runtimeFile,fixture.identity,{create:true});const run=accepted(original);original.close();
-  const runtime=new DatabaseSync(runtimeFile);runtime.exec('DROP TABLE run_persona_manifests;PRAGMA user_version=1');runtime.close();
-  const plan=await planMigration(fixture);assert.deepEqual(plan.files.filter(file=>file.kind==='memory'||file.kind==='runtime').map(file=>file.targetVersion),[10,2]);
+  const runtime=new DatabaseSync(runtimeFile);runtime.exec('DROP TABLE native_deliveries;DROP TABLE run_persona_manifests;PRAGMA user_version=1');runtime.close();
+  const plan=await planMigration(fixture);assert.deepEqual(plan.files.filter(file=>file.kind==='memory'||file.kind==='runtime').map(file=>file.targetVersion),[10,3]);
   await assert.rejects(applyMigration(plan,{afterStep:kind=>{if(kind==='memory')throw new Error('fixture interruption');}}),/BACKUP_RETAINED/);
   assert.equal(inspectStorage(memoryFile,'memory').version,10);assert.equal(inspectStorage(runtimeFile,'runtime').version,1);
-  await applyMigration(plan);assert.equal(inspectStorage(runtimeFile,'runtime').version,2);assert.equal((await applyMigration(plan)).complete,true);
+  await applyMigration(plan);assert.equal(inspectStorage(runtimeFile,'runtime').version,3);assert.equal((await applyMigration(plan)).complete,true);
   const verified=new RuntimeStore(runtimeFile,fixture.identity);try{assert.deepEqual(verified.get(run.id),run);assert.equal(verified.personaBinding(run.id).kind,'legacy-unbound');}finally{verified.close();}
 });
 

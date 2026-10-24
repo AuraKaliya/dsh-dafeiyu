@@ -21,7 +21,9 @@ export class QqSegmentedTransport {
     try{plan=this.host.ledger.prepare(reply);}catch(error){const prior=this.host.ledger.progress(reply.id);return Promise.resolve(prior&&prior.state!=='ready'?{status:'unknown',code:'DELIVERY_PLAN_CONFLICT'}:{status:'not-sent',code:safeCode(error,'DELIVERY_PLAN_INVALID')});}
     const existing=this.active.get(reply.id);if(existing)return existing;
     const progress=this.host.ledger.progress(reply.id)!;if(!plan||progress.state==='sent'||progress.unknown||progress.state==='sending')return Promise.resolve(result(progress,'DELIVERY_NOT_RESUMABLE'));
-    const work=this.execute(reply,plan,signal,authority).finally(()=>this.active.delete(reply.id));this.active.set(reply.id,work);return work;
+    const {messageId,...anchor}=plan.anchor;
+    const snapshot:Reply=Object.freeze({id:plan.replyId,conversation:Object.freeze({...plan.target}),sourceMessageId:messageId,text:plan.segments.join(''),...(anchor.kind==='task-result'?{taskResult:Object.freeze({...anchor,target:Object.freeze({...anchor.target})})}:{})});
+    const work=this.execute(snapshot,plan,signal,authority).finally(()=>this.active.delete(snapshot.id));this.active.set(snapshot.id,work);return work;
   }
   private async execute(reply:Reply,plan:QqDeliveryPlan,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>{
     const guard=()=>{if(signal.aborted)throw new Error('DELIVERY_CANCELLED');try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};

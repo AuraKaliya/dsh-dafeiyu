@@ -84,7 +84,7 @@ export class ContextCoordinator {
   }
   private policy(region:PreparedRegion){
     const name=`${region.entry.owner}:${region.entry.contributor.id}`;
-    return this.config.regions[name]??policySchema.parse(name==='memory:working'?{priority:500,maxBytes:6000}:name==='memory:evidence'?{priority:200,maxBytes:8000}:{});
+    return this.config.regions[name]??policySchema.parse(name==='memory:working'?{priority:500,maxBytes:6000}:name==='memory:evidence'?{priority:200,maxBytes:8000}:name==='native-task-results:delivered-results'?{priority:450,maxBytes:6000}:{});
   }
   packet(prepared:readonly PreparedRegion[],allowance=this.config.maxBytes):ContextPacket{
     for(const [name,policy] of Object.entries(this.config.regions))if(policy.required&&!prepared.some(r=>r.entry.active&&`${r.entry.owner}:${r.entry.contributor.id}`===name))

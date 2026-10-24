@@ -10,7 +10,7 @@ export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'work
 const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
   query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
   memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8,9,10],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
-  runtime:{app:RUNTIME_APPLICATION_ID,versions:[1,2],tables:['runtime_metadata','runtime_ownership','execution_requests','runs','run_operations','runtime_outbox']},
+  runtime:{app:RUNTIME_APPLICATION_ID,versions:[1,2,3],tables:['runtime_metadata','runtime_ownership','execution_requests','runs','run_operations','runtime_outbox']},
   delivery:{app:0x44464433,versions:[1],tables:['deliveries','events']},
   analysis:{app:0x44464131,versions:[1],tables:['jobs','ownership','audit_outbox']},
   working:{app:0x44465731,versions:[1],tables:['states','revisions','requests','outbox']},
@@ -40,6 +40,7 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
     if(kind==='runtime'&&supported&&identity){const row=db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();
       const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='runtime'&&supported&&version>=2)supported=tables.has('run_persona_manifests');
+    if(kind==='runtime'&&supported&&version>=3)supported=tables.has('native_deliveries');
     if(kind==='memory'&&supported){
       const stages:Record<number,readonly string[]>={2:['memory_boundaries','memory_schema_migrations'],3:['observation_sources','observation_activities','observation_contributions','observation_source_requests'],
         4:['task_workspaces','task_revisions','task_members','task_selections','task_links','task_jobs','task_slots','task_requests','task_observations'],

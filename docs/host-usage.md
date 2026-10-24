@@ -104,7 +104,7 @@ node scripts/dafeiyu-host.mjs migrate verify --config path/to/host.json --plan .
 
 命令会核对选定profile、实际路径、配置哈希和固定迁移计划。计划文件使用独占创建，不覆盖同名已有计划。活动Host占用的数据不能迁移；更换配置／路径后需要重新核对计划，不能套用另一profile的清单。
 
-目标为journal v2、memory v10、runtime v2、QQ v4；旧D3及辅助权威库保持既有版本。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。
+目标为journal v2、memory v10、runtime v3、QQ v4；旧D3及辅助权威库保持既有版本。runtime v3追加独立任务结果交付账本，旧v1／v2需显式备份升级；既有Run、快照与结果保留。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。
 
 迁移中断保持准入关闭；新版本已产生新数据后，不用旧备份覆盖新增记忆。原`scripts/migrate-profile.mjs`仍可用，新入口复用其底层迁移实现。
 
