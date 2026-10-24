@@ -23,7 +23,7 @@ const policyBodySchema=z.strictObject({input:ExpressionPolicySchema,proofs:z.arr
 
 export function migrateExpression(db:DatabaseSync){
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
-  if(version===6){for(const name of ['expression_policies','expression_policy_revisions','expression_requests','expression_packets','expression_jobs'])db.prepare(`SELECT * FROM ${name} LIMIT 0`).all();return;}
+  if(version===6||version===7){for(const name of ['expression_policies','expression_policy_revisions','expression_requests','expression_packets','expression_jobs'])db.prepare(`SELECT * FROM ${name} LIMIT 0`).all();return;}
   if(version!==5)throw new Error('Unsupported expression schema');
   db.exec(`CREATE TABLE expression_policies(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id));
     CREATE TABLE expression_policy_revisions(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id,version));

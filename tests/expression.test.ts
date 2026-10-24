@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { dropExecutionFixtureSchema } from './legacy-execution-fixture.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -154,13 +155,13 @@ test('expiry, cancellation and provider unload never expose a usable stale resul
 
 test('schema v5 migration leaves old boundaries intact and startup interrupts orphan jobs without a model call',async()=>{
   const h=await expressionFixture(),root=h.root,taskId=h.task.reference.id,original=h.store.read(h.scope(0),h.receipts[0]!.contributions[0]!.memoryId)!;await h.close();
-  const db=new DatabaseSync(join(root,'memory.sqlite'));try{for(const table of ['expression_jobs','expression_packets','expression_requests','expression_policies','expression_policy_revisions'])db.exec(`DROP TABLE ${table}`);db.exec('PRAGMA user_version=5');}finally{db.close();}
+  const db=new DatabaseSync(join(root,'memory.sqlite'));try{dropExecutionFixtureSchema(db);for(const table of ['expression_jobs','expression_packets','expression_requests','expression_policies','expression_policy_revisions'])db.exec(`DROP TABLE ${table}`);db.exec('PRAGMA user_version=5');}finally{db.close();}
   const next=await taskMemoryFixture(root);try{assert.deepEqual(next.store.read(next.scope(0),original.id),original);const task=next.core.resumeTaskWorkspace(taskId);
     const handle=next.handles[0]!,receipt=handle.ingest({id:randomUUID(),conversation:scenes[0]!,occurredAt:new Date().toISOString(),sender:{id:'fictional',displayName:'虚构'},text:'继续'});await next.core.whenIdle();
     const packet=z.object({packetId:z.string()}).parse(task.expression.prepare({requestId:randomUUID(),inboundId:receipt.id,linkIds:[]}));
     const db=new DatabaseSync(join(root,'memory.sqlite'));try{db.prepare("INSERT INTO expression_jobs VALUES(?,?,?,?,?,?,'running',NULL)").run(randomUUID(),'dafeiyu',taskId,'orphan','fixture',packet.packetId);}finally{db.close();}
   }finally{await next.close();}
-  const restored=await taskMemoryFixture(root);try{const db=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(db.prepare("SELECT status FROM expression_jobs WHERE request_id='orphan'").get()?.status,'interrupted');assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,6);}finally{db.close();}assert.equal(restored.adapter.requests.length,0);}finally{await restored.close();}
+  const restored=await taskMemoryFixture(root);try{const db=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(db.prepare("SELECT status FROM expression_jobs WHERE request_id='orphan'").get()?.status,'interrupted');assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,7);}finally{db.close();}assert.equal(restored.adapter.requests.length,0);}finally{await restored.close();}
 });
 
 test('provider unload during an active model request drains cancellation before closing persistence',async t=>{

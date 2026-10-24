@@ -24,6 +24,10 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./runtime-store": {
+      "types": "./lib/runtime-store.d.ts",
+      "default": "./lib/runtime-store.js"
     }
   },
   "main": "./lib/index.js"

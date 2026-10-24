@@ -38,7 +38,8 @@
     "accept:phase1-runtime": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1-runtime.mjs",
     "accept:phase1-image": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1-image.mjs",
     "accept:phase1-audio": "node scripts/accept-phase1-audio.mjs",
-    "demo:lifecycle": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-managed-lifecycle.mjs"
+    "demo:lifecycle": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-managed-lifecycle.mjs",
+    "demo:migration": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-storage-migration.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",

@@ -13,12 +13,13 @@ import { memoryFixture } from './memory-fixture.js';
 import { provenanceFixture } from './provenance-fixture.js';
 import { fragmentFixture } from './fragment-fixture.js';
 import { Worker } from 'node:worker_threads';
+import { dropExecutionFixtureSchema } from './legacy-execution-fixture.js';
 
 async function path(){return join(await mkdtemp(join(tmpdir(),'dafeiyu-boundary-')),'memory.sqlite');}
 test('v1 migration adds conservative five-axis boundaries without changing any legacy row or hash',async t=>{
   const file=await path(),old=legacyMemory(file),before=legacySnapshot(old.db);old.db.close();
   const store=new MemoryStore(file);t.after(()=>store.close());const db=new DatabaseSync(file);t.after(()=>db.close());
-  assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,6);
+  assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,7);
   assert.equal(db.prepare('SELECT count(*) AS n FROM memory_boundaries').get()?.n,6);
   const item=store.read(old.scope,old.active.id)!;
   assert.deepEqual(item.boundary.owner,{kind:'agent',agentId:'fish'});assert.equal(item.boundary.sourceScene.kind,'conversation');
@@ -47,7 +48,7 @@ test('migration and repeated opens never grant another conversation, agent or ma
     for(const mode of ['normal','history','deleted'] as const)for(const purpose of ['internal','expression'] as const)assert.equal(store.read(s,old.active.id,mode,undefined,purpose),null);
     assert.equal(store.search(s,'normal',{query:'',limit:50}).items.length,0);
   }
-  const db=new DatabaseSync(file);try{assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations').get()?.n,1);}finally{db.close();}
+  const db=new DatabaseSync(file);try{assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=2').get()?.n,1);}finally{db.close();}
   }finally{store.close();}
 });
 test('an interrupted invalid v1 migration rolls back the schema and never initializes over legacy data',async()=>{
@@ -153,7 +154,7 @@ test('migrating compatible v1 rows preserves existing DSH partial views, and res
   const h=await fragmentFixture(),root=h.root,a=h.a;h.mutate(a,'delete',1);await h.run('迁移前删除A');const ref=h.ref;
   await h.close();
   // Reproduce the pre-boundary layout on this fictional DSH fixture; old rows stay intact.
-  const db=new DatabaseSync(join(root,'memory.sqlite'));db.exec('DROP TABLE expression_jobs; DROP TABLE expression_packets; DROP TABLE expression_requests; DROP TABLE expression_policies; DROP TABLE expression_policy_revisions; DROP TABLE task_memory_hits; DROP TABLE task_memory_grants; DROP TABLE task_memory_policies; DROP TABLE task_memory_policy_revisions; DROP TABLE task_memory_requests; DROP TABLE task_observations; DROP TABLE task_slots; DROP TABLE task_jobs; DROP TABLE task_links; DROP TABLE task_members; DROP TABLE task_selections; DROP TABLE task_revisions; DROP TABLE task_requests; DROP TABLE task_workspaces; DROP TABLE observation_contributions; DROP TABLE observation_activities; DROP TABLE observation_sources; DROP TABLE observation_source_requests; DROP TRIGGER boundaries_no_update; DROP TRIGGER boundaries_no_delete; DROP TABLE memory_boundaries; DROP TABLE memory_schema_migrations; PRAGMA user_version=1;');db.close();
+  const db=new DatabaseSync(join(root,'memory.sqlite'));dropExecutionFixtureSchema(db);db.exec('DROP TABLE expression_jobs; DROP TABLE expression_packets; DROP TABLE expression_requests; DROP TABLE expression_policies; DROP TABLE expression_policy_revisions; DROP TABLE task_memory_hits; DROP TABLE task_memory_grants; DROP TABLE task_memory_policies; DROP TABLE task_memory_policy_revisions; DROP TABLE task_memory_requests; DROP TABLE task_observations; DROP TABLE task_slots; DROP TABLE task_jobs; DROP TABLE task_links; DROP TABLE task_members; DROP TABLE task_selections; DROP TABLE task_revisions; DROP TABLE task_requests; DROP TABLE task_workspaces; DROP TABLE observation_contributions; DROP TABLE observation_activities; DROP TABLE observation_sources; DROP TABLE observation_source_requests; DROP TRIGGER boundaries_no_update; DROP TRIGGER boundaries_no_delete; DROP TABLE memory_boundaries; DROP TABLE memory_schema_migrations; PRAGMA user_version=1;');db.close();
   const next=await provenanceFixture(root);try{await next.run('迁移后继续');assert.match(next.visible(),/B_FACT_KEEP/);assert.ok(!next.visible().includes('A_FACT_ONLY'));
     assert.equal((await next.probe('a',c=>next.timeline.open(c,{ref}))).status,'ok');
     next.mutate(a,'restore',2);await next.run('恢复A');assert.ok(!next.visible().includes('A_FACT_ONLY'));assert.match(next.visible(),/B_FACT_KEEP/);
@@ -170,6 +171,6 @@ test('concurrent v1 opens serialize migration and produce one complete boundary 
   });
   await Promise.all([open(),open()]);const db=new DatabaseSync(file);
   try{assert.deepEqual(legacySnapshot(db),before);assert.equal(db.prepare('SELECT count(*) AS n FROM memory_boundaries').get()?.n,6);
-    assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations').get()?.n,1);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=2').get()?.n,1);
   }finally{db.close();}
 });

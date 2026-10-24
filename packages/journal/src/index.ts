@@ -3,7 +3,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { MessageSchema, conversationKey, TimelineQuerySchema, redactJson } from '@dafeiyu/contracts';
+import { MessageSchema, conversationKey, TimelineQuerySchema, redactJson, ExecutionEventInputSchema, ExecutionEventSchema, taskScopeKey } from '@dafeiyu/contracts';
+import type { NewExecutionEvent, ExecutionEvent } from '@dafeiyu/contracts';
+import { JOURNAL_APPLICATION_ID, checkJournalShape, migrateJournalSchema, journalHasLiveOwner } from './schema.js';
+import { configureSqlite } from './sqlite.js';
+export { inspectJournal, JOURNAL_APPLICATION_ID } from './schema.js';
+export { configureSqlite } from './sqlite.js';
 import type { TimelineQuery, TimelineScope } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import type { EventRecord, InboundMessage, Json, MessageState, PendingMessage, Receipt, Reply, SourceRef } from '@dafeiyu/contracts';
@@ -28,11 +33,22 @@ export class Journal {
   constructor(file: string) {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
-    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+    try {
+    this.db.exec('PRAGMA busy_timeout=5000;');
     const schema = this.db.prepare('PRAGMA user_version').get();
-    if (schema?.user_version !== 0 && schema?.user_version !== 1) {
+    const app=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
+    const tableCount=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n);
+    const fresh=schema?.user_version===0&&app===0&&tableCount===0;
+    if (!fresh&&!(schema?.user_version===1&&app===0)&&!(schema?.user_version===2&&app===JOURNAL_APPLICATION_ID)) {
       this.db.close(); throw new Error('Unsupported journal schema');
     }
+    try{if(!fresh){checkJournalShape(this.db,schema?.user_version===1);if(journalHasLiveOwner(this.db))throw new Error('Journal is already owned by a live process');}}catch(error){this.db.close();throw error;}
+    configureSqlite(this.db);
+    if(fresh){
+      this.transaction(()=>{
+      const currentVersion=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),currentApp=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
+      const currentTables=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n);
+      if(currentVersion===0&&currentApp===0&&currentTables===0){
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS conversations(route TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS inbox(
@@ -50,6 +66,13 @@ export class Journal {
       CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'Events are append-only'); END;
       PRAGMA user_version=1;
     `);
+      }else{
+        if(!(currentVersion===1&&currentApp===0)&&!(currentVersion===2&&currentApp===JOURNAL_APPLICATION_ID))throw new Error('Unsupported journal schema');
+        checkJournalShape(this.db,currentVersion===1);if(journalHasLiveOwner(this.db))throw new Error('Journal is already owned by a live process');
+      }
+      });
+    }
+    try{migrateJournalSchema(this.db);}catch(error){this.db.close();throw error;}
     try {
       this.transaction(() => {
         const owner = this.db.prepare('SELECT pid FROM ownership WHERE singleton=1').get();
@@ -66,6 +89,7 @@ export class Journal {
       const body = z.object({ type: z.string(), plugin: z.string(), data: z.record(z.string(), z.json()) }).parse(JSON.parse(text(value)));
       return JSON.stringify(redactJson({ type: body.type, plugin: body.plugin, data: body.data }).value).toLowerCase();
     });
+    }catch(error){if(this.db.isOpen)this.db.close();throw error;}
   }
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -95,6 +119,21 @@ export class Journal {
   }
   append(input: NewEvent): EventRecord {
     return this.appendOnce(input, randomUUID());
+  }
+  appendExecutionOnce(raw:NewExecutionEvent,id:string):ExecutionEvent {
+    z.uuid().parse(id);const input=ExecutionEventInputSchema.parse(raw);
+    const old=this.db.prepare('SELECT seq,body FROM events WHERE id=?').get(id);
+    if(old){const record=ExecutionEventSchema.parse(JSON.parse(text(old.body)));const {schemaVersion:_version,id:_id,recordedAt:_at,visibility:_visibility,...body}=record;
+      if(!isDeepStrictEqual(body,input))throw new Error('Event idempotency conflict');return {...record,seq:Number(old.seq)};}
+    const record=ExecutionEventSchema.parse({...input,id,schemaVersion:2,recordedAt:new Date().toISOString(),visibility:{kind:'task',agentId:input.agentId,taskId:input.taskId}});
+    const result=this.db.prepare('INSERT INTO events(id,route,trace_id,operation_id,body) VALUES(?,?,?,?,?)').run(id,input.route,input.traceId,input.operationId,JSON.stringify(record));
+    return {...record,seq:Number(result.lastInsertRowid)};
+  }
+  /** Trusted native API. A model-facing caller must obtain its task scope from the core. */
+  executionEvents(agentId:string,taskId:string):ExecutionEvent[]{
+    const route=taskScopeKey(agentId,taskId);
+    return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='task' AND json_extract(body,'$.visibility.agentId')=? AND json_extract(body,'$.visibility.taskId')=? ORDER BY seq")
+      .all(route,agentId,taskId).map(row=>({...ExecutionEventSchema.parse(JSON.parse(text(row.body))),seq:Number(row.seq)}));
   }
   /** Trusted outbox publishers supply a stable UUID; duplicates never create a second event. */
   appendOnce(input: NewEvent, id: string): EventRecord {
@@ -142,7 +181,7 @@ export class Journal {
   latestMessageId(route:string):string|null {const row=this.db.prepare('SELECT id FROM inbox WHERE route=? ORDER BY ordinal DESC LIMIT 1').get(route);return row?text(row.id):null;}
   /** Scope filtering happens in the query, before exposing event bodies. No global model-facing query. */
   events(route: string): EventRecord[] {
-    return this.db.prepare('SELECT seq,body FROM events WHERE route=? ORDER BY seq').all(route)
+    return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='conversation' ORDER BY seq").all(route)
       .map(row => ({ ...JSON.parse(text(row.body)), seq: Number(row.seq) }) as EventRecord);
   }
   /** Authorization predicates are evaluated inside the SQL query, including persisted visibility. */

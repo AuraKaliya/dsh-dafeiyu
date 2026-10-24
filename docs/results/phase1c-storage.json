@@ -1,0 +1,73 @@
+{
+  "stage": "1C",
+  "kind": "real-sqlite-fictional-data-no-model",
+  "at": "2026-10-24T10:04:22.825Z",
+  "serverAccess": false,
+  "realRuntimeData": false,
+  "checks": {
+    "cliPlan": true,
+    "cliApply": true,
+    "cliVerify": true,
+    "idempotentApply": true,
+    "legacyRowsUnchanged": true
+  },
+  "engineHash": "54e9e578cc1a8231c5963137255dc323ddf705679febc7279ce0f4cbcb848d84",
+  "sourceRevision": "8968d54bd3ed65d29013f5e714600da4ba699a59",
+  "sourceWorktreeDirty": true,
+  "configHash": "2e69d6ec5daf2889b2f9b36ecc97f71e2815617926bb758afc50714eba5e23cf",
+  "stores": [
+    {
+      "kind": "journal",
+      "version": 2,
+      "supported": true,
+      "integrity": true,
+      "identityMatches": true
+    },
+    {
+      "kind": "memory",
+      "version": 7,
+      "supported": true,
+      "integrity": true,
+      "identityMatches": true
+    },
+    {
+      "kind": "runtime",
+      "version": 1,
+      "supported": true,
+      "integrity": true,
+      "identityMatches": true
+    },
+    {
+      "kind": "delivery",
+      "version": 0,
+      "supported": true,
+      "integrity": true,
+      "identityMatches": true
+    },
+    {
+      "kind": "analysis",
+      "version": 0,
+      "supported": true,
+      "integrity": true,
+      "identityMatches": true
+    },
+    {
+      "kind": "working",
+      "version": 0,
+      "supported": true,
+      "integrity": true,
+      "identityMatches": true
+    },
+    {
+      "kind": "feedback",
+      "version": 0,
+      "supported": true,
+      "integrity": true,
+      "identityMatches": true
+    }
+  ],
+  "legacyBeforeHash": "64398ccfa2f91f26e22e2e2e41c1c08eb7a98058d53da5f87cc73e3256938d35",
+  "legacyAfterHash": "64398ccfa2f91f26e22e2e2e41c1c08eb7a98058d53da5f87cc73e3256938d35",
+  "sessionFixture": "synthetic JSONL bytes; no model or DSH replay triggered",
+  "passed": true
+}
