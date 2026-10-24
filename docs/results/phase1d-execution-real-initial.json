@@ -1,0 +1,93 @@
+{
+  "stage": "1D",
+  "kind": "real-model-real-dsh-fictional-capability",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "at": "2026-10-24T11:52:01.521Z",
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "formalPersona": false,
+  "checks": [
+    {
+      "name": "native-two-step-run",
+      "passed": false
+    },
+    {
+      "name": "no-channel-or-inbox",
+      "passed": true
+    },
+    {
+      "name": "restart-no-replay",
+      "passed": false
+    },
+    {
+      "name": "persisted-session-tool-continuation",
+      "passed": false
+    },
+    {
+      "name": "no-private-model-state-on-disk",
+      "passed": true
+    }
+  ],
+  "calls": [
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 166,
+      "usage": null,
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1466,
+      "usage": {
+        "inputTokens": 793,
+        "outputTokens": 115,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "totalTokens": 908
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1057,
+      "usage": {
+        "inputTokens": 241,
+        "outputTokens": 87,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1096
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1071,
+      "usage": {
+        "inputTokens": 171,
+        "outputTokens": 48,
+        "cacheReadTokens": 1024,
+        "cacheWriteTokens": 0,
+        "totalTokens": 1243
+      },
+      "status": "completed"
+    }
+  ],
+  "passed": false,
+  "steps": [
+    1,
+    2
+  ],
+  "finishedAt": "2026-10-24T11:52:05.557Z"
+}

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ConversationSchema } from './conversation.js';
-import type { Json, ChannelCapability } from './index.js';
+import type { Json, ChannelCapability, Receipt } from './index.js';
 import type { ContextItem } from './context.js';
 
 export const EXTENSION_PROTOCOL_VERSION = 3 as const;
@@ -62,7 +62,7 @@ export interface ExtensionV3 {
   readonly contexts?: readonly ContextContributorV3[];
   readonly lifecycleReady?: () => boolean;
 }
-export interface ExtensionHandleV3 { dispose(): void }
+export interface ExtensionHandleV3 { readonly ingest?: (message:unknown)=>Receipt; dispose(): void }
 
 export const ExtensionMetadataV3Schema = z.strictObject({ protocolVersion: z.literal(3), id: ExtensionIdSchema,
   version: z.string().min(1).max(80), agentId: actor, provides: z.array(FeatureSchema).max(64).default([]), requires: z.array(FeatureSchema).max(64).default([]) });

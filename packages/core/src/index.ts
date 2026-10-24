@@ -168,8 +168,26 @@ export class DafeiyuService extends Service {
     const legacy=[...this.extensions.values()].map(entry=>entry.extension);
     const handle=this.registryV3.register(this.config.agentId,extension,{ids:legacy.map(value=>value.id),actions:legacy.flatMap(value=>(value.actions??[]).map(action=>action.name)),
       channels:legacy.flatMap(value=>(value.channels??[]).map(channel=>JSON.stringify([channel.channel,channel.account])))});
-    try{if(this.gate.active)this.registryV3.checkReady(this.features());}catch(error){handle.dispose();throw error;}
-    return handle;
+    let bridge:Registered|undefined;
+    try{
+      if(extension.channels?.length){
+        const channels=extension.channels.map(channel=>({channel:channel.channel,account:channel.account,deliver:channel.deliver.bind(channel),
+          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{})}));
+        bridge={active:true,controller:new AbortController(),extension:{apiVersion:2,id:extension.id,version:extension.version,agentId:extension.agentId,channels,
+          ...(extension.lifecycleReady?{lifecycleReady:extension.lifecycleReady.bind(extension)}:{})}};
+        this.extensions.set(extension.id,bridge);
+      }
+      if(this.gate.active)this.registryV3.checkReady(this.features());
+    }catch(error){handle.dispose();if(bridge)this.extensions.delete(extension.id);throw error;}
+    const registered=bridge;
+    if(registered)for(const item of this.journal.list(['accepted','reply-ready']))if(item.extensionId===extension.id)this.schedule(item);
+    if(this.accepting)this.executions?.activate();
+    return Object.freeze({...(registered?{ingest:(raw:unknown):Receipt=>{
+      this.assertAccepting();if(!registered.active)throw new Error('CAPABILITY_UNAVAILABLE');const message=MessageSchema.parse(raw);
+      if(!registered.extension.channels?.some(channel=>channel.channel===message.conversation.channel&&channel.account===message.conversation.account))throw new Error('SCOPE_DENIED');
+      const receipt=this.journal.accept(this.config.agentId,registered.extension.id,registered.extension.version,message),item=this.journal.get(receipt.id);
+      if(item.state==='accepted'||item.state==='reply-ready')this.schedule(item);return receipt;
+    }}:{}),dispose:()=>{handle.dispose();if(registered?.active){registered.active=false;registered.controller.abort();if(this.extensions.get(registered.extension.id)===registered)this.extensions.delete(registered.extension.id);}}});
   }
   private persona(): PersonaSnapshot {
     const text = readFileSync(this.config.personaFile, 'utf8').trim();
@@ -457,7 +475,7 @@ export class DafeiyuService extends Service {
       let started:import('@dafeiyu/contracts').EventRecord|undefined,run:StoredRun|undefined,result;
       try {
         const persona = this.persona();
-        run=this.conversationRuns?.begin(item,persona,this.analysisModelRoute(),[...this.extensions.values()].map(entry=>({id:entry.extension.id,version:entry.extension.version})));
+        run=this.conversationRuns?.begin(item,persona,this.analysisModelRoute(),[...this.extensions.values()].map(entry=>({id:entry.extension.id,version:entry.extension.version})),this.executions?.conversationSnapshot(source.extension.id));
         started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(this.config.turnTimeoutMs)]);
@@ -500,7 +518,7 @@ export class DafeiyuService extends Service {
   }
   getStatus() {
     return { agentId: this.config.agentId, state: this.fatal ? 'error' : this.controller.signal.aborted ? 'closed' : this.gate.active?(this.dependenciesReady()?'ready':'degraded'):this.gate.state==='quiescing'?'draining':'composing',
-      lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null, extensions: [...this.extensions.keys(),...this.registryV3.ids()], queuedRoutes: this.queues.size,
+      lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null, extensions: [...new Set([...this.extensions.keys(),...this.registryV3.ids()])], queuedRoutes: this.queues.size,
       messages: this.closed ? [] : this.journal.list().map(item => ({ id: item.id, state: item.state, sessionId: item.sessionId })) };
   }
   async whenIdle(): Promise<void> {

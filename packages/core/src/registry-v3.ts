@@ -9,11 +9,12 @@ export interface BoundActionV3 {
   readonly input: Record<string, unknown>; readonly effects: ActionCapabilityV3['effects']; readonly requiresTask: boolean;
   readonly parameters:ReturnType<typeof toolParameters>;
   readonly active: () => boolean;
+  readonly signal:AbortSignal;
   validateInput(raw:unknown):Json;
   execute(raw: unknown, context: ExecutionContextV3): Promise<ActionOutcome>;
 }
 interface Entry {
-  metadata: z.infer<typeof ExtensionMetadataV3Schema>; active: boolean;
+  metadata: z.infer<typeof ExtensionMetadataV3Schema>; active: boolean;controller:AbortController;
   actions: readonly BoundActionV3[]; channels: readonly string[]; contexts: readonly ContextContributorV3[]; ready: () => boolean;
 }
 const allowedExtensionKeys = new Set(['protocolVersion', 'id', 'version', 'agentId', 'provides', 'requires', 'actions', 'channels', 'contexts', 'lifecycleReady']);
@@ -32,7 +33,7 @@ function freezeTree(value: unknown): void {
   Object.values(value).forEach(freezeTree); Object.freeze(value);
 }
 
-/** Registration only. Core-issued execution authority is supplied by the later Run coordinator. */
+/** Registration snapshots. Invocation authority is issued by the core Run coordinator. */
 export class CapabilityRegistryV3 {
   private readonly entries = new Map<string, Entry>();
   hasId(id: string): boolean { return this.entries.has(id); }
@@ -53,7 +54,7 @@ export class CapabilityRegistryV3 {
     if (this.entries.has(metadata.id) || reserved.ids.includes(metadata.id)) throw new Error('DUPLICATE_EXTENSION');
     const names = new Set([...reserved.actions, ...this.actionNames()]), channels = new Set([...reserved.channels, ...this.channelKeys()]);
     if(extension.lifecycleReady!==undefined&&typeof extension.lifecycleReady!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
-    const entry: Entry = { metadata, active: true, actions: [], channels: [], contexts: [], ready: extension.lifecycleReady?.bind(extension) ?? (() => true) };
+    const entry: Entry = { metadata, active: true, controller:new AbortController(),actions: [], channels: [], contexts: [], ready: extension.lifecycleReady?.bind(extension) ?? (() => true) };
     const bound: BoundActionV3[] = [];
     for (const action of extension.actions ?? []) {
       const meta = actionMetaSchema.parse({ id: action.id, version: action.version, description: action.description, effects: action.effects, requiresTask: action.requiresTask ?? false });
@@ -66,7 +67,7 @@ export class CapabilityRegistryV3 {
       const parameters=toolParameters(input);freezeTree(parameters);
       const parseInput = action.inputSchema.parse.bind(action.inputSchema), parseOutput = action.outputSchema.parse.bind(action.outputSchema), execute = action.execute.bind(action);
       const validateInput=(raw:unknown):Json=>{let parsed:Json;try{parsed=z.json().parse(parseInput(raw));}catch{throw new Error('INVALID_INPUT');}if(Buffer.byteLength(JSON.stringify(parsed),'utf8')>128000)throw new Error('ACTION_INPUT_TOO_LARGE');return parsed;};
-      bound.push(Object.freeze({ ...meta, owner: metadata.id, input: Object.freeze(input),parameters, active: () => entry.active&&entry.ready(),validateInput,
+      bound.push(Object.freeze({ ...meta, owner: metadata.id, input: Object.freeze(input),parameters, signal:entry.controller.signal,active: () => entry.active&&entry.ready(),validateInput,
         execute: async (raw: unknown, context: ExecutionContextV3):Promise<ActionOutcome> => {
           if (!entry.active || !entry.ready()) throw new Error('CAPABILITY_UNAVAILABLE');
           context.signal.throwIfAborted();
@@ -83,6 +84,7 @@ export class CapabilityRegistryV3 {
     }
     const keys: string[] = [];
     for (const channel of extension.channels ?? []) {
+      if(channel.taskDelivery!==undefined&&channel.taskDelivery!=='simulated')throw new Error('INVALID_DELIVERY_CONTRACT');
       const key = JSON.stringify([channel.channel, channel.account]);
       if (!channel.channel || !channel.account || typeof channel.deliver !== 'function' || channels.has(key)) throw new Error('DUPLICATE_OR_INVALID_CHANNEL');
       channels.add(key); keys.push(key);
@@ -97,7 +99,7 @@ export class CapabilityRegistryV3 {
     });
     entry.actions = bound; entry.channels = keys;
     this.entries.set(metadata.id, entry);
-    return Object.freeze({ dispose: () => { if (!entry.active) return; entry.active = false; this.entries.delete(metadata.id); } });
+    return Object.freeze({ dispose: () => { if (!entry.active) return; entry.active = false; entry.controller.abort();this.entries.delete(metadata.id); } });
   }
-  close(): void { for (const entry of this.entries.values()) entry.active = false; this.entries.clear(); }
+  close(): void { for (const entry of this.entries.values()){entry.active = false;entry.controller.abort();} this.entries.clear(); }
 }

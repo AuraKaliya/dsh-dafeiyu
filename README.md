@@ -2,9 +2,9 @@
 
 当前项目版本0.19.0：contracts/core/memory 0.15.0完成D3交付凭据与模拟闭环；journal/channel-simulator为0.4.0。先在目标DSH人格会话整理，再核验目标、来源、版本与授权，使用持久凭据发送最终正文；迟到、重复、撤销和不确定状态不会盲目重发。本机421项测试及模拟渠道演示通过；本轮使用虚构样本与脚本模型，真实QQ未接入，服务器未修改。
 
-第一阶段实施进度：1A适配探针、1B契约与受控生命周期、1C存储与迁移已完成；1A真实模型工具续轮／持久化、图像及本地音频有单独验收。1D检查点的既有回归为464项通过，正式Host与完整新任务入口仍待后续子步骤，现有QQ和服务器未切换。
+第一阶段实施进度：1A适配探针、1B契约与受控生命周期、1C存储与迁移、1D任务执行已完成。当前470项回归通过；1D另有真实模型多步任务与重启续接验收，1A音画探针单独记录。1E人格成长／连续性及正式Host仍待后续子步骤，现有QQ和服务器未切换。
 
-1D已保存为[开发检查点](docs/phase1d-checkpoint.md)，尚未完成子步骤验收。用户已认可独立判断与任务执行边界，本轮整理[人格成长与连续性方案](docs/persona-growth-continuity-plan.md)并修订第一阶段设计：稳定底色、阶段人格、压缩接续及验收分开；不使用管理中心现有人格文件。本轮只提交文档，不继续开发，新schema与人格服务均未实施。
+1D从[开发检查点](docs/phase1d-checkpoint.md)继续完成[执行验收](docs/phase1d-execution.md)。后续按[人格成长与连续性方案](docs/persona-growth-continuity-plan.md)推进：底色、阶段人格、任务责任与压缩接续分别核验；不使用管理中心现有人格文件。1E的新schema和人格服务尚未实施。
 
 ## 开始使用
 
@@ -41,6 +41,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第一阶段1A适配前提验收](docs/phase1a-adaptation.md)：DSH程序来源、真实模型工具续轮与持久化、真实图像和本地音频探针。
 - [第一阶段1B接口与生命周期验收](docs/phase1b-lifecycle.md)：v2/v3兼容、启动准入、恢复／激活分离、延迟分析与QQ连接。
 - [第一阶段1C存储与迁移验收](docs/phase1c-storage.md)：Run账本、Task事件、增量schema、只读预检、备份和中断续接；使用虚构旧库。
+- [第一阶段1D任务执行验收](docs/phase1d-execution.md)：470项回归、v3渠道与动作、取消／恢复边界及真实模型任务续接；首轮失败与成功复测分别保留。
 - [架构与开发决策](docs/architecture.md)
 - [记忆、行为时间线、压缩和检索](docs/memory.md)
 - [记忆能力插件完整开发方案（2026-10-23）](docs/memory-plugin-plan.md)

@@ -24,7 +24,7 @@ export const model = Object.freeze({ provider: 'deepseek-official', model: 'deep
 const fingerprint = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 
 /** Isolated DSH composition for local acceptance. Credential values never leave the DSH service. */
-export async function localHost(root, { simulator = true, realModel = true, adapter, timeout = 180000, timeline = false } = {}) {
+export async function localHost(root, { simulator = true, realModel = true, adapter, timeout = 180000, timeline = false, lifecycleMode = 'legacy', personaFile = resolve('profiles/persona.test.md') } = {}) {
   if (!process.env.DSH_HOME || resolve(process.env.DSH_HOME) !== resolve(root, 'dsh-home')) throw new Error('Isolated DSH_HOME must be selected before loading the host');
   const ctx = new Context();
   const calls = [];
@@ -59,8 +59,10 @@ export async function localHost(root, { simulator = true, realModel = true, adap
         reasoningEffort: options.reasoningEffort, sessionId: options.sessionId, durationMs: null, usage: null, status: 'running' };
       calls.push(entry); const start = Date.now();
       try {
-        for await (const chunk of next()) { if (chunk.type === 'usage') entry.usage = chunk.usage; yield chunk; }
-        entry.status = 'completed';
+        for await (const chunk of next()) { if (chunk.type === 'usage') entry.usage = chunk.usage;
+          if(chunk.type==='finish'){entry.finish=chunk.reason.kind;if(chunk.reason.kind==='error'||chunk.reason.kind==='aborted')entry.status='failed';}
+          yield chunk; }
+        if(entry.status!=='failed')entry.status = 'completed';
       } catch (error) {
         entry.status = 'failed';
         // Keep only stable error classification; provider payloads may contain private material.
@@ -69,8 +71,8 @@ export async function localHost(root, { simulator = true, realModel = true, adap
       } finally { entry.durationMs = Date.now() - start; }
     });
     const coreFiber = await ctx.plugin(Core, { agentId: 'dafeiyu', dataDir: resolve(root, 'core'),
-      personaFile: resolve('profiles/persona.test.md'), ...(realModel ? model : { provider: 'local-test', model: 'scripted' }),
-      turnTimeoutMs: timeout });
+      personaFile, ...(realModel ? model : { provider: 'local-test', model: 'scripted' }),
+      turnTimeoutMs: timeout,lifecycleMode });
     const simulatorFiber = simulator ? await ctx.plugin(Simulator, { agentId: 'dafeiyu', account: 'local' }) : null;
     const timelineFiber = timeline ? await ctx.plugin(Timeline, { agentId: 'dafeiyu' }) : null;
     let closed = false;

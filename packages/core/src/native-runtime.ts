@@ -51,4 +51,4 @@ export class NativeRuntime {
   }
   async close(){const sessions=[...this.sessions.values()];this.sessions.clear();for(const owned of sessions)await owned.handle.dispose();}
 }
-function requestBytes(options:GenerateOptions):number{return Buffer.byteLength(JSON.stringify({messages:options.messages,tools:options.tools}),'utf8');}
+function requestBytes(options:GenerateOptions):number{return Buffer.byteLength(JSON.stringify({messages:options.messages,tools:options.tools??[],toolHistory:options.toolHistory??null}),'utf8');}

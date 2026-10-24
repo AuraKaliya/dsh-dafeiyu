@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { ExecutionRequestSchema,ResumeRunSchema,WakeRequestSchema,RunControlSchema,ProducerSchema,taskScopeKey,HostConfigSchema,TaskUpdateSchema,redactJson } from '@dafeiyu/contracts';
+import { ExecutionRequestSchema,ResumeRunSchema,WakeRequestSchema,RunControlSchema,ProducerSchema,taskScopeKey,HostConfigSchema,TaskUpdateSchema,redactJson,RunOriginSchema } from '@dafeiyu/contracts';
 import type { TaskRepositoryPort,TaskRef,RunRef,RunOrigin,ExecutionContextV3,ExecutionGrant,ExecutionInput,WakeAuthorityProvider,PersonaSnapshot,HostConfig,Json } from '@dafeiyu/contracts';
 import type { Journal } from '@dafeiyu/journal';
 import { RuntimeStore,runtimeHash } from './runtime-store.js';
@@ -23,8 +23,7 @@ interface Dependencies {
 }
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null}
 type Request=z.output<typeof ExecutionRequestSchema>;
-const savedSchema=z.strictObject({kind:z.literal('execution'),input:ExecutionRequestSchema,origin:z.lazy(()=>importOrigin),parentRunId:z.uuid().nullable(),checkpointId:z.uuid().nullable()});
-import { RunOriginSchema as importOrigin } from '@dafeiyu/contracts';
+const savedSchema=z.strictObject({kind:z.literal('execution'),input:ExecutionRequestSchema,origin:RunOriginSchema,parentRunId:z.uuid().nullable(),checkpointId:z.uuid().nullable()});
 
 /** Durable acceptance and authority; DSH remains the sole model loop. */
 export class ExecutionCoordinator {
@@ -131,9 +130,10 @@ export class ExecutionCoordinator {
         const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite));
         const registryVersion=runtimeHash(actions.map(action=>[action.id,action.owner,action.version,action.input,action.effects]));
         const sessionId=this.d.store.session(runtimeHash({task:task.id,epoch:task.epoch,authorityVersion,inputHash,registryVersion})),persona=this.d.persona();
-        const signal=AbortSignal.any([this.d.signal,controller.signal,AbortSignal.timeout(this.d.turnTimeoutMs)]);
+        const signal=AbortSignal.any([this.d.signal,controller.signal,...actions.map(action=>action.signal),AbortSignal.timeout(this.d.turnTimeoutMs)]);
         const guard=()=>{signal.throwIfAborted();if(!repository.ready()||this.d.repository()!==repository)throw new Error('DEPENDENCY_UNAVAILABLE');
           const current=repository.readState(this.d.agentId,task.id);if(current.epoch!==task.epoch||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');
+          if(run.definition.origin.kind==='wake'&&!this.wakes.get(request.producer)?.validate(run.definition.origin,current))throw new Error('WAKE_NOT_AUTHORIZED');
           if(runtimeHash(repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules))!==inputHash)throw new Error('SOURCE_STALE');
           if(actions.some(action=>!action.active()))throw new Error('DEPENDENCY_UNAVAILABLE');};
         run=this.d.store.start(id,run.version,{sessionId,personaVersion:persona.version,model:this.d.model,registryVersion,authorityVersion,
@@ -146,7 +146,7 @@ export class ExecutionCoordinator {
       }catch(error){run=this.d.store.get(id);
         if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
-        }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'))this.d.store.transition(id,run.version,'cancelled');
+        }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
       }finally{this.active.delete(id);this.flushEvents();}
     }finally{release();}
@@ -162,7 +162,7 @@ export class ExecutionCoordinator {
       if(operation.reused)throw new Error('OPERATION_IN_PROGRESS');
       const grant=Object.freeze({id:randomUUID()}) as ExecutionGrant;
       const context:ExecutionContextV3=Object.freeze({agentId:this.d.agentId,taskId:run.definition.taskId,runId:run.id,operationId:operation.id,
-        origin:Object.freeze({...run.definition.origin}),scope:Object.freeze({...run.definition.scope}),intentVersion:run.definition.intentVersion,grant,signal:AbortSignal.any([signal,toolSignal])});
+        origin:freezeOrigin(run.definition.origin),scope:Object.freeze({...run.definition.scope}),intentVersion:run.definition.intentVersion,grant,signal:AbortSignal.any([signal,toolSignal,action.signal])});
       this.grants.set(context,{action,runId:run.id,guard});this.flushEvents();
       try{const outcome=await action.execute(input,context);
         // Sources are only accepted through the source port (added with execution memory in 1E).
@@ -178,6 +178,10 @@ export class ExecutionCoordinator {
     return this.d.registry.actions().filter(action=>!action.requiresTask&&policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .map(action=>this.bindAction(run,action,signal,()=>{signal.throwIfAborted();guard();if(!action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');}));
   }
+  conversationSnapshot(producer:string){const policy=this.d.options.policies.find(policy=>policy.id==='conversation'&&policy.producers.includes(producer));
+    return {policyId:policy?.id??'conversation-v2',authority:policy??null,actions:this.d.registry.actions()
+      .filter(action=>policy?.actions.includes(action.id)&&!action.requiresTask&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
+      .map(action=>({id:action.id,owner:action.owner,version:action.version,input:action.input,effects:action.effects}))};}
   authority(context:ExecutionContextV3,pluginId:string){const grant=this.grants.get(context);
     if(!grant||grant.action.owner!==pluginId||!grant.action.active()||this.d.store.get(grant.runId).state!=='running')throw new Error('SCOPE_DENIED');grant.guard();return context;
   }
@@ -194,3 +198,4 @@ export class ExecutionCoordinator {
   get health(){return {active:this.active.size,queued:this.queued.size,error:this.failure};}
 }
 function safeCode(error:unknown):string{return error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'EXECUTION_FAILED';}
+function freezeOrigin(raw:RunOrigin):RunOrigin{const origin=RunOriginSchema.parse(raw);if(origin.kind==='message')Object.freeze(origin.conversation);return Object.freeze(origin);}

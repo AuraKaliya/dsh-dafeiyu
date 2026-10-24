@@ -2,7 +2,7 @@
 
 日期：2026-10-24（北京时间）。方案版本：1.1（人格成长与连续性修订）。
 
-实施状态：**1A、1B、1C已完成，1D—1G尚未完成**，结果见[1A验收](phase1a-adaptation.md)、[1B验收](phase1b-lifecycle.md)、[1C验收](phase1c-storage.md)。本方案编写时仅交付文档，原核验过程保留在第16节；当前实施进度以各子步骤验收为准。尚未创建正式Host运行入口、迁移真实数据库或切换QQ／服务器。
+实施状态：**1A—1D已完成，1E—1G尚未完成**，结果见[1A验收](phase1a-adaptation.md)、[1B验收](phase1b-lifecycle.md)、[1C验收](phase1c-storage.md)、[1D验收](phase1d-execution.md)。本方案编写时仅交付文档，原核验过程保留在第16节；当前实施进度以各子步骤验收为准。尚未创建正式Host运行入口、迁移真实数据库或切换QQ／服务器。
 
 1D中途实现和接续事项见[开发检查点](phase1d-checkpoint.md)。本轮按用户认可的边界新增[大肥鱼人格成长与连续性方案](persona-growth-continuity-plan.md)，同步修订本方案；只改文档，不继续功能开发。正式底色将按新方案后续新建，不采用管理中心现有人格文件；正式人格与成长验收仍未完成。
 
