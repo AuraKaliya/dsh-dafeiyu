@@ -7,8 +7,11 @@ export function within(path: string, root: string): boolean {
   return rest !== '' && rest !== '..' && !rest.startsWith('..' + sep) && !isAbsolute(rest);
 }
 export async function physicalDirectory(path: string): Promise<string> {
-  const absolute = resolve(path), actual = await realpath(absolute);
-  if (key(actual) !== key(absolute) || (await lstat(absolute)).isSymbolicLink()) throw new Error('TEST_PATH_LINK_REFUSED');
+  const absolute = resolve(path), info = await lstat(absolute);
+  if (info.isSymbolicLink()) throw new Error('TEST_PATH_LINK_REFUSED');
+  if (!info.isDirectory()) throw new Error('TEST_PATH_NOT_DIRECTORY');
+  const actual = await realpath(absolute);
+  if (key(actual) !== key(absolute)) throw new Error('TEST_PATH_LINK_REFUSED');
   return absolute;
 }
 export interface TreeSize { bytes: number; files: number; links: number }

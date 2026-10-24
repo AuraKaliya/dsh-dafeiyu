@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "runId": "c7e4fe07-6734-42e7-baa4-295cc4ba356a",
+  "startedAt": "2026-10-24T18:27:28.807Z",
+  "finishedAt": "2026-10-24T18:28:51.674Z",
+  "stages": [
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "durationMs": 123
+    },
+    {
+      "name": "test-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 1839
+    },
+    {
+      "name": "tooling-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 567
+    },
+    {
+      "name": "tests",
+      "code": 0,
+      "signal": null,
+      "durationMs": 77822
+    }
+  ],
+  "summary": {
+    "success": true,
+    "counts": {
+      "tests": 560,
+      "failed": 0,
+      "passed": 560,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 560,
+      "suites": 0
+    },
+    "durationMs": 77753.9854,
+    "failures": []
+  },
+  "reason": null,
+  "cleanup": {
+    "removed": [
+      "c7e4fe07-6734-42e7-baa4-295cc4ba356a"
+    ],
+    "retained": [
+      {
+        "id": "7e1abcb3-0105-4984-8026-1145c6785eea",
+        "bytes": 4562421
+      }
+    ],
+    "blocked": []
+  },
+  "freeBytes": 218045005824,
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "legacyTempDirectoriesAfterRegression": 6,
+  "finalRetention": {
+    "maxCount": 3,
+    "maxHours": 72,
+    "count": 1,
+    "bytes": 4565326,
+    "maxBytes": 1073741824
+  }
+}

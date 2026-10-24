@@ -13,6 +13,7 @@
     "build": "tsc -b",
     "host": "npm run build && node scripts/dafeiyu-host.mjs",
     "test": "node scripts/run-tests.mjs",
+    "test:cleanup": "node scripts/cleanup-test-runs.mjs",
     "demo": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo.mjs",
     "check": "npm test",
     "accept:model": "npm run build && node scripts/accept-real-model.mjs",

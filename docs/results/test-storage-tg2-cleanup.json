@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "e6ab4e14-0037-4de8-9ba6-752231b77d16",
+  "planDigest": "4a20d77fb1415278b337d64aa23d403a9e0d21c3a22e74e8e15d65390d2033bb",
+  "at": "2026-10-24T18:26:19.157Z",
+  "counts": {
+    "removed": 29729,
+    "preserved": 6,
+    "failed": 0
+  },
+  "reasons": {
+    "HISTORICAL_TEST_REMOVED": 29729,
+    "UNKNOWN_PREFIX": 3,
+    "PROTECTED_REPORT": 3
+  },
+  "removedLogicalBytes": 14101276752,
+  "freeBytesBefore": 8586317824,
+  "freeBytesAfter": 22887518208,
+  "freeBytesChange": 14301200384,
+  "remaining": 6,
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "protectedFiles": 648,
+  "protectedFilesChanged": 0,
+  "userDocumentHash": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730",
+  "retainedDirectories": [
+    "dafeiyu-debug-DlxbbW",
+    "dafeiyu-debug-u3C7GD",
+    "dafeiyu-debug-xJRIYc",
+    "dafeiyu-migration-6kCC8y",
+    "dafeiyu-migration-a6CGuy",
+    "dafeiyu-migration-PO16U4"
+  ]
+}
