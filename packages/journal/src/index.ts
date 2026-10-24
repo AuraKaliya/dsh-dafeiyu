@@ -139,6 +139,7 @@ export class Journal {
     const rows = this.db.prepare('SELECT id,state FROM inbox ORDER BY ordinal').all();
     return rows.filter(row => !statesToRead || statesToRead.includes(state(row.state))).map(row => this.get(text(row.id)));
   }
+  latestMessageId(route:string):string|null {const row=this.db.prepare('SELECT id FROM inbox WHERE route=? ORDER BY ordinal DESC LIMIT 1').get(route);return row?text(row.id):null;}
   /** Scope filtering happens in the query, before exposing event bodies. No global model-facing query. */
   events(route: string): EventRecord[] {
     return this.db.prepare('SELECT seq,body FROM events WHERE route=? ORDER BY seq').all(route)

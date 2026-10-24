@@ -82,6 +82,8 @@ export class MemoryService extends Service {
       this.expression=this.store.taskExpression(this.tasks,ctx);
       this.handle = ctx.dafeiyu.registerExtension({ id: 'memory', version: MEMORY_VERSION, apiVersion: API_VERSION,
         taskExpressionProvider:{
+          deliveryMaterial:(agent,task,job,target)=>{this.assertTasks();return this.expression.deliveryMaterial(agent,task,job,target);},
+          verifyDelivery:async(agent,task,job,target,answer,signal,guard)=>{this.assertTasks();await this.expression.verifyDelivery(agent,task,job,target,answer,signal,()=>{this.assertTasks();guard();});},
           policy:(agent,input)=>{this.assertTasks();if(agent!==this.config.agentId)throw new Error('Wrong expression owner');const result=this.expression.policy(agent,input);this.flush();return result;},
           prepare:(agent,task,input)=>{this.assertTasks();const result=this.expression.prepare(agent,task,input);this.flush();return result;},
           open:(agent,task,input)=>{this.assertTasks();return this.expression.open(agent,task,input);},

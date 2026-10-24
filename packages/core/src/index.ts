@@ -19,6 +19,7 @@ import { fragmentCapsuleSchema } from './summary-fragments.js';
 import { MemoryObservationSchema,ObservationSourceReadSchema,ObservationSourceChangeSchema } from '@dafeiyu/contracts';
 import type { Conversation,ObservationAuthority } from '@dafeiyu/contracts';
 import { TaskCoordinator,bindTaskProvider,bindTaskMemoryProvider,bindExpressionProvider } from './task-coordinator.js';
+import { TaskDelivery } from './task-delivery.js';
 export type { CompactionBinding } from './compaction-runtime.js';
 export { readCompactionEvents } from './compaction-runtime.js';
 export { readProvenance } from './provenance.js';
@@ -45,6 +46,7 @@ export class DafeiyuService extends Service {
   private readonly runtime: DshRuntime;
   private readonly contexts:ContextCoordinator;
   private readonly taskCoordinator:TaskCoordinator;
+  private readonly taskDelivery:TaskDelivery;
   private readonly extensions = new Map<string, Registered>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly scheduled = new Set<string>();
@@ -57,7 +59,8 @@ export class DafeiyuService extends Service {
   constructor(ctx: Context, config: Config) {
     super(ctx, 'dafeiyu');
     this.config = ConfigSchema.parse(config);
-    this.taskCoordinator=new TaskCoordinator(this.config.agentId,()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskWorkspaceProvider)?.extension.taskWorkspaceProvider,()=>this.assertOpen(),()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskMemoryProvider)?.extension.taskMemoryProvider,()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskExpressionProvider)?.extension.taskExpressionProvider);
+    this.taskCoordinator=new TaskCoordinator(this.config.agentId,()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskWorkspaceProvider)?.extension.taskWorkspaceProvider,()=>this.assertOpen(),()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskMemoryProvider)?.extension.taskMemoryProvider,()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskExpressionProvider)?.extension.taskExpressionProvider,
+      {submit:(task,input,signal,guard)=>this.taskDelivery.submit(task,input,signal,guard),status:(task,id)=>this.taskDelivery.status(task,id)});
     this.persona();
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
@@ -65,6 +68,13 @@ export class DafeiyuService extends Service {
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
       (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text),this.config.agentId,()=>this.compactionBinding(),
       (item,data,seqs)=>{this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});});
+    try{this.taskDelivery=new TaskDelivery(resolve(this.config.dataDir,'delivery.sqlite'),{agentId:this.config.agentId,journal:this.journal,contexts:this.contexts,runtime:this.runtime,signal:this.controller.signal,
+      turnTimeoutMs:this.config.turnTimeoutMs,deliveryTimeoutMs:this.config.deliveryTimeoutMs,assertOpen:()=>this.assertOpen(),persona:()=>this.persona(),model:()=>this.analysisModelRoute(),
+      sourceTracking:()=>!!this.compactionBinding()?.provider.sources,
+      provider:()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskExpressionProvider)?.extension.taskExpressionProvider,
+      channel:item=>{const entry=this.extensions.get(item.extensionId),capability=entry?.extension.channels?.find(c=>c.channel===item.message.conversation.channel&&c.account===item.message.conversation.account);
+        return entry?.active&&capability?{identity:entry,id:entry.extension.id,version:entry.extension.version,capability,signal:entry.controller.signal}:null;},
+      enqueue:(route,work)=>this.enqueueTaskDelivery(route,work)});}catch(error){this.journal.close();throw error;}
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
       this.journal.transition(item.id, item.state, 'uncertain', this.event(item, 'recovery.uncertain', { previousState: item.state }));
@@ -169,6 +179,7 @@ export class DafeiyuService extends Service {
     const channelKeys = new Set(existing.flatMap(ext => ext.channels ?? []).map(c => JSON.stringify([c.channel, c.account])));
     const actionNames = new Set(existing.flatMap(ext => ext.actions ?? []).map(action => action.name));
     for (const c of extension.channels ?? []) {
+      if(c.taskDelivery!==undefined&&c.taskDelivery!=='simulated')throw new Error('Task delivery requires simulated capability');
       const key = JSON.stringify([c.channel, c.account]);
       if (!c.channel || !c.account || channelKeys.has(key)) throw new Error('Duplicate or invalid channel/account');
       channelKeys.add(key);
@@ -189,6 +200,7 @@ export class DafeiyuService extends Service {
     // Snapshot registration metadata so caller-side mutations cannot change a running capability.
     extension = { ...extension,
       channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
+        ...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),
         ...(channel.description ? { description: channel.description } : {}),
         deliver: channel.deliver.bind(channel) })),
       actions: (extension.actions ?? []).map(action => ({ name: action.name, description: action.description,
@@ -272,6 +284,12 @@ export class DafeiyuService extends Service {
       if (this.queues.get(item.route) === task) this.queues.delete(item.route);
     });
     this.queues.set(item.route, task);
+  }
+  private enqueueTaskDelivery<T>(route:string,work:()=>Promise<T>):Promise<T>{
+    const previous=this.queues.get(route)??Promise.resolve();
+    const result=previous.then(work);
+    const queued=result.then(()=>{},()=>{this.fatal='Task delivery persistence failure; automatic processing stopped';}).finally(()=>{if(this.queues.get(route)===queued)this.queues.delete(route);});
+    this.queues.set(route,queued);return result;
   }
   private actions(item: PendingMessage, causedBy: string): BoundAction[] {
     return [...this.extensions.values()].flatMap(entry => (entry.extension.actions ?? []).map(definition => ({
@@ -399,7 +417,7 @@ export class DafeiyuService extends Service {
     this.controller.abort();
     this.closing = (async () => {
       await Promise.all([...this.queues.values()]);
-      try { await this.runtime.close(); } finally { this.closed = true; this.journal.close(); }
+      try { await this.runtime.close(); } finally { this.taskDelivery.close();this.closed = true; this.journal.close(); }
     })();
     return this.closing;
   }

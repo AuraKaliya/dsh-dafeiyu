@@ -12,8 +12,8 @@ import { observationReport } from './observation-fixture.js';
 export const scenes:Conversation[]=['A','B','C'].map(id=>({channel:`fictional-${id}`,account:'fixture',kind:'local',id}));
 export const resultSchema=z.object({usage:z.literal('internal-only'),items:z.array(z.object({id:z.string(),hitId:z.string(),sourceRoute:z.string(),chunk:z.object({text:z.string()}),authorization:z.object({grantId:z.string()})})),scenes:z.array(z.object({cacheHits:z.number(),vectorsComputed:z.number(),degraded:z.boolean()}))});
 export const currentVersion=(task:TaskController)=>z.object({task:z.object({version:z.number()})}).parse(task.read()).task.version;
-export async function taskMemoryFixture(root?:string,options?:{config:RetrievalConfig;dependencies?:RetrievalDependencies}){
-  const fake=fakeDependencies(),h=await memoryFixture(root,{context:{},compaction:{inputTokens:1000000},retrieval:options?.config??config},options?options.dependencies:fake.dependency);
+export async function taskMemoryFixture(root?:string,options?:{config:RetrievalConfig;dependencies?:RetrievalDependencies},sourceTracking=true){
+  const fake=fakeDependencies(),h=await memoryFixture(root,{context:{},...(sourceTracking?{compaction:{inputTokens:1000000}}:{}),retrieval:options?.config??config},options?options.dependencies:fake.dependency);
   const handles=scenes.map((scene,i)=>h.core.registerExtension({id:`observer-${i}`,version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',channels:[{channel:scene.channel,account:scene.account,deliver:async()=>({status:'sent',receiptId:'fictional'})}]}));
   const receipts=handles.map((handle,i)=>handle.observeMemory(observationReport({requestId:`seed-${i}`,conversation:scenes[i]!,sources:[{key:`source-${i}`,occurredAt:'2026-10-20T00:00:00Z',archive:{kind:'text',text:[
     '虚构天气计划：下雨出门应带雨伞。A_ONLY。','虚构旅行计划：遇到降水，需要准备雨具。B_INTERNAL_ONLY。','无授权的虚构秘密：雨具藏在阁楼。C_DENIED。'][i]!},...(i===1?{policy:{externalExpression:'none' as const}}:{})}],contributions:[{id:'fact',form:'original',source:`source-${i}`,exposure:[`source-${i}`]}]})));

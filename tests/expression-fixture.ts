@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { taskMemoryFixture,scenes,resultSchema,currentVersion } from './task-memory-fixture.js';
 
-export async function expressionFixture(root?:string){
-  const h=await taskMemoryFixture(root),task=h.create();h.policy([0,1,2],`policy-${task.reference.id}`);const access=h.grant(task,[0,1,2],`policy-${task.reference.id}`);
+export async function expressionFixture(root?:string,sourceTracking=true){
+  const h=await taskMemoryFixture(root,undefined,sourceTracking),task=h.create();h.policy([0,1,2],`policy-${task.reference.id}`);const access=h.grant(task,[0,1,2],`policy-${task.reference.id}`);
   const hits=resultSchema.parse(await access.recall({query:'雨',strategy:'lexical',limit:10}));
   const selected=z.object({links:z.array(z.string())}).parse(access.select({requestId:randomUUID(),expectedVersion:currentVersion(task),hitIds:hits.items.map(i=>i.hitId)}));
   const linkFor=(index:number)=>selected.links[hits.items.findIndex(item=>item.id===h.receipts[index]!.contributions[0]!.memoryId)]!;

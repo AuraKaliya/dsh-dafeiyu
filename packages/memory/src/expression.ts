@@ -9,7 +9,7 @@ import type { MemoryStore } from './store.js';
 import { TaskWorkspace,witnessSchema } from './task-workspace.js';
 import type { Witness } from './task-workspace.js';
 import { digest,canonical } from './retrieval-profile.js';
-import { rebuildExpression } from './expression-runtime.js';
+import { rebuildExpression,verifyPersonaDelivery } from './expression-runtime.js';
 import { MEMORY_VERSION } from './types.js';
 
 const text=(v:unknown)=>z.string().parse(v),integer=(v:unknown)=>z.number().int().parse(v),hash=(v:unknown)=>digest(canonical(z.json().parse(v)));
@@ -140,6 +140,16 @@ export class TaskExpression {
     const packet=this.packet(agentId,taskId,text(row.packet_id),input.target),body=z.object({answer:z.string(),citations:z.array(z.string()),insufficient:z.boolean(),packetHash:z.string(),exposure:z.array(witnessSchema),question:questionSchema}).parse(JSON.parse(text(row.body)));
     if(body.packetHash!==hash(packet)||hash(body.exposure)!==hash(packet.evidence.map(e=>e.proof))||hash(body.question)!==hash(packet.question))throw new Error('expression_result_unavailable');
     return {jobId:input.jobId,packetId:text(row.packet_id),target:packet.question.target,answer:body.answer,citations:body.citations,insufficient:body.insufficient,usage:'target-draft-only',sendAuthorized:false};});
+  }
+  deliveryMaterial(agentId:string,taskId:string,jobId:string,target:Conversation){return this.transaction(()=>{
+    const result=this.result(agentId,taskId,{jobId,target}),packet=this.packet(agentId,taskId,result.packetId,target),selection=this.tasks.selection({agentId,route:packet.question.route});
+    if(selection.taskId!==taskId)throw new Error('delivery_task_not_selected');
+    return {jobId,packetId:result.packetId,inboundId:packet.question.inboundId,target:packet.question.target,question:packet.question.text,draft:result.answer,
+      evidence:packet.evidence.map(({id,text})=>({id,text})),sourceStamp:hash({packet,result}),selectionVersion:selection.version,expiresAt:packet.expiresAt};
+  });}
+  async verifyDelivery(agentId:string,taskId:string,jobId:string,target:Conversation,answer:string,signal:AbortSignal,guard:()=>void){
+    const material=this.deliveryMaterial(agentId,taskId,jobId,target);await verifyPersonaDelivery(this.ctx,{question:material.question,evidence:material.evidence},answer,signal,()=>{
+      guard();if(hash(this.deliveryMaterial(agentId,taskId,jobId,target))!==hash(material))throw new Error('delivery_material_changed');});
   }
   recover(agentId:string){this.transaction(()=>{for(const row of this.db.prepare("SELECT id,task_id FROM expression_jobs WHERE agent_id=? AND status='running'").all(agentId)){
     this.db.prepare("UPDATE expression_jobs SET status='interrupted' WHERE id=?").run(row.id!);this.audit(agentId,text(row.task_id),'task.expression.interrupted',{jobId:text(row.id)});}});}

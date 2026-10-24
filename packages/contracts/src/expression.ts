@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { ConversationSchema } from './conversation.js';
+import type { Conversation } from './conversation.js';
+import type { DeliveryMaterial } from './delivery.js';
 const key=z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/);
 export const ExpressionPolicySchema=z.strictObject({requestId:key,id:key,expectedVersion:z.number().int().nonnegative(),enabled:z.boolean(),target:ConversationSchema,
   sources:z.array(z.strictObject({conversation:ConversationSchema,id:z.uuid(),revision:z.number().int().positive(),version:z.number().int().positive(),contentHash:z.string().regex(/^[a-f0-9]{64}$/)})).min(1).max(16),reason:z.string().min(1).max(300)});
@@ -18,6 +20,8 @@ export interface TaskExpressionControl {
   withdraw(input:unknown):Record<string,unknown>;
 }
 export interface TaskExpressionProvider {
+  deliveryMaterial(agentId:string,taskId:string,jobId:string,target:Conversation):DeliveryMaterial;
+  verifyDelivery(agentId:string,taskId:string,jobId:string,target:Conversation,answer:string,signal:AbortSignal,guard:()=>void):Promise<void>;
   policy(agentId:string,input:z.output<typeof ExpressionPolicySchema>):Record<string,unknown>;
   prepare(agentId:string,taskId:string,input:z.output<typeof ExpressionPrepareSchema>):Record<string,unknown>;
   open(agentId:string,taskId:string,input:z.output<typeof ExpressionOpenSchema>):Record<string,unknown>;

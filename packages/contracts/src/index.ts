@@ -13,6 +13,7 @@ export * from './observation.js';
 export * from './task-workspace.js';
 export * from './task-memory.js';
 export * from './expression.js';
+export * from './delivery.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
@@ -64,6 +65,7 @@ export interface ChannelCapability {
   readonly account: string;
   /** Actual transport capabilities/limits, independent of the model's own modalities. */
   readonly description?: string;
+  readonly taskDelivery?:'simulated';
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
   deliver(reply: Reply, signal: AbortSignal): Promise<DeliveryResult>;
 }

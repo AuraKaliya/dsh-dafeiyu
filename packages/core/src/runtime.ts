@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent';
 import { SessionId,pluginRecordOf } from '@deepseek-ai/dsh-session';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-session-persistence';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 import type {} from '@deepseek-ai/dsh-tools';
@@ -18,7 +19,8 @@ import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { CompactionRuntime,committedSummary } from './compaction-runtime.js';
 import type { CompactionBinding,CompactionAudit } from './compaction-runtime.js';
 
-interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime }
+interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime;delivery?:RuntimeDelivery;lastRequest?:GenerateOptions }
+export interface RuntimeDelivery {id:string;guard:()=>void;finalize:(result:RunResult,guard:()=>void)=>Promise<void>}
 export interface ActionResult {value:Json;feedback:FeedbackMeta|null}
 export interface BoundAction {
   readonly definition: ActionCapability;
@@ -37,6 +39,8 @@ export class DshRuntime {
   constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator,private readonly agentId:string,private readonly compactionBinding:()=>CompactionBinding|undefined,private readonly compactionAudit:CompactionAudit) {
     const sessions=this.handles;
     ctx.on('llm/stream',async function*(options,next){
+      const owned=options.sessionId?sessions.get(options.sessionId):undefined;
+      if(owned)owned.lastRequest=options;
       const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
       const feedback=options.sessionId?sessions.get(options.sessionId)?.feedback:undefined;
       const compaction=options.sessionId?sessions.get(options.sessionId)?.compaction:undefined;
@@ -45,14 +49,26 @@ export class DshRuntime {
         yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
       }
       compaction?.guard(options,true);
-      for await(const chunk of next()){context?.guard(options);feedback?.guard(options);compaction?.guard(options);yield chunk;}
+      const deliveryGuard=()=>{if(owned?.delivery){owned.delivery.guard();if(!owned.context.sourceItems().some(s=>s.owner==='task-delivery'&&s.item.id===owned.delivery!.id))throw new Error('Delivery material missing from context');}};
+      deliveryGuard();
+      const visible=new Map<number,number>();
+      for await(const chunk of next()){deliveryGuard();context?.guard(options);feedback?.guard(options);compaction?.guard(options);
+        if(!owned?.delivery){yield chunk;continue;}
+        if(chunk.type==='block-start'&&chunk.blockType==='tool-call'||chunk.type==='tool-call-delta'||chunk.type==='block-end'&&chunk.block.type==='tool-call')throw new Error('Delivery turn cannot call tools');
+        // Delivery never resumes provider reasoning/opaque replay blocks. Persist only final text.
+        if(chunk.type==='block-start'&&chunk.blockType==='text'){const index=visible.size;visible.set(chunk.index,index);yield {...chunk,index};}
+        else if(chunk.type==='text-delta'||chunk.type==='block-end'){const index=visible.get(chunk.index);if(index!==undefined){if(chunk.type==='block-end'&&chunk.block.type!=='text')throw new Error('Invalid delivery text block');yield {...chunk,index};}}
+        else if(chunk.type==='usage')yield chunk;
+        else if(chunk.type==='finish')yield {type:'finish',reason:chunk.reason.kind==='error'||chunk.reason.kind==='aborted'?{kind:chunk.reason.kind,failure:{code:'DELIVERY_MODEL_FAILED',message:'Delivery model did not complete'}}:chunk.reason};
+      }
+      deliveryGuard();
       context?.guard(options);
       feedback?.guard(options);
       compaction?.guard(options);
     });
   }
 
-  async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。'): Promise<RunResult> {
+  async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。',delivery?:RuntimeDelivery): Promise<RunResult> {
     signal.throwIfAborted();
     if(this.compactionBinding()&&!this.ctx.get('tokenMeter'))await (this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter)));
     let owned = this.handles.get(item.sessionId);
@@ -84,6 +100,7 @@ export class DshRuntime {
     if(!this.ctx.get('tokenMeter')&&agent.session.snapshotEvents().some(e=>pluginRecordOf(e)?.type==='plugin:dafeiyu/summary-manifest'))
       await (this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter)));
     if (agent.status !== 'idle') throw new Error('DSH conversation is busy outside the core');
+    if(delivery)owned.delivery=delivery;
     owned.context.begin(item,agent);
     owned.feedback.begin(item,agent);
     const disposers: (() => void)[] = [];
@@ -91,6 +108,7 @@ export class DshRuntime {
     const abort = (): void => agent.cancel({ kind: 'hook', reason: 'Dafeiyu turn cancelled' });
     signal.addEventListener('abort', abort, { once: true });
     try {
+      if(delivery)disposers.push(owned.scope.systemPrompt.section({name:'dafeiyu-task-delivery',order:22,interpolate:false,text:'本轮是当前任务的结果交付整理。依据 task-delivery 的已核验材料，以大肥鱼人格自然回答原问题；草稿不是要直接转发的执行器报告。保留事实、限定与不确定性，不新增结论，不重复工具操作，不声称消息已经发送。只输出准备发送的回答正文。'}));
       owned.compaction.begin(item,agent);
       // DSH restrict() filters inherited GLOBAL tools; locally registered tools remain visible.
       disposers.push(owned.scope.tools.restrict({ allow: [] }));
@@ -126,8 +144,12 @@ export class DshRuntime {
       if (!output || output.type !== 'assistant/message') throw new Error('DSH turn produced no final reply');
       const text = output.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
       if (!text) throw new Error('DSH turn produced no text');
-      return { text, sources: events.filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
+      const result:RunResult={ text, sources: events.filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
         .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })) };
+      if(delivery)await delivery.finalize(result,()=>{signal.throwIfAborted();delivery.guard();
+        const request=owned!.lastRequest;if(!request||!owned!.context.guard(request))throw new Error('Delivery context stale');owned!.feedback.guard(request);owned!.compaction.guard(request);
+        if(!owned!.context.sourceItems().some(s=>s.owner==='task-delivery'&&s.item.id===delivery.id))throw new Error('Delivery material missing');});
+      return result;
     } catch {
       throw new DshRunError(agent.session.snapshotEvents().slice(before)
         .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
@@ -137,6 +159,7 @@ export class DshRuntime {
       owned.compaction.end();
       owned.context.end();
       owned.feedback.end();
+      delete owned.delivery;delete owned.lastRequest;
       signal.removeEventListener('abort', abort);
       for (const dispose of disposers.reverse()) dispose();
       }

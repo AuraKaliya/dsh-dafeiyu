@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前项目版本0.18.0：contracts/core/memory 0.14.0完成D2表达判断、目标交付材料与干净上下文重建。多来源结论继承完整实际输入限制；独立生成与验证只读取目标问题和允许证据，来源/授权失效后旧材料退出。材料与草稿不自动进入聊天，均未获得发送权限。本机394项测试及虚构演示通过；本轮使用脚本模型，D3交付凭据与真实QQ接入仍待开发，服务器未修改。
+当前项目版本0.19.0：contracts/core/memory 0.15.0完成D3交付凭据与模拟闭环；journal/channel-simulator为0.4.0。先在目标DSH人格会话整理，再核验目标、来源、版本与授权，使用持久凭据发送最终正文；迟到、重复、撤销和不确定状态不会盲目重发。本机421项测试及模拟渠道演示通过；本轮使用虚构样本与脚本模型，真实QQ未接入，服务器未修改。
 
 ## 开始使用
 
@@ -55,6 +55,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [阶段D核心授权、检索与对外交付方案](docs/agent-memory-phase-d-plan.md)
 - [D1任务内部跨场景检索验收](docs/agent-memory-phase-d1.md)
 - [D2表达判断、独立交付材料与干净重建验收](docs/agent-memory-phase-d2.md)
+- [D3交付凭据与模拟渠道闭环验收](docs/agent-memory-phase-d3.md)
 - [第一阶段接口与实现边界](docs/phase-1.md)
 - [本地开发与后续部署流程](docs/development.md)
 - [验收记录](docs/acceptance.md)

@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-24T06:12:49.746Z",
+  "projectVersion": "0.19.0",
+  "samples": "fictional-only",
+  "model": "scripted-through-real-DSH-loop",
+  "channel": "@dafeiyu/channel-simulator",
+  "serverAccess": false,
+  "realQQ": false,
+  "realModel": false,
+  "targetPersonaSessionUsed": true,
+  "personaWordingSentInsteadOfDraft": true,
+  "privateInputsExcluded": true,
+  "simulatedTaskRepliesSent": 1,
+  "duplicateDidNotRegenerateOrResend": true,
+  "unknownOutcomeTerminal": true,
+  "revocationDuringPersonaBlocked": true,
+  "deliveryCredentialPersisted": true
+}

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { TaskDeliverySubmitSchema,TaskDeliveryStatusSchema } from '@dafeiyu/contracts';
+import type { TaskDeliveryControl } from '@dafeiyu/contracts';
 import { ExpressionPolicySchema,ExpressionPrepareSchema,ExpressionOpenSchema,ExpressionGenerateSchema,ExpressionResultSchema,ExpressionWithdrawSchema } from '@dafeiyu/contracts';
 import type { TaskExpressionProvider,TaskExpressionControl } from '@dafeiyu/contracts';
 import { TaskMemoryPolicySchema,TaskMemoryGrantSchema,TaskMemoryRevokeSchema,TaskMemoryQuerySchema,TaskMemoryOpenSchema,TaskMemorySelectSchema } from '@dafeiyu/contracts';
@@ -7,7 +9,7 @@ import { ConversationSchema,MemoryObservationSchema,TaskCreateSchema,TaskUpdateS
 import type { TaskReference,TaskController,TaskWorkTicket,TaskPluginAPI,TaskWorkspaceProvider,ObservationAuthority,Conversation,ActionContext } from '@dafeiyu/contracts';
 
 export function bindTaskMemoryProvider(p:TaskMemoryProvider):TaskMemoryProvider{return {policy:p.policy.bind(p),grant:p.grant.bind(p),check:p.check.bind(p),revoke:p.revoke.bind(p),recall:p.recall.bind(p),open:p.open.bind(p),select:p.select.bind(p)};}
-export function bindExpressionProvider(p:TaskExpressionProvider):TaskExpressionProvider{return {policy:p.policy.bind(p),prepare:p.prepare.bind(p),open:p.open.bind(p),generate:p.generate.bind(p),result:p.result.bind(p),withdraw:p.withdraw.bind(p)};}
+export function bindExpressionProvider(p:TaskExpressionProvider):TaskExpressionProvider{return {policy:p.policy.bind(p),prepare:p.prepare.bind(p),open:p.open.bind(p),generate:p.generate.bind(p),result:p.result.bind(p),withdraw:p.withdraw.bind(p),deliveryMaterial:p.deliveryMaterial.bind(p),verifyDelivery:p.verifyDelivery.bind(p)};}
 export function bindTaskProvider(p:TaskWorkspaceProvider):TaskWorkspaceProvider {return {
   current:p.current.bind(p),
   create:p.create.bind(p),read:p.read.bind(p),update:p.update.bind(p),join:p.join.bind(p),activate:p.activate.bind(p),link:p.link.bind(p),begin:p.begin.bind(p),
@@ -19,7 +21,8 @@ export function bindTaskProvider(p:TaskWorkspaceProvider):TaskWorkspaceProvider 
 export class TaskCoordinator {
   private readonly references=new WeakMap<TaskReference,{id:string;provider:TaskWorkspaceProvider}>();
   private readonly jobs=new WeakMap<TaskWorkTicket,{id:string;provider:TaskWorkspaceProvider;issuer:object;authority:ObservationAuthority}>();
-  constructor(private readonly agentId:string,private readonly provider:()=>TaskWorkspaceProvider|undefined,private readonly assertOpen:()=>void,private readonly memoryProvider:()=>TaskMemoryProvider|undefined,private readonly expressionProvider:()=>TaskExpressionProvider|undefined){}
+  constructor(private readonly agentId:string,private readonly provider:()=>TaskWorkspaceProvider|undefined,private readonly assertOpen:()=>void,private readonly memoryProvider:()=>TaskMemoryProvider|undefined,private readonly expressionProvider:()=>TaskExpressionProvider|undefined,
+    private readonly deliveryHost:{submit:(taskId:string,input:z.output<typeof TaskDeliverySubmitSchema>,signal:AbortSignal,guard:()=>void)=>Promise<Record<string,unknown>>;status:(taskId:string,id:string)=>Record<string,unknown>}){}
   private expression(){this.assertOpen();const p=this.expressionProvider();if(!p)throw new Error('Task expression provider unavailable');return p;}
   expressionPolicy(raw:unknown){return this.expression().policy(this.agentId,ExpressionPolicySchema.parse(raw));}
   private memory(){this.assertOpen();const p=this.memoryProvider();if(!p)throw new Error('Task memory provider unavailable');return p;}
@@ -47,7 +50,9 @@ export class TaskCoordinator {
       generate:async(raw:unknown,signal:AbortSignal=AbortSignal.timeout(60000))=>{this.reference(reference);const p=this.expression();const guard=()=>{this.reference(reference);if(this.expression()!==p)throw new Error('Task expression provider changed');};
         const result=await p.generate(this.agentId,id,ExpressionGenerateSchema.parse(raw),signal,guard);guard();return result;},
     });
-    return Object.freeze({reference,memory,expression,read:()=>{this.reference(reference);return provider.read(this.agentId,id);},
+    const delivery:TaskDeliveryControl=Object.freeze({submit:(raw:unknown,signal:AbortSignal=AbortSignal.timeout(60000))=>{this.reference(reference);return this.deliveryHost.submit(id,TaskDeliverySubmitSchema.parse(raw),signal,()=>this.reference(reference));},
+      status:(raw:unknown)=>{this.reference(reference);return this.deliveryHost.status(id,TaskDeliveryStatusSchema.parse(raw).deliveryId);}});
+    return Object.freeze({reference,memory,expression,delivery,read:()=>{this.reference(reference);return provider.read(this.agentId,id);},
       update:(raw:unknown)=>{this.reference(reference);return provider.update(this.agentId,id,TaskUpdateSchema.parse(raw));}});
   }
   forExtension(authorize:(c:Conversation,context?:ActionContext)=>ObservationAuthority,assertActive:()=>void):TaskPluginAPI {

@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-project",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -33,7 +33,8 @@
     "demo:observations": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-observations.mjs",
     "demo:task-workspaces": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-task-workspaces.mjs",
     "accept:task-memory": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-task-memory.mjs",
-    "demo:expression": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-expression.mjs"
+    "demo:expression": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-expression.mjs",
+    "demo:delivery": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-delivery.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
