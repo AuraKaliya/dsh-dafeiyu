@@ -19,15 +19,15 @@ const config={schemaVersion:1,profileId:'fixture',agent:{id:'dafeiyu'},paths:{co
   authorityPolicies:[{id:'local',producers:['host-cli'],actions:[] as string[],allowLocalWrite:false}]};
 const request={requestId:'one',title:'虚构任务',goal:'PRIVATE_TASK_SENTINEL 仅检验隔离，不对外发送。',policyId:'local'};
 let server:ReturnType<typeof createServer>|undefined,wss:InstanceType<typeof WebSocketServer>|undefined,sent=0,platformCalls=0;
-const capabilities=['qq-capabilities','single-capabilities','optional-capabilities'].includes(scenario??''),single=scenario==='single'||scenario==='single-capabilities',optional=scenario==='optional'||scenario==='optional-capabilities';
+const segmented=scenario==='qq-segments'||scenario==='qq-partial',capabilities=['qq-capabilities','single-capabilities','optional-capabilities'].includes(scenario??'')||segmented,single=scenario==='single'||scenario==='single-capabilities',optional=scenario==='optional'||scenario==='optional-capabilities';
 if(['optional','required','qq','qq-groups','single'].includes(scenario??'')||capabilities){
   config.paths.channels['channel-qq']='./data/qq';
   let port=1;
-  if(scenario==='qq'||scenario==='qq-groups'||scenario==='qq-capabilities'){
+  if(scenario==='qq'||scenario==='qq-groups'||scenario==='qq-capabilities'||segmented){
     server=createServer(async(req,res)=>{platformCalls++;if(req.headers.authorization!=='Bearer '+token){res.writeHead(401).end();return;}
       let data:unknown;if(req.url==='/get_login_info')data={user_id:12345678};else if(req.url==='/get_status')data={online:true};
       else if(req.url==='/get_group_list'){if(scenario==='qq-groups'){res.writeHead(503).end();return;}data=[{group_id:11223344,group_name:'虚构群'}];}
-      else if(req.url==='/send_private_msg'){sent++;data={message_id:100+sent};}else{res.writeHead(404).end();return;}
+      else if(req.url==='/send_private_msg'){sent++;data={message_id:100+sent};if(scenario==='qq-partial'&&sent===2){res.destroy();return;}}else{res.writeHead(404).end();return;}
       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data}));});
     wss=new WebSocketServer({server});wss.on('connection',socket=>socket.send(JSON.stringify({post_type:'message',self_id:12345678,message_id:10,message_type:'private',user_id:87654321,time:1792850000,message:[{type:'text',data:{text:'虚构QQ输入'}}],sender:{nickname:'虚构主人'}})));
     await new Promise<void>(resolve=>server!.listen(0,'127.0.0.1',resolve));const address=server.address();assert.ok(address&&typeof address!=='string');port=address.port;await writeFile(join(root,'token'),token);
@@ -45,6 +45,7 @@ const adapter=new ScriptedModel(async options=>{modelCalls++;assert.ok(['ready',
   if(scenario==='drain')await new Promise(resolve=>setTimeout(resolve,100));
   if(scenario==='cancel')await new Promise<void>((resolve,reject)=>{options.signal?.addEventListener('abort',()=>reject(new Error('FIXTURE_CANCELLED')),{once:true});});
   if(scenario==='qq-capabilities'){if(modelCalls===1)return call('qq_browse',{requestId:'host-read'});if(modelCalls===2)return call('qq_observe_select',{requestId:'host-choice',snapshotId:lastPage(options).snapshotId,mode:'none',reason:'Host仅验证观察链'});assert.equal(outcomes(options).at(-1)?.status,'succeeded');}
+  if(segmented)return textReply('LONG_HOST_REPLY_SENTINEL'+'鱼'.repeat(8500));
   return textReply('虚构的可见完成结果');});
 const phases:string[]=[],options:HostRuntimeOptions={coordination,adapter,mode:single?'single-run':'daemon',onPhase:(next,host)=>{phase=next;phases.push(next);
   if(next==='recovering'){assert.equal(modelCalls,bootCalls);if(scenario==='fault')throw new Error('FIXTURE_RECOVERY_FAILURE');assert.throws(()=>host.ctx.dafeiyuSimulator.send('room','提前输入',{id:'early'}),/HOST_NOT_READY/);}}};
@@ -56,6 +57,9 @@ try{
   }else{
     host=await Host.start(prepared,options);assert.equal(host.snapshot().accepting,true);
     if(optional){assert.equal(host.snapshot().phase,'degraded');assert.equal(platformCalls,0);assert.equal((await host.run(request)).state,'completed');}
+    else if(segmented){await entered;await host.core.whenIdle();assert.equal(modelCalls,1);assert.equal(sent,scenario==='qq-partial'?2:3);host.publish();
+      const snapshot=readHostStatus(prepared,coordination).snapshot;assert.deepEqual(snapshot?.services.qq?.delivery,{plans:1,pending:scenario==='qq-partial'?1:0,unknown:scenario==='qq-partial'?1:0});assert.ok(!JSON.stringify(snapshot).includes('LONG_HOST_REPLY_SENTINEL'));
+      assert.equal(host.core.journal.list()[0]?.state,scenario==='qq-partial'?'uncertain':'delivered');await host.close();assert.deepEqual(readHostStatus(prepared,coordination).snapshot?.services.qq?.delivery,snapshot?.services.qq?.delivery);}
     else if(scenario==='qq-capabilities'){await entered;await host.core.whenIdle();assert.equal(sent,1);assert.equal(modelCalls,3);host.publish();
       const saved=readHostStatus(prepared,coordination);assert.equal(saved.online,true);assert.equal(saved.snapshot?.services.memory?.sourceTracking,'configured');assert.equal(saved.snapshot?.services.qq?.capabilities,true);assert.ok(saved.snapshot?.features.includes('qq.browse.v1'));}
     else if(scenario==='qq'||scenario==='qq-groups'){const deadline=Date.now()+5000;while(sent===0&&Date.now()<deadline)await new Promise(r=>setTimeout(r,10));await host.core.whenIdle();assert.equal(sent,1);assert.equal(modelCalls,1);

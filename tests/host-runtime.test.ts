@@ -20,4 +20,6 @@ for(const [scenario,name] of [
   ['qq-capabilities','Host assembles QQ observations, tracked selection and accurate diagnostics'],
   ['single-capabilities','single-run skips QQ conversation-only policies and does not require channel credentials'],
   ['optional-capabilities','an absent optional QQ observation channel does not block unrelated native tasks'],
+  ['qq-segments','Host records complete segmented QQ delivery without exposing body in status'],
+  ['qq-partial','Host preserves unknown QQ segment counters through orderly shutdown'],
 ] as const)test(name,async()=>{const {stdout}=await execute(process.execPath,[resolve('build-tests/host-runtime-fixture.js'),scenario],{cwd:resolve('.'),timeout:20000,maxBuffer:200000});const report=JSON.parse(stdout.trim().split('\n').at(-1)!);assert.equal(report.passed,true);assert.equal(report.serverAccess,false);});
