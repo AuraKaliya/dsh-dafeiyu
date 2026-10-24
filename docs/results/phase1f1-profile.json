@@ -1,0 +1,20 @@
+{
+  "stage": "1F-1",
+  "at": "2026-10-24T15:35:43.596Z",
+  "kind": "real-files-sqlite-and-processes-no-model",
+  "serverAccess": false,
+  "realModelCalls": 0,
+  "realPlatformAccess": false,
+  "command": "npm.cmd test",
+  "tests": {
+    "total": 511,
+    "passed": 511,
+    "failed": 0,
+    "skipped": 0,
+    "newTests": 10,
+    "durationMs": 54904.7357
+  },
+  "sourceRevision": "07836fe",
+  "sourceWorktreeDirty": true,
+  "passed": true
+}

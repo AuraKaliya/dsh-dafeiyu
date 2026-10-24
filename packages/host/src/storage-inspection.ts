@@ -5,8 +5,9 @@ import { RUNTIME_APPLICATION_ID, RuntimeIdentitySchema } from '@dafeiyu/core/run
 import type { RuntimeIdentity } from '@dafeiyu/core/runtime-store';
 import { MEMORY_APPLICATION_ID } from '@dafeiyu/memory/store';
 
-export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq';
+export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query';
 const definitions:Record<Exclude<StorageKind,'journal'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
+  query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
   memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
   runtime:{app:RUNTIME_APPLICATION_ID,versions:[1,2],tables:['runtime_metadata','runtime_ownership','execution_requests','runs','run_operations','runtime_outbox']},
   delivery:{app:0x44464433,versions:[1],tables:['deliveries','events']},

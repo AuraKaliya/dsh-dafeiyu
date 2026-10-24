@@ -2,5 +2,5 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "lib", "composite": true },
   "include": ["src/**/*.ts"],
-  "references": [{"path":"../contracts"},{"path":"../core"},{"path":"../journal"},{"path":"../memory"}]
+  "references": [{"path":"../contracts"},{"path":"../core"},{"path":"../journal"},{"path":"../memory"},{"path":"../channel-qq"},{"path":"../channel-simulator"},{"path":"../timeline"}]
 }

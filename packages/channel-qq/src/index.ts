@@ -9,6 +9,7 @@ import WebSocket from 'ws';
 import { z } from 'zod';
 import { loopbackURL, OneBot, platformId } from './onebot.js';
 import { QqStore } from './store.js';
+export { QqStore } from './store.js';
 
 export const name = 'dafeiyu-channel-qq';
 export const inject = ['dafeiyu'];
@@ -21,6 +22,7 @@ const configSchema = z.strictObject({
   reconnectMs: z.number().int().min(100).max(60000).default(3000),
 });
 export type Config = z.input<typeof configSchema>;
+export const QqPluginConfigSchema=configSchema.omit({agentId:true,dataDir:true,lifecycleMode:true});
 const segmentSchema = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
 const messageSchema = z.object({
   post_type: z.literal('message'), self_id: platformId, message_id: platformId,

@@ -25,11 +25,13 @@ import type { TaskExpression } from './expression.js';
 import { taskRepository } from './task-repository-adapter.js';
 import { PersonaService } from './persona-service.js';
 export type { MemoryView } from './store.js';
+export { initializeMemoryStorage } from './storage-initialization.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
 const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), lifecycleMode:LifecycleModeSchema.default('legacy'), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional() });
+export const MemoryPluginConfigSchema=configSchema.omit({agentId:true,dataDir:true,lifecycleMode:true});
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
   sourceRefs: z.array(z.string().min(1).max(300)).min(1).max(8) };

@@ -30,6 +30,7 @@ import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
 export { readFoundation } from './foundation.js';
+export { initializeCoreStorage } from './storage-initialization.js';
 import type { StoredRun } from './runtime-store.js';
 import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider,PersonaProvider,ExecutionMemoryPort } from '@dafeiyu/contracts';
 export type { ExecutionOptions } from './execution-coordinator.js';

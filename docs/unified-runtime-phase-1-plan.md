@@ -2,6 +2,8 @@
 
 日期：2026-10-24（北京时间）。方案版本：1.1（人格成长与连续性修订）。
 
+1F实施补充：按[三个子步骤](phase1f-implementation-plan.md)推进；[1F-1配置、预检与初始化](phase1f1-profile-inspection.md)已完成，511项回归通过。1F-2／1F-3及1G仍待完成，下文方案原始设计状态保留历史含义。
+
 实施状态：**1A—1E已完成，1F—1G尚未完成**，结果见[1A验收](phase1a-adaptation.md)、[1B验收](phase1b-lifecycle.md)、[1C验收](phase1c-storage.md)、[1D验收](phase1d-execution.md)及下列1E记录。本方案编写时仅交付文档，原核验过程保留在第16节；当前实施进度以各子步骤验收为准。尚未创建正式Host运行入口、迁移真实数据库或切换QQ／服务器。
 
 1E进度：已完成[1E-1底色／契约／增量存储](phase1e1-foundation-storage.md)、[1E-2显式阶段状态](phase1e2-stage-persona.md)与[1E-3观察／贡献、TaskIntent及压缩连续性](phase1e3-execution-continuity.md)。当前501项回归通过，memory v8/runtime v2迁移复验通过；新底色用于有限的真实模型接口及压缩样例，不等同1G完整人格行为验收。正文中“拟／后续”保留方案提交基线，实际实现以各步验收及其接口细化为准。

@@ -15,6 +15,7 @@ export const inject = ['dafeiyu', 'sessionQuery'];
 const settingsSchema = z.strictObject({ agentId: z.string().min(1), maxPageChars: z.number().int().min(100).max(8000).default(2000),
   previewChars: z.number().int().min(50).max(1000).default(300),execution:z.boolean().default(false) });
 export type Config = z.input<typeof settingsSchema>;
+export const TimelinePluginConfigSchema=settingsSchema.omit({agentId:true});
 const openSchema = z.strictObject({ ref: z.string().max(300), offset: z.number().int().nonnegative().max(10_000_000).default(0),
   limit: z.number().int().min(1).max(8000).optional() });
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
