@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "tsc -b",
+    "host": "npm run build && node scripts/dafeiyu-host.mjs",
     "test": "npm run build && tsc -p tests/tsconfig.json && node --test build-tests/*.test.js",
     "demo": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo.mjs",
     "check": "npm test",
@@ -42,7 +43,8 @@
     "demo:migration": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-storage-migration.mjs",
     "accept:phase1d-execution": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1d-execution.mjs",
     "accept:phase1e2-persona": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1e2-persona.mjs",
-    "accept:phase1e3-continuity": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1e3-continuity.mjs"
+    "accept:phase1e3-continuity": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1e3-continuity.mjs",
+    "accept:phase1f-host": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1f-host.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",

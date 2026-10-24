@@ -34,6 +34,7 @@ const importedHome=process.env.DSH_HOME;
 export type HostPhase='created'|'inspected'|'opening'|'binding'|'recovering'|'ready'|'degraded'|'draining'|'failed'|'stopped';
 export interface HostRuntimeOptions {
   readonly mode?:'daemon'|'single-run';readonly coordination?:string;
+  readonly signal?:AbortSignal;
   /** Program-only test seam, forbidden for formal or real-provider profiles. */
   readonly adapter?:LlmAdapter;
   readonly onPhase?:(phase:HostPhase,host:ManagedHost)=>void;
@@ -75,8 +76,8 @@ export class ManagedHost {
   static async start(config:PreparedHostConfig,options:HostRuntimeOptions={}):Promise<ManagedHost>{
     const expected=resolve(config.paths.core,'dsh-home');if(!importedHome||resolve(importedHome)!==expected||!process.env.DSH_HOME||resolve(process.env.DSH_HOME)!==expected)throw new Error('HOST_DSH_HOME_NOT_BOUND_BEFORE_IMPORT');
     if(options.adapter&&(config.config.persona.kind!=='test'||!pluginConfig(config,'model-scripted')))throw new Error('HOST_TEST_ADAPTER_FORBIDDEN');
-    const host=new ManagedHost(config,options);try{await host.open();return host;}catch(error){host.error=stableCode(error);host.phase='failed';await host.close('startup-failed').catch(()=>{});throw new Error(host.error);}}
-  private mark(phase:HostPhase){this.phase=phase;this.options.onPhase?.(phase,this);}
+    const host=new ManagedHost(config,options);try{await host.open();return host;}catch(error){host.error=options.signal?.aborted?'HOST_START_CANCELLED':stableCode(error);host.phase='failed';await host.close('startup-failed').catch(()=>{});throw new Error(host.error);}}
+  private mark(phase:HostPhase){this.options.signal?.throwIfAborted();this.phase=phase;this.options.onPhase?.(phase,this);}
   private plugin(id:string,state:PluginHealth['state'],code:string|null=null){const health=this.health.find(p=>p.id===id);if(health){health.state=state;health.code=code;}}
   private async open(){
     const check=inspectHost(this.config,this.options.coordination);if(!check.ready)throw new Error(check.codes[0]??'HOST_INSPECTION_FAILED');this.mark('inspected');
@@ -94,7 +95,7 @@ export class ManagedHost {
     }else if(scripted){ctx.llm.registerAdapter(['local-test'],this.options.adapter??new FixedModel(scripted.response));this.plugin('model-scripted','ready');}
     const observe=this.options.onModelCall;ctx.on('llm/stream',async function*(options,next){const call={provider:options.provider??'',model:options.model??'',purpose:options.purpose??'task'};observe?.({...call,status:'started'});let okay=true;
       try{for await(const chunk of next()){if(chunk.type==='finish'&&['error','aborted','max-tokens'].includes(chunk.reason.kind))okay=false;yield chunk;}observe?.({...call,status:okay?'completed':'failed'});}catch(error){observe?.({...call,status:'failed'});throw error;}});
-    const route=this.config.config.modelRoutes.chat,modelInfo=await ctx.llm.resolveModelInfo(route.provider,route.model);
+    const route=this.config.config.modelRoutes.chat,modelInfo=await ctx.llm.resolveModelInfo(route.provider,route.model,this.options.signal);
     if(route.reasoningEffort&&!modelInfo.reasoning?.efforts.some(e=>e.id===route.reasoningEffort))throw new Error('HOST_REASONING_ROUTE_UNSUPPORTED');
     await ctx.plugin(Query,{path:this.config.paths.query,openAt:'first-search'});
     const {compactionInputTokens:inputTokens,...context}=this.config.config.context;
@@ -115,7 +116,7 @@ export class ManagedHost {
     if(this.qqValue){await this.qqValue.start();const deadline=Date.now()+6000;while(this.qqValue.getStatus().state==='starting'&&Date.now()<deadline)await delay(20);
       const state=this.qqValue.getStatus();if(state.state!=='online'){if(this.health.find(p=>p.id==='channel-qq')?.required)throw new Error('HOST_REQUIRED_QQ_UNAVAILABLE');
         this.qqValue.quiesce();await this.qqValue.close();this.qqValue=undefined;this.plugin('channel-qq','degraded',state.error??'HOST_QQ_UNAVAILABLE');}else this.plugin('channel-qq','ready');}
-    this.core.activate(resume);this.qqValue?.releaseIngress();this.mark(this.health.some(p=>p.state==='degraded')?'degraded':'ready');
+    this.options.signal?.throwIfAborted();this.core.activate(resume);this.qqValue?.releaseIngress();this.mark(this.health.some(p=>p.state==='degraded')?'degraded':'ready');
     this.publish();this.timer=setInterval(()=>{try{this.refresh();this.publish();}catch(error){this.error=stableCode(error,'HOST_DIAGNOSTICS_FAILED');void this.close('diagnostics-failed').catch(()=>{});}},this.config.config.diagnostics.snapshotIntervalMs);if(this.mode==='single-run')this.timer.unref();
   }
   private refresh(){if(!['ready','degraded'].includes(this.phase))return;const qq=this.qqValue?.getStatus();if(qq&&qq.state!=='online'){

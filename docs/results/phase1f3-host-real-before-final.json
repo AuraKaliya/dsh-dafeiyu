@@ -1,0 +1,64 @@
+{
+  "stage": "1F-3",
+  "kind": "real-model-real-dsh-through-host-cli-fictional-task",
+  "at": "2026-10-24T16:12:23.959Z",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "checks": [
+    {
+      "name": "offline-inspection-identifies-uninitialized-profile",
+      "passed": true
+    },
+    {
+      "name": "explicit-init-creates-only-selected-profile",
+      "passed": true
+    },
+    {
+      "name": "real-task-and-actual-intent-tool-through-cli",
+      "passed": true
+    },
+    {
+      "name": "new-process-repeat-reads-the-same-run-without-model-replay",
+      "passed": true
+    },
+    {
+      "name": "stopped-status-is-not-online-and-has-no-task-text",
+      "passed": true
+    },
+    {
+      "name": "dsh-persists-visible-content-without-reasoning-or-opaque-replay",
+      "passed": true
+    },
+    {
+      "name": "existing-credential-file-unchanged",
+      "passed": true
+    }
+  ],
+  "modelRequests": [
+    {
+      "started": 2,
+      "completed": 2,
+      "failed": 0
+    },
+    {
+      "started": 0,
+      "completed": 0,
+      "failed": 0
+    }
+  ],
+  "passed": true,
+  "operations": [
+    {
+      "action": "dafeiyu_task_intent",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "none"
+    }
+  ],
+  "finishedAt": "2026-10-24T16:12:29.774Z"
+}

@@ -1,0 +1,22 @@
+{
+  "stage": "1F-3",
+  "at": "2026-10-24T16:31:47.379Z",
+  "kind": "real-cli-processes-sqlite-scripted-model",
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "command": "npm.cmd test",
+  "tests": {
+    "total": 529,
+    "passed": 529,
+    "failed": 0,
+    "skipped": 0,
+    "newTests": 7,
+    "durationMs": 61433.852
+  },
+  "realModelReport": "phase1f3-host-real.json",
+  "consoleReport": "phase1f3-host-console.json",
+  "sourceRevision": "6c680d6",
+  "sourceWorktreeDirty": true,
+  "binHelpVerified": true,
+  "passed": true
+}

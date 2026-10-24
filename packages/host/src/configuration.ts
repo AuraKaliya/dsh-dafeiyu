@@ -67,7 +67,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     const declared=[file,...[config.paths.core,config.paths.memory,config.paths.sessions,config.paths.query,...Object.values(config.paths.channels),config.persona.fixedFile].map(path=>resolve(base,path))];
     const prepared:PreparedHostConfig={file,config,hash:runtimeHash({config,paths,plugins}),foundation:{hash:foundation.version,identity:foundation.fileIdentity},paths,plugins,order,resources,
       declarations:declared.map(path=>({path,identity:pathIdentity(path)}))};freeze(prepared);return prepared;
-  }catch(error){if(error instanceof Error&&/^HOST_[A-Z0-9_]+$/.test(error.message))throw error;if(error instanceof Error&&/^DEPENDENCY_[A-Z0-9_]+$/.test(error.message))throw new Error('HOST_'+error.message);throw new Error('HOST_CONFIG_INVALID');}
+  }catch(error){if(error instanceof Error&&/^HOST_[A-Z0-9_]+$/.test(error.message))throw error;if(error instanceof Error&&error.message==='FOUNDATION_INVALID')throw new Error('HOST_FOUNDATION_INVALID');if(error instanceof Error&&/^DEPENDENCY_[A-Z0-9_]+$/.test(error.message))throw new Error('HOST_'+error.message);throw new Error('HOST_CONFIG_INVALID');}
 }
 export function pluginConfig<P extends PluginId>(prepared:PreparedHostConfig,id:P):z.output<(typeof pluginSchemas)[P]>|undefined{
   // The key selects both the schema and the result; TypeScript cannot retain that generic correlation.

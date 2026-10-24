@@ -1,0 +1,18 @@
+{
+  "stage": "1F-3",
+  "kind": "real-windows-console-ctrl-c-scripted-profile",
+  "serverAccess": false,
+  "realModelCalls": 0,
+  "realPlatformAccess": false,
+  "at": "2026-10-24T16:13:32.471Z",
+  "finishedAt": "2026-10-24T16:13:51.933Z",
+  "checks": {
+    "liveStatus": true,
+    "concurrentStartRejected": true,
+    "stoppedAfterCtrlC": true,
+    "storesReleased": true
+  },
+  "outerTerminalExitCode": 1,
+  "terminalExitClassification": "interrupted; outer PowerShell session returned 1, not recorded as a normal zero exit",
+  "passed": true
+}

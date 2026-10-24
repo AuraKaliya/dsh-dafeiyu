@@ -1,0 +1,84 @@
+{
+  "stage": "1F-3",
+  "kind": "real-model-real-dsh-through-host-cli-fictional-task",
+  "at": "2026-10-24T16:25:37.368Z",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "checks": [
+    {
+      "name": "offline-inspection-identifies-uninitialized-profile",
+      "passed": true
+    },
+    {
+      "name": "explicit-init-creates-only-selected-profile",
+      "passed": true
+    },
+    {
+      "name": "real-task-and-actual-intent-tool-through-cli",
+      "passed": true
+    },
+    {
+      "name": "new-process-repeat-reads-the-same-run-without-model-replay",
+      "passed": true
+    },
+    {
+      "name": "stopped-status-is-not-online-and-has-no-task-text",
+      "passed": true
+    },
+    {
+      "name": "dsh-persists-visible-content-without-reasoning-or-opaque-replay",
+      "passed": true
+    },
+    {
+      "name": "existing-credential-file-unchanged",
+      "passed": true
+    }
+  ],
+  "modelRequests": [
+    {
+      "started": 2,
+      "completed": 2,
+      "failed": 0
+    },
+    {
+      "started": 0,
+      "completed": 0,
+      "failed": 0
+    }
+  ],
+  "passed": true,
+  "node": "24.13.0",
+  "sqlite": "3.50.4",
+  "sourceRevision": "6c680d6021cbe33df1da15e76918f17b91eead4c",
+  "sourceWorktreeDirty": true,
+  "configHash": "ffffce7f5caff8c6565c3cbf54f570e9ca94726f03f3b0e10f1bb8cf28f56e7d",
+  "foundationHash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a",
+  "plugins": [
+    {
+      "id": "model-deepseek",
+      "version": "0.2.1-rc.2"
+    },
+    {
+      "id": "timeline",
+      "version": "0.8.0"
+    },
+    {
+      "id": "memory",
+      "version": "0.15.0"
+    }
+  ],
+  "operations": [
+    {
+      "action": "dafeiyu_task_intent",
+      "state": "finished",
+      "status": "succeeded",
+      "effects": "none"
+    }
+  ],
+  "finishedAt": "2026-10-24T16:25:42.439Z"
+}

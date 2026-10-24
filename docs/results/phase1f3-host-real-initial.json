@@ -1,0 +1,34 @@
+{
+  "stage": "1F-3",
+  "kind": "real-model-real-dsh-through-host-cli-fictional-task",
+  "at": "2026-10-24T16:11:52.069Z",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "checks": [
+    {
+      "name": "offline-inspection-identifies-uninitialized-profile",
+      "passed": false
+    },
+    {
+      "name": "explicit-init-creates-only-selected-profile",
+      "passed": true
+    },
+    {
+      "name": "dsh-persists-visible-content-without-reasoning-or-opaque-replay",
+      "passed": false
+    },
+    {
+      "name": "existing-credential-file-unchanged",
+      "passed": true
+    }
+  ],
+  "modelRequests": [],
+  "passed": false,
+  "error": "HOST_INITIALIZATION_ACCEPTANCE_FAILED",
+  "finishedAt": "2026-10-24T16:11:52.826Z"
+}

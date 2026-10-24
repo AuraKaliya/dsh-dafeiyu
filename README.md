@@ -1,8 +1,8 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前项目版本0.19.0：contracts/core/memory 0.15.0完成D3交付凭据与模拟闭环；journal/channel-simulator为0.4.0。先在目标DSH人格会话整理，再核验目标、来源、版本与授权，使用持久凭据发送最终正文；迟到、重复、撤销和不确定状态不会盲目重发。本机421项测试及模拟渠道演示通过；本轮使用虚构样本与脚本模型，真实QQ未接入，服务器未修改。
+当前仓库包版本仍为0.19.0，Host为0.1.0；正式阶段版本与标签在1G统一验收后处理。统一运行入口已可用，见[本地使用说明](docs/host-usage.md)。真实QQ新任务流程和服务器切换尚未实施。
 
-第一阶段实施进度：1A—1E已完成。1F已完成[1F-1配置／预检／初始化](docs/phase1f1-profile-inspection.md)和[1F-2运行装配](docs/phase1f2-managed-runtime.md)，当前522项回归通过；1F-3命令入口与有限真实验收、1G完整场景验收仍待完成。1A音画探针单独记录，现有QQ和服务器未切换。
+第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，当前529项回归通过。1G完整场景与资源验收仍待完成；1A音画探针单独记录，现有QQ和服务器未切换。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
@@ -24,6 +24,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 
 | 包 | 职责 |
 |---|---|
+| `@dafeiyu/host` | 本地配置、插件装配、预检／初始化／迁移、常驻与一次性运行、健康状态及排空关闭 |
 | `@dafeiyu/contracts` | 版本化接口、消息校验、能力和事件类型 |
 | `@dafeiyu/journal` | 本地 SQLite、接收去重、会话映射、交付状态、时序与因果事件 |
 | `@dafeiyu/core` | DSH 主插件；人格、会话、能力注册、上下文贡献协调与预算、旧快照退出、交付 |
@@ -37,7 +38,9 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [大肥鱼人格成长与连续性方案（1.0）](docs/persona-growth-continuity-plan.md)：爱世界的底色、阶段人格、独立判断与任务责任、污染／漂移防护、压缩接续、数据演进与验收。
 - [本轮人格方案文档核验](docs/persona-growth-continuity-review.md)：文档范围、既有代码回归、链接／编号检查和原有修改保留；不作为新功能验收。
 - [大肥鱼统一运行、唤醒与插件协作接口方案（1.2）](docs/unified-runtime-wakeup-plugin-plan.md)：渠道／能力分离、自主活动、记忆E、音画理解、人格职责及各阶段依赖；按阶段实施，尚未整体完成。
-- [第一阶段：核心与统一运行入口开发方案（1.1）](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、底色与阶段状态、无聊天任务、增量迁移与验收；1A—1E完成，1F—1G待实施。
+- [第一阶段：核心与统一运行入口开发方案（1.1）](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、底色与阶段状态、无聊天任务、增量迁移与验收；1A—1F完成，1G待实施。
+- [本地统一入口使用说明](docs/host-usage.md)：配置模板、命令、诊断、迁移与数据保护。
+- [1F统一入口实施拆分](docs/phase1f-implementation-plan.md)及[最终验收](docs/phase1f3-cli-acceptance.md)：三个子步骤独立测试、记录和提交，真实模型／模拟模型／实际终端分开计量。
 - [第一阶段1A适配前提验收](docs/phase1a-adaptation.md)：DSH程序来源、真实模型工具续轮与持久化、真实图像和本地音频探针。
 - [第一阶段1B接口与生命周期验收](docs/phase1b-lifecycle.md)：v2/v3兼容、启动准入、恢复／激活分离、延迟分析与QQ连接。
 - [第一阶段1C存储与迁移验收](docs/phase1c-storage.md)：Run账本、Task事件、增量schema、只读预检、备份和中断续接；使用虚构旧库。

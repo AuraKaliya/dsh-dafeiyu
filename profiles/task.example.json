@@ -1,0 +1,7 @@
+{
+  "requestId": "local-example-001",
+  "title": "统一入口的虚构样例",
+  "goal": "这是本机接口样例，不代表实际生活经历。简要说明你目前可以执行的任务范围，不声称做过未执行的操作。",
+  "policyId": "local-task",
+  "inputRefs": []
+}

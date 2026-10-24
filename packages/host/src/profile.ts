@@ -10,7 +10,7 @@ import { QqStore } from '@dafeiyu/channel-qq';
 import { inspectStorage } from './storage-inspection.js';
 import type { StorageKind,StorageInspection } from './storage-inspection.js';
 import { claim,conflict } from './coordination.js';
-import { assertPaths } from './configuration.js';
+import { assertPaths,pluginConfig } from './configuration.js';
 import type { PreparedHostConfig } from './configuration.js';
 import { pathIdentity,physicalPath,within } from './paths.js';
 
@@ -59,6 +59,7 @@ export function inspectHost(config:PreparedHostConfig,coordination?:string,ownIn
         if(db.prepare(sql).all().some(row=>row.id!==identity.agentId))codes.push('HOST_AGENT_BINDING_MISMATCH');}finally{db.close();}}
     return {name:item.name,...inspection};});
   if(!manifest&&!hasMigration)codes.push('HOST_INITIALIZATION_REQUIRED');
+  const model=pluginConfig(config,'model-deepseek');if(model&&(!existsSync(model.credentialStore)||!statSync(model.credentialStore).isFile()))codes.push('HOST_CREDENTIAL_FILE_MISSING');
   const plugins=config.plugins.map(p=>{const version=packageVersion(p.id);if(p.enabled&&!version)codes.push('HOST_PACKAGE_UNAVAILABLE');else if(p.enabled&&version!==versions[p.id])codes.push('HOST_PACKAGE_VERSION_MISMATCH');return {id:p.id,enabled:p.enabled,required:p.required,version,state:p.enabled?'configured' as const:'disabled' as const};});
   const [major,minor]=process.versions.node.split('.').map(Number);if(major!==24||minor!<13)codes.push('HOST_NODE_VERSION_UNSUPPORTED');
   return {schemaVersion:1,...identity,configHash:config.hash,foundationHash:config.foundation.hash,ready:codes.length===0,canInitialize:!occupied&&empty(config),codes:[...new Set(codes)],occupied,stores,plugins,order:config.order};
