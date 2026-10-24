@@ -22,6 +22,7 @@ import { MemorySourcePolicy } from './source-policy.js';
 import type { CompactionScope } from '@dafeiyu/contracts';
 import type { TaskWorkspace } from './task-workspace.js';
 import type { TaskExpression } from './expression.js';
+import { taskRepository } from './task-repository-adapter.js';
 export type { MemoryView } from './store.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
@@ -58,6 +59,7 @@ export class MemoryService extends Service {
   private closed = false;
   private readonly gate=new ServiceGate();
   private closing:Promise<void>|undefined;
+  private unbindRepository:(()=>void)|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
     this.config = configSchema.parse(config);
@@ -126,6 +128,8 @@ export class MemoryService extends Service {
         ...(this.feedbackArchive?{feedbackProvider:this.feedbackArchive}:{}) });
     } catch (error) { this.feedbackArchive?.close();this.working?.close();void this.analysis?.close(); this.retrieval?.close(); this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'memory.close');
+    if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
+      ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();}));
     ctx.effect(()=>ctx.dafeiyu.onReady(()=>{if(this.gate.active)this.analysis?.start();}),'memory.core-ready');
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
@@ -141,7 +145,7 @@ export class MemoryService extends Service {
   async whenIdle():Promise<void>{await this.analysis?.whenIdle();}
   close():Promise<void>{
     if(this.closing)return this.closing;
-    this.quiesce();this.closed=true;this.handle.dispose();
+    this.quiesce();this.closed=true;this.handle.dispose();this.unbindRepository?.();
     this.closing=(async()=>{try{await this.expression.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
     return this.closing;
   }

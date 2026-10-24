@@ -1,12 +1,15 @@
 import { z } from 'zod';
-import { ActionOutcomeSchema, ExtensionMetadataV3Schema, dependencyOrder } from '@dafeiyu/contracts';
+import { ActionOutcomeSchema, ExtensionMetadataV3Schema, dependencyOrder,redactJson } from '@dafeiyu/contracts';
 import type { ActionCapabilityV3, ExtensionV3, ExtensionHandleV3, ExecutionContextV3, ActionOutcome, Json, ContextContributorV3 } from '@dafeiyu/contracts';
+import { toolParameters } from './tool-schema.js';
 
 interface ReservedNames { ids: readonly string[]; actions: readonly string[]; channels: readonly string[] }
 export interface BoundActionV3 {
   readonly id: string; readonly owner: string; readonly version: string; readonly description: string;
   readonly input: Record<string, unknown>; readonly effects: ActionCapabilityV3['effects']; readonly requiresTask: boolean;
+  readonly parameters:ReturnType<typeof toolParameters>;
   readonly active: () => boolean;
+  validateInput(raw:unknown):Json;
   execute(raw: unknown, context: ExecutionContextV3): Promise<ActionOutcome>;
 }
 interface Entry {
@@ -36,6 +39,7 @@ export class CapabilityRegistryV3 {
   actionNames(): string[] { return this.actions().map(action => action.id); }
   channelKeys(): string[] { return [...this.entries.values()].flatMap(entry => [...entry.channels]); }
   ids(): string[] { return [...this.entries.keys()]; }
+  contexts(){return [...this.entries.values()].filter(entry=>entry.active).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,context,active:()=>entry.active&&entry.ready()})));}
   actions(): BoundActionV3[] { return [...this.entries.values()].filter(entry => entry.active).flatMap(entry => [...entry.actions]); }
   checkReady(available: readonly string[] = []): void {
     dependencyOrder([...this.entries.values()].filter(entry => entry.active).map(entry => entry.metadata), available);
@@ -59,18 +63,21 @@ export class CapabilityRegistryV3 {
       if (input.type !== 'object' || input.additionalProperties !== false) throw new Error('V3_SCHEMA_MUST_BE_STRICT');
       assertStrictSchema(input);
       freezeTree(input);
+      const parameters=toolParameters(input);freezeTree(parameters);
       const parseInput = action.inputSchema.parse.bind(action.inputSchema), parseOutput = action.outputSchema.parse.bind(action.outputSchema), execute = action.execute.bind(action);
-      bound.push(Object.freeze({ ...meta, owner: metadata.id, input: Object.freeze(input), active: () => entry.active,
-        execute: async (raw: unknown, context: ExecutionContextV3) => {
+      const validateInput=(raw:unknown):Json=>{let parsed:Json;try{parsed=z.json().parse(parseInput(raw));}catch{throw new Error('INVALID_INPUT');}if(Buffer.byteLength(JSON.stringify(parsed),'utf8')>128000)throw new Error('ACTION_INPUT_TOO_LARGE');return parsed;};
+      bound.push(Object.freeze({ ...meta, owner: metadata.id, input: Object.freeze(input),parameters, active: () => entry.active&&entry.ready(),validateInput,
+        execute: async (raw: unknown, context: ExecutionContextV3):Promise<ActionOutcome> => {
           if (!entry.active || !entry.ready()) throw new Error('CAPABILITY_UNAVAILABLE');
           context.signal.throwIfAborted();
           if (meta.requiresTask && !context.taskId) throw new Error('TASK_REQUIRED');
-          const parsed: Json = z.json().parse(parseInput(raw));
-          if (Buffer.byteLength(JSON.stringify(parsed), 'utf8') > 128000) throw new Error('ACTION_INPUT_TOO_LARGE');
+          const parsed=validateInput(raw);
           const result = ActionOutcomeSchema.parse(await execute(parsed, context));
           if (result.data !== null) result.data = z.json().parse(parseOutput(result.data));
-          context.signal.throwIfAborted();
-          if (!entry.active) throw new Error('CAPABILITY_UNAVAILABLE');
+          // Preserve a returned receipt even if cancellation/unload arrived while the operation ran.
+          // The coordinator persists the fact before checking continued admission.
+          if(Buffer.byteLength(JSON.stringify(result),'utf8')>128000)throw new Error('ACTION_RESULT_TOO_LARGE');
+          if(redactJson(z.json().parse(result)).redacted)return {status:'partial',effects:result.effects,completeness:'partial',data:null,sources:[],receipts:[],errorCode:'PRIVATE_CONTENT_OMITTED'};
           return result;
         } }));
     }

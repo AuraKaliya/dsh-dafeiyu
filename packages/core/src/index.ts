@@ -23,6 +23,15 @@ import { TaskDelivery } from './task-delivery.js';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
 import { CapabilityRegistryV3 } from './registry-v3.js';
+import { ExecutionCoordinator,ExecutionOptionsSchema } from './execution-coordinator.js';
+import type { ExecutionOptions } from './execution-coordinator.js';
+import { RuntimeStore } from './runtime-store.js';
+import { RunScheduler } from './run-scheduler.js';
+import { ConversationRuns } from './conversation-run.js';
+import type { StoredRun } from './runtime-store.js';
+import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider } from '@dafeiyu/contracts';
+export type { ExecutionOptions } from './execution-coordinator.js';
+export { EXECUTION_MESSAGE_SOURCE } from './native-runtime.js';
 export type { CompactionBinding } from './compaction-runtime.js';
 export { readCompactionEvents } from './compaction-runtime.js';
 export { readProvenance } from './provenance.js';
@@ -62,6 +71,12 @@ export class DafeiyuService extends Service {
   private readonly gate = new ServiceGate();
   private readonly readyListeners = new Set<() => void>();
   private readonly registryV3 = new CapabilityRegistryV3();
+  private repositoryPort:TaskRepositoryPort|undefined;
+  private executions:ExecutionCoordinator|undefined;
+  private runStore:RuntimeStore|undefined;
+  private scheduler:RunScheduler|undefined;
+  private executionRecovered=false;
+  private conversationRuns:ConversationRuns|undefined;
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'dafeiyu');
@@ -74,7 +89,7 @@ export class DafeiyuService extends Service {
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
       (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text),this.config.agentId,()=>this.compactionBinding(),
-      (item,data,seqs)=>{this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});});
+      (item,data,seqs)=>{this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.config.lifecycleMode==='managed');
     try{this.taskDelivery=new TaskDelivery(resolve(this.config.dataDir,'delivery.sqlite'),{agentId:this.config.agentId,journal:this.journal,contexts:this.contexts,runtime:this.runtime,signal:this.controller.signal,
       turnTimeoutMs:this.config.turnTimeoutMs,deliveryTimeoutMs:this.config.deliveryTimeoutMs,assertOpen:()=>this.assertOpen(),persona:()=>this.persona(),model:()=>this.analysisModelRoute(),
       sourceTracking:()=>!!this.compactionBinding()?.provider.sources,
@@ -88,6 +103,7 @@ export class DafeiyuService extends Service {
     this.assertOpen();
     if(this.gate.state==='recovered'||this.gate.active)return;
     if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');
+    if(this.executions&&!this.executionRecovered)throw new Error('EXECUTION_RECOVERY_REQUIRED');
     this.taskDelivery.recover();
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
@@ -106,10 +122,11 @@ export class DafeiyuService extends Service {
     this.assertOpen();
     if(this.gate.active)return;
     if([...this.extensions.values()].some(entry=>entry.extension.lifecycleReady&&!entry.extension.lifecycleReady()))throw new Error('DEPENDENCY_UNAVAILABLE');
-    this.registryV3.checkReady(['core.registration.v1','lifecycle.managed.v1','context.conversation.v1']);
+    this.registryV3.checkReady(this.features());
     this.gate.activate();
     try{for(const listener of this.readyListeners)listener();}catch(error){this.gate.quiesce();throw error;}
     for(const item of this.journal.list(['accepted','reply-ready']))if(this.extensions.get(item.extensionId)?.active)this.schedule(item);
+    this.executions?.activate();
   }
   onReady(listener:()=>void):()=>void {
     this.assertOpen();this.readyListeners.add(listener);if(this.accepting)listener();
@@ -117,20 +134,41 @@ export class DafeiyuService extends Service {
   }
   quiesce():void {this.gate.quiesce();}
   get lifecycleState(){return this.gate.state;}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.wake-ingress.v1']:[])];}
   get accepting(){return this.gate.active&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {
     try {
+      if(this.executions&&(!this.repositoryPort?.ready()||this.executions.health.error))return false;
       if([...this.extensions.values()].some(entry=>entry.extension.lifecycleReady&&!entry.extension.lifecycleReady()))return false;
-      this.registryV3.checkReady(['core.registration.v1','lifecycle.managed.v1','context.conversation.v1']);return true;
+      this.registryV3.checkReady(this.features());return true;
     }catch{return false;}
   }
   private assertAccepting():void {this.assertOpen();this.gate.assertActive();if(!this.dependenciesReady())throw new Error('DEPENDENCY_UNAVAILABLE');}
+  bindTaskRepository(port:TaskRepositoryPort):()=>void {
+    this.assertOpen();if(this.repositoryPort)throw new Error('DUPLICATE_PROVIDER');const bound:TaskRepositoryPort=Object.freeze({ready:port.ready.bind(port),create:port.create.bind(port),findRequest:port.findRequest.bind(port),
+      readState:port.readState.bind(port),readSelectedInputs:port.readSelectedInputs.bind(port),update:port.update.bind(port)});this.repositoryPort=bound;
+    return ()=>{if(this.repositoryPort===bound)this.repositoryPort=undefined;};
+  }
+  configureExecution(raw:ExecutionOptions):void {
+    this.assertOpen();if(this.config.lifecycleMode!=='managed'||this.gate.state!=='registered'||this.executions)throw new Error('SERVICE_LIFECYCLE_CONFLICT');
+    const options=ExecutionOptionsSchema.parse(raw),store=new RuntimeStore(resolve(this.config.dataDir,'runtime.sqlite'),{agentId:this.config.agentId,profileId:options.profileId},{create:options.createStore});
+    this.runStore=store;this.scheduler=new RunScheduler(options.maxConcurrentRuns);
+    this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId);
+    this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,
+      repository:()=>this.repositoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
+      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal});
+  }
+  async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}
+  executionProducer(id:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id);}
+  bindWakeAuthority(provider:WakeAuthorityProvider){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindWake(provider);}
+  executionAuthority(context:ExecutionContextV3,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authority(context,pluginId);}
+  executionEvents(context:ExecutionContextV3,pluginId:string){const authority=this.executionAuthority(context,pluginId);if(authority.scope.kind!=='task')throw new Error('UNSUPPORTED_EXECUTION_ORIGIN');return this.journal.executionEvents(authority.agentId,authority.scope.taskId);}
   registerExtensionV3(extension:ExtensionV3):ExtensionHandleV3 {
     this.assertOpen();
     const legacy=[...this.extensions.values()].map(entry=>entry.extension);
     const handle=this.registryV3.register(this.config.agentId,extension,{ids:legacy.map(value=>value.id),actions:legacy.flatMap(value=>(value.actions??[]).map(action=>action.name)),
       channels:legacy.flatMap(value=>(value.channels??[]).map(channel=>JSON.stringify([channel.channel,channel.account])))});
-    try{if(this.gate.active)this.registryV3.checkReady(['core.registration.v1','lifecycle.managed.v1','context.conversation.v1']);}catch(error){handle.dispose();throw error;}
+    try{if(this.gate.active)this.registryV3.checkReady(this.features());}catch(error){handle.dispose();throw error;}
     return handle;
   }
   private persona(): PersonaSnapshot {
@@ -406,27 +444,35 @@ export class DafeiyuService extends Service {
     return Object.fromEntries(Object.entries(parsed).filter((pair): pair is [string, string] => typeof pair[1] === 'string'));
   }
   private async process(id: string): Promise<void> {
+    const release=await this.scheduler?.acquire(true);
+    try{await this.processMessage(id);}finally{release?.();}
+  }
+  private async processMessage(id:string):Promise<void>{
     if (!this.accepting) return;
     let item = this.journal.get(id);
     const source = this.extensions.get(item.extensionId);
     if (!source?.active) return;
     if (item.state === 'accepted') {
       const accepted = this.journal.events(item.route).find(event => event.traceId === item.id && event.type === 'message.accepted');
-      const started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started', {}, accepted?.id ?? null));
-      let result;
+      let started:import('@dafeiyu/contracts').EventRecord|undefined,run:StoredRun|undefined,result;
       try {
         const persona = this.persona();
+        run=this.conversationRuns?.begin(item,persona,this.analysisModelRoute(),[...this.extensions.values()].map(entry=>({id:entry.extension.id,version:entry.extension.version})));
+        started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(this.config.turnTimeoutMs)]);
         const channel = source.extension.channels?.find(capability => capability.channel === item.message.conversation.channel && capability.account === item.message.conversation.account);
-        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description);
+        const nativeActions=run?this.executions?.conversationActions(run,source.extension.id,signal,()=>{if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');})??[]:[];
+        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description,undefined,nativeActions);
       } catch (error) {
-        this.journal.transition(item.id, 'processing', 'failed', { ...this.event(item, 'turn.failed', { code: 'TURN_FAILED', note: 'Earlier operations may have effects; no automatic replay' }, started.id),
+        if(run)this.conversationRuns?.fail(run);
+        this.journal.transition(item.id, this.journal.get(item.id).state, 'failed', { ...this.event(item, 'turn.failed', { code: 'TURN_FAILED', note: 'Earlier operations may have effects; no automatic replay' }, started?.id??null),
           sources: error instanceof DshRunError ? error.sources : [] });
         return;
       }
-      const reply: Reply = { id: `${item.id}:reply`, conversation: item.message.conversation, sourceMessageId: item.message.id, text: result.text };
-      this.journal.transition(item.id, 'processing', 'reply-ready', { ...this.event(item, 'turn.completed', {}, started.id), sources: result.sources }, reply);
+      if(run&&this.conversationRuns){this.conversationRuns.complete(run,item,result,started!.id);await this.conversationRuns.project();}
+      else{const reply: Reply = { id: `${item.id}:reply`, conversation: item.message.conversation, sourceMessageId: item.message.id, text: result.text };
+        this.journal.transition(item.id, 'processing', 'reply-ready', { ...this.event(item, 'turn.completed', {}, started!.id), sources: result.sources }, reply);}
       item = this.journal.get(id);
     }
     if (item.state !== 'reply-ready' || !item.reply) return;
@@ -454,11 +500,12 @@ export class DafeiyuService extends Service {
   }
   getStatus() {
     return { agentId: this.config.agentId, state: this.fatal ? 'error' : this.controller.signal.aborted ? 'closed' : this.gate.active?(this.dependenciesReady()?'ready':'degraded'):this.gate.state==='quiescing'?'draining':'composing',
-      lifecycle:this.gate.state,error: this.fatal, extensions: [...this.extensions.keys(),...this.registryV3.ids()], queuedRoutes: this.queues.size,
+      lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null, extensions: [...this.extensions.keys(),...this.registryV3.ids()], queuedRoutes: this.queues.size,
       messages: this.closed ? [] : this.journal.list().map(item => ({ id: item.id, state: item.state, sessionId: item.sessionId })) };
   }
   async whenIdle(): Promise<void> {
     while (this.queues.size) await Promise.all([...this.queues.values()]);
+    await this.executions?.whenIdle();
     if (this.fatal) throw new Error(this.fatal);
   }
   close(): Promise<void> {
@@ -466,8 +513,8 @@ export class DafeiyuService extends Service {
     this.quiesce();this.readyListeners.clear();this.registryV3.close();
     this.controller.abort();
     this.closing = (async () => {
-      await Promise.all([...this.queues.values()]);
-      try { await this.runtime.close(); } finally { this.taskDelivery.close();this.closed = true;this.gate.close(); this.journal.close(); }
+      try{await Promise.all([...this.queues.values()]);await this.executions?.whenIdle();}
+      finally{try { await this.runtime.close(); } finally { this.runStore?.close();this.taskDelivery.close();this.closed = true;this.gate.close(); this.journal.close(); }}
     })();
     return this.closing;
   }

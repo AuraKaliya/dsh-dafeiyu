@@ -94,6 +94,10 @@ export class TaskWorkspace {
       this.db.prepare('INSERT INTO task_revisions VALUES(?,?,?)').run(id,1,JSON.stringify(task));this.record(task,'task.created',{version:1});return {id};
     }).id;
   }
+  findCreateRequest(agentId:string,requestId:string):string|null {
+    const row=this.db.prepare("SELECT receipt FROM task_requests WHERE agent_id=? AND route='$task-coordinator' AND plugin='$core' AND request_id=?").get(agentId,requestId);
+    return row?z.object({id:z.uuid()}).parse(JSON.parse(string(row.receipt))).id:null;
+  }
   update(agentId:string,id:string,input:Parameters<TaskWorkspaceProvider['update']>[2]):Record<string,unknown>{
     return this.request({agentId,route:'$task-coordinator',pluginId:'$core'},input.requestId,{kind:'update',id,input},()=>{
       const task=this.task(agentId,id);if(task.version!==input.expectedVersion)throw new Error('task_version_conflict');

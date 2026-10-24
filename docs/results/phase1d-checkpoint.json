@@ -1,0 +1,27 @@
+{
+  "stage": "1D",
+  "status": "development-checkpoint-not-stage-acceptance",
+  "date": "2026-10-24",
+  "sourceBaseline": "a01f1da",
+  "model": "scripted",
+  "realDshAndSqlite": true,
+  "serverAccess": false,
+  "formalPersonaSelected": false,
+  "tests": {
+    "command": "npm test",
+    "total": 464,
+    "passed": 464,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 48862.4069,
+    "newExecutionTests": 12
+  },
+  "limitations": [
+    "No real model acceptance of the new execution coordinator yet",
+    "Execution memory, growth, task source retirement and compaction remain for 1E",
+    "Native timeline and broader v3/recovery cases still need acceptance",
+    "Formal Host startup remains for 1F",
+    "User requested discussion of Dafeiyu goals before choosing a formal persona"
+  ]
+}

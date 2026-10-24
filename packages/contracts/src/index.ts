@@ -18,6 +18,7 @@ export * from './lifecycle.js';
 export * from './execution.js';
 export * from './host-config.js';
 export * from './execution-event.js';
+export * from './execution-ports.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';

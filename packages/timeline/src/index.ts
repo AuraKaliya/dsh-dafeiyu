@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-session-query';
 import type {} from '@dafeiyu/core';
 import type {} from '@deepseek-ai/dsh-compaction';
 import { API_VERSION, TimelineQuerySchema, redactContent, redactJson } from '@dafeiyu/contracts';
-import type { ActionContext, ContextRequest,EventRecord, ExtensionHandle, Json, OperationScope, SourceRef, TimelineScope } from '@dafeiyu/contracts';
+import type { ActionContext, ContextRequest,EventRecord, ExtensionHandle, ExtensionHandleV3,ExecutionContextV3, Json, OperationScope, SourceRef, TimelineScope } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { eventMetadata, projectSession } from './projection.js';
@@ -13,7 +13,7 @@ import { eventMetadata, projectSession } from './projection.js';
 export const name = 'dafeiyu-timeline';
 export const inject = ['dafeiyu', 'sessionQuery'];
 const settingsSchema = z.strictObject({ agentId: z.string().min(1), maxPageChars: z.number().int().min(100).max(8000).default(2000),
-  previewChars: z.number().int().min(50).max(1000).default(300) });
+  previewChars: z.number().int().min(50).max(1000).default(300),execution:z.boolean().default(false) });
 export type Config = z.input<typeof settingsSchema>;
 const openSchema = z.strictObject({ ref: z.string().max(300), offset: z.number().int().nonnegative().max(10_000_000).default(0),
   limit: z.number().int().min(1).max(8000).optional() });
@@ -32,6 +32,7 @@ export class TimelineService extends Service {
   private readonly config: z.output<typeof settingsSchema>;
   private readonly handle: ExtensionHandle;
   private closed = false;
+  private readonly executionHandle:ExtensionHandleV3|undefined;
   constructor(ctx: Context, config: Config) {
     super(ctx, 'dafeiyuTimeline'); this.config = settingsSchema.parse(config);
     this.handle = ctx.dafeiyu.registerExtension({ id: 'timeline', version: '0.8.0', apiVersion: API_VERSION, agentId: this.config.agentId,
@@ -51,8 +52,14 @@ export class TimelineService extends Service {
             ...(args.offset === undefined ? {} : { offset: numberArgument(args.offset) }), ...(args.limit === undefined ? {} : { limit: numberArgument(args.limit) }) })),
         },
       ] });
-    ctx.effect(() => () => { this.closed = true; this.handle.dispose(); }, 'timeline.unregister');
+    if(this.config.execution)this.executionHandle=ctx.dafeiyu.registerExtensionV3({id:'timeline-execution',version:'1',protocolVersion:3,agentId:this.config.agentId,
+      requires:['execution.task.v1'],actions:[{id:'dafeiyu_execution_events',version:'1',description:'读取当前内部任务的操作事件；不读取其它任务或聊天，不重新执行工具。返回独立的execution-event引用。',effects:'read',requiresTask:true,
+        inputSchema:z.strictObject({beforeSeq:z.number().int().nonnegative().optional(),limit:z.number().int().min(1).max(30).default(10)}),outputSchema:z.json(),
+        execute:async(raw,context)=>{const input=z.object({beforeSeq:z.number().optional(),limit:z.number()}).parse(raw),events=this.executionEvents(context).filter(event=>input.beforeSeq===undefined||event.seq<input.beforeSeq).reverse().slice(0,input.limit);
+          return {status:'succeeded',effects:'none',completeness:'complete',data:toJson(events.map(event=>({...event,ref:`dafeiyu:execution-event:${event.id}`}))),sources:[],receipts:[]};}}]});
+    ctx.effect(() => () => { this.closed = true; this.executionHandle?.dispose();this.handle.dispose(); }, 'timeline.unregister');
   }
+  executionEvents(context:ExecutionContextV3){if(this.closed)throw new Error('CAPABILITY_UNAVAILABLE');return this.ctx.dafeiyu.executionEvents(context,'timeline-execution');}
   private scope(context: ActionContext): OperationScope {
     if (this.closed) throw new Error('Timeline capability is unregistered');
     const scope = this.ctx.dafeiyu.scopeFor(context);

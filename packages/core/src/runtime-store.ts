@@ -110,6 +110,8 @@ export class RuntimeStore {
   }
   request(id:string){this.open();z.uuid().parse(id);const row=this.db.prepare('SELECT * FROM execution_requests WHERE id=?').get(id);if(!row)throw new Error('REQUEST_NOT_FOUND');
     return {id,producer:string(row.producer),requestId:string(row.request_id),payload:z.json().parse(JSON.parse(string(row.body))),taskId:row.task_id===null?null:z.uuid().parse(row.task_id),runId:row.run_id===null?null:z.uuid().parse(row.run_id)};}
+  findRequest(producer:string,requestId:string){this.open();const row=this.db.prepare('SELECT id FROM execution_requests WHERE producer=? AND request_id=?').get(producer,requestId);return row?this.request(string(row.id)):null;}
+  pendingRequests(){this.open();return this.db.prepare('SELECT id FROM execution_requests WHERE run_id IS NULL ORDER BY rowid').all().map(row=>this.request(string(row.id)));}
   bindTask(requestKey:string,taskId:string):void{z.uuid().parse(taskId);this.transaction(()=>{const request=this.request(requestKey);if(request.taskId&&request.taskId!==taskId)throw new Error('TASK_BINDING_CONFLICT');this.db.prepare('UPDATE execution_requests SET task_id=? WHERE id=? AND task_id IS NULL').run(taskId,requestKey);});}
   acceptRun(requestKey:string,raw:unknown):StoredRun {
     const definition=RunDefinitionSchema.parse(raw);if(definition.scope.agentId!==this.identity.agentId)throw new Error('RUN_AGENT_MISMATCH');
@@ -142,7 +144,7 @@ export class RuntimeStore {
   session(keyValue:string):string {key.parse(keyValue);return this.transaction(()=>{const old=this.db.prepare('SELECT session_id FROM execution_sessions WHERE session_key=?').get(keyValue);if(old)return string(old.session_id);const id=`dafeiyu-task-${randomUUID()}`;this.db.prepare('INSERT INTO execution_sessions VALUES(?,?)').run(keyValue,id);return id;});}
   transition(id:string,expectedVersion:number,to:RunState,error:string|null=null):StoredRun{if(to==='running'||to==='completed')throw new Error('USE_DEDICATED_TRANSITION');return this.transaction(()=>this.transitionInside(id,expectedVersion,to,error));}
   private transitionInside(id:string,version:number,to:RunState,error:string|null=null):StoredRun {
-    const current=this.get(id),allowed:Partial<Record<RunState,readonly RunState[]>>={accepted:['queued','cancelled','failed'],queued:['running','cancelled','failed'],running:['waiting','cancelling','completed','failed','interrupted'],cancelling:['cancelled','interrupted','failed'],waiting:['cancelled','interrupted']};
+    const current=this.get(id),allowed:Partial<Record<RunState,readonly RunState[]>>={accepted:['queued','cancelled','failed'],queued:['running','cancelled','failed'],running:['waiting','cancelling','completed','failed','interrupted'],cancelling:['waiting','cancelled','interrupted','failed'],waiting:['cancelled','interrupted']};
     if(current.version!==version)throw new Error('VERSION_CONFLICT');if(!allowed[current.state]?.includes(to))throw new Error('RUN_TRANSITION_FORBIDDEN');
     if(error!==null&&!/^[A-Z0-9_]{1,100}$/.test(error))throw new Error('INVALID_ERROR_CODE');
     const pending=this.operations(id).filter(operation=>operation.state==='started');
@@ -164,17 +166,31 @@ export class RuntimeStore {
   beginOperation(runId:string,callId:string,action:string,plugin:string,pluginVersion:string,input:unknown){
     key.parse(callId);key.parse(action);key.parse(plugin);key.parse(pluginVersion);const fingerprint=runtimeHash({action,plugin,pluginVersion,input});
     return this.transaction(()=>{const run=this.get(runId);if(run.state!=='running')throw new Error('RUN_NOT_RUNNING');const old=this.db.prepare('SELECT id,fingerprint FROM run_operations WHERE run_id=? AND call_id=?').get(runId,callId);
-      if(old){if(old.fingerprint!==fingerprint)throw new Error('IDEMPOTENCY_CONFLICT');return this.operation(string(old.id));}
+      if(old){if(old.fingerprint!==fingerprint)throw new Error('IDEMPOTENCY_CONFLICT');return {...this.operation(string(old.id)),reused:true};}
       const id=randomUUID(),eventId=this.event(runId,'operation.started',{operationId:id,action,plugin});
-      this.db.prepare("INSERT INTO run_operations(id,run_id,call_id,fingerprint,action,plugin,plugin_version,state,outcome,started_event) VALUES(?,?,?,?,?,?,?,'started',NULL,?)").run(id,runId,callId,fingerprint,action,plugin,pluginVersion,eventId);return this.operation(id);});
+      this.db.prepare("INSERT INTO run_operations(id,run_id,call_id,fingerprint,action,plugin,plugin_version,state,outcome,started_event) VALUES(?,?,?,?,?,?,?,'started',NULL,?)").run(id,runId,callId,fingerprint,action,plugin,pluginVersion,eventId);return {...this.operation(id),reused:false};});
   }
   operation(id:string){this.open();const row=this.db.prepare('SELECT * FROM run_operations WHERE id=?').get(id);if(!row)throw new Error('OPERATION_NOT_FOUND');
-    return {id,runId:string(row.run_id),callId:string(row.call_id),action:string(row.action),plugin:string(row.plugin),pluginVersion:string(row.plugin_version),state:z.enum(['started','finished','unknown']).parse(row.state),startedEventId:string(row.started_event),outcome:row.outcome===null?null:ActionOutcomeSchema.parse(JSON.parse(string(row.outcome)))};}
+    return {id,runId:string(row.run_id),callId:string(row.call_id),fingerprint:string(row.fingerprint),action:string(row.action),plugin:string(row.plugin),pluginVersion:string(row.plugin_version),state:z.enum(['started','finished','unknown']).parse(row.state),startedEventId:string(row.started_event),outcome:row.outcome===null?null:ActionOutcomeSchema.parse(JSON.parse(string(row.outcome)))};}
   operations(runId:string){this.open();return this.db.prepare('SELECT id FROM run_operations WHERE run_id=? ORDER BY ordinal').all(runId).map(row=>this.operation(string(row.id)));}
   finishOperation(id:string,raw:unknown){const outcome=ActionOutcomeSchema.parse(raw);return this.transaction(()=>{const operation=this.operation(id);if(operation.outcome){if(runtimeHash(operation.outcome)!==runtimeHash(outcome))throw new Error('OPERATION_OUTCOME_CONFLICT');return operation;}
     if(operation.state!=='started')throw new Error('OPERATION_UNCERTAIN');this.db.prepare("UPDATE run_operations SET state='finished',outcome=? WHERE id=?").run(JSON.stringify(outcome),id);this.event(operation.runId,`operation.${outcome.status}`,{operationId:id,effects:outcome.effects});return this.operation(id);});}
-  checkpoint(runId:string,body:unknown):string {const value=z.json().parse(body);return this.transaction(()=>{const run=this.get(runId);if(!['running','waiting'].includes(run.state))throw new Error('RUN_NOT_RUNNING');const id=randomUUID();this.db.prepare('INSERT INTO run_checkpoints VALUES(?,?,?)').run(id,runId,JSON.stringify(value));return id;});}
+  checkpoint(runId:string,body:unknown):string {const value=z.json().parse(body);return this.transaction(()=>{const run=this.get(runId);if(!['running','waiting','cancelling'].includes(run.state))throw new Error('RUN_NOT_RUNNING');const id=randomUUID();this.db.prepare('INSERT INTO run_checkpoints VALUES(?,?,?)').run(id,runId,JSON.stringify(value));return id;});}
   readCheckpoint(runId:string,id:string):Json {this.open();const row=this.db.prepare('SELECT body FROM run_checkpoints WHERE id=? AND run_id=?').get(id,runId);if(!row)throw new Error('CHECKPOINT_NOT_FOUND');return z.json().parse(JSON.parse(string(row.body)));}
+  checkpoints(runId:string){this.open();return this.db.prepare('SELECT id FROM run_checkpoints WHERE run_id=? ORDER BY rowid').all(runId).map(row=>string(row.id));}
+  control(runId:string,requestKey:string,version:number,to:RunState):StoredRun{return this.transaction(()=>{
+    const request=this.request(requestKey);if(request.runId){if(request.runId!==runId)throw new Error('IDEMPOTENCY_CONFLICT');return this.get(runId);}
+    const run=this.transitionInside(runId,version,to);this.db.prepare('UPDATE execution_requests SET run_id=?,task_id=? WHERE id=?').run(runId,run.definition.taskId,requestKey);return run;
+  });}
+  /** A durable chat projection belongs to the same transaction as the completed Run. */
+  completeWithProjection(id:string,version:number,result:unknown,projection:Record<string,Json>):StoredRun {
+    const ref=RunResultRefSchema.parse(result);return this.transaction(()=>{const run=this.get(id);
+      if(run.definition.origin.kind!=='message'||run.state!=='running'||run.version!==version||run.snapshot?.sessionId!==ref.sessionId)throw new Error('RESULT_BINDING_CONFLICT');
+      if(this.operations(id).some(operation=>operation.state==='started'))throw new Error('OPERATION_PENDING');
+      this.db.prepare('UPDATE runs SET result=? WHERE id=?').run(JSON.stringify(ref),id);
+      const completed=this.transitionInside(id,version,'completed');this.event(id,'conversation.result-ready',projection);return completed;
+    });
+  }
   recover():number{return this.transaction(()=>{let count=0;for(const run of this.list(['running','cancelling'])){
     for(const operation of this.operations(run.id))if(operation.state==='started'){this.db.prepare("UPDATE run_operations SET state='unknown' WHERE id=?").run(operation.id);this.event(run.id,'operation.unknown',{operationId:operation.id});}
     this.transitionInside(run.id,run.version,'interrupted','PROCESS_INTERRUPTED');count++;}return count;});}

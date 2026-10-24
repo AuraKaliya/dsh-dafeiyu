@@ -8,10 +8,11 @@ export const FeatureSchema = z.string().regex(/^[a-z][a-z0-9.-]{1,100}$/);
 export const ExtensionIdSchema = z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/);
 const requestId = z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/);
 const actor = z.string().min(1).max(100);
+export const WakeOriginSchema=z.strictObject({ kind: z.literal('wake'), producerId: ExtensionIdSchema, scheduleId: z.string().min(1).max(160), scheduleVersion: z.number().int().positive(), occurrenceId: requestId, dueAt: z.iso.datetime({ offset: true }) });
 export const RunOriginSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('message'), inboundId: z.uuid(), conversation: ConversationSchema }),
   z.strictObject({ kind: z.literal('native'), producerId: ExtensionIdSchema, requestId }),
-  z.strictObject({ kind: z.literal('wake'), producerId: ExtensionIdSchema, scheduleId: z.string().min(1).max(160), scheduleVersion: z.number().int().positive(), occurrenceId: requestId, dueAt: z.iso.datetime({ offset: true }) }),
+  WakeOriginSchema,
   z.strictObject({ kind: z.literal('continuation'), parentRunId: z.uuid(), checkpointId: z.uuid() }),
   z.strictObject({ kind: z.literal('maintenance'), producerId: ExtensionIdSchema, requestId }),
 ]);
