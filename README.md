@@ -30,6 +30,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 
 ## 文档
 
+- [大肥鱼统一运行、唤醒与插件协作接口方案（2026-10-24，设计文档）](docs/unified-runtime-wakeup-plugin-plan.md)：渠道／能力分离、自主活动、记忆E阶段、音画理解、依赖与数据迁移；功能尚未实施。
 - [架构与开发决策](docs/architecture.md)
 - [记忆、行为时间线、压缩和检索](docs/memory.md)
 - [记忆能力插件完整开发方案（2026-10-23）](docs/memory-plugin-plan.md)
