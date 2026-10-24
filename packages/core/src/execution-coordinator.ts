@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ExecutionRequestSchema,ResumeRunSchema,WakeRequestSchema,RunControlSchema,ProducerSchema,taskScopeKey,HostConfigSchema,TaskUpdateSchema,redactJson,RunOriginSchema } from '@dafeiyu/contracts';
-import type { TaskRepositoryPort,TaskRef,RunRef,RunOrigin,ExecutionContextV3,ExecutionGrant,ExecutionInput,WakeAuthorityProvider,PersonaSnapshot,HostConfig,Json } from '@dafeiyu/contracts';
+import type { TaskRepositoryPort,TaskRef,RunRef,RunOrigin,ExecutionContextV3,ExecutionGrant,ExecutionInput,WakeAuthorityProvider,HostConfig,Json } from '@dafeiyu/contracts';
+import type { FoundationSnapshot } from './foundation.js';
+import { foundationManifest } from './persona-manifest.js';
 import type { Journal } from '@dafeiyu/journal';
 import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import type { StoredRun } from './runtime-store.js';
@@ -18,7 +20,7 @@ export type ExecutionOptions=z.input<typeof ExecutionOptionsSchema>;
 interface Dependencies {
   agentId:string;store:RuntimeStore;journal:Journal;runtime:DshRuntime;registry:CapabilityRegistryV3;scheduler:RunScheduler;
   options:z.output<typeof ExecutionOptionsSchema>;repository:()=>TaskRepositoryPort|undefined;
-  accepting:()=>boolean;assertAccepting:()=>void;persona:()=>PersonaSnapshot;model:HostConfig['modelRoutes']['chat'];
+  accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
   turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number};signal:AbortSignal;
 }
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null}
@@ -137,7 +139,7 @@ export class ExecutionCoordinator {
           if(runtimeHash(repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules))!==inputHash)throw new Error('SOURCE_STALE');
           if(actions.some(action=>!action.active()))throw new Error('DEPENDENCY_UNAVAILABLE');};
         run=this.d.store.start(id,run.version,{sessionId,personaVersion:persona.version,model:this.d.model,registryVersion,authorityVersion,
-          inputs:inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey}))});
+          inputs:inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey}))},foundationManifest(run,persona,this.d.model));
         this.d.store.checkpoint(id,{kind:'run-start',intentVersion:task.epoch});this.flushEvents();
         const view=Object.freeze({runId:id,taskId:task.id,scope:Object.freeze({...run.definition.scope}),origin:Object.freeze({...run.definition.origin}),signal});
         const bound=actions.map(action=>this.bindAction(run,action,signal,guard));

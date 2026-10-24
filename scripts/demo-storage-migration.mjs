@@ -6,6 +6,9 @@ import { migrationFixture } from '../build-tests/runtime-migration-fixture.js';
 import { legacySnapshot } from '../build-tests/legacy-memory-fixture.js';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
 
+const stage=process.argv[2]??'current';if(!['current','1E-1'].includes(stage))throw new Error('Unknown migration demo stage');
+const reportName=stage==='1E-1'?'phase1e1-storage.json':'storage-migration-current.json';
+
 const fixture=await migrationFixture(),file=join(fixture.memoryDir,'memory.sqlite');
 const beforeDb=new DatabaseSync(file,{readOnly:true});const before=runtimeHash(legacySnapshot(beforeDb));beforeDb.close();
 const configFile=join(fixture.root,'host-fixture.json'),planFile=join(fixture.root,'migration-plan.json');
@@ -19,12 +22,12 @@ const verified=run(['verify','--plan',planFile]);
 const repeated=run(['apply','--config',configFile,'--plan',planFile]);
 const afterDb=new DatabaseSync(file,{readOnly:true});const after=runtimeHash(legacySnapshot(afterDb));afterDb.close();
 const plan=JSON.parse(await readFile(planFile,'utf8'));
-const report={stage:'1C',kind:'real-sqlite-fictional-data-no-model',at:new Date().toISOString(),serverAccess:false,realRuntimeData:false,
+const report={stage,kind:'real-sqlite-fictional-data-no-model',at:new Date().toISOString(),serverAccess:false,realRuntimeData:false,
   checks:{cliPlan:planned.status==='planned',cliApply:applied.complete===true,cliVerify:verified.passed===true,idempotentApply:repeated.complete===true,legacyRowsUnchanged:before===after},
   engineHash:plan.engineHash,sourceRevision:plan.bundle.provenance.sourceRevision,sourceWorktreeDirty:plan.bundle.provenance.dirty,
   configHash:plan.bundle.provenance.configHash,stores:verified.stores.map(({kind,version,supported,integrity,identityMatches})=>({kind,version,supported,integrity,identityMatches})),
   legacyBeforeHash:before,legacyAfterHash:after,sessionFixture:'synthetic JSONL bytes; no model or DSH replay triggered'};
 report.passed=Object.values(report.checks).every(Boolean);
 await writeFile(join(fixture.root,'report.json'),JSON.stringify(report,null,2)+'\n');
-await mkdir(resolve('docs/results'),{recursive:true});await writeFile(resolve('docs/results/phase1c-storage.json'),JSON.stringify(report,null,2)+'\n');
+await mkdir(resolve('docs/results'),{recursive:true});await writeFile(resolve('docs/results',reportName),JSON.stringify(report,null,2)+'\n');
 console.log(JSON.stringify(report));if(!report.passed)process.exitCode=1;

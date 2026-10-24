@@ -1,6 +1,5 @@
 import { Context, Service } from '@deepseek-ai/cordis';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
@@ -28,6 +27,8 @@ import type { ExecutionOptions } from './execution-coordinator.js';
 import { RuntimeStore } from './runtime-store.js';
 import { RunScheduler } from './run-scheduler.js';
 import { ConversationRuns } from './conversation-run.js';
+import { readFoundation } from './foundation.js';
+export { readFoundation } from './foundation.js';
 import type { StoredRun } from './runtime-store.js';
 import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider } from '@dafeiyu/contracts';
 export type { ExecutionOptions } from './execution-coordinator.js';
@@ -151,7 +152,7 @@ export class DafeiyuService extends Service {
   }
   configureExecution(raw:ExecutionOptions):void {
     this.assertOpen();if(this.config.lifecycleMode!=='managed'||this.gate.state!=='registered'||this.executions)throw new Error('SERVICE_LIFECYCLE_CONFLICT');
-    const options=ExecutionOptionsSchema.parse(raw),store=new RuntimeStore(resolve(this.config.dataDir,'runtime.sqlite'),{agentId:this.config.agentId,profileId:options.profileId},{create:options.createStore});
+    const options=ExecutionOptionsSchema.parse(raw),store=new RuntimeStore(resolve(this.config.dataDir,'runtime.sqlite'),{agentId:this.config.agentId,profileId:options.profileId},{create:options.createStore,requirePersonaManifest:true});
     this.runStore=store;this.scheduler=new RunScheduler(options.maxConcurrentRuns);
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId);
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,
@@ -189,10 +190,8 @@ export class DafeiyuService extends Service {
       if(item.state==='accepted'||item.state==='reply-ready')this.schedule(item);return receipt;
     }}:{}),dispose:()=>{handle.dispose();if(registered?.active){registered.active=false;registered.controller.abort();if(this.extensions.get(registered.extension.id)===registered)this.extensions.delete(registered.extension.id);}}});
   }
-  private persona(): PersonaSnapshot {
-    const text = readFileSync(this.config.personaFile, 'utf8').trim();
-    if (!text || text.length > 32_000) throw new Error('Persona must contain 1..32000 characters');
-    return { text, version: createHash('sha256').update(text).digest('hex') };
+  private persona() {
+    return readFoundation(this.config.personaFile);
   }
   private event(item: PendingMessage, type: string, data: Record<string, Json> = {}, causedBy: string | null = null) {
     return eventFor(this.config.agentId, item, type, '@dafeiyu/core', CORE_VERSION, item.id, causedBy, data);

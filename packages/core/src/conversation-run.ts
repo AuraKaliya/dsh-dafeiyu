@@ -10,6 +10,8 @@ import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import type { StoredRun } from './runtime-store.js';
 import type { RunResult } from './runtime.js';
 import { CORE_VERSION } from './version.js';
+import type { FoundationSnapshot } from './foundation.js';
+import { foundationManifest } from './persona-manifest.js';
 
 const projectionSchema=z.strictObject({inboundId:z.uuid(),startedEventId:z.uuid(),reply:z.strictObject({id:z.string(),conversation:ConversationSchema,sourceMessageId:z.string(),text:z.string().min(1)}),
   sources:z.array(z.strictObject({kind:z.enum(['message','session','event']),id:z.string(),seq:z.number().int().nonnegative().optional(),route:z.string().optional()}))});
@@ -17,12 +19,12 @@ const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 /** The journal owns delivery. The Run owns only the durable model execution and its projection. */
 export class ConversationRuns {
   constructor(private readonly ctx:Context,private readonly store:RuntimeStore,private readonly journal:Journal,private readonly agentId:string){}
-  begin(item:PendingMessage,persona:PersonaSnapshot,model:HostConfig['modelRoutes']['chat'],registry:unknown,execution:{policyId:string;authority:unknown;actions:unknown}={policyId:'conversation-v2',authority:null,actions:[]}):StoredRun{
+  begin(item:PendingMessage,persona:FoundationSnapshot,model:HostConfig['modelRoutes']['chat'],registry:unknown,execution:{policyId:string;authority:unknown;actions:unknown}={policyId:'conversation-v2',authority:null,actions:[]}):StoredRun{
     const request=this.store.prepareRequest('conversation',item.id,{kind:'message',inboundId:item.id,messageHash:runtimeHash(item.message)});
     let run=this.store.acceptRun(request.id,{taskId:null,scope:{kind:'conversation',agentId:this.agentId,route:item.route},origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},intentVersion:0,policyId:execution.policyId});
     if(run.state==='accepted')run=this.store.transition(run.id,run.version,'queued');
     if(run.state!=='queued')throw new Error('RUN_INTERRUPTED');
-    return this.store.start(run.id,run.version,{sessionId:item.sessionId,personaVersion:persona.version,model,registryVersion:runtimeHash({legacy:registry,v3:execution.actions}),authorityVersion:runtimeHash({extension:item.extensionId,route:item.route,policy:execution.authority}),inputs:[]});
+    return this.store.start(run.id,run.version,{sessionId:item.sessionId,personaVersion:persona.version,model,registryVersion:runtimeHash({legacy:registry,v3:execution.actions}),authorityVersion:runtimeHash({extension:item.extensionId,route:item.route,policy:execution.authority}),inputs:[]},foundationManifest(run,persona,model));
   }
   complete(run:StoredRun,item:PendingMessage,result:RunResult,startedEventId:string):void{
     if(!result.resultRef)throw new Error('PERSISTENCE_FAILED');

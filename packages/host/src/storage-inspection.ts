@@ -7,8 +7,8 @@ import { MEMORY_APPLICATION_ID } from '@dafeiyu/memory/store';
 
 export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq';
 const definitions:Record<Exclude<StorageKind,'journal'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
-  memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
-  runtime:{app:RUNTIME_APPLICATION_ID,versions:[1],tables:['runtime_metadata','runtime_ownership','execution_requests','runs','run_operations','runtime_outbox']},
+  memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
+  runtime:{app:RUNTIME_APPLICATION_ID,versions:[1,2],tables:['runtime_metadata','runtime_ownership','execution_requests','runs','run_operations','runtime_outbox']},
   delivery:{app:0x44464433,versions:[1],tables:['deliveries','events']},
   analysis:{app:0x44464131,versions:[1],tables:['jobs','ownership','audit_outbox']},
   working:{app:0x44465731,versions:[1],tables:['states','revisions','requests','outbox']},
@@ -37,11 +37,13 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
     let identityMatches=true;
     if(kind==='runtime'&&supported&&identity){const row=db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();
       const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
+    if(kind==='runtime'&&supported&&version>=2)supported=tables.has('run_persona_manifests');
     if(kind==='memory'&&supported){
       const stages:Record<number,readonly string[]>={2:['memory_boundaries','memory_schema_migrations'],3:['observation_sources','observation_activities','observation_contributions','observation_source_requests'],
         4:['task_workspaces','task_revisions','task_members','task_selections','task_links','task_jobs','task_slots','task_requests','task_observations'],
         5:['task_memory_policies','task_memory_policy_revisions','task_memory_grants','task_memory_requests','task_memory_hits'],6:['expression_policies','expression_policy_revisions','expression_requests','expression_packets','expression_jobs'],
-        7:['execution_scopes','execution_sources','execution_observations','execution_contributions','growth_selections','growth_revisions','growth_requests','task_execution_results','execution_memory_requests','execution_memory_outbox']};
+        7:['execution_scopes','execution_sources','execution_observations','execution_contributions','growth_selections','growth_revisions','growth_requests','task_execution_results','execution_memory_requests','execution_memory_outbox'],
+        8:['persona_candidates','persona_candidate_revisions','persona_profiles','persona_profile_revisions','persona_dependencies','persona_requests','persona_outbox','continuity_checkpoints','task_intent_events']};
       supported=Object.entries(stages).every(([stage,names])=>version<Number(stage)||names.every(name=>tables.has(name)));
     }
     const integrity=Object.values(db.prepare('PRAGMA quick_check').get()??{})[0]==='ok'&&db.prepare('PRAGMA foreign_key_check').get()===undefined;

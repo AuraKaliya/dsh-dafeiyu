@@ -16,7 +16,7 @@ export const observationSourceRef=(id:string)=>`dafeiyu:observation-source:${id}
 const sourceId=(ref:string)=>z.uuid().parse(/^dafeiyu:observation-source:(.+)$/.exec(ref)?.[1]);
 export function migrateObservations(db:DatabaseSync):void {
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
-  if(version===3||version===4||version===5||version===6||version===7){for(const table of ['observation_sources','observation_activities','observation_contributions','observation_source_requests'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===3||version===4||version===5||version===6||version===7||version===8){for(const table of ['observation_sources','observation_activities','observation_contributions','observation_source_requests'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==2)throw new Error('Unsupported observation database');
   db.exec(`CREATE TABLE observation_sources(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,source_key TEXT NOT NULL,version INTEGER NOT NULL,deleted INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,UNIQUE(agent_id,route,source_key));
     CREATE TABLE observation_activities(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT NOT NULL,UNIQUE(agent_id,route,plugin,request_id));
