@@ -1,5 +1,5 @@
 import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
 import { z } from 'zod';
 import Query from '@deepseek-ai/dsh-session-query-sqlite';

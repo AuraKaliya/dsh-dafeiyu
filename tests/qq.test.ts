@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { testTempDir as tmpdir } from './test-temp.js';
 import * as QQ from '@dafeiyu/channel-qq';
 import { harness, textReply } from './harness.js';
 import type { Response } from './harness.js';

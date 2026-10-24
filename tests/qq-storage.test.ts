@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
 import { QqStore, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
 import { inspectStorage, planMigration, applyMigration, verifyMigration, loadHostConfig, initializeProfile, inspectHost } from '@dafeiyu/host';

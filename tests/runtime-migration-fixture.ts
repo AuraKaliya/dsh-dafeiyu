@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { conversationKey } from '@dafeiyu/contracts';
@@ -25,8 +25,8 @@ export function legacyJournal(file:string){
   db.prepare('INSERT INTO events(id,route,trace_id,operation_id,body) VALUES(?,?,?,?,?)').run(eventId,route,id,id,JSON.stringify(event));
   return {db,id,eventId,route};
 }
-export async function migrationFixture(){
-  const root=await mkdtemp(join(tmpdir(),'dafeiyu-migration-')),coreDir=join(root,'core'),memoryDir=join(root,'memory'),sessionsDir=join(root,'sessions'),backupDir=join(root,'backups');
+export async function migrationFixture(existingRoot?:string){
+  const root=existingRoot??await mkdtemp(join(tmpdir(),'dafeiyu-migration-')),coreDir=join(root,'core'),memoryDir=join(root,'memory'),sessionsDir=join(root,'sessions'),backupDir=join(root,'backups');
   await mkdir(coreDir);await mkdir(memoryDir);await mkdir(sessionsDir);
   const journal=legacyJournal(join(coreDir,'journal.sqlite'));journal.db.close();
   const memory=legacyMemory(join(memoryDir,'memory.sqlite'));memory.db.close();

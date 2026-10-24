@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,readdir,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { testTempDir as tmpdir } from './test-temp.js';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { ExecutionContextV3,PersonaSourceRef,ExtensionV3 } from '@dafeiyu/contracts';

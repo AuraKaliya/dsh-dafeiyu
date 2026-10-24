@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,readFile,writeFile,mkdir,link } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+import { testTempDir as tmpdir } from './test-temp.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readHostStatus,loadHostConfig,claim } from '@dafeiyu/host';

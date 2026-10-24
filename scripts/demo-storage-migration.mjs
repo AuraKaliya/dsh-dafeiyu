@@ -5,11 +5,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { migrationFixture } from '../build-tests/runtime-migration-fixture.js';
 import { legacySnapshot } from '../build-tests/legacy-memory-fixture.js';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
+import { randomUUID } from 'node:crypto';
 
 const stage=process.argv[2]??'current';if(!['current','1E-1','1E-3'].includes(stage))throw new Error('Unknown migration demo stage');
 const reportName=stage==='1E-1'?'phase1e1-storage.json':stage==='1E-3'?'phase1e3-storage.json':'storage-migration-current.json';
 
-const fixture=await migrationFixture(),file=join(fixture.memoryDir,'memory.sqlite');
+const demoRoot=resolve('.runtime/demos','migration-'+randomUUID());await mkdir(demoRoot,{recursive:true});
+const fixture=await migrationFixture(demoRoot),file=join(fixture.memoryDir,'memory.sqlite');
 const beforeDb=new DatabaseSync(file,{readOnly:true});const before=runtimeHash(legacySnapshot(beforeDb));beforeDb.close();
 const configFile=join(fixture.root,'host-fixture.json'),planFile=join(fixture.root,'migration-plan.json');
 await writeFile(join(fixture.root,'persona.test.md'),'这是虚构的迁移验收人格。\n');

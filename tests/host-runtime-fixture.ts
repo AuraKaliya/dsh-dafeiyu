@@ -1,6 +1,6 @@
 import { mkdtemp,writeFile,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { testTempDir as tmpdir } from './test-temp.js';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { HostRuntimeOptions,ManagedHost } from '@dafeiyu/host';

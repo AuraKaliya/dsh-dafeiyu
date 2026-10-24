@@ -12,6 +12,8 @@
 
 环境：Windows 本地验收使用 Node.js 24.13.0。项目固定 DSH 0.2.1-rc.2、Cordis 4.0.5，依赖锁在 `package-lock.json`。
 
+测试已迁到D盘项目专用目录并自动清理；失败现场按最多3次、72小时、合计1 GiB保留。请使用下面的 `npm.cmd test` 入口，不再直接运行旧测试命令。治理记录见[方案与规则](docs/test-storage-governance.md)及[TG1检查](docs/test-storage-tg1.md)；本轮暂不继续2C。
+
 ```powershell
 npm.cmd ci --ignore-scripts
 npm.cmd test

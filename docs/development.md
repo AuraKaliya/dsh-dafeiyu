@@ -15,6 +15,8 @@ git diff --check
 
 测试与demo不使用API密钥。profiles/persona.test.md为可公开审阅的虚构样本。运行数据默认不入Git。首次真实模型验收要单独配置测试实例，不能将模拟结果当作真实模型验收。
 
+测试必须通过受管入口 `npm.cmd test` 运行；定向检查可用 `npm.cmd test -- build-tests/qq.test.js`。临时目录和测试子进程环境统一隔离到D盘 `.runtime/tests/`，成功自动清理，失败最多3次／72小时／合计1 GiB。直接运行依赖临时夹具的旧 `node --test` 命令会拒绝创建目录。清理失败会使本次入口失败；运行报告在 `.runtime/test-reports/`，正式验收材料另行保留。详见[测试临时文件治理](test-storage-governance.md)。
+
 ## 当前布局
 
 `packages/*/src`源码；`packages/*/lib`构建输出；`tests`真实DSH服务集成测试；`build-tests`编译后的验收驱动；`scripts/demo.mjs`演示；`.runtime`本地运行数据；`docs`架构及验收记录。

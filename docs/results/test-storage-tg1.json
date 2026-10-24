@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "runId": "7b97bf59-b6df-461a-8942-240a3e87b970",
+  "startedAt": "2026-10-24T17:58:47.154Z",
+  "finishedAt": "2026-10-24T18:00:04.325Z",
+  "stages": [
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "durationMs": 128
+    },
+    {
+      "name": "test-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 1864
+    },
+    {
+      "name": "tooling-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 552
+    },
+    {
+      "name": "tests",
+      "code": 0,
+      "signal": null,
+      "durationMs": 71803
+    }
+  ],
+  "summary": {
+    "success": true,
+    "counts": {
+      "tests": 556,
+      "failed": 0,
+      "passed": 556,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 556,
+      "suites": 0
+    },
+    "durationMs": 71722.4095,
+    "failures": []
+  },
+  "reason": null,
+  "cleanup": {
+    "removed": [
+      "7b97bf59-b6df-461a-8942-240a3e87b970"
+    ],
+    "retained": [],
+    "blocked": []
+  },
+  "freeBytes": 115806416896,
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "legacyTempDirectoriesBefore": 29735,
+  "legacyTempDirectoriesAfter": 29735
+}
