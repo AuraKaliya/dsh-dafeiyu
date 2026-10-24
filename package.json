@@ -34,12 +34,16 @@
     "demo:task-workspaces": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-task-workspaces.mjs",
     "accept:task-memory": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-task-memory.mjs",
     "demo:expression": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-expression.mjs",
-    "demo:delivery": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-delivery.mjs"
+    "demo:delivery": "npm run build && tsc -p tests/tsconfig.json && node scripts/demo-delivery.mjs",
+    "accept:phase1-runtime": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1-runtime.mjs",
+    "accept:phase1-image": "npm run build && tsc -p tests/tsconfig.json && node scripts/accept-phase1-image.mjs",
+    "accept:phase1-audio": "node scripts/accept-phase1-audio.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
     "@deepseek-ai/dsh-compaction": "0.2.1-rc.2",
     "@deepseek-ai/dsh-credentials-local": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",

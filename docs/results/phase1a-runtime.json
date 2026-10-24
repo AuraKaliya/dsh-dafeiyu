@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "stage": "1A",
+  "probe": "P1-P02",
+  "kind": "real-model-real-dsh-fictional-operations",
+  "at": "2026-10-24T08:03:58.445Z",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "serverAccess": false,
+  "realPlatformAccess": false,
+  "privateHistoryUsed": false,
+  "checks": [
+    {
+      "name": "two-tool-steps",
+      "passed": true
+    },
+    {
+      "name": "no-private-model-state-live",
+      "passed": true
+    },
+    {
+      "name": "restart-and-tool-continuation",
+      "passed": true
+    },
+    {
+      "name": "no-private-model-state-resumed",
+      "passed": true
+    },
+    {
+      "name": "no-private-model-state-on-disk",
+      "passed": true,
+      "files": 1
+    }
+  ],
+  "finishes": [
+    {
+      "kind": "tool-calls"
+    },
+    {
+      "kind": "tool-calls"
+    },
+    {
+      "kind": "stop"
+    },
+    {
+      "kind": "tool-calls"
+    },
+    {
+      "kind": "stop"
+    }
+  ],
+  "calls": [
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1686,
+      "usage": {
+        "inputTokens": 430,
+        "outputTokens": 99,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "totalTokens": 529
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1046,
+      "usage": {
+        "inputTokens": 187,
+        "outputTokens": 114,
+        "cacheReadTokens": 384,
+        "cacheWriteTokens": 0,
+        "totalTokens": 685
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 717,
+      "usage": {
+        "inputTokens": 213,
+        "outputTokens": 24,
+        "cacheReadTokens": 512,
+        "cacheWriteTokens": 0,
+        "totalTokens": 749
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 1183,
+      "usage": {
+        "inputTokens": 337,
+        "outputTokens": 138,
+        "cacheReadTokens": 384,
+        "cacheWriteTokens": 0,
+        "totalTokens": 859
+      },
+      "status": "completed"
+    },
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max",
+      "durationMs": 845,
+      "usage": {
+        "inputTokens": 259,
+        "outputTokens": 24,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 923
+      },
+      "status": "completed"
+    }
+  ],
+  "passed": true,
+  "modelCapabilities": {
+    "id": "deepseek-flash",
+    "inputModalities": [
+      "text",
+      "image"
+    ],
+    "contextWindow": null
+  },
+  "streamProjection": {
+    "reasoningBlocks": 5,
+    "replayEnvelopes": 5,
+    "toolBlocks": 3
+  },
+  "toolSteps": [
+    1,
+    2,
+    3
+  ],
+  "finishedAt": "2026-10-24T08:04:04.052Z"
+}

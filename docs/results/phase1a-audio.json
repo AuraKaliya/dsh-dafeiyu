@@ -1,0 +1,452 @@
+{
+  "schemaVersion": 1,
+  "stage": "1A",
+  "probe": "P1-P04",
+  "at": "2026-10-24T08:16:54.878Z",
+  "runId": "18b891a6-00de-413a-935d-0c86de6e0ae9",
+  "kind": "real-local-inference-synthetic-speech-and-tone",
+  "model": {
+    "repository": "ggerganov/whisper.cpp",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+    "file": "ggml-tiny.bin",
+    "bytes": 77691713,
+    "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+  },
+  "serverAccess": false,
+  "nativeChatAudioSupported": false,
+  "backend": "@fugood/whisper.node@1.1.3 CPU",
+  "samples": [
+    {
+      "name": "speech-zh",
+      "language": "zh",
+      "source": "local system TTS, no subtitles supplied",
+      "sha256": "95ac8f7c7651383c039c749f3d7838e49f367dfc99a7b017856f2f6053233be6",
+      "text": "這是大飛魚的本地音頻測試藍色燈亮了三次然後關閉",
+      "segments": [
+        {
+          "text": "這是大飛魚的本地音頻測試",
+          "t0": 0,
+          "t1": 3200
+        },
+        {
+          "text": "藍色燈亮了三次",
+          "t0": 3700,
+          "t1": 5840
+        },
+        {
+          "text": "然後關閉",
+          "t0": 5840,
+          "t1": 7500
+        }
+      ],
+      "timestampUnit": "milliseconds",
+      "aborted": false,
+      "durationMs": 4286,
+      "factsMatched": [
+        true,
+        true,
+        true
+      ],
+      "observedRssBytes": 379875328
+    },
+    {
+      "name": "speech-en",
+      "language": "en",
+      "source": "local system TTS, no subtitles supplied",
+      "sha256": "23aed3f1e661011352f43b9e6a18c522969eb95450081583565e92d7889d338a",
+      "text": " This is a local audio test. The blue lamp flashed three times and then switched off.",
+      "segments": [
+        {
+          "text": " This is a local audio test.",
+          "t0": 0,
+          "t1": 2000
+        },
+        {
+          "text": " The blue lamp flashed three times and then switched off.",
+          "t0": 2680,
+          "t1": 6000
+        }
+      ],
+      "timestampUnit": "milliseconds",
+      "aborted": false,
+      "durationMs": 4233,
+      "factsMatched": [
+        true,
+        true,
+        true
+      ],
+      "observedRssBytes": 301174784
+    }
+  ],
+  "passed": true,
+  "loadMs": 65,
+  "loadedRssBytes": 266985472,
+  "events": {
+    "kind": "real-local-onnx-inference-synthetic-audio",
+    "model": {
+      "repository": "niobures/YAMNet",
+      "revision": "080fce0c9e69a9a6da1c1c141c6fcb0b33d0c465",
+      "files": [
+        {
+          "name": "yamnet.onnx",
+          "bytes": 16124200,
+          "sha256": "04e27fca08e7a3aea2630d1a63a51e6b437c803e0ff6e26399f80870ac251dda"
+        },
+        {
+          "name": "yamnet_class_map.csv",
+          "bytes": 14096,
+          "sha256": "cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2"
+        }
+      ]
+    },
+    "onnxruntime": "1.31.0",
+    "numpy": "2.5.4",
+    "samples": [
+      {
+        "fixture": "speech-zh.wav",
+        "sha256": "95ac8f7c7651383c039c749f3d7838e49f367dfc99a7b017856f2f6053233be6",
+        "durationSeconds": 8.0398125,
+        "processedEndSeconds": 8.0398125,
+        "durationMs": 14,
+        "top": [
+          {
+            "label": "Speech",
+            "score": 0.9322764277458191
+          },
+          {
+            "label": "Silence",
+            "score": 0.062535360455513
+          },
+          {
+            "label": "Narration, monologue",
+            "score": 0.028448110446333885
+          },
+          {
+            "label": "Speech synthesizer",
+            "score": 0.007427673786878586
+          },
+          {
+            "label": "Conversation",
+            "score": 0.006205478683114052
+          }
+        ],
+        "timeline": [
+          {
+            "start": 0,
+            "end": 0.975,
+            "label": "Speech",
+            "score": 0.9978750944137573
+          },
+          {
+            "start": 0.4875,
+            "end": 1.4625,
+            "label": "Speech",
+            "score": 0.9964006543159485
+          },
+          {
+            "start": 0.975,
+            "end": 1.95,
+            "label": "Speech",
+            "score": 0.9994155168533325
+          },
+          {
+            "start": 1.4625,
+            "end": 2.4375,
+            "label": "Speech",
+            "score": 0.9990580081939697
+          },
+          {
+            "start": 1.95,
+            "end": 2.925,
+            "label": "Speech",
+            "score": 0.9959703087806702
+          },
+          {
+            "start": 2.4375,
+            "end": 3.4125,
+            "label": "Speech",
+            "score": 0.9984622597694397
+          },
+          {
+            "start": 2.925,
+            "end": 3.9,
+            "label": "Silence",
+            "score": 1
+          },
+          {
+            "start": 3.4125,
+            "end": 4.3875,
+            "label": "Speech",
+            "score": 0.9981883764266968
+          },
+          {
+            "start": 3.9,
+            "end": 4.875,
+            "label": "Speech",
+            "score": 0.9785653352737427
+          },
+          {
+            "start": 4.3875,
+            "end": 5.3625,
+            "label": "Speech",
+            "score": 0.9954878091812134
+          },
+          {
+            "start": 4.875,
+            "end": 5.85,
+            "label": "Speech",
+            "score": 0.986164927482605
+          },
+          {
+            "start": 5.3625,
+            "end": 6.3375,
+            "label": "Speech",
+            "score": 0.9967107772827148
+          },
+          {
+            "start": 5.85,
+            "end": 6.825,
+            "label": "Speech",
+            "score": 0.988595187664032
+          },
+          {
+            "start": 6.3375,
+            "end": 7.3125,
+            "label": "Speech",
+            "score": 0.9995598793029785
+          },
+          {
+            "start": 6.825,
+            "end": 7.8,
+            "label": "Speech",
+            "score": 0.9941006898880005
+          },
+          {
+            "start": 7.0648125,
+            "end": 8.0398125,
+            "label": "Speech",
+            "score": 0.9918397665023804
+          }
+        ]
+      },
+      {
+        "fixture": "speech-en.wav",
+        "sha256": "23aed3f1e661011352f43b9e6a18c522969eb95450081583565e92d7889d338a",
+        "durationSeconds": 6.73,
+        "processedEndSeconds": 6.73,
+        "durationMs": 9,
+        "top": [
+          {
+            "label": "Speech",
+            "score": 0.9597693681716919
+          },
+          {
+            "label": "Narration, monologue",
+            "score": 0.01991438679397106
+          },
+          {
+            "label": "Speech synthesizer",
+            "score": 0.00976778194308281
+          },
+          {
+            "label": "Conversation",
+            "score": 0.00454845791682601
+          },
+          {
+            "label": "Inside, small room",
+            "score": 0.0034749668557196856
+          }
+        ],
+        "timeline": [
+          {
+            "start": 0,
+            "end": 0.975,
+            "label": "Speech",
+            "score": 0.9809374809265137
+          },
+          {
+            "start": 0.4875,
+            "end": 1.4625,
+            "label": "Speech",
+            "score": 0.9948200583457947
+          },
+          {
+            "start": 0.975,
+            "end": 1.95,
+            "label": "Speech",
+            "score": 0.9994518756866455
+          },
+          {
+            "start": 1.4625,
+            "end": 2.4375,
+            "label": "Speech",
+            "score": 0.9994533658027649
+          },
+          {
+            "start": 1.95,
+            "end": 2.925,
+            "label": "Speech",
+            "score": 0.9793738126754761
+          },
+          {
+            "start": 2.4375,
+            "end": 3.4125,
+            "label": "Speech",
+            "score": 0.9992121458053589
+          },
+          {
+            "start": 2.925,
+            "end": 3.9,
+            "label": "Speech",
+            "score": 0.999890923500061
+          },
+          {
+            "start": 3.4125,
+            "end": 4.3875,
+            "label": "Speech",
+            "score": 0.9994914531707764
+          },
+          {
+            "start": 3.9,
+            "end": 4.875,
+            "label": "Speech",
+            "score": 0.9997342824935913
+          },
+          {
+            "start": 4.3875,
+            "end": 5.3625,
+            "label": "Speech",
+            "score": 0.9998824596405029
+          },
+          {
+            "start": 4.875,
+            "end": 5.85,
+            "label": "Speech",
+            "score": 0.9998077750205994
+          },
+          {
+            "start": 5.3625,
+            "end": 6.3375,
+            "label": "Speech",
+            "score": 0.9978777170181274
+          },
+          {
+            "start": 5.755,
+            "end": 6.73,
+            "label": "Speech",
+            "score": 0.5270693302154541
+          }
+        ]
+      },
+      {
+        "fixture": "tone.wav",
+        "sha256": "eeb7f1262f84d129d0627cd6868c87a33887ae6669e540bfbb0c17f6c3096dde",
+        "durationSeconds": 6,
+        "processedEndSeconds": 6,
+        "durationMs": 8,
+        "top": [
+          {
+            "label": "Beep, bleep",
+            "score": 0.7223203778266907
+          },
+          {
+            "label": "Sidetone",
+            "score": 0.2866500914096832
+          },
+          {
+            "label": "Noise",
+            "score": 0.2462233304977417
+          },
+          {
+            "label": "Sound effect",
+            "score": 0.12452561408281326
+          },
+          {
+            "label": "Busy signal",
+            "score": 0.10958502441644669
+          }
+        ],
+        "timeline": [
+          {
+            "start": 0,
+            "end": 0.975,
+            "label": "Beep, bleep",
+            "score": 0.7386680245399475
+          },
+          {
+            "start": 0.4875,
+            "end": 1.4625,
+            "label": "Beep, bleep",
+            "score": 0.8610827922821045
+          },
+          {
+            "start": 0.975,
+            "end": 1.95,
+            "label": "Beep, bleep",
+            "score": 0.6855521202087402
+          },
+          {
+            "start": 1.4625,
+            "end": 2.4375,
+            "label": "Beep, bleep",
+            "score": 0.5724105834960938
+          },
+          {
+            "start": 1.95,
+            "end": 2.925,
+            "label": "Sidetone",
+            "score": 0.6307036876678467
+          },
+          {
+            "start": 2.4375,
+            "end": 3.4125,
+            "label": "Beep, bleep",
+            "score": 0.8227440118789673
+          },
+          {
+            "start": 2.925,
+            "end": 3.9,
+            "label": "Beep, bleep",
+            "score": 0.40779900550842285
+          },
+          {
+            "start": 3.4125,
+            "end": 4.3875,
+            "label": "Beep, bleep",
+            "score": 0.8581544160842896
+          },
+          {
+            "start": 3.9,
+            "end": 4.875,
+            "label": "Beep, bleep",
+            "score": 0.8585566878318787
+          },
+          {
+            "start": 4.3875,
+            "end": 5.3625,
+            "label": "Beep, bleep",
+            "score": 0.9077253341674805
+          },
+          {
+            "start": 4.875,
+            "end": 5.85,
+            "label": "Beep, bleep",
+            "score": 0.7631310224533081
+          },
+          {
+            "start": 5.025,
+            "end": 6,
+            "label": "Beep, bleep",
+            "score": 0.8000067472457886
+          }
+        ]
+      }
+    ],
+    "checks": {
+      "speechDetected": true,
+      "knownToneDetected": true,
+      "sourceTailCovered": true
+    }
+  },
+  "finishedAt": "2026-10-24T08:17:04.229Z"
+}

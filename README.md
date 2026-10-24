@@ -2,6 +2,8 @@
 
 当前项目版本0.19.0：contracts/core/memory 0.15.0完成D3交付凭据与模拟闭环；journal/channel-simulator为0.4.0。先在目标DSH人格会话整理，再核验目标、来源、版本与授权，使用持久凭据发送最终正文；迟到、重复、撤销和不确定状态不会盲目重发。本机421项测试及模拟渠道演示通过；本轮使用虚构样本与脚本模型，真实QQ未接入，服务器未修改。
 
+第一阶段实施进度：1A隔离适配探针已完成，全量回归425项通过；真实模型工具续轮／持久化、图像及本地音频有单独验收。正式Host与新运行入口仍待后续子步骤，现有QQ和服务器未切换。
+
 ## 开始使用
 
 环境：Windows 本地验收使用 Node.js 24.13.0。项目固定 DSH 0.2.1-rc.2、Cordis 4.0.5，依赖锁在 `package-lock.json`。
@@ -31,7 +33,8 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 ## 文档
 
 - [大肥鱼统一运行、唤醒与插件协作接口方案（2026-10-24，设计文档）](docs/unified-runtime-wakeup-plugin-plan.md)：渠道／能力分离、自主活动、记忆E阶段、音画理解、依赖与数据迁移；功能尚未实施。
-- [第一阶段：核心与统一运行入口开发方案（设计文档）](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、人格与成长投影、无聊天任务、具体迁移及验收标准；功能尚未开发。
+- [第一阶段：核心与统一运行入口开发方案](docs/unified-runtime-phase-1-plan.md)：managed装配、v2/v3兼容、人格与成长投影、无聊天任务、具体迁移及验收标准；1A已验收，其余子步骤继续实施。
+- [第一阶段1A适配前提验收](docs/phase1a-adaptation.md)：DSH程序来源、真实模型工具续轮与持久化、真实图像和本地音频探针。
 - [架构与开发决策](docs/architecture.md)
 - [记忆、行为时间线、压缩和检索](docs/memory.md)
 - [记忆能力插件完整开发方案（2026-10-23）](docs/memory-plugin-plan.md)
