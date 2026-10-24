@@ -75,7 +75,7 @@ export interface ChannelCapability {
   readonly description?: string;
   readonly taskDelivery?:'simulated';
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
-  deliver(reply: Reply, signal: AbortSignal): Promise<DeliveryResult>;
+  deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
 }
 export interface ActionContext {
   readonly operationId: string;

@@ -76,7 +76,7 @@ export class TaskDelivery {
           let resultState:z.infer<typeof outcome>;
           try{
             transportSignal.throwIfAborted();guard();runtimeGuard();invoked=true;
-            const transmission=channel.capability.deliver(Object.freeze({id:`task-delivery:${id}`,conversation:Object.freeze({...binding.material.target}),sourceMessageId:item.message.id,text:body}),transportSignal);
+            const transmission=channel.capability.deliver(Object.freeze({id:`task-delivery:${id}`,conversation:Object.freeze({...binding.material.target}),sourceMessageId:item.message.id,text:body}),transportSignal,()=>{guard();runtimeGuard();});
             resultState=outcome.parse(await Promise.race([transmission,aborted]));
           }catch{if(!invoked)throw new Error('delivery_pre_dispatch_rejected');resultState={status:'unknown'};}finally{transportSignal.removeEventListener('abort',onAbort);}
           this.store.transition(id,'sending',resultState.status==='sent'?'sent':resultState.status==='not-sent'?'not-sent':'uncertain',resultState.status==='sent'?resultState.receiptId:undefined);

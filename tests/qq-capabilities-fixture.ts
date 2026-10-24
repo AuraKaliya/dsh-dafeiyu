@@ -28,13 +28,14 @@ export function lastPage(request:GenerateOptions){const pages=outcomes(request).
 
 export async function qqCapabilityFixture(){
   const root=await mkdtemp(join(testTempDir(),'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
-  const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot};
+  const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
+    afterSend:async(_count:number):Promise<void>=>{},beforeVerify:async():Promise<void>=>{}};
   const server=createServer(async(req,res)=>{if(req.headers.authorization!=='Bearer '+token){res.writeHead(401).end();return;}
     let raw='';for await(const bytes of req)raw+=String(bytes);let data:unknown;
-    if(req.url==='/get_login_info')data={user_id:Number(platform.identity)};
+    if(req.url==='/get_login_info'){await platform.beforeVerify();data={user_id:Number(platform.identity)};}
     else if(req.url==='/get_status')data={online:true};
     else if(req.url==='/get_group_list')data=platform.groups;
-    else if(req.url==='/send_private_msg'||req.url==='/send_group_msg'){platform.sent.push(z.record(z.string(),z.unknown()).parse(JSON.parse(raw)));data={message_id:-platform.sent.length};}
+    else if(req.url==='/send_private_msg'||req.url==='/send_group_msg'){platform.sent.push(z.record(z.string(),z.unknown()).parse(JSON.parse(raw)));data={message_id:-platform.sent.length};await platform.afterSend(platform.sent.length);if(platform.loseAt===platform.sent.length){res.destroy();return;}}
     else{res.writeHead(404).end();return;}
     res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data}));});
   const wss=new WebSocketServer({server});await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();assert.ok(address&&typeof address!=='string');

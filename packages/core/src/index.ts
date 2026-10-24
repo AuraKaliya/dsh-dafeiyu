@@ -19,6 +19,7 @@ import { MemoryObservationSchema,ObservationSourceReadSchema,ObservationSourceCh
 import type { Conversation,ObservationAuthority } from '@dafeiyu/contracts';
 import { TaskCoordinator,bindTaskProvider,bindTaskMemoryProvider,bindExpressionProvider } from './task-coordinator.js';
 import { TaskDelivery } from './task-delivery.js';
+import { prepareReplySources } from './reply-sources.js';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
 import { CapabilityRegistryV3 } from './registry-v3.js';
@@ -566,11 +567,16 @@ export class DafeiyuService extends Service {
     const deliveryEvent = (type: string, data: Record<string, Json>, parent: string | null) =>
       eventFor(this.config.agentId, item, type, source.extension.id, source.extension.version, deliveryOperation, parent, data);
     const sending = this.journal.transition(id, 'reply-ready', 'sending', deliveryEvent('delivery.started', { replyId: item.reply.id }, completed?.id ?? null));
-    let result;
+    let result,invoked=false;let release=()=>{};
     try {
-      result = await channel.deliver(item.reply, AbortSignal.any([this.controller.signal, source.controller.signal, AbortSignal.timeout(this.config.deliveryTimeoutMs)]));
+      const signal=AbortSignal.any([this.controller.signal,source.controller.signal,AbortSignal.timeout(this.config.deliveryTimeoutMs)]);
+      const evidence=await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal);release=evidence.release;
+      const authority=()=>{if(!source.active||this.fatal||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
+        if(runId&&this.runStore)this.validateRunPersona(this.runStore.get(runId));
+        evidence.guard();};
+      authority();invoked=true;result = await channel.deliver(item.reply,signal,authority);
       if (result.status === 'sent' && !result.receiptId) throw new Error('Missing transport receipt');
-    } catch { result = { status: 'unknown' as const, code: 'DELIVERY_UNKNOWN' }; }
+    } catch { result = invoked?{status:'unknown' as const,code:'DELIVERY_UNKNOWN'}:{status:'not-sent' as const,code:'SOURCE_STALE'}; }finally{release();}
     const next = result.status === 'sent' ? 'delivered' : result.status === 'not-sent' ? 'reply-ready' : 'uncertain';
     this.journal.transition(id, 'sending', next, deliveryEvent(`delivery.${result.status}`, result.status === 'sent' ? { receiptId: result.receiptId } : { code: result.code }, sending.id));
   }
