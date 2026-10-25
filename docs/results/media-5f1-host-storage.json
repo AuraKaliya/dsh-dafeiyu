@@ -1,0 +1,17 @@
+{
+  "stage": "media-5F-1",
+  "date": "2026-10-25",
+  "baseline": "16acc7e",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "8a2e57ca-e9f5-4464-9f0b-bfbbf764d513", "passed": 21, "failed": 0, "scope": ["storage-migration", "host-profile"]},
+    {"runId": "40a99dd6-676a-4369-9b61-f3b3f1bf0599", "passed": 8, "failed": 0, "scope": ["host-media-storage", "activity-host-migration"]}
+  ],
+  "countsOverlap": true,
+  "actualLocalExecution": ["SQLite migration and backup", "media object and analysis-file hashing", "path/link rejection"],
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false
+}

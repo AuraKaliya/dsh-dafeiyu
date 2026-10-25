@@ -4,6 +4,8 @@ export { BoundedProcess,MediaWorkerError } from './process.js';
 export { MediaRangeBroker } from './range-broker.js';
 export { MediaDecoder } from './decoder.js';
 export { MediaService,MEDIA_ACTIONS,mediaConfigSchema } from './service.js';
+import { mediaConfigSchema } from './service.js';
+export const MediaPluginConfigSchema=mediaConfigSchema.omit({agentId:true,profileId:true,dataDir:true,createStore:true});
 export type { Config } from './service.js';
 import { MediaService } from './service.js';
 import type { Config } from './service.js';
