@@ -69,6 +69,7 @@ export class MemoryService extends Service {
   private nativeExpression:import('./native-expression.js').NativeExpression|undefined;
   readonly persona:PersonaService|undefined;
   readonly maintenance:MaintenanceService|undefined;
+  private readonly emptyMaintenanceCounts:Record<string,number>={};
   private readonly capabilityService:CapabilityObservationService|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
@@ -151,7 +152,7 @@ export class MemoryService extends Service {
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
   get lifecycleState(){return this.gate.state;}
-  runtimeHealth(){return {lifecycle:this.gate.state,analysis:this.analysis?.health??{state:'not-configured' as const,active:false},retrieval:this.config.retrieval?'configured' as const:'not-configured' as const,compaction:this.config.compaction?'configured' as const:'not-configured' as const,sourceTracking:this.config.sourceTracking||this.config.compaction?'configured' as const:'not-configured' as const};}
+  runtimeHealth(){return {lifecycle:this.gate.state,analysis:this.analysis?.health??{state:'not-configured' as const,active:false},maintenance:this.maintenance?.health??{state:'not-configured' as const,active:0,requests:this.emptyMaintenanceCounts,scheduler:'not-configured' as const},retrieval:this.config.retrieval?'configured' as const:'not-configured' as const,compaction:this.config.compaction?'configured' as const:'not-configured' as const,sourceTracking:this.config.sourceTracking||this.config.compaction?'configured' as const:'not-configured' as const};}
   recover():void {
     if(this.closed)throw new Error('Memory capability is unregistered');
     if(this.gate.state==='recovered'||this.gate.active)return;

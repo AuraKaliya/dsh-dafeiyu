@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "profileId": "memory-local-development",
+  "agent": {"id": "dafeiyu"},
+  "paths": {"core": "../.runtime/memory-local-development/core", "memory": "../.runtime/memory-local-development/memory", "sessions": "../.runtime/memory-local-development/sessions", "query": "../.runtime/memory-local-development/query.sqlite"},
+  "modelRoutes": {"chat": {"provider": "local-test", "model": "scripted"}},
+  "persona": {"fixedFile": "./persona.test.md", "kind": "test"},
+  "plugins": [
+    {"id": "model-scripted", "required": true},
+    {"id": "timeline", "required": true, "config": {"execution": true}},
+    {"id": "memory", "required": true, "config": {"sourceTracking": true, "maintenance": {"timeoutMs": 120000, "maxInputBytes": 65536, "maxOutputBytes": 32768}}}
+  ],
+  "authorityPolicies": [{"id": "local-task", "producers": ["host-cli"], "actions": [
+    "dafeiyu_task_intent", "dafeiyu_execution_source_open", "dafeiyu_execution_select", "dafeiyu_execution_contribute",
+    "dafeiyu_memory_maintenance_request", "dafeiyu_memory_maintenance_status", "dafeiyu_memory_consolidate",
+    "dafeiyu_memory_maintenance_result", "dafeiyu_experience_read", "dafeiyu_experience_review", "dafeiyu_memory_persona_candidate"
+  ], "allowLocalWrite": true}]
+}

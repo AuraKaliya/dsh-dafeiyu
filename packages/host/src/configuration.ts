@@ -57,6 +57,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     if(!hasMemory&&enabled.some(p=>p.id==='timeline'&&p.config.execution===true))throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     if(config.context.compactionInputTokens!==undefined&&!hasMemory)throw new Error('HOST_COMPACTION_REQUIRES_MEMORY');
     const memory=enabled.find(p=>p.id==='memory');if(memory?.config.compaction&&config.context.compactionInputTokens!==undefined)throw new Error('HOST_DUPLICATE_COMPACTION_CONFIG');
+    if(memory?.config.maintenance&&!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_MAINTENANCE_SOURCE_TRACKING_REQUIRED');
     const qq=enabled.find(p=>p.id==='channel-qq'),qqCapabilities=qq&&QqPluginConfigSchema.parse(qq.config).capabilities.enabled;
     if(qqCapabilities){if(!memory)throw new Error('HOST_QQ_MEMORY_REQUIRED');
       if(!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_QQ_SOURCE_TRACKING_REQUIRED');
@@ -72,7 +73,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     if(config.context.regions['memory:growth'])throw new Error('HOST_GROWTH_CONFIG_CONFLICT');
     if(!hasMemory&&config.authorityPolicies.length)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     const descriptors=[{id:'core',provides:['core.registration.v1','lifecycle.managed.v1','context.conversation.v1'],requires:['llm.route.v1']},
-      ...enabled.map(plugin=>({id:plugin.id,provides:plugin.id.startsWith('model-')?['llm.route.v1']:plugin.id==='timeline'?['timeline.history.v1']:plugin.id==='memory'?['task.repository.v1','memory.execution.v1','persona.stage-state.v1','persona.growth-selection.v1','continuity.checkpoint.v1','task.intent.v1','memory.capability-observation.v1','memory.native-expression.v1']:[`channel.${plugin.id==='channel-qq'?'qq':'simulator'}.v1`],
+      ...enabled.map(plugin=>({id:plugin.id,provides:plugin.id.startsWith('model-')?['llm.route.v1']:plugin.id==='timeline'?['timeline.history.v1']:plugin.id==='memory'?['task.repository.v1','memory.execution.v1','persona.stage-state.v1','persona.growth-selection.v1','continuity.checkpoint.v1','task.intent.v1','memory.capability-observation.v1','memory.native-expression.v1',...(memory?.config.maintenance?['memory.maintenance.v1']:[])]:[`channel.${plugin.id==='channel-qq'?'qq':'simulator'}.v1`],
         requires:[...(plugin.id.startsWith('model-')?[]:['core.registration.v1']),...(plugin.id==='memory'?['timeline.history.v1']:[]),...(plugin.id==='channel-qq'&&qqCapabilities?['memory.capability-observation.v1','execution.resource-scope.v1']:[]),...(plugin.id==='channel-qq'&&qqTasks?.enabled?['execution.message-task.v1',...(qqTasks.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])]:[]),...plugin.requires]})),
       ...(hasMemory?[{id:'core-execution',provides:['execution.task.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1','delivery.task-result.v1'],requires:['task.repository.v1']}]:[])];
     const order=dependencyOrder(descriptors);const foundation=readFoundation(paths.foundation);

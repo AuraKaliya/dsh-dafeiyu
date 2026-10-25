@@ -28,6 +28,8 @@ export class MaintenanceService {
   private readonly controller=new AbortController();
   private readonly pending=new Set<Promise<unknown>>();
   private readonly active=new Set<string>();
+  private closed=false;
+  private finalCounts:Record<string,number>={};
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   readonly config:z.output<typeof maintenanceConfigSchema>;
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly persona:PersonaService,directory:string,
@@ -131,6 +133,7 @@ export class MaintenanceService {
   recover(){this.persona.experiences.recover();}
   cancel(){this.controller.abort();}
   async whenIdle(){await Promise.allSettled([...this.pending]);}
-  get health(){return {state:this.ready()?'ready' as const:'paused' as const,active:this.active.size,requests:this.persona.experiences.counts()};}
-  async close(){this.cancel();this.handle.dispose();await this.whenIdle();await this.runtime.close();}
+  get health(){return {state:this.closed?'closed' as const:this.ready()&&!this.controller.signal.aborted?'ready' as const:'paused' as const,active:this.active.size,
+    requests:this.closed?this.finalCounts:this.persona.experiences.counts(),scheduler:'not-configured' as const};}
+  async close(){this.cancel();this.handle.dispose();await this.whenIdle();await this.runtime.close();this.finalCounts=this.persona.experiences.counts();this.closed=true;}
 }

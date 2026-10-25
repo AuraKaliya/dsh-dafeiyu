@@ -1,6 +1,6 @@
 # 大肥鱼本地统一运行入口
 
-本入口对应第一阶段1F。支持统一检查、初始化、迁移、常驻启动、一次性原生任务和状态查询。1G完整人格／资源评价、QQ业务增强、自主活动、完整媒体和B站仍按后续阶段实施；此入口不自动部署服务器。
+本入口对应第一阶段1F，并已接入QQ文字／任务流程和记忆E。支持统一检查、初始化、迁移、常驻启动、一次性原生任务和状态查询。1G完整评价、自主活动、完整媒体和B站仍按后续阶段实施；此入口不自动部署服务器。
 
 ## 1. 先使用隔离的测试配置
 
@@ -66,7 +66,7 @@ start保持运行，开放已配置渠道并处理已受理队列。另一终端
 
 2B已加入可配置自然称呼和群列表同步。旧配置默认 `naturalNames:[]`、`groupSync.enabled:false`，保留原at／引用和静态群范围；样例启用“大肥鱼”“蓝色大肥鱼”，只识别正文直接称呼，引用／昵称不作为称呼或主人授权。群同步默认每30秒刷新，allowlist模式取配置群与已加入群交集；joined模式必须明确开启，才能开放所有实际已加入群。失败可在120秒内沿用本进程最后成功集合，过期拒绝群操作；重启后需重新成功同步。Host状态保存同步状态、错误、有效群数量与上次成功时间；失败显示degraded，仍可提供已授权主人私聊。图片／语音／文件和新任务交付仍待后续步骤。
 
-当前QQ目标库为v4，memory为v10。旧QQ v0—v3／memory v1—v9库普通启动会提示迁移，先按第6节流程备份升级；不能用init重建旧目录，也不能让旧二进制写升级后的库。群快照只记录账号绑定的成员范围，浏览短期快照也不等于长期记忆。
+当前QQ目标库为v4，memory为v11。旧QQ v0—v3／memory v1—v10库普通启动会提示迁移，先按第6节流程备份升级；不能用init重建旧目录，也不能让旧二进制写升级后的库。群快照只记录账号绑定的成员范围，浏览短期快照也不等于长期记忆。
 
 2C浏览能力需显式开启 `channel-qq.config.capabilities.enabled:true`，装配memory及来源追踪（`memory.config.sourceTracking:true`，或已有compaction），并为 `conversation` 策略配置producer `channel-qq`、三个动作 `qq_groups`／`qq_browse`／`qq_observe_select` 和 `allowLocalWrite:true`。缺项在连接前拒绝。样例已包含这些配置，未开启时沿用原QQ行为。来源追踪自身不会增加辅助模型调用。
 
@@ -118,7 +118,7 @@ node scripts/dafeiyu-host.mjs migrate verify --config path/to/host.json --plan .
 
 命令会核对选定profile、实际路径、配置哈希和固定迁移计划。计划文件使用独占创建，不覆盖同名已有计划。活动Host占用的数据不能迁移；更换配置／路径后需要重新核对计划，不能套用另一profile的清单。
 
-目标为journal v2、memory v10、runtime v3、QQ v4；旧D3及辅助权威库保持既有版本。runtime v3追加独立任务结果交付账本，旧v1／v2需显式备份升级；既有Run、快照与结果保留。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。
+目标为journal v2、memory v11、runtime v3、QQ v4；旧D3及辅助权威库保持既有版本。memory v11追加经历、候选关系和整理队列；runtime v3追加独立任务结果交付账本，旧库需显式备份升级；既有Run、快照与结果保留。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。
 
 迁移中断保持准入关闭；新版本已产生新数据后，不用旧备份覆盖新增记忆。原`scripts/migrate-profile.mjs`仍可用，新入口复用其底层迁移实现。
 
@@ -129,3 +129,15 @@ node scripts/dafeiyu-host.mjs migrate verify --config path/to/host.json --plan .
 - [1F-3命令／真实模型／终端验收](phase1f3-cli-acceptance.md)
 
 这些记录不替代1G的162次完整人格与连续性评价，也不代表服务器资源和部署已验收。
+
+## 8. 记忆E的按需整理
+
+[host.memory.example.json](../profiles/host.memory.example.json)是隔离的本机脚本模型配置，启用`memory.config.sourceTracking`和`maintenance`。它用于装配检查；默认固定回复本身不会自主调用分析工具，不代表真实归纳质量。已有QQ profile可在memory配置中加`maintenance: {}`，并把需要的整理动作加入对应原生任务policy；聊天policy不因此获得跨任务正文权限。
+
+任务中的操作和选材完成后，记忆保存当前task/epoch的整理请求。当前没有activity，`services.memory.maintenance.scheduler`显示`not-configured`，请求为`waiting-scheduler`。不会因生成请求直接调用模型。按需整理在相同Task的获准Run中进行：先`dafeiyu_memory_maintenance_status`取得ID，再`dafeiyu_memory_consolidate`，然后读结果／经验。请求ID、taskId或模型参数不授予其它范围的访问权。
+
+默认一次独立分析预算为120秒、输入64 KiB、输出32 KiB；Core Run仍有自身时间限制，实际取较先到达者。没有按工具调用次数终止。超限、失效、取消和模型失败保存状态，不自动重试；更正输入后申请新请求。没有已保留证据时仅记录活动事实，不凭任务完成推断爱好或知识。
+
+`dafeiyu_experience_review`以expectedVersion追加复核记录。经验状态为accepted仍是有条件的经验，不是事实保证。`dafeiyu_memory_persona_candidate`只能明确选择proposed候选，后续试行／采用沿既有persona接口。经历修订保留旧推断作为历史输入；当前结果及人格依赖固定内容身份，旧建议不能静默变成新判断。撤下或来源变更立即阻断使用。
+
+Host状态只展示整理状态／计数，不显示目标、经验正文或来源。关闭后保留最后计数。源库升级到v11不初始化历史人格、不扫描旧聊天补造经历。完整检查见[记忆E联合记录](memory-e4-integration.md)。

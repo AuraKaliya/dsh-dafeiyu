@@ -1,0 +1,12 @@
+{
+  "step":"memory-E4","date":"2026-10-25","baseline":"e7c94db",
+  "checks":[
+    {"runId":"dedbd167-6fe9-4fb9-bd3e-7a1c7af7b43d","tests":null,"passed":false,"reason":"Test type errors and an overly narrow empty count dictionary, corrected"},
+    {"runId":"63601e15-69a2-4f5b-9e30-bc9390fe78e2","passed":1,"failed":0},
+    {"runId":"02eca2d0-50d8-4483-9a60-7059dea46fec","passed":20,"failed":0}
+  ],
+  "localDevelopment":"complete","nextStage":"autonomous-activity-design",
+  "fullRegression":false,"realModel":false,"realPlatform":false,"serverConnected":false,"releaseTagged":false,
+  "schemas":{"memory":11,"runtime":3,"qq":4},"cleanupBlocked":false,
+  "preservedDirtySha256":"CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+}
