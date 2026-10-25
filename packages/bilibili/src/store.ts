@@ -16,11 +16,12 @@ export const biliHash=(value:unknown)=>createHash('sha256').update(canonical(val
 export const biliOwner=(context:Pick<ExecutionContextV3,'scope'|'intentVersion'>)=>biliHash([context.scope,context.intentVersion]);
 export const BiliPageSchema=z.strictObject({id:z.uuid(),owner:z.string().length(64),kind:z.enum(['discover','search','video','comments','subtitles','danmaku','media']),
   sourceKey:z.string().min(1).max(240),sourceVersion:z.number().int().positive(),fetchedAt:z.iso.datetime(),data:z.json(),coverage:z.array(z.string().max(500)).max(24),
-  fields:z.array(z.strictObject({id:z.string().max(80),text:z.string().min(1).max(1000)})).max(100)});
+  fields:z.array(z.strictObject({id:z.string().max(80),text:z.string().min(1).max(1000)})).max(100),parents:z.array(ResourceProofSchema).max(4).optional()});
 export type BiliPage=z.infer<typeof BiliPageSchema>;
 const requestState=z.enum(['pending','completed','failed','interrupted']);
 export class BiliStore {
   private readonly db:DatabaseSync;
+  private readonly checking=new Set<string>();
   readonly identity:z.infer<typeof identitySchema>;
   constructor(file:string,identity:z.infer<typeof identitySchema>,create=false){this.identity=identitySchema.parse(identity);
     if(!existsSync(file)&&!create)throw new Error('BILI_MIGRATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});this.db=new DatabaseSync(file);
@@ -55,12 +56,12 @@ export class BiliStore {
     this.db.prepare('INSERT INTO bili_pages VALUES(?,?,?,?,NULL)').run(page.id,owner,JSON.stringify(page),biliHash(page));
     if(this.db.prepare("UPDATE bili_requests SET state='completed',page_id=? WHERE owner=? AND request_id=? AND state='pending'").run(page.id,owner,requestId).changes!==1)throw new Error('BILI_REQUEST_STATE_CONFLICT');this.audit(context,'bilibili.request.completed',{requestId,pageId:page.id,kind:page.kind});return page;});}
   fail(context:ExecutionContextV3,requestId:string,error:string){z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).parse(error);const owner=biliOwner(context);this.atomic(()=>{if(this.db.prepare("UPDATE bili_requests SET state='failed',error=? WHERE owner=? AND request_id=? AND state='pending'").run(error,owner,requestId).changes)this.audit(context,'bilibili.request.failed',{requestId,error});});}
-  page(owner:string,id:string){const row=this.db.prepare('SELECT body,hash FROM bili_pages WHERE id=? AND owner=?').get(z.uuid().parse(id),owner);if(!row)throw new Error('BILI_PAGE_UNAVAILABLE');const page=BiliPageSchema.parse(JSON.parse(String(row.body)));if(page.owner!==owner||biliHash(page)!==row.hash)throw new Error('BILI_STATE_CORRUPT');if(!this.sourceCurrent(page.sourceKey,page.sourceVersion))throw new Error('SOURCE_STALE');return page;}
+  page(owner:string,id:string):BiliPage{const row=this.db.prepare('SELECT body,hash FROM bili_pages WHERE id=? AND owner=?').get(z.uuid().parse(id),owner);if(!row)throw new Error('BILI_PAGE_UNAVAILABLE');const page=BiliPageSchema.parse(JSON.parse(String(row.body)));if(page.owner!==owner||biliHash(page)!==row.hash)throw new Error('BILI_STATE_CORRUPT');if(!this.sourceCurrent(page.sourceKey,page.sourceVersion)||page.parents?.some(p=>!this.current(p)))throw new Error('SOURCE_STALE');return page;}
   pages(owner:string){return this.db.prepare('SELECT id FROM bili_pages WHERE owner=? ORDER BY rowid DESC LIMIT 64').all(owner).flatMap(r=>{try{return [this.page(owner,String(r.id))];}catch{return [];}});}
   sourceCurrent(key:string,version:number){const row=this.db.prepare('SELECT version,available FROM bili_sources WHERE key=?').get(key);return row?.version===version&&row.available===1;}
   unavailable(key:string){this.db.prepare('UPDATE bili_sources SET available=0 WHERE key=?').run(key);}
   proof(page:BiliPage):ResourceProof{return {provider:'bilibili',scene:BILI_SCENE,key:page.id,version:page.sourceVersion,hash:biliHash(page),roots:['bilibili:'+page.sourceKey],detail:{owner:page.owner}};}
-  current(raw:ResourceProof){try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail),page=this.page(detail.owner,proof.key);return biliHash(proof)===biliHash(this.proof(page));}catch{return false;}}
+  current(raw:ResourceProof):boolean{if(this.checking.has(raw.key)||this.checking.size>=64)return false;this.checking.add(raw.key);try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail),page=this.page(detail.owner,proof.key);return biliHash(proof)===biliHash(this.proof(page));}catch{return false;}finally{this.checking.delete(raw.key);}}
   bindObservation(page:BiliPage,source:PersonaSourceRef){const value=JSON.stringify(PersonaSourceRefSchema.parse(source)),old=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);if(!old)throw new Error('BILI_PAGE_UNAVAILABLE');if(old.observation&&old.observation!==value)throw new Error('BILI_OBSERVATION_CONFLICT');this.db.prepare('UPDATE bili_pages SET observation=? WHERE id=?').run(value,page.id);}
   observation(page:BiliPage){const row=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);return row?.observation?PersonaSourceRefSchema.parse(JSON.parse(String(row.observation))):null;}
   registerMedia(key:string,description:MediaSourceDescription,locator:unknown,expiresAt:number){const body=MediaSourceDescriptionSchema.parse(description);this.db.prepare('INSERT INTO bili_media VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET description=excluded.description,hash=excluded.hash,locator=excluded.locator,expires_at=excluded.expires_at').run(key,JSON.stringify(body),biliHash(body),JSON.stringify(z.json().parse(locator)),z.number().int().positive().parse(expiresAt));}
