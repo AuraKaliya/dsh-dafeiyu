@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { sha256 } from './catalog.ts';
 
-export const RuntimeIdentitySchema=z.strictObject({schemaVersion:z.literal(1),node:z.string(),sqlite:z.string(),platform:z.string(),arch:z.string(),scope:z.literal('offline-evaluation-runtime-v1'),files:z.array(z.strictObject({path:z.string(),bytes:z.number().int().nonnegative(),hash:z.string().length(64)})),workspaceLinks:z.array(z.strictObject({path:z.string(),target:z.string()}))});
+export const RuntimeIdentitySchema=z.strictObject({schemaVersion:z.literal(1),node:z.string(),sqlite:z.string(),platform:z.string(),arch:z.string(),scope:z.enum(['offline-evaluation-runtime-v1','real-evaluation-runtime-v1']),files:z.array(z.strictObject({path:z.string(),bytes:z.number().int().nonnegative(),hash:z.string().length(64)})),workspaceLinks:z.array(z.strictObject({path:z.string(),target:z.string()}))});
 export type RuntimeIdentity=z.infer<typeof RuntimeIdentitySchema>;
 export function cleanEvaluationRevision(repository:string){
   const paths=['packages','scripts','profiles','evaluation','package.json','package-lock.json',':(glob)tsconfig*.json'];
@@ -15,7 +15,7 @@ export function cleanEvaluationRevision(repository:string){
   return execFileSync('git',['rev-parse','HEAD'],{cwd:repository,encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();
 }
 /** Records the actual built code and installed runtime dependencies, not only the lockfile. */
-export async function captureRuntimeIdentity(repository:string):Promise<RuntimeIdentity>{
+export async function captureRuntimeIdentity(repository:string,options:{real?:boolean}={}):Promise<RuntimeIdentity>{
   const root=resolve(repository),files:RuntimeIdentity['files']=[],workspaceLinks:RuntimeIdentity['workspaceLinks']=[];let total=0;
   const local=(path:string)=>relative(root,path).split(sep).join('/');
   async function walk(path:string):Promise<void>{
@@ -27,6 +27,7 @@ export async function captureRuntimeIdentity(repository:string):Promise<RuntimeI
     files.push({path:local(path),bytes:info.size,hash:hash.digest('hex')});
   }
   for(const path of ['package.json','package-lock.json','scripts/evaluation','scripts/prepare-integrated-acceptance.mjs','scripts/run-integrated-offline.mjs'])await walk(join(root,path));
+  if(options.real)for(const path of ['scripts/run-integrated-real.mjs','evaluation/phase7c/authorization.json'])await walk(join(root,path));
   for(const entry of await readdir(root))if(/^tsconfig.*\.json$/.test(entry))await walk(join(root,entry));
   for(const entry of await readdir(join(root,'packages'),{withFileTypes:true})){
     if(!entry.isDirectory()||entry.isSymbolicLink())throw new Error('EVALUATION_RUNTIME_LINK_DENIED');
@@ -40,6 +41,6 @@ export async function captureRuntimeIdentity(repository:string):Promise<RuntimeI
     if(await realpath(path)!==await realpath(expected))throw new Error('EVALUATION_RUNTIME_LINK_DENIED');workspaceLinks.push({path:local(path),target:local(expected)});
   }
   files.sort((a,b)=>a.path.localeCompare(b.path));workspaceLinks.sort((a,b)=>a.path.localeCompare(b.path));
-  return RuntimeIdentitySchema.parse({schemaVersion:1,node:process.version,sqlite:process.versions.sqlite??'unknown',platform:process.platform,arch:process.arch,scope:'offline-evaluation-runtime-v1',files,workspaceLinks});
+  return RuntimeIdentitySchema.parse({schemaVersion:1,node:process.version,sqlite:process.versions.sqlite??'unknown',platform:process.platform,arch:process.arch,scope:options.real?'real-evaluation-runtime-v1':'offline-evaluation-runtime-v1',files,workspaceLinks});
 }
 export const runtimeIdentityHash=(identity:RuntimeIdentity)=>sha256(JSON.stringify(RuntimeIdentitySchema.parse(identity)));

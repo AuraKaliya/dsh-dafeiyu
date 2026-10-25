@@ -8,7 +8,7 @@ const hash=z.string().regex(/^[a-f0-9]{64}$/),id=z.string().regex(/^[a-zA-Z0-9._
 const money=integer; // Integer micro-CNY. No binary floating-point currency arithmetic.
 export const EvaluationConfigSchema=z.strictObject({schemaVersion:z.literal(1),suiteId:id,suiteHash:hash,manifestHash:hash,foundationHash:hash,codeRevision:z.string().regex(/^[a-f0-9]{40}$/),
   runtimeHash:hash.optional(),
-  executionBounds:z.strictObject({authorizationId:id,maximumActiveMs:integer.positive(),validForMsAfterFirstCall:integer.positive(),calibrationMaximumMicroCny:money.positive(),calibrationMaximumActiveMs:integer.positive()}).optional(),
+  executionBounds:z.strictObject({authorizationId:id,authorizationHash:hash.optional(),maximumActiveMs:integer.positive(),validForMsAfterFirstCall:integer.positive(),calibrationMaximumMicroCny:money.positive(),calibrationMaximumActiveMs:integer.positive()}).optional(),
   mode:z.enum(['offline','real']),budget:z.strictObject({authorized:z.boolean(),maximumMicroCny:money,expiresAt:z.iso.datetime(),pricingHash:hash,
     inputMicroCnyPerMillion:money,outputMicroCnyPerMillion:money}),cases:z.array(z.strictObject({id,reviewId:id})).min(1).max(2000)})
   .refine(c=>new Set(c.cases.map(i=>i.id)).size===c.cases.length&&new Set(c.cases.map(i=>i.reviewId)).size===c.cases.length,'Duplicate case identity')
