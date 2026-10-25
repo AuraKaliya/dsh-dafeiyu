@@ -14,7 +14,7 @@
 
 阶段6已完成[B站方案](docs/bilibili-capabilities-plan.md)的6A—6D本地开发：只读搜索／页面／字幕／弹幕／评论、独立音画来源、选择性记忆、QQ任务与兴趣、自主活动、Host和bilibili v1迁移。见[阶段记录](docs/bili-6d3-integration.md)及[使用边界](docs/bili-usage.md)。下一步准备整体验收，不能把脚本模型与合成媒体结果当作真实平台或理解质量通过。
 
-阶段7已提交[整体验收与发布包方案](docs/integrated-acceptance-plan.md)，完成[7A样本检查](docs/integrated-7a-readiness.md)及[7B-1运行／费用账本](docs/integrated-7b1-ledger.md)。162项仍未执行，具体场景驱动、真实验收、持续运行与发布回归尚待推进。
+阶段7已提交[整体验收与发布包方案](docs/integrated-acceptance-plan.md)，完成7A及7B的本地离线工具：冻结样本、运行／费用账本、12类边界场景、6类连续性对照、批次恢复与证据导出，见[使用与检查记录](docs/integrated-7b6-offline-runner.md)。已用脚本后端做定向检查，未执行完整162项真实验收；真实模型／平台、持续运行和发布全量回归尚待7C—7F推进。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 

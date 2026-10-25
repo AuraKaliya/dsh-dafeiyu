@@ -78,4 +78,4 @@ IG-02／07至少覆盖：主人明确任务、聊天中产生兴趣、无聊天�
 
 ## 7. 当前记录
 
-7A样本校验通过：18组、162项、108／54分组和原SHA256一致；真实调用0、executionAuthorized=false。2026-10-26完成[7B-1运行／费用账本](integrated-7b1-ledger.md)的本地开发与4项检查；具体场景驱动、DSH计费接线和证据导出仍待7B后续。真实运行、平台发送、全量发布回归和发布包尚未执行。
+7A样本校验通过：18组、162项、108／54分组和原SHA256一致；真实调用0、executionAuthorized=false。2026-10-26已完成7B的本地离线开发：[运行／费用账本](integrated-7b1-ledger.md)、[冻结样本与工作区](integrated-7b2-catalog.md)、[DSH调用接线](integrated-7b3-billing.md)、[实际边界夹具](integrated-7b4-boundary.md)、[连续性对照](integrated-7b5-continuity.md)及[批次／恢复／证据导出](integrated-7b6-offline-runner.md)。过程中修复[原生任务摘要来源证明](integrated-7b5-native-summary-fix.md)。定向检查覆盖所有基础场景种类，未运行完整162项矩阵；不把离线程序检查写为人格语义或真实模型验收。7C尚待真实执行授权、模型和预算冻结及对应真实适配器接线，7D—7F与服务器接入尚未执行。
