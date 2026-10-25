@@ -1,0 +1,9 @@
+{
+  "step":"media-5A","date":"2026-10-25","planCommit":"1b022ae",
+  "checks":[
+    {"runId":"e0857943-fe94-412d-a5a2-7ddbad5418c5","passed":7,"failed":0},
+    {"runId":"d2ede503-064b-4f72-9d53-0547daf0bdc0","passed":8,"failed":0}
+  ],
+  "mediaSchema":1,"byteIOImplemented":false,"decoderImplemented":false,"hostIntegrated":false,
+  "fullRegression":false,"realModel":false,"realPlatform":false,"serverConnected":false,"cleanupBlocked":false
+}

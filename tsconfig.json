@@ -26,6 +26,9 @@
       "path": "packages/activity"
     },
     {
+      "path": "packages/media"
+    },
+    {
       "path": "packages/host"
     }
   ]

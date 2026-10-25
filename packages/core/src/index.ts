@@ -22,6 +22,8 @@ import { TaskDelivery } from './task-delivery.js';
 import { prepareReplySources } from './reply-sources.js';
 import type { MessageTaskBinding } from '@dafeiyu/contracts';
 import type { NativeExpressionPort } from '@dafeiyu/contracts';
+import type { MediaPort,MediaAccess,MediaSourceProvider,MediaAssetRef } from '@dafeiyu/contracts';
+import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema } from '@dafeiyu/contracts';
 import { NativeTaskDelivery } from './native-task-delivery.js';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
@@ -68,7 +70,19 @@ export class DafeiyuService extends Service {
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
   private nativeExpressionPort:NativeExpressionPort|undefined;
+  private mediaPort:MediaPort|undefined;
   bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({...(port.signal?{signal:port.signal}:{}),ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
+  bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port)});
+    this.mediaPort=bound;return ()=>{if(this.mediaPort===bound)this.mediaPort=undefined;};}
+  registerMediaProvider(provider:MediaSourceProvider){if(!this.mediaPort)throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.registerProvider(provider);}
+  mediaAccess(context:ExecutionContextV3,owner:string,raw:unknown):MediaAccess {
+    const origin=ResourceProofSchema.parse(raw),fingerprint=createHash('sha256').update(JSON.stringify(origin)).digest('hex'),execution=this.personaAccess(context,owner,'read');
+    const guard=()=>{execution.guard();this.authorizeCapabilityResource(context,owner,origin.scene);if(createHash('sha256').update(JSON.stringify(origin)).digest('hex')!==fingerprint||!this.capabilityResourceCurrent(origin))throw new Error('MEDIA_SOURCE_STALE');};
+    guard();return Object.freeze({execution,origin,guard});
+  }
+  acquireMedia(context:ExecutionContextV3,owner:string,input:unknown){this.executionAuthority(context,owner);if(!this.mediaPort?.ready())throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.acquire(context,owner,MediaAcquireSchema.parse(input));}
+  inspectMedia(context:ExecutionContextV3,owner:string,ref:MediaAssetRef){this.executionAuthority(context,owner);if(!this.mediaPort?.ready())throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.inspect(context,owner,MediaAssetRefSchema.parse(ref));}
+  readMedia(context:ExecutionContextV3,owner:string,input:unknown){this.executionAuthority(context,owner);if(!this.mediaPort?.ready())throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.read(context,owner,MediaReadSchema.parse(input));}
   async prepareMessageTaskExpression(runId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const port=this.nativeExpressionPort,access=await this.executions.nativeResultAccess(runId);if(port!==this.nativeExpressionPort)throw new Error('DEPENDENCY_UNAVAILABLE');return port.prepare(access);}
   async openMessageTaskExpression(runId:string,packetId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.open(await this.executions.nativeResultAccess(runId),packetId);}
   async withdrawMessageTaskExpression(runId:string,packetId:string,version:number){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.withdraw(await this.executions.nativeResultAccess(runId),packetId,version);}
@@ -162,7 +176,7 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.mediaPort?['media.assets.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   bindMessageTasks(binding:MessageTaskBinding){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const channel=this.extensions.get(binding.channelExtensionId);
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
