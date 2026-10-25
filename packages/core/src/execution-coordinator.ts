@@ -14,7 +14,7 @@ import type { RunScheduler } from './run-scheduler.js';
 import type { NativeAction } from './execution-frame.js';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
-import { SourceDependencySchema } from '@dafeiyu/contracts';
+import { SourceDependencySchema,MaintenanceLifecycleSchema } from '@dafeiyu/contracts';
 import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskSourceSchema,MessageTaskControlSchema,PersonaSourceRefSchema,TaskResultAnchorSchema } from '@dafeiyu/contracts';
 import type { MessageTaskBinding,MessageTaskSource,NativeExpressionAccess,PersonaSourceRef } from '@dafeiyu/contracts';
 import { ExecutionEvidence } from './execution-evidence.js';
@@ -290,6 +290,7 @@ export class ExecutionCoordinator {
         memory?.acceptIntent({...access,producer:`producer:${request.producer}`});
         const prior=this.previousContinuity(run,access,persona.version);
         const sessionId=this.d.store.session(runtimeHash({task:task.id,epoch:task.epoch,authorityVersion,inputHash,registryVersion,persona:runPersona.projectionKey,executionHistory:1}));
+        this.d.store.bindInput(id,'task-facts',{goal:task.goal,epoch:task.epoch});
         run=this.d.store.start(id,run.version,{sessionId,personaVersion:persona.version,model:this.d.model,registryVersion,authorityVersion,
           inputs:inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey}))},{...runPersona.manifest,continuityCheckpointId:prior?.id??null});
         this.d.store.checkpoint(id,{kind:'run-start',intentVersion:task.epoch});this.flushEvents();
@@ -403,6 +404,20 @@ export class ExecutionCoordinator {
       operationId:operation?.id??run.id,causedBy:operation&&event.type!=='operation.started'?operation.startedEventId:prior?.id??null,
       type:event.type,plugin:operation?.plugin??'core',pluginVersion:operation?.pluginVersion??CORE_VERSION,occurredAt:event.at,sources:[],data:event.data},event.id);
     if(run.state==='completed'&&run.result)this.d.memory()?.bindResult(run.definition.taskId!,run.id,run.definition.intentVersion,{result:run.result,continuity:this.d.store.readInput(run.id,'continuity-reference')});
+    const lifecycle=this.d.memory()?.recordLifecycle;
+    if(lifecycle){
+      const changed=event.type==='operation.succeeded'&&operation&&((operation.plugin==='memory-execution'&&['dafeiyu_execution_contribute','dafeiyu_execution_select'].includes(operation.action))||operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select');
+      const type=changed?'evidence.changed':event.type;
+      if(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed'].includes(type)){
+        const facts=z.object({goal:z.string(),epoch:z.number()}).safeParse(this.d.store.readInput(run.id,'task-facts'));
+        const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),goal=facts.success?facts.data.goal:'goal'in saved.input?saved.input.goal:'';
+        const operations=type==='run.running'?[]:this.d.store.operations(run.id);
+        lifecycle(MaintenanceLifecycleSchema.parse({id:event.id,scope:run.definition.scope,runId:run.id,taskEpoch:run.definition.intentVersion,
+          origin:run.definition.origin,motivation:this.motivation(run),type,goal,at:event.at,
+          operations:operations.slice(0,256).map(op=>({id:op.id,action:op.action,status:op.outcome?.status??(op.state==='started'?'started':'unknown'),
+            effects:op.outcome?.effects??'unknown',completeness:op.outcome?.completeness??'unknown'})),omittedOperations:Math.max(0,operations.length-256)}));
+      }
+    }
     this.d.store.acknowledgeEvent(event.id);
   }}
   async whenIdle(){while(this.queued.size)await Promise.all([...this.queued.values()]);if(this.failure)throw new Error(this.failure);}

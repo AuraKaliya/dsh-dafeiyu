@@ -1,0 +1,10 @@
+{
+  "step":"memory-E3","date":"2026-10-25","baseline":"1238063",
+  "checks":[
+    {"runId":"c956fe5c-31a5-4c25-bff7-b75feb899c09","passed":19,"failed":0},
+    {"runId":"9e69ed02-f1d8-41de-b836-449539d9b270","passed":14,"failed":0}
+  ],
+  "recovery":"Real local close/reopen with a simulated lost acknowledgement in persistent SQLite",
+  "automaticModelsStartedByEvents":0,"fullRegression":false,"realModel":false,"realPlatform":false,
+  "serverConnected":false,"cleanupBlocked":false
+}

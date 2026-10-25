@@ -58,7 +58,7 @@ export class ExperienceStore {
     });
   }
   /** Program-only: durable core event identity; no model-facing authority fields. */
-  recordLifecycle(raw:MaintenanceLifecycle,sources:readonly PersonaSourceRef[]=[]):string|null {
+  recordLifecycle(raw:MaintenanceLifecycle,sources?:readonly PersonaSourceRef[]):string|null {
     const event=MaintenanceLifecycleSchema.parse(raw);if(event.scope.kind!=='task')throw new Error('TASK_REQUIRED');
     const fingerprint=personaDigest(event);
     return this.transaction(()=>{
@@ -66,12 +66,24 @@ export class ExperienceStore {
       if(old){if(old.body_hash!==fingerprint)throw new Error('IDEMPOTENCY_CONFLICT');return this.eventRequest(event.id);}
       this.db.prepare('INSERT INTO maintenance_events VALUES(?,?,?,?,?)').run(event.id,event.scope.agentId,personaScope(event.scope),JSON.stringify(event),fingerprint);
       if(event.type==='run.running'||event.motivation.kind==='maintenance'||event.origin.kind==='maintenance')return null;
-      const now=new Date().toISOString(),id=randomUUID(),refs=uniqueSources(sources);
+      const selected=sources?{refs:[...sources],omitted:0}:this.selectedFor(event),now=new Date().toISOString(),id=randomUUID(),refs=uniqueSources(selected.refs);
       const snapshot=MaintenanceSnapshotSchema.parse({schemaVersion:1,id,scope:event.scope,taskEpoch:event.taskEpoch,runId:event.runId,requestId:event.id,
-        goal:event.goal,reason:event.type,motivation:event.motivation,sources:refs,history:[],targets:[],event,
+        goal:event.goal,reason:event.type,motivation:event.motivation,sources:refs,history:[],targets:[],event,omittedSources:selected.omitted,
         watermark:personaDigest({event:event.id,sources:refs}),createdAt:now,expiresAt:new Date(Date.now()+7*86400000).toISOString()});
       return this.insert(snapshot,'core-lifecycle',fingerprint,'waiting-scheduler');
     });
+  }
+  private selectedFor(event:MaintenanceLifecycle){
+    // Only explicitly retained memory created in this Run; unselected capability payloads remain absent.
+    const rows=this.db.prepare("SELECT count(*) OVER() AS total,i.id,i.version,i.head,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id AND r.revision=i.head JOIN memory_events e ON e.id=r.event_id WHERE i.agent_id=? AND i.route=? AND i.deleted=0 AND json_extract(e.body,'$.traceId')=? ORDER BY i.ordinal LIMIT 33")
+      .all(event.scope.agentId,personaScope(event.scope),event.runId);
+    if(rows.length>32)return {refs:[],omitted:Number(rows[0]!.total)}; // Do not silently call a truncated set complete.
+    const selected=this.db.prepare("SELECT json_extract(body,'$.data.version') AS version FROM execution_memory_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')='execution.evidence.selected' AND json_extract(body,'$.at')<=? ORDER BY rowid DESC LIMIT 1").get(event.runId,event.at);
+    const receipt=selected?this.db.prepare("SELECT receipt FROM execution_memory_requests WHERE scope_key=? AND json_extract(receipt,'$.kind')='execution-selection' AND json_extract(receipt,'$.version')=? LIMIT 1").get(personaScope(event.scope),selected.version!):null;
+    const entries=receipt?z.object({entries:z.array(PersonaSourceRefSchema).max(16)}).parse(JSON.parse(String(receipt.receipt))).entries:[];
+    const refs=uniqueSources([...entries,...rows.map(row=>PersonaSourceRefSchema.parse({kind:'memory',agentId:event.scope.agentId,scopeKey:personaScope(event.scope),id:row.id,version:row.version,revision:row.head,
+      contentHash:z.object({contentHash:z.string()}).parse(JSON.parse(String(row.body))).contentHash}))]);
+    return refs.length>32?{refs:[],omitted:refs.length}:{refs,omitted:0};
   }
   private eventRequest(id:string):string|null {const row=this.db.prepare("SELECT id FROM maintenance_requests WHERE producer='core-lifecycle' AND request_id=?").get(id);return row?String(row.id):null;}
   snapshot(access:PersonaAccess,id:string){
@@ -97,7 +109,8 @@ export class ExperienceStore {
   });}
   fail(access:PersonaAccess,id:string,code:string){return this.transaction(()=>{
     // Record the already-started failure even when its live grant has expired or been cancelled.
-    const row=this.db.prepare('SELECT state FROM maintenance_requests WHERE id=? AND agent_id=? AND scope_key=?').get(id,access.view.scope.agentId,personaScope(access.view.scope));if(row?.state!=='running')return;
+    const row=this.db.prepare('SELECT state FROM maintenance_requests WHERE id=? AND agent_id=? AND scope_key=?').get(id,access.view.scope.agentId,personaScope(access.view.scope));
+    if(!row||row.state!=='running'&&(!['ready','waiting-scheduler'].includes(String(row.state))||!['SOURCE_STALE','TASK_NOT_ACTIVE','VERSION_CONFLICT'].includes(code)))return;
     const state=code==='CANCELLED'?'cancelled':['SOURCE_STALE','TASK_NOT_ACTIVE','VERSION_CONFLICT'].includes(code)?'stale':'failed';
     this.db.prepare('UPDATE maintenance_requests SET state=?,version=version+1,error=?,updated_at=? WHERE id=?').run(state,code,new Date().toISOString(),id);
     this.audit(access,'memory.maintenance.failed',{id,code});

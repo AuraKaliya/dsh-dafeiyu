@@ -14,6 +14,8 @@ export const ExecutionContributionSchema=z.strictObject({requestId:PersonaReques
   text:z.string().trim().min(1).max(8000).optional(),reason:z.string().trim().min(1).max(1000)});
 export interface ExecutionMemoryPort {
   ready():boolean;
+  /** Optional durable consumer; core acknowledges its event only after this returns. */
+  recordLifecycle?(event:import('./memory-maintenance.js').MaintenanceLifecycle):void;
   resourceEpoch?(access:PersonaAccess):string;
   validate(access:PersonaAccess,ref:PersonaSourceRef):boolean;
   operationSources(access:PersonaAccess,operationId:string):readonly PersonaSourceRef[];

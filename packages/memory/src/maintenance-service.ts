@@ -78,12 +78,15 @@ export class MaintenanceService {
     void pending.then(()=>this.pending.delete(pending),()=>this.pending.delete(pending));return pending;
   }
   private async execute(access:PersonaAccess,id:string,caller:AbortSignal){
-    const store=this.persona.experiences,row=store.begin(access,id);if(row.state==='completed'){this.result(access,id);return {id,state:'completed',duplicate:true};}
+    const store=this.persona.experiences;
+    let row:ReturnType<typeof store.begin>;try{row=store.begin(access,id);}catch(error){if(error instanceof Error)store.fail(access,id,error.message);this.persona.flush();throw error;}
+    if(row.state==='completed'){this.result(access,id);return {id,state:'completed',duplicate:true};}
     this.active.add(id);const timeout=AbortSignal.timeout(this.config.timeoutMs),signal=AbortSignal.any([caller,this.controller.signal,timeout]);
     try{
       const sources=row.input.sources.map((ref,i)=>{const material=this.persona.resolve(access,ref);if(!material)throw new Error('SOURCE_STALE');return {sourceId:`S${i+1}`,ref,text:material.text,rootSources:material.rootSources};});
       const targets=row.input.targets.map(target=>store.read(access,target.id));
       const model=this.ctx.dafeiyu.analysisModelRoute();
+      if(row.input.omittedSources)throw new Error('INPUT_TOO_LARGE');
       const input={policy:'experience-e-v1',instructionAuthority:false,sources,targets,program:{goal:row.input.goal,motivation:row.input.motivation,event:row.input.event}};
       if(Buffer.byteLength(JSON.stringify(input))+Buffer.byteLength(instructions)>this.config.maxInputBytes)throw new Error('INPUT_TOO_LARGE');
       const analysis:MaintenanceAnalysis=sources.length?await this.runtime.structured({id,model,instructions,input,parse:v=>MaintenanceAnalysisSchema.parse(v)},signal):

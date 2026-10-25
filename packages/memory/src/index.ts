@@ -143,7 +143,7 @@ export class MemoryService extends Service {
     ctx.effect(() => () => this.close(), 'memory.close');
     if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
       ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
-    if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction);
+    if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction,!!this.config.maintenance);
     if(this.config.maintenance&&this.persona)this.maintenance=new MaintenanceService(ctx,this.store,this.persona,this.config.dataDir,this.config.maintenance,this.config.agentId,()=>!this.closed&&this.gate.active);
     if(this.config.lifecycleMode==='managed')this.capabilityService=new CapabilityObservationService(ctx,this.store,()=>!this.closed&&this.gate.active,sourcePolicy,()=>{this.flush();this.persona?.flush();});
     if(this.config.lifecycleMode==='managed'){this.nativeExpression=this.store.nativeExpression(ctx,this.expression,()=>!this.closed&&this.gate.active,()=>{this.flush();this.persona?.flush();});this.unbindNativeExpression=ctx.dafeiyu.bindNativeExpression(this.nativeExpression);}

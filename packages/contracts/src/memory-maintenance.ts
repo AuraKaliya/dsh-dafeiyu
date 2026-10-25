@@ -9,7 +9,7 @@ const short = z.string().trim().min(1).max(2000);
 export const MaintenanceLifecycleSchema = z.strictObject({
   id:z.uuid(), scope:ExecutionScopeSchema, runId:z.uuid(), taskEpoch:version,
   origin:RunOriginSchema, motivation:MotivationSchema,
-  type:z.enum(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted']),
+  type:z.enum(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed']),
   goal:z.string().max(2000), at:z.iso.datetime(),
   operations:z.array(z.strictObject({id:z.uuid(),action:z.string().max(100),
     status:z.enum(['started','succeeded','partial','failed','cancelled','unknown']),
@@ -26,6 +26,7 @@ export const MaintenanceSnapshotSchema = z.strictObject({schemaVersion:z.literal
   sources:z.array(PersonaSourceRefSchema).max(64),history:z.array(SourceDependencySchema).max(4096),
   targets:z.array(z.strictObject({id:z.uuid(),version})).max(8),
   event:MaintenanceLifecycleSchema.nullable(),watermark:hash,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),
+  omittedSources:z.number().int().nonnegative().optional(),
 });
 export type MaintenanceSnapshot = z.infer<typeof MaintenanceSnapshotSchema>;
 export const MaintenanceStateSchema=z.enum(['waiting-scheduler','ready','running','completed','failed','cancelled','stale']);

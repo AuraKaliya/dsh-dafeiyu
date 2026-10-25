@@ -189,6 +189,7 @@ export class DafeiyuService extends Service {
     const bound:ExecutionMemoryPort=Object.freeze({ready:port.ready.bind(port),...(port.resourceEpoch?{resourceEpoch:port.resourceEpoch.bind(port)}:{}),validate:port.validate.bind(port),operationSources:port.operationSources.bind(port),outcomeSources:port.outcomeSources.bind(port),
       prepareContext:port.prepareContext.bind(port),validateContext:port.validateContext.bind(port),captureContinuity:port.captureContinuity.bind(port),checkpoint:port.checkpoint.bind(port),bindResult:port.bindResult.bind(port),
       generation:port.generation.bind(port),acceptIntent:port.acceptIntent.bind(port),intent:port.intent.bind(port),resolveIntent:port.resolveIntent.bind(port),summarize:port.summarize.bind(port),
+      ...(port.recordLifecycle?{recordLifecycle:port.recordLifecycle.bind(port)}:{}),
       ...(port.compactionPolicy?{compactionPolicy:Object.freeze({...port.compactionPolicy})}:{}),...(port.summarizeFragments?{summarizeFragments:port.summarizeFragments.bind(port)}:{})});
     this.executionMemoryPort=bound;return ()=>{if(this.executionMemoryPort===bound)this.executionMemoryPort=undefined;};}
   personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'):PersonaAccess {
