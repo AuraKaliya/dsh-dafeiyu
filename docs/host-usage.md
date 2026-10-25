@@ -118,7 +118,7 @@ node scripts/dafeiyu-host.mjs migrate verify --config path/to/host.json --plan .
 
 命令会核对选定profile、实际路径、配置哈希和固定迁移计划。计划文件使用独占创建，不覆盖同名已有计划。活动Host占用的数据不能迁移；更换配置／路径后需要重新核对计划，不能套用另一profile的清单。
 
-目标为journal v2、memory v11、runtime v3、QQ v4；旧D3及辅助权威库保持既有版本。memory v11追加经历、候选关系和整理队列；runtime v3追加独立任务结果交付账本，旧库需显式备份升级；既有Run、快照与结果保留。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。
+目标为journal v2、memory v11、runtime v4、QQ v5；旧D3及辅助权威库保持既有版本。memory v11追加经历、候选关系和整理队列；runtime v3追加独立任务结果交付账本，v4是语音来源／媒体协议的兼容门槛；QQ v5追加媒体来源及交付表。旧库需显式备份升级，既有Run、快照与文字回执保留。检索缓存按现有v2、DSH查询索引按v8核验；其它派生索引版本需另行明确升级／重建，start不暗中接受自动重置。旧会话由DSH管理，不作为模板导入新会话。统一Host的media插件装配仍待阶段5F，不因存在新库版本便宣称已配置媒体。
 
 迁移中断保持准入关闭；新版本已产生新数据后，不用旧备份覆盖新增记忆。原`scripts/migrate-profile.mjs`仍可用，新入口复用其底层迁移实现。
 
@@ -156,4 +156,4 @@ daemon在统一ready后启动计时；single-run只装配和保存计划，不�
 
 记忆自行判断待办：同Run且来源被完整覆盖的选材请求可合并；没有内容证据的请求只落定活动事实。有证据的整理通过同Task的maintenance Run执行，并保留原始经历动机。整理不会递归唤醒自己。
 
-activity使用独立`core/activity.sqlite` v1，memory仍为v11、runtime v3。已有profile首次启用activity必须走第6节显式迁移；迁移将备份旧库并追加新库，不以init替换数据。以后关闭插件仍保留其权威数据。插件只在进程存活时计时；系统启动、服务器守护和正式部署未在本阶段配置。详见[自主活动联合检查](activity-4d-integration.md)。
+activity使用独立`core/activity.sqlite` v1，memory为v11；阶段4交付时runtime为v3，当前v4兼容门槛见第6节。已有profile首次启用activity必须走第6节显式迁移；迁移将备份旧库并追加新库，不以init替换数据。以后关闭插件仍保留其权威数据。插件只在进程存活时计时；系统启动、服务器守护和正式部署未在本阶段配置。详见[自主活动联合检查](activity-4d-integration.md)。

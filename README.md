@@ -4,11 +4,13 @@
 
 第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，1F结束时529项回归通过。用户于2026-10-25决定将真实模型与整体验收延后至整体开发完成；[162次场景样本已保留](docs/phase1g-deferred-samples.md)，1G尚未通过，继续阶段2开发并保留本地程序回归。1A音画探针单独记录，现有QQ和服务器未切换。
 
-阶段2已完成[2A存储迁移基础](docs/qq-phase2a-storage.md)、[2B自然称呼／群同步](docs/qq-phase2b-triggers-groups.md)、[2C浏览／观察／选择性记忆](docs/qq-phase2c3-integration.md)、[2D可靠分段交付](docs/qq-phase2d3-host.md)、[2E可信任务与人格交付](docs/qq-phase2e5-host.md)和[2F阶段整合](docs/qq-phase2f-integration.md)的本地开发。当前QQ v4、memory v11、runtime v3，已有数据需显式备份升级。浏览／tasks默认关闭，样例明确开启。每步仅运行相关检查；真实模型／QQ及整体人工验收延期，全量回归留到部署／发布。
+阶段2已完成[2A存储迁移基础](docs/qq-phase2a-storage.md)、[2B自然称呼／群同步](docs/qq-phase2b-triggers-groups.md)、[2C浏览／观察／选择性记忆](docs/qq-phase2c3-integration.md)、[2D可靠分段交付](docs/qq-phase2d3-host.md)、[2E可信任务与人格交付](docs/qq-phase2e5-host.md)和[2F阶段整合](docs/qq-phase2f-integration.md)的本地开发。当前QQ v5、memory v11、runtime v4，已有数据需显式备份升级。浏览／tasks默认关闭，样例明确开启。每步仅运行相关检查；真实模型／QQ及整体人工验收延期，全量回归留到部署／发布。
 
 阶段3记忆E已完成[方案](docs/agent-memory-phase-e-plan.md)、E1存储与迁移、E2经历分析／修订和人格建议、E3任务事件／请求持久化及[E4 Host联合检查](docs/memory-e4-integration.md)。整理默认不开启。
 
-阶段4自主活动已完成[方案](docs/autonomous-activity-plan.md)、4A计划／时间存储、4B核心来源锚点、4C唤醒／让出与整理调度、[4D Host联合检查](docs/activity-4d-integration.md)。activity库v1，按需启用；single-run不启动后台活动。下一阶段是统一媒体与QQ多媒体，仍先设计后开发。
+阶段4自主活动已完成[方案](docs/autonomous-activity-plan.md)、4A计划／时间存储、4B核心来源锚点、4C唤醒／让出与整理调度、[4D Host联合检查](docs/activity-4d-integration.md)。activity库v1，按需启用；single-run不启动后台活动。
+
+阶段5已完成[统一媒体方案](docs/media-and-qq-plan.md)的5A—5D：受管字节／解码、图像／音频／文档读取、QQ按需媒体观察和[可选主人语音任务](docs/media-5d3b-voice-tasks.md)。真实模型／平台仍未验收；媒体发送与统一Host媒体装配尚未完成，继续[5E媒体交付](docs/media-delivery-5e-plan.md)后推进5F。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
