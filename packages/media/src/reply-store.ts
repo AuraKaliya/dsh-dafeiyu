@@ -16,7 +16,7 @@ export function migrateMediaReplies(db:DatabaseSync){const version=Number(db.pre
     PRAGMA user_version=2;`);
 }
 export const mediaDraftContentSchema=z.strictObject({schemaVersion:z.literal(1),runId:z.uuid(),scope:ExecutionScopeSchema,taskEpoch:z.number().int().nonnegative(),parts:z.array(z.discriminatedUnion('kind',[
-  z.strictObject({kind:z.literal('asset'),asset:MediaAssetRefSchema,source:MediaSourceDescriptionSchema}),z.strictObject({kind:z.literal('final-voice')})])).max(8)});
+  z.strictObject({kind:z.literal('asset'),asset:MediaAssetRefSchema,source:MediaSourceDescriptionSchema,as:z.enum(['image','record','file']).optional()}),z.strictObject({kind:z.literal('final-voice')})])).max(8)});
 export const mediaDraftSchema=mediaDraftContentSchema.extend({id:z.uuid(),version:z.number().int().positive(),requestId:z.string(),operationId:z.uuid(),authority:MediaReplyAuthoritySchema,createdAt:z.iso.datetime()});
 export type MediaDraft=z.infer<typeof mediaDraftSchema>;
 const exportSchema=z.strictObject({manifest:ReplyMediaManifestSchema,leases:z.array(z.strictObject({id:z.uuid(),owner:z.string()})).max(8)});
@@ -39,7 +39,7 @@ export class MediaReplyStore {
     const body=exportSchema.parse({manifest,leases});if(manifest.draft.id!==draft.id||manifest.draft.version!==draft.version||manifest.runId!==draft.runId)throw new Error('MEDIA_EXPORT_BINDING_INVALID');
     if(!draft.parts.length||manifest.parts.length!==draft.parts.length||leases.length!==manifest.parts.length)throw new Error('MEDIA_EXPORT_BINDING_INVALID');
     for(const [index,part] of manifest.parts.entries()){const selected=draft.parts[index]!;
-      if(selected.kind==='asset'&&(this.hash(selected.asset)!==this.hash(part.asset)||part.kind!==(selected.asset.kind==='image'?'image':selected.asset.kind==='audio'?'record':'file'))||selected.kind==='final-voice'&&part.kind!=='record')throw new Error('MEDIA_EXPORT_BINDING_INVALID');
+      if(selected.kind==='asset'&&(this.hash(selected.asset)!==this.hash(part.asset)||part.kind!==(selected.as??(selected.asset.kind==='image'?'image':selected.asset.kind==='audio'?'record':'file')))||selected.kind==='final-voice'&&part.kind!=='record')throw new Error('MEDIA_EXPORT_BINDING_INVALID');
       this.validAsset(part.asset);const lease=leases[index]!,actual=this.db.prepare('SELECT * FROM media_leases WHERE id=?').get(lease.id);
       if(!actual||actual.asset_id!==part.asset.id||actual.asset_version!==part.asset.version||actual.owner!==lease.owner||lease.owner!=='media-export:'+manifest.id||actual.released!==0||Number(actual.expires_at)<Date.parse(manifest.expiresAt)||Number(actual.expires_at)<=Date.now())throw new Error('MEDIA_EXPORT_LEASE_REQUIRED');
     }

@@ -122,6 +122,12 @@ export class MediaStore {
   lease(access:MediaAccess,ref:MediaAssetRef,owner:string,expiresAt:number){z.string().min(1).max(200).parse(owner);z.number().int().positive().safe().parse(expiresAt);return this.atomic(()=>{
     this.requireRef(access,ref);const id=randomUUID();this.db.prepare('INSERT INTO media_leases VALUES(?,?,?,?,?,0)').run(id,ref.id,ref.version,owner,expiresAt);return id;});}
   releaseLease(id:string,owner:string){return this.db.prepare('UPDATE media_leases SET released=1 WHERE id=? AND owner=?').run(z.uuid().parse(id),owner).changes===1;}
+  releaseLeases(owner:string){return Number(this.db.prepare('UPDATE media_leases SET released=1 WHERE owner=? AND released=0').run(owner).changes);}
+  ensureLease(access:MediaAccess,ref:MediaAssetRef,owner:string,expiresAt:number){return this.atomic(()=>{this.requireRef(access,ref);z.string().min(1).max(200).parse(owner);z.number().int().positive().safe().parse(expiresAt);
+    const old=this.db.prepare('SELECT id FROM media_leases WHERE asset_id=? AND asset_version=? AND owner=? AND released=0 ORDER BY expires_at DESC LIMIT 1').get(ref.id,ref.version,owner);
+    if(old){this.db.prepare('UPDATE media_leases SET expires_at=max(expires_at,?) WHERE id=?').run(expiresAt,old.id!);return String(old.id);}
+    const id=randomUUID();this.db.prepare('INSERT INTO media_leases VALUES(?,?,?,?,?,0)').run(id,ref.id,ref.version,owner,expiresAt);return id;
+  });}
   reclaimable(now:number){return this.db.prepare("SELECT b.sha256,b.bytes FROM media_blobs b WHERE b.present=1 AND NOT EXISTS(SELECT 1 FROM media_assets a JOIN media_asset_revisions r ON r.id=a.id AND r.version=a.version JOIN media_leases l ON l.asset_id=a.id AND l.asset_version=a.version WHERE json_extract(r.body,'$.sha256')=b.sha256 AND l.released=0 AND l.expires_at>?) ORDER BY b.created_at").all(now).map(row=>({sha256:String(row.sha256),bytes:Number(row.bytes)}));}
   beginEviction(hash:string,now:number){this.atomic(()=>{if(!this.reclaimable(now).some(blob=>blob.sha256===hash))throw new Error('MEDIA_BLOB_PINNED');
     this.db.prepare('UPDATE media_blobs SET present=0 WHERE sha256=?').run(hash);

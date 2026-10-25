@@ -22,7 +22,7 @@ export type ReplyMediaManifest=z.infer<typeof ReplyMediaManifestSchema>;
 export const MediaReplyAuthoritySchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),runId:z.uuid(),operationId:z.uuid(),scope:ExecutionScopeSchema,intentVersion:z.number().int().nonnegative(),hash});
 export type MediaReplyAuthority=z.infer<typeof MediaReplyAuthoritySchema>;
 export const MediaReplyDraftInputSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().nonnegative(),
-  parts:z.array(z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('asset'),asset:MediaAssetRefSchema}),z.strictObject({kind:z.literal('final-voice')})])).max(8)});
+  parts:z.array(z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('asset'),asset:MediaAssetRefSchema,as:z.enum(['image','record','file']).optional()}),z.strictObject({kind:z.literal('final-voice')})])).max(8)});
 /** Core-created, short-lived access to a persisted completed reply. Never constructed from model input. */
 export interface MediaReplyAccess {readonly execution:PersonaAccess;readonly authority:MediaReplyAuthority;readonly payloadHash:string;
   readonly replyId:string;readonly text:string;readonly target:z.infer<typeof ConversationSchema>;readonly sourceMessageId:string;readonly inboundId:string;

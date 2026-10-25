@@ -89,8 +89,10 @@ export interface ChannelCapability {
   readonly taskDelivery?:'simulated';
   /** Opt-in for persistent reply source rebinding and checks before every transport part. */
   readonly deliveryValidation?:'per-segment';
+  readonly mediaDelivery?:'parts-v1';
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
   deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
+  deliverMedia?(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(mediaPosition:number)=>Promise<Uint8Array>):Promise<DeliveryResult>;
   /** Separate from the legacy simulated-task contract; caller supplies a verified task-result anchor. */
   deliverTaskResult?(reply:Reply,anchor:TaskResultAnchor,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>;
 }

@@ -143,3 +143,4 @@ QQ用文字分段与媒体独立部件组成固定计划，尤其语音独立发
 - 5D-3b：[主人语音任务与runtime v4](media-5d3b-voice-tasks.md)完成；5D结束，继续5E媒体交付。
 - 5E-1：[回复媒体协议与逐部件账本](media-5e1-parts-ledger.md)完成；授权／字节导出和实际发送仍待5E-2—5E-6。
 - 5E-2a：[media v2草案存储与核心授权基础](media-5e2a-draft-authority.md)完成；继续5E-2b准备动作与受控字节导出。
+- 5E-2b：[准备动作、冻结与受控字节导出](media-5e2b-draft-export.md)完成；继续5E-3原生任务的目标材料与渲染凭据。

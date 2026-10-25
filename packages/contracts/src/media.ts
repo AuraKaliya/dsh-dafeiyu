@@ -5,6 +5,7 @@ import { PersonaRequestIdSchema,PersonaSourceRefSchema } from './persona.js';
 import type { ExecutionContextV3 } from './execution.js';
 import type { PersonaAccess } from './persona.js';
 import type { ResourceProof } from './resource-observation.js';
+import type { MediaReplyAccess,MediaReplyAuthority,ReplyMediaManifest } from './media-delivery.js';
 
 export const MediaKindSchema=z.enum(['image','audio','video','document']);
 const hash=z.string().regex(/^[a-f0-9]{64}$/),version=z.number().int().positive();
@@ -56,4 +57,9 @@ export interface MediaPort {
   read(context:ExecutionContextV3,owner:string,input:z.infer<typeof MediaReadSchema>):Promise<unknown>;
   voice?(context:ExecutionContextV3,owner:string,exposureId:string):{text:string;evidence:MediaVoiceEvidence};
   voiceCurrent?(evidence:MediaVoiceEvidence):boolean;
+  replyDraft?(runId:string):{id:string;version:number;selected:number;authority:MediaReplyAuthority}|null;
+  finalizeReply?(access:MediaReplyAccess):Promise<ReplyMediaManifest|null>;
+  readReplyPart?(access:MediaReplyAccess,manifestId:string,position:number):Promise<Uint8Array>;
+  validateReply?(access:MediaReplyAccess,manifestId:string):void;
+  settleReply?(access:MediaReplyAccess,manifestId:string,state:'sent'|'unknown'|'blocked'):void;
 }

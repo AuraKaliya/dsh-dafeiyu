@@ -8,7 +8,7 @@ import { MediaStore } from './store.js';
 import type { StoredMediaSource } from './store.js';
 import { contained } from './process.js';
 
-export async function hashFile(file:string){const hash=createHash('sha256');let bytes=0;for await(const chunk of createReadStream(file)){hash.update(chunk);bytes+=chunk.length;}return {sha256:hash.digest('hex'),bytes};}
+export async function hashFile(file:string,maxBytes?:number){const hash=createHash('sha256');let bytes=0;for await(const chunk of createReadStream(file)){bytes+=chunk.length;if(maxBytes!==undefined&&bytes>maxBytes)throw new Error('MEDIA_SIZE_LIMIT');hash.update(chunk);}return {sha256:hash.digest('hex'),bytes};}
 export async function nextWithAbort<T>(iterator:AsyncIterator<T>,signal:AbortSignal):Promise<IteratorResult<T>>{
   signal.throwIfAborted();
   return abortable(iterator.next(),signal);
@@ -29,7 +29,12 @@ export class MediaFiles {
   async path(hash:string){z.string().regex(/^[a-f0-9]{64}$/).parse(hash);await this.rootCurrent();const prefix=join(this.objects,hash.slice(0,2));await mkdir(prefix,{recursive:true});await contained(this.root,prefix);
     if((await lstat(prefix)).isSymbolicLink())throw new Error('MEDIA_PATH_ESCAPE');return join(prefix,hash);}
   async verified(ref:MediaAssetRef){const file=await this.path(ref.sha256);await contained(this.root,file);const info=await lstat(file);if(!info.isFile()||info.isSymbolicLink()||info.size!==ref.bytes)throw new Error('MEDIA_BLOB_CORRUPT');
-    const actual=await hashFile(file);if(actual.sha256!==ref.sha256||actual.bytes!==ref.bytes)throw new Error('MEDIA_BLOB_CORRUPT');return file;}
+    const actual=await hashFile(file,ref.bytes);if(actual.sha256!==ref.sha256||actual.bytes!==ref.bytes)throw new Error('MEDIA_BLOB_CORRUPT');return file;}
+  async bytes(ref:MediaAssetRef,signal:AbortSignal,guard:()=>void,maximum=16*1024**2){if(ref.bytes>maximum)throw new Error('MEDIA_SIZE_LIMIT');guard();signal.throwIfAborted();const path=await this.verified(ref),file=await open(path,'r');
+    try{const result=Buffer.alloc(ref.bytes);let offset=0;while(offset<result.length){guard();signal.throwIfAborted();const part=await file.read(result,offset,Math.min(65536,result.length-offset),offset);if(!part.bytesRead)throw new Error('MEDIA_BLOB_CORRUPT');offset+=part.bytesRead;}
+      const extra=await file.read(Buffer.alloc(1),0,1,result.length);if(extra.bytesRead||createHash('sha256').update(result).digest('hex')!==ref.sha256)throw new Error('MEDIA_BLOB_CORRUPT');guard();signal.throwIfAborted();return result;
+    }finally{await file.close();}
+  }
   private async remove(hash:string){const file=await this.path(hash);try{await contained(this.root,file);if((await lstat(file)).isSymbolicLink())throw new Error('MEDIA_PATH_ESCAPE');await unlink(file);}catch(error){if(!(error instanceof Error&&'code'in error&&error.code==='ENOENT'))throw error;}}
   async cleanPending(){for(const blob of this.store.pendingRemoval()){await this.remove(blob.sha256);this.store.completeRemoval(blob.sha256,()=>{});}}
   async capacity(required:number){if(required>this.maxAssetBytes||required>this.maxBytes)throw new Error('MEDIA_SIZE_LIMIT');await this.cleanPending();

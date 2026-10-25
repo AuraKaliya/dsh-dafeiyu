@@ -73,7 +73,8 @@ export class DafeiyuService extends Service {
   private mediaPort:MediaPort|undefined;
   private readonly mediaReplyAccesses=new WeakSet<MediaReplyAccess>();
   bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({...(port.signal?{signal:port.signal}:{}),ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
-  bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port),...(port.voice?{voice:port.voice.bind(port)}:{}),...(port.voiceCurrent?{voiceCurrent:port.voiceCurrent.bind(port)}:{})});
+  bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port),...(port.voice?{voice:port.voice.bind(port)}:{}),...(port.voiceCurrent?{voiceCurrent:port.voiceCurrent.bind(port)}:{}),
+    ...(port.replyDraft?{replyDraft:port.replyDraft.bind(port)}:{}),...(port.finalizeReply?{finalizeReply:port.finalizeReply.bind(port)}:{}),...(port.readReplyPart?{readReplyPart:port.readReplyPart.bind(port)}:{}),...(port.validateReply?{validateReply:port.validateReply.bind(port)}:{}),...(port.settleReply?{settleReply:port.settleReply.bind(port)}:{})});
     this.mediaPort=bound;return ()=>{if(this.mediaPort===bound)this.mediaPort=undefined;};}
   registerMediaProvider(provider:MediaSourceProvider){if(!this.mediaPort)throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.registerProvider(provider);}
   mediaAccess(context:ExecutionContextV3,owner:string,raw:unknown):MediaAccess {
@@ -95,15 +96,17 @@ export class DafeiyuService extends Service {
     try{captured=await prepareCapturedReplySources(this.config.agentId,item,facts.body.dependencies,this.contexts,()=>this.compactionBinding(),signal);
       final=await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal);
       const expiresAt=new Date(Date.parse(run.updatedAt)+900000).toISOString(),target=Object.freeze({...item.message.conversation}),text=reply.text;
-      let access:MediaReplyAccess,released=false;const release=()=>{if(released)return;released=true;signal.removeEventListener('abort',release);this.mediaReplyAccesses.delete(access);captured!.release();final!.release();};
-      const guard=()=>{signal.throwIfAborted();this.controller.signal.throwIfAborted();if(!this.mediaReplyAccesses.has(access)||!source?.active||this.fatal||Date.parse(expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');
+      let access:MediaReplyAccess,released=false,resourcesReleased=false;const releaseResources=()=>{if(resourcesReleased)return;resourcesReleased=true;captured!.release();final!.release();};
+      const release=()=>{if(released)return;released=true;signal.removeEventListener('abort',releaseResources);this.mediaReplyAccesses.delete(access);releaseResources();};
+      const guard=()=>{signal.throwIfAborted();this.controller.signal.throwIfAborted();if(resourcesReleased||!this.mediaReplyAccesses.has(access)||!source?.active||this.fatal||Date.parse(expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');
         facts.guard();this.validateRunPersona(run);captured!.guard();final!.guard();};
       access=Object.freeze({execution:Object.freeze({...facts.execution,guard}),authority:facts.authority,payloadHash:facts.body.payloadHash,replyId:reply.id,text,target,sourceMessageId:item.message.id,inboundId:item.id,anchor:Object.freeze({kind:'reply' as const,inboundId:item.id}),expiresAt,guard,
         release});allocated=access;
-      this.mediaReplyAccesses.add(access);signal.addEventListener('abort',release,{once:true});if(signal.aborted)release();guard();return access;
+      this.mediaReplyAccesses.add(access);signal.addEventListener('abort',releaseResources,{once:true});if(signal.aborted)releaseResources();guard();return access;
     }catch(error){if(allocated)allocated.release();else{captured?.release();final?.release();}throw error;}
   }
   validateMediaReplyAccess(access:MediaReplyAccess){if(!this.mediaReplyAccesses.has(access))throw new Error('SCOPE_DENIED');access.guard();}
+  ownsMediaReplyAccess(access:MediaReplyAccess){return this.mediaReplyAccesses.has(access);}
   async prepareMessageTaskExpression(runId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const port=this.nativeExpressionPort,access=await this.executions.nativeResultAccess(runId);if(port!==this.nativeExpressionPort)throw new Error('DEPENDENCY_UNAVAILABLE');return port.prepare(access);}
   async openMessageTaskExpression(runId:string,packetId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.open(await this.executions.nativeResultAccess(runId),packetId);}
   async withdrawMessageTaskExpression(runId:string,packetId:string,version:number){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.withdraw(await this.executions.nativeResultAccess(runId),packetId,version);}
@@ -304,7 +307,7 @@ export class DafeiyuService extends Service {
     try{
       if(extension.channels?.length){
         const channels=extension.channels.map(channel=>({channel:channel.channel,account:channel.account,deliver:channel.deliver.bind(channel),
-          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{})}));
+          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{}),...(channel.mediaDelivery?{mediaDelivery:channel.mediaDelivery}:{}),...(channel.deliverMedia?{deliverMedia:channel.deliverMedia.bind(channel)}:{})}));
         bridge={active:true,controller:new AbortController(),extension:{apiVersion:2,id:extension.id,version:extension.version,agentId:extension.agentId,channels,
           ...(extension.lifecycleReady?{lifecycleReady:extension.lifecycleReady.bind(extension)}:{})}};
         this.extensions.set(extension.id,bridge);
@@ -641,18 +644,33 @@ export class DafeiyuService extends Service {
     const deliveryEvent = (type: string, data: Record<string, Json>, parent: string | null) =>
       eventFor(this.config.agentId, item, type, source.extension.id, source.extension.version, deliveryOperation, parent, data);
     const sending = this.journal.transition(id, 'reply-ready', 'sending', deliveryEvent('delivery.started', { replyId: item.reply.id }, completed?.id ?? null));
-    let result,invoked=false;let release=()=>{};
+    let result,invoked=false,mediaSettlementPending=false;let release=()=>{};let mediaAccess:MediaReplyAccess|undefined,mediaManifestId:string|undefined,activeMedia:MediaPort|undefined;
     try {
       const signal=AbortSignal.any([this.controller.signal,source.controller.signal,AbortSignal.timeout(this.config.deliveryTimeoutMs)]);
       const evidence=channel.deliveryValidation==='per-segment'?await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal):{guard:()=>{},release:()=>{}};release=evidence.release;
       const authority=()=>{if(!source.active||this.fatal||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
         if(runId&&this.runStore)this.validateRunPersona(this.runStore.get(runId));
         evidence.guard();};
-      authority();invoked=true;result = await channel.deliver(item.reply,signal,authority);
+      authority();const mediaOperation=runId?this.runStore?.operations(runId).findLast(op=>op.plugin==='media'&&op.action==='dafeiyu_media_reply'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'):undefined;
+      const uncertainMedia=runId&&this.runStore?.operations(runId).some(op=>op.plugin==='media'&&op.action==='dafeiyu_media_reply'&&(op.state==='unknown'||op.outcome?.effects==='unknown'));
+      if(uncertainMedia)throw new Error('MEDIA_REPLY_OPERATION_UNCONFIRMED');
+      const selection=mediaOperation?z.object({currentDraftId:z.uuid(),currentVersion:z.number().int().positive(),selected:z.number().int().nonnegative()}).parse(mediaOperation.outcome!.data):null;
+      if(selection?.selected){
+        activeMedia=this.mediaPort;if(!activeMedia?.ready()||!activeMedia.replyDraft||!activeMedia.finalizeReply||!activeMedia.readReplyPart||!activeMedia.validateReply||!activeMedia.settleReply||channel.mediaDelivery!=='parts-v1'||!channel.deliverMedia)throw new Error('MEDIA_DELIVERY_NOT_CONFIGURED');
+        const draft=activeMedia.replyDraft(runId!);if(!draft||draft.id!==selection.currentDraftId||draft.version!==selection.currentVersion||draft.selected!==selection.selected)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');
+        mediaAccess=await this.prepareMediaReplyAccess(draft.authority,item.reply,signal);const manifest=await activeMedia.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaManifestId=manifest.id;
+        const guarded=()=>{authority();mediaAccess!.guard();if(this.mediaPort!==activeMedia||!activeMedia!.ready())throw new Error('SOURCE_STALE');activeMedia!.validateReply!(mediaAccess!,manifest.id);};guarded();invoked=true;
+        result=await channel.deliverMedia({...item.reply,media:manifest},signal,guarded,position=>{guarded();return activeMedia!.readReplyPart!(mediaAccess!,manifest.id,position);});
+      }else{invoked=true;result = await channel.deliver(item.reply,signal,authority);}
       if (result.status === 'sent' && !result.receiptId) throw new Error('Missing transport receipt');
-    } catch { result = invoked?{status:'unknown' as const,code:'DELIVERY_UNKNOWN'}:{status:'not-sent' as const,code:'SOURCE_STALE'}; }finally{release();}
+    } catch(error) { const code=error instanceof Error&&['MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH','MEDIA_REPLY_OPERATION_UNCONFIRMED','MEDIA_TARGET_DENIED','MEDIA_SIZE_LIMIT','MEDIA_BLOB_CORRUPT','MEDIA_TTS_NOT_CONFIGURED'].includes(error.message)?error.message:'SOURCE_STALE';
+      result = invoked?{status:'unknown' as const,code:'DELIVERY_UNKNOWN'}:{status:'not-sent' as const,code}; }finally{
+      try{if(mediaAccess&&mediaManifestId&&activeMedia?.settleReply&&(result?.status==='sent'||result?.status==='unknown')){
+        try{activeMedia.settleReply(mediaAccess,mediaManifestId,result.status==='sent'?'sent':'unknown');}catch{mediaSettlementPending=true;}
+      }}finally{mediaAccess?.release();release();}}
     const next = result.status === 'sent' ? 'delivered' : result.status === 'not-sent' ? 'reply-ready' : 'uncertain';
     this.journal.transition(id, 'sending', next, deliveryEvent(`delivery.${result.status}`, result.status === 'sent' ? { receiptId: result.receiptId } : { code: result.code }, sending.id));
+    if(mediaSettlementPending)this.journal.append(deliveryEvent('delivery.media-settlement-pending',{manifestId:mediaManifestId!,state:result.status},sending.id));
   }
   /** Explicit retry only for definitely-not-sent replies; never runs the model or replays tool operations. */
   retryDelivery(id: string): void {

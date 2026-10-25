@@ -1,0 +1,20 @@
+{
+  "stage": "media-5E-2b",
+  "date": "2026-10-25",
+  "baseline": "a9251b4",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "10cd8e86-1dfa-4494-aeca-fc718e4ed245", "passed": 14, "failed": 0, "scope": ["media-reply-pipeline", "qq-delivery"]},
+    {"runId": "6250fc49-a28d-4622-a93b-270018d93bcc", "passed": 12, "failed": 0, "scope": ["media-reply-pipeline", "media-files", "media-reply-authority"]}
+  ],
+  "countsOverlap": true,
+  "actualLocalExecution": ["DSH", "SQLite", "FFmpeg normalization", "loopback acquisition", "bounded verified byte export"],
+  "mediaTransportEnabled": false,
+  "nativeMediaExportEnabled": false,
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false,
+  "remaining": ["native target material and media credential", "QQ media transport", "TTS", "Host integration and settlement reconciliation"]
+}
