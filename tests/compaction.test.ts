@@ -71,11 +71,13 @@ test('summary failures keep valid source history, close the DSH bracket and resp
   const h = await memoryFixture(undefined, { compaction: { ...policy, cooldownMs: 600000 } }); t.after(h.close);
   h.setCompactionResponse(() => textReply('{bad json'));
   const agent = await seed(h, 6); const count = compactCalls(h).length; assert.equal(count, 1);
-  await next(h); assert.equal(compactCalls(h).length, count);
+  const current=await next(h); assert.equal(compactCalls(h).length, count);
   assert.match(visible(lastChat(h)), /虚构旧任务1/);
   const events = readCompactionEvents(agent.session);
   assert.equal(events.filter(e => e.type === 'compaction/start').length, events.filter(e => e.type === 'compaction/end').length);
   assert.equal(events.filter(e => e.type === 'compaction/summary').length, 0);
+  const audit=h.core.journal.events(current.route);assert.ok(audit.some(e=>e.type==='context.compaction.checked'&&e.data.status==='summary-rejected'&&e.data.reason==='invalid-json'));
+  assert.ok(!JSON.stringify(audit).includes('{bad json'));
 });
 
 test('native and second-plugin regions remain verbatim across repeated incremental replacements', async t => {

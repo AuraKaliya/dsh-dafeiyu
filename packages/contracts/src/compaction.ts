@@ -64,6 +64,6 @@ export interface CompactionProvider {
   basis(scope: CompactionScope): CompactionBasis;
   readonly sources?:SourcePolicy;
   summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal,checkSources?:()=>void): Promise<string>;
-  summarizeFragments?(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number):Promise<readonly SummaryFragment[]>;
+  summarizeFragments?(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number,maxFragments?:number):Promise<readonly SummaryFragment[]>;
   rewrite?(scope:CompactionScope,request:SemanticRequest,signal:AbortSignal,checkSources:()=>void):Promise<SemanticResult>;
 }

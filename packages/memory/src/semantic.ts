@@ -10,11 +10,16 @@ export class SemanticVerificationError extends Error {
   readonly code='SEMANTIC_VERIFICATION_REJECTED';
   constructor(readonly verification:{compatible:boolean;faithful:boolean;issues:string[]}){super('Semantic verification rejected');}
 }
+export class SemanticSourceCapacityError extends Error {
+  readonly code='SEMANTIC_SOURCE_CAPACITY';
+}
 
 /** Fresh tool-free DSH requests. Generation and verification never enter the chat session. */
 export async function rewriteMemorySummary(ctx:Context,request:SemanticRequest,signal:AbortSignal,checkSources:()=>void,timeoutMs:number,maxOutputTokens:number,maxInputBytes:number):Promise<SemanticResult>{
   if(request.mode==='rebuild'&&request.parents.length)throw new Error('Rebuild cannot read parent summaries');
-  const model=ctx.dafeiyu.analysisModelRoute(),qualifiers=extractQualifiers(request.sources);
+  const model=ctx.dafeiyu.analysisModelRoute();let qualifiers:SemanticResult['qualifiers'];
+  try{qualifiers=extractQualifiers(request.sources);}catch(error){if(error instanceof z.ZodError)throw new SemanticSourceCapacityError('Semantic qualifier capacity exceeded');throw error;}
+  if([...new Set(qualifiers.map(q=>q.text))].reduce((sum,text)=>sum+Array.from(text).length,0)>request.maxChars)throw new SemanticSourceCapacityError('Semantic qualifier capacity exceeds output budget');
   const deadline=AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]);
   const input={mode:request.mode,sources:request.sources.map(({seq,role,text})=>({seq,role,text})),parents:request.parents,qualifiers,maxChars:request.maxChars};
   async function call(stage:'generate'|'verify',payload:unknown){
@@ -30,7 +35,7 @@ qualifiers是代码从原文抽取的保护条款。先把每条不同的qualifi
 逐项对比sources原文、parents（若有）、qualifiers和candidate。检查归属、范围、否定、条件、时间、状态、置信、数值单位、纠正及冲突。任何扩大权限、编造事实、删除必要限定、把计划写成完成或假设写成事实都必须faithful=false；不能靠候选里附带正确引文掩盖其它错误结论。
 fusion还须确认parents属于相容的同一事件/主题；无法确定时compatible=false。rebuild以sources为唯一内容依据。检验所有重要信息是否被保留，不只是qualifiers。只有全部通过才两个字段均true且issues为空。只报告结论和简短问题，不输出内部推理。`;
     const body=JSON.stringify({stage,...input,...(typeof payload==='object'&&payload!==null?payload:{})});
-    if(Buffer.byteLength(prompt)+Buffer.byteLength(body)>maxInputBytes)throw new Error('Semantic input capacity exceeded');
+    if(Buffer.byteLength(prompt)+Buffer.byteLength(body)>maxInputBytes)throw new SemanticSourceCapacityError('Semantic input capacity exceeded');
     for await(const chunk of ctx.llm.stream({provider:model.provider,model:model.model,...(model.reasoningEffort?{reasoningEffort:ReasoningEffortId(model.reasoningEffort)}:{}),
       sessionId:SessionId(`memory-semantic-${stage}-${randomUUID()}`),purpose:'compaction',signal:deadline,maxTokens:maxOutputTokens,
       messages:[createSystemMessage(prompt),createUserMessage({source:{kind:'user'},content:[{type:'text',text:body}]})]})){

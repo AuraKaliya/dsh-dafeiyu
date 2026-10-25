@@ -70,4 +70,5 @@ export const ExtensionMetadataV3Schema = z.strictObject({ protocolVersion: z.lit
   version: z.string().min(1).max(80), agentId: actor, provides: z.array(FeatureSchema).max(64).default([]), requires: z.array(FeatureSchema).max(64).default([]) });
 
 export const TaskSubmitSchema = z.strictObject({ requestId, title: z.string().trim().min(1).max(200), goal: z.string().trim().min(1).max(2000),
-  policyId: ExtensionIdSchema, inputRefs: z.array(z.string().min(1).max(300)).max(16).default([]) });
+  policyId: ExtensionIdSchema, inputRefs: z.array(z.string().min(1).max(300)).max(16).default([]),
+  data:z.json().refine(value=>new TextEncoder().encode(JSON.stringify(value)).byteLength<=16384,'Task data exceeds 16 KiB').optional() });

@@ -45,7 +45,7 @@ export class PersonaService {
       bindResult:(task,run,epoch,body)=>this.executionState.bindResult(task,run,epoch,body),generation:access=>this.executionState.generation(access),
       acceptIntent:access=>{try{this.executionState.acceptIntent(access);}finally{this.flush();}},intent:access=>this.executionState.intent(access),
       resolveIntent:(access,input)=>{try{return this.executionState.resolveIntent(access,input);}finally{this.flush();}},
-      ...(compact?{compactionPolicy:compact.policy,summarize:compact.summarize.bind(compact),summarizeFragments:compact.summarizeFragments.bind(compact)}:{summarize:async()=>{throw new Error('COMPACTION_NOT_CONFIGURED');}})};
+      ...(compact?{compactionPolicy:compact.policy,summarize:compact.summarize.bind(compact),summarizeFragments:compact.summarizeFragments.bind(compact),rewrite:compact.rewrite.bind(compact)}:{summarize:async()=>{throw new Error('COMPACTION_NOT_CONFIGURED');}})};
     this.unbindExecution=ctx.dafeiyu.bindExecutionMemory(port);
     this.unbind=ctx.dafeiyu.bindPersonaProvider({ready,prepare:access=>this.store.prepare(access),validate:(access,entry)=>this.ready()&&this.store.validate(access,entry)});
     try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'memory-persona',version:MEMORY_VERSION,agentId,requires:['persona.stage-state.v1'],lifecycleReady:ready,actions:this.actions()});}

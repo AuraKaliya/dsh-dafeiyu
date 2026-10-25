@@ -290,7 +290,7 @@ export class CompactionRuntime {
           const plan=prepareSummaryRewrite(session,this.scope(),capsule.data.ref,group.id,mode,{owner:binding.owner,version:binding.version,
             protectedTaskId:basis.protectedRunId?null:basis.taskId,maxChars:p.maxSummaryChars,maxBytes:p.maxSourceBytes,maxConsecutive:p.semanticMaxConsecutive??2},deps=>this.provenance.validate(deps));
           if(!plan)continue;
-          let status='rewrite-failed',saved=0;
+          let status='rewrite-failed',saved=0,sourceCapacity=false;
           try{
             const validate=(deps:readonly SourceDependency[])=>this.binding()?.provider===binding.provider
               &&binding.provider.basis(this.scope()).taskId===basis.taskId&&this.provenance.validate(deps);
@@ -311,8 +311,9 @@ export class CompactionRuntime {
             }
           }catch(error){
             signal.throwIfAborted();
+            sourceCapacity=!!error&&typeof error==='object'&&'code'in error&&error.code==='SEMANTIC_SOURCE_CAPACITY';if(sourceCapacity)status='rewrite-skipped';
             const message=error instanceof Error?error.message:'';
-            const reason=message==='Semantic verification rejected'?'verification-rejected':message.includes('qualifier')?'qualifier-validation'
+            const reason=sourceCapacity?'source-capacity':message==='Semantic verification rejected'?'verification-rejected':message.includes('qualifier')?'qualifier-validation'
               :message.includes('conflict')?'source-conflict':message.includes('capacity')?'capacity':message.includes('incomplete')?'incomplete':'invalid-result';
             this.audit(this.item!,{status:'summary-rewrite-rejected',ref:capsule.data.ref,group:group.id,mode,reason},[seq,view.manifestSeq]);
           }
@@ -320,6 +321,7 @@ export class CompactionRuntime {
             this.clean();this.record(status,pressure,target,saved);
             if(!await this.ctx.sessions.flush(session))throw new Error('Semantic summary checkpoint unavailable');
           }
+          if(sourceCapacity)continue;
           return;
         }
       }
@@ -384,10 +386,13 @@ export class CompactionRuntime {
       let manifest:FragmentManifest|undefined,text:string;
       if(fragmented){
         const groups:FragmentManifest['groups']=[],fragments:FragmentManifest['fragments']=[];
-        const budget=Math.floor(p.maxSummaryChars/grouped.length);
         for(const [index,group] of grouped.entries()){
           checkSources();
-          const results=await binding.provider.summarizeFragments!(this.scope(),group.sources,signal,checkSources,budget);
+          const usedChars=fragments.reduce((sum,fragment)=>sum+Array.from(fragment.text).length,0);
+          const budget=Math.floor((p.maxSummaryChars-usedChars)/(grouped.length-index));
+          const fragmentBudget=Math.max(1,Math.floor(((p.maxFragments??16)-fragments.length)/(grouped.length-index)));
+          const results=await binding.provider.summarizeFragments!(this.scope(),group.sources,signal,checkSources,budget,fragmentBudget);
+          if(results.length>fragmentBudget)throw new Error('Fragment budget exceeded');
           const id=`G${index+1}`;
           groups.push({id,taskId:group.taskId,inputs:group.sources.map(({seq,role,hash})=>({seq,role,hash})),dependencies:group.dependencies});
           for(const result of results)fragments.push({...result,id:`F${fragments.length+1}`,version:1,group:id});
@@ -422,7 +427,15 @@ export class CompactionRuntime {
         shadowedSeqs: seqs, shadowedTokenCount: priced.reduce((sum, n) => sum + n.heuristicTokens, 0), provider: agent.options.provider ?? '', model: agent.options.model ?? '' });
       session.append('user/message', checkpoint, { surfaceOp: { op: 'replace', startSeq: seqs[0]!, endSeq: seqs.at(-1)! }, sourceEventSeqs: [...seqs,...proofSeqs] });
       status = 'compacted';
-    } catch { signal.throwIfAborted(); }
+    } catch(error) {
+      signal.throwIfAborted();
+      const message=error instanceof Error?error.message:'',reason=error instanceof SyntaxError?'invalid-json':error instanceof z.ZodError?'invalid-shape'
+        :message==='Fragment text budget exceeded'?'fragment-text-budget':message==='Fragment budget exceeded'?'fragment-count-or-budget'
+        :message==='Summary too large'?'output-size':message==='Compaction did not complete'?'incomplete-stream'
+        :/sources? changed|source conflict/i.test(message)?'source-conflict':/^EVALUATION_[A-Z_]+$/.test(message)?'request-admission':'other';
+      // Classifications only: never persist malformed model output, prompts, or internal reasoning here.
+      this.audit(this.item!,{status:'summary-rejected',reason},[]);
+    }
     finally {
       session.append('compaction/end', { compactionId: id, turn, ...(status === 'compacted' ? {} : { error: status }) });
       const data=this.record(status, pressure, target, saved,false);

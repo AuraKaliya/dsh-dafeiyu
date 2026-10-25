@@ -81,6 +81,7 @@ export class ExecutionEvidence {
       },
       summarize:(scope,sources,signal,check)=>{if(!port)throw new Error('DEPENDENCY_UNAVAILABLE');return port.summarize(scope,sources,signal,check);},
       ...(port?.summarizeFragments?{summarizeFragments:port.summarizeFragments.bind(port)}:{}),
+      ...(port?.rewrite?{rewrite:port.rewrite.bind(port)}:{}),
     };return this.bound={owner:'memory',version:'execution-sources-v1',provider};
   }
 }

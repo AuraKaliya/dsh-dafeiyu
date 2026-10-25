@@ -27,7 +27,7 @@ import { readRealAuthorization } from './authorization.ts';
 import { PERSONA_ACTIONS,EXECUTION_ACTIONS } from './runtime.ts';
 import { sha256 } from './catalog.ts';
 
-export interface ObservedRequest {purpose:string;text:string;reasoningEffort:string|null}
+export interface ObservedRequest {purpose:string;text:string;reasoningEffort:string|null;nativeUserInputs:readonly string[]}
 export function visibleRequestText(options:GenerateOptions){return JSON.stringify({system:options.system??'',messages:options.messages},(key,value:unknown)=>['replayState','reasoning_content'].includes(key)||value&&typeof value==='object'&&'type'in value&&value.type==='reasoning'?undefined:value);}
 /** Only transport cancellation changes; the model input and all semantic options remain untouched. */
 export class DeadlineAdapter extends LlmAdapter {
@@ -57,7 +57,7 @@ export async function openRealEvaluationRuntime(options:{repository:string;campa
       backend=new DeepSeekAdapter({options:()=>connection,providerName:'DeepSeek',admit:(_connection,model)=>{if(model!==a.model)throw new Error('EVALUATION_ROUTE_CHANGED');},resolveAuth:async()=>{if(sha256(readFileSync(credentialFile))!==credentialHash)throw new Error('EVALUATION_CREDENTIAL_CHANGED');const hit=await ctx.credentials.resolve(ref);if(!hit)throw new Error('EVALUATION_CREDENTIAL_MISSING');return {headers:{'x-api-key':assertUsableApiKey(hit.value,'evaluation',ref)}};},resolveUserId:()=>getOrCreateAnonymousUserId(),prepareExtensions:async()=>({fields:{},accept:async()=>{}})});
     }
     const remaining=()=>Math.min(options.ledger.remainingExecutionMs(),(options.caseDeadline??Number.POSITIVE_INFINITY)-Date.now());
-    ctx.llm.registerAdapter([a.provider],new DeadlineAdapter(backend,remaining,a.requestTimeoutMs,request=>requests.push({purpose:request.purpose??'task',text:visibleRequestText(request),reasoningEffort:request.reasoningEffort??null})));
+    ctx.llm.registerAdapter([a.provider],new DeadlineAdapter(backend,remaining,a.requestTimeoutMs,request=>requests.push({purpose:request.purpose??'task',text:visibleRequestText(request),reasoningEffort:request.reasoningEffort??null,nativeUserInputs:request.messages.flatMap(message=>message.role==='user'&&message.source?.kind==='dafeiyu-execution'?[message.content.filter(block=>block.type==='text').map(block=>block.text).join('\n')]:[])})));
     installEvaluationBilling(ctx,options.ledger,{provider:a.provider,model:a.model,contextWindow:a.contextWindow,maxRequestBytes:1000000,reasoningEffort:a.reasoningEffort,maxOutputTokens:a.maximumOutputTokens},()=>options.attemptId,code=>admissionErrors.push(code));
     await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(options.root,'core'),personaFile:options.foundationFile,provider:a.provider,model:a.model,reasoningEffort:a.reasoningEffort,lifecycleMode:'managed',turnTimeoutMs:240000});await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(options.root,'memory'),lifecycleMode:'managed',sourceTracking:true,...(options.compaction?{compaction:options.compaction}:{})});
     const extension=options.extension?.(ctx);ctx.dafeiyu.configureExecution({profileId:'evaluation',createStore:options.create!==false,policies:options.policies??[{id:'case',producers:['evaluation'],actions:[...(extension?.actions?.map(action=>action.id)??[]),...PERSONA_ACTIONS,...EXECUTION_ACTIONS],allowLocalWrite:true}]});if(extension)handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,agentId:'dafeiyu',...extension});await options.beforeActivate?.(ctx);

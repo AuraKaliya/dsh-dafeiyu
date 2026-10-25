@@ -32,6 +32,8 @@ export interface ExecutionMemoryPort {
   readonly compactionPolicy?:CompactionProvider['policy'];
   summarize:CompactionProvider['summarize'];
   summarizeFragments?:CompactionProvider['summarizeFragments'];
+  /** Optional checked semantic rewrite; native tasks retain the same provenance guard. */
+  rewrite?:CompactionProvider['rewrite'];
 }
 export const ExecutionToolReceiptSchema=z.strictObject({schemaVersion:z.literal(1),runId:z.uuid(),operationId:z.uuid(),callId:z.string(),outcomeHash:z.string().regex(/^[a-f0-9]{64}$/),inputHash:z.string().regex(/^[a-f0-9]{64}$/),sources:z.array(PersonaSourceRefSchema).max(64)});
 export type ExecutionToolReceipt=z.infer<typeof ExecutionToolReceiptSchema>;
