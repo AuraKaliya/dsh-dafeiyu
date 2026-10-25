@@ -7,8 +7,9 @@ import { MEMORY_APPLICATION_ID } from '@dafeiyu/memory/store';
 import { inspectQqSchema } from '@dafeiyu/channel-qq';
 import { ACTIVITY_APPLICATION_ID,ACTIVITY_SCHEMA_VERSION,ACTIVITY_TABLES } from '@dafeiyu/activity/store';
 import { MEDIA_APPLICATION_ID,MEDIA_TABLES } from '@dafeiyu/media';
+import { BILI_APPLICATION_ID,BILI_TABLES } from '@dafeiyu/bilibili';
 
-export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity'|'media';
+export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity'|'media'|'bilibili';
 const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
   query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
   memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8,9,10,11],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
@@ -19,6 +20,7 @@ const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;version
   feedback:{app:0x44464631,versions:[1],tables:['archives','states','requests','events','outbox']},
   activity:{app:ACTIVITY_APPLICATION_ID,versions:[ACTIVITY_SCHEMA_VERSION],tables:ACTIVITY_TABLES},
   media:{app:MEDIA_APPLICATION_ID,versions:[1,2],tables:MEDIA_TABLES.filter(t=>!t.startsWith('media_reply_'))},
+  bilibili:{app:BILI_APPLICATION_ID,versions:[1],tables:BILI_TABLES},
   retrieval:{app:0x44465232,versions:[1,2],tables:['chunks','snapshots','vector_cache']},
 };
 export interface StorageInspection {kind:StorageKind;exists:boolean;version:number;applicationId:number;supported:boolean;activeOwner:boolean;integrity:boolean;identityMatches:boolean}
@@ -46,6 +48,7 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
     if(kind==='activity'&&supported&&identity){const row=db.prepare('SELECT body FROM activity_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));
       identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='media'&&supported&&identity){const row=db.prepare('SELECT body FROM media_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
+    if(kind==='bilibili'&&supported&&identity){const row=db.prepare('SELECT body FROM bili_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='media'&&supported&&version>=2)supported=MEDIA_TABLES.every(t=>tables.has(t));
     if(kind==='runtime'&&supported&&version>=2)supported=tables.has('run_persona_manifests');
     if(kind==='runtime'&&supported&&version>=3)supported=tables.has('native_deliveries');

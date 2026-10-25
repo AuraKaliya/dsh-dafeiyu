@@ -7,6 +7,7 @@ import type { HostConfig } from '@dafeiyu/contracts';
 import { MemoryPluginConfigSchema } from '@dafeiyu/memory';
 import { ActivityPluginConfigSchema,ACTIVITY_ACTIONS,validateQuiet } from '@dafeiyu/activity';
 import { MediaPluginConfigSchema } from '@dafeiyu/media';
+import { BiliPluginConfigSchema } from '@dafeiyu/bilibili';
 import { QqPluginConfigSchema, QQ_ACTIONS, QQ_TASK_ACTIONS } from '@dafeiyu/channel-qq';
 import { TimelinePluginConfigSchema } from '@dafeiyu/timeline';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
@@ -19,7 +20,7 @@ export const DeepSeekConfigSchema=z.strictObject({credentialStore:z.string().min
 export const ScriptedConfigSchema=z.strictObject({response:z.string().trim().min(1).max(8000).default('这是本机虚构样例；模拟模型已完成任务。')});
 export const TimelineConfigSchema=TimelinePluginConfigSchema;
 export const SimulatorConfigSchema=z.strictObject({account:z.string().min(1).max(100).default('local-test')});
-export const pluginSchemas={timeline:TimelineConfigSchema,memory:MemoryPluginConfigSchema,activity:ActivityPluginConfigSchema,media:MediaPluginConfigSchema,'channel-qq':QqPluginConfigSchema,'channel-simulator':SimulatorConfigSchema,'model-deepseek':DeepSeekConfigSchema,'model-scripted':ScriptedConfigSchema} as const;
+export const pluginSchemas={timeline:TimelineConfigSchema,memory:MemoryPluginConfigSchema,activity:ActivityPluginConfigSchema,media:MediaPluginConfigSchema,bilibili:BiliPluginConfigSchema,'channel-qq':QqPluginConfigSchema,'channel-simulator':SimulatorConfigSchema,'model-deepseek':DeepSeekConfigSchema,'model-scripted':ScriptedConfigSchema} as const;
 export type PluginId=keyof typeof pluginSchemas;
 export interface PreparedPlugin {readonly id:PluginId;readonly enabled:boolean;readonly required:boolean;readonly requires:readonly string[];readonly config:Record<string,unknown>}
 export interface PreparedHostConfig {
@@ -45,6 +46,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     const plugins:PreparedPlugin[]=config.plugins.map(plugin=>{if(!Object.hasOwn(pluginSchemas,plugin.id))throw new Error('HOST_UNKNOWN_PLUGIN');const id=plugin.id as PluginId;
       const parsed:Record<string,unknown>=pluginSchemas[id].parse(plugin.config);
       if(id==='model-deepseek')parsed.credentialStore=resolvePath(String(parsed.credentialStore));
+      if(id==='bilibili'){const settings=BiliPluginConfigSchema.parse(parsed);if(settings.session){if(/^\\\\|^\/\//.test(settings.session.file))throw new Error('HOST_BILI_LOCAL_SESSION_REQUIRED');settings.session.file=resolvePath(settings.session.file);}Object.assign(parsed,settings);}
       if(id==='channel-qq'){
         parsed.tokenFile=resolvePath(String(parsed.tokenFile));if(plugin.enabled&&!paths.channels['channel-qq'])throw new Error('HOST_CHANNEL_PATH_REQUIRED');
         for(const key of ['httpURL','wsURL'] as const){const url=new URL(String(parsed[key]));if(!['127.0.0.1','localhost','[::1]'].includes(url.hostname)||url.username||url.password||url.search||url.hash||url.protocol!==(key==='httpURL'?'http:':'ws:'))throw new Error('HOST_QQ_LOOPBACK_REQUIRED');}}
@@ -79,6 +81,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     const media=enabled.find(p=>p.id==='media'),mediaConfig=media?MediaPluginConfigSchema.parse(media.config):undefined;
     if(media){if(!memory)throw new Error('HOST_MEDIA_MEMORY_REQUIRED');if(!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_MEDIA_SOURCE_TRACKING_REQUIRED');
       if(mediaConfig?.vision&&mediaConfig.vision.provider!==config.modelRoutes.chat.provider)throw new Error('HOST_MEDIA_MODEL_ROUTE_UNAVAILABLE');}
+    if(enabled.some(p=>p.id==='bilibili')&&!media)throw new Error('HOST_BILI_MEDIA_REQUIRED');
     const qqMedia=qq?QqPluginConfigSchema.parse(qq.config).media:undefined;if(qqMedia?.enabled&&!media)throw new Error('HOST_QQ_MEDIA_REQUIRED');
     if(qqMedia?.voiceDirectives&&(!qqMedia.enabled||!QqPluginConfigSchema.parse(qq!.config).tasks.enabled||!mediaConfig?.audio?.whisper||!mediaConfig.audio.events))throw new Error('HOST_QQ_VOICE_DEPENDENCY_REQUIRED');
     if(qqCapabilities){if(!memory)throw new Error('HOST_QQ_MEMORY_REQUIRED');
@@ -91,12 +94,13 @@ export function loadHostConfig(input:string):PreparedHostConfig{
       const conversation=config.authorityPolicies.find(policy=>policy.id==='conversation'&&policy.producers.includes('channel-qq'));
       const native=config.authorityPolicies.find(policy=>policy.id===qqTasks.policyId&&policy.producers.includes('qq-tasks'));
       if(!conversation||QQ_TASK_ACTIONS.some(action=>!conversation.actions.includes(action))||!native?.allowLocalWrite||['dafeiyu_task_intent','dafeiyu_task_object'].some(action=>!native.actions.includes(action)))throw new Error('HOST_QQ_TASK_POLICY_REQUIRED');
+      if(qqTasks.explorationResources?.some(scene=>!native.resources.some(allowed=>runtimeHash(scene)===runtimeHash(allowed))))throw new Error('HOST_QQ_EXPLORATION_RESOURCE_DENIED');
     }
     if(config.context.regions['memory:growth'])throw new Error('HOST_GROWTH_CONFIG_CONFLICT');
     if(!hasMemory&&config.authorityPolicies.length)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     const descriptors=[{id:'core',provides:['core.registration.v1','lifecycle.managed.v1','context.conversation.v1'],requires:['llm.route.v1']},
-      ...enabled.map(plugin=>({id:plugin.id,provides:plugin.id.startsWith('model-')?['llm.route.v1']:plugin.id==='timeline'?['timeline.history.v1']:plugin.id==='media'?['media.assets.v1','media.processing.v1']:plugin.id==='activity'?['activity.plan.v1','activity.wakeup.v1']:plugin.id==='memory'?['task.repository.v1','memory.execution.v1','persona.stage-state.v1','persona.growth-selection.v1','continuity.checkpoint.v1','task.intent.v1','memory.capability-observation.v1','memory.native-expression.v1',...(memory?.config.maintenance?['memory.maintenance.v1']:[])]:[`channel.${plugin.id==='channel-qq'?'qq':'simulator'}.v1`],
-        requires:[...(plugin.id.startsWith('model-')?[]:['core.registration.v1']),...(plugin.id==='memory'?['timeline.history.v1']:[]),...(plugin.id==='media'?['execution.task.v1','memory.capability-observation.v1']:[]),...(plugin.id==='activity'?['execution.task.v1','execution.source-anchor.v1','memory.execution.v1',...(activityConfig?.maintenance?['memory.maintenance.v1']:[])]:[]),...(plugin.id==='channel-qq'&&qqCapabilities?['memory.capability-observation.v1','execution.resource-scope.v1']:[]),...(plugin.id==='channel-qq'&&qqMedia?.enabled?['media.assets.v1']:[]),...(plugin.id==='channel-qq'&&qqTasks?.enabled?['execution.message-task.v1',...(qqTasks.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])]:[]),...plugin.requires]})),
+      ...enabled.map(plugin=>({id:plugin.id,provides:plugin.id.startsWith('model-')?['llm.route.v1']:plugin.id==='timeline'?['timeline.history.v1']:plugin.id==='bilibili'?['bilibili.read.v1']:plugin.id==='media'?['media.assets.v1','media.processing.v1']:plugin.id==='activity'?['activity.plan.v1','activity.wakeup.v1']:plugin.id==='memory'?['task.repository.v1','memory.execution.v1','persona.stage-state.v1','persona.growth-selection.v1','continuity.checkpoint.v1','task.intent.v1','memory.capability-observation.v1','memory.native-expression.v1',...(memory?.config.maintenance?['memory.maintenance.v1']:[])]:[`channel.${plugin.id==='channel-qq'?'qq':'simulator'}.v1`],
+        requires:[...(plugin.id.startsWith('model-')?[]:['core.registration.v1']),...(plugin.id==='memory'?['timeline.history.v1']:[]),...(plugin.id==='media'?['execution.task.v1','memory.capability-observation.v1']:[]),...(plugin.id==='bilibili'?['media.assets.v1','execution.task.v1','memory.capability-observation.v1']:[]),...(plugin.id==='activity'?['execution.task.v1','execution.source-anchor.v1','memory.execution.v1',...(activityConfig?.maintenance?['memory.maintenance.v1']:[])]:[]),...(plugin.id==='channel-qq'&&qqCapabilities?['memory.capability-observation.v1','execution.resource-scope.v1']:[]),...(plugin.id==='channel-qq'&&qqMedia?.enabled?['media.assets.v1']:[]),...(plugin.id==='channel-qq'&&qqTasks?.enabled?['execution.message-task.v1',...(qqTasks.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])]:[]),...plugin.requires]})),
       ...(hasMemory?[{id:'core-execution',provides:['execution.task.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1','delivery.task-result.v1'],requires:['task.repository.v1']}]:[])];
     const order=dependencyOrder(descriptors);const foundation=readFoundation(paths.foundation);
     const declared=[file,...[config.paths.core,config.paths.memory,config.paths.sessions,config.paths.query,...Object.values(config.paths.channels),config.persona.fixedFile].map(path=>resolve(base,path))];

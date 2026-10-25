@@ -66,3 +66,4 @@ playurl选择可解码的普通视频和音频轨；DASH分别登记，不假设
 - [6B-2页面能力与记忆](bili-6b2-capabilities.md)完成；公开材料支持受控回QQ，继续6C字幕／弹幕与音画。
 - [6C-1字幕／弹幕](bili-6c1-timed-text.md)完成，继续6C-2独立播放源和音画处理。
 - [6C-2实际音画接入](bili-6c2-audiovisual.md)完成合成字节＋模拟分析检查；真实识别与平台兼容仍延期。继续6D Host／迁移／联合流程。
+- [6D-1 Host配置与显式迁移](bili-6d1-host-storage.md)完成；继续6D-2运行和联合检查。

@@ -1,0 +1,1 @@
+{"stage":"bilibili-6D-1","date":"2026-10-25","baseline":"b77bfd6","runId":"8140b60d-2a49-4923-9ba1-4af3fc623b8f","passed":26,"failed":0,"scope":["host-bili-storage","host-profile","host-cli","host-media-storage"],"realModel":false,"realPlatform":false,"fullRegression":false,"serverAccess":false,"cleanupBlocked":false}
