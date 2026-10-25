@@ -32,6 +32,7 @@ export async function captureRuntimeIdentity(repository:string,options:{real?:bo
   for(const entry of await readdir(join(root,'packages'),{withFileTypes:true})){
     if(!entry.isDirectory()||entry.isSymbolicLink())throw new Error('EVALUATION_RUNTIME_LINK_DENIED');
     const lib=join(root,'packages',entry.name,'lib');if(!existsSync(lib))throw new Error('EVALUATION_BUILD_MISSING');await walk(lib);
+    if(options.real){await walk(join(root,'packages',entry.name,'src'));await walk(join(root,'packages',entry.name,'package.json'));await walk(join(root,'packages',entry.name,'tsconfig.json'));}
   }
   const excluded=new Set(['.bin','@dafeiyu','@types','typescript','undici-types']);
   for(const entry of await readdir(join(root,'node_modules'),{withFileTypes:true}))if(!excluded.has(entry.name))await walk(join(root,'node_modules',entry.name));

@@ -12,7 +12,7 @@ import { sessionArchive } from './boundary.ts';
 
 export const CandidateSchema=z.strictObject({codeRevision:z.string().regex(/^[a-f0-9]{40}$/),runtimeHash:z.string().length(64),protocolHash:z.string().length(64)});
 export type RealCandidate=z.infer<typeof CandidateSchema>;
-export interface RealDriverOptions {repository:string;candidate:RealCandidate;retry?:boolean;testBackend?:LlmAdapter}
+export interface RealDriverOptions {repository:string;candidate:RealCandidate;candidateArtifact?:{relative:string;hash:string};retry?:boolean;testBackend?:LlmAdapter}
 export const stableEvaluationError=(error:unknown)=>error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'EVALUATION_CASE_FAILED';
 function hasPrivatePayload(value:unknown):boolean{if(!value||typeof value!=='object')return false;if('replayState'in value&&value.replayState!=null||'reasoning_content'in value||'type'in value&&['reasoning','redacted-thinking'].includes(String(value.type)))return true;return Object.values(value).some(hasPrivatePayload);}
 export class RealCaseRecord {
@@ -20,7 +20,8 @@ export class RealCaseRecord {
   readonly startedAt=Date.now();
   readonly checks:EvaluationOutcome['programChecks']=[];readonly artifacts:EvaluationOutcome['artifacts']=[];readonly evidence:Record<string,unknown>={};readonly turns:{prompt:string;answer:string}[]=[];error:string|null=null;
   private constructor(workspace:EvaluationWorkspace,item:EvaluationCase,attemptId:string,modelClass:'real'|'transport-test'){this.workspace=workspace;this.item=item;this.attemptId=attemptId;this.base=`cases/${attemptId}`;this.profile=join(workspace.root,this.base,'profile');this.modelClass=modelClass;}
-  static async begin(workspace:EvaluationWorkspace,item:EvaluationCase,options:RealDriverOptions){if(workspace.config.mode!=='real')throw new Error('EVALUATION_REAL_WORKSPACE_REQUIRED');workspace.ledger.remainingExecutionMs();const candidate=CandidateSchema.parse(options.candidate),record=new RealCaseRecord(workspace,item,workspace.ledger.begin(item.id,{retry:options.retry??false}),options.testBackend?'transport-test':'real');record.artifacts.push(await workspace.write(record.base+'/case.json',JSON.stringify({case:item,candidate,modelClass:record.modelClass,calibration:item.id.startsWith('CAL-')},null,2)+'\n'));return record;}
+  static async begin(workspace:EvaluationWorkspace,item:EvaluationCase,options:RealDriverOptions){if(workspace.config.mode!=='real')throw new Error('EVALUATION_REAL_WORKSPACE_REQUIRED');workspace.ledger.remainingExecutionMs();const candidate=CandidateSchema.parse(options.candidate);if(!options.testBackend&&!options.candidateArtifact)throw new Error('EVALUATION_CANDIDATE_REQUIRED');if(options.candidateArtifact){const saved=z.object({candidate:CandidateSchema}).parse(JSON.parse((await workspace.read(options.candidateArtifact.relative,options.candidateArtifact.hash)).toString()));if(JSON.stringify(saved.candidate)!==JSON.stringify(candidate))throw new Error('EVALUATION_CANDIDATE_CHANGED');}
+    const record=new RealCaseRecord(workspace,item,workspace.ledger.begin(item.id,{retry:options.retry??false}),options.testBackend?'transport-test':'real');if(options.candidateArtifact)record.artifacts.push(options.candidateArtifact);record.artifacts.push(await workspace.write(record.base+'/case.json',JSON.stringify({case:item,candidate,modelClass:record.modelClass,calibration:item.id.startsWith('CAL-')},null,2)+'\n'));return record;}
   check(id:string,passed:boolean,evidence:unknown){this.evidence[id]=evidence;this.checks.push({id,passed,evidenceHash:sha256(JSON.stringify(evidence))});}
   fail(error:unknown){this.error??=stableEvaluationError(error);this.check('driver-completed',false,{error:this.error});}
   async finish(){
