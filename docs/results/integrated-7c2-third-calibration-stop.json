@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "codeRevision": "8b2a2a2",
+  "model": "deepseek-official/deepseek-flash",
+  "reasoningEffort": "max",
+  "realModel": true,
+  "realPlatform": false,
+  "serverAccess": false,
+  "humanAccepted": false,
+  "overallTestsComplete": false,
+  "formalCasesStarted": 0,
+  "dispatchAttempts": 114,
+  "settledCalls": 113,
+  "budget": {
+    "maximum": 60000000,
+    "spent": 5203806,
+    "held": 2131072,
+    "unknown": 1,
+    "remaining": 52665122
+  },
+  "phaseBudgets": {
+    "allocation": {
+      "calibration": 10000000,
+      "formal": 35000000,
+      "retest": 15000000
+    },
+    "used": {
+      "calibration": 7334878,
+      "formal": 0,
+      "retest": 0
+    },
+    "remaining": {
+      "calibration": 2665122,
+      "formal": 35000000,
+      "retest": 15000000
+    },
+    "hash": "c679946ad7bc5aa8346035135c37c3856384082c0c3e97d842acc432128180a2"
+  },
+  "execution": {
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 539030,
+    "calibrationMs": 539030,
+    "remainingActiveMs": 21060970,
+    "phase": null,
+    "ownerPid": null,
+    "running": false
+  },
+  "program": {
+    "caseId": "CAL-history-compressed",
+    "attemptId": "ea6131e2-cfc6-41b2-ab73-006d3ca4df29",
+    "modelClass": "real",
+    "checks": [
+      {
+        "id": "identical-independent-baseline",
+        "passed": true,
+        "evidenceHash": "6e4c19af164aa478520bf1a9ebff99d0df1d4b1993b73a1fd1695f1e060f2a31"
+      },
+      {
+        "id": "actual-history-input-exposure",
+        "passed": true,
+        "evidenceHash": "66f6a90e01cf2114ae218f6e44f53e9400c5090e586794d481a3d59c133fc3fa"
+      },
+      {
+        "id": "driver-completed",
+        "passed": false,
+        "evidenceHash": "a59cdf2292ad32977688993e18997e823c6b234f4ba2f1385f5d062d862a967c"
+      },
+      {
+        "id": "answer-captured",
+        "passed": false,
+        "evidenceHash": "c5db262d5c9168655312b53b488699e2f9b89303356923a87874dfc95458480d"
+      },
+      {
+        "id": "all-real-dispatches-accounted",
+        "passed": false,
+        "evidenceHash": "8459cb4dadbc733fe464c4a6643f76fcf5e0d024b6f7669c5b25ecef4ea6d46b"
+      },
+      {
+        "id": "private-model-payload-not-persisted",
+        "passed": true,
+        "evidenceHash": "c1f9dd4f28cb7805d2d89200492fa8b3eb2c49f8effe96c1a76ce386644b1c83"
+      }
+    ],
+    "evidence": {
+      "identical-independent-baseline": {
+        "baseline": "d9cdc747e66518e35c09d0e21a9c78f30b142deac36f41eb70a63d18c05ab595",
+        "copy": "d9cdc747e66518e35c09d0e21a9c78f30b142deac36f41eb70a63d18c05ab595"
+      },
+      "actual-history-input-exposure": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "driver-completed": {
+        "error": "EVALUATION_CONTINUATION_FAILED"
+      },
+      "answer-captured": {
+        "turns": 0,
+        "characters": 0
+      },
+      "all-real-dispatches-accounted": {
+        "started": 17,
+        "finished": 17,
+        "errors": [
+          "EVALUATION_MODEL_FAILED"
+        ]
+      },
+      "private-model-payload-not-persisted": {
+        "visibleOnly": true
+      }
+    },
+    "error": "EVALUATION_CONTINUATION_FAILED"
+  },
+  "unknownCall": {
+    "id": "0dfd2868-cf76-4998-ad3c-07550cdcc415",
+    "attemptId": "ea6131e2-cfc6-41b2-ab73-006d3ca4df29",
+    "phase": "finished",
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "purpose": "task",
+    "requestHash": "bc5ec84dca685cecf426dc681137ab3c0525056a372c8bbb99d3c7646ea74b9b",
+    "sessionHash": "9fdbf96cfdf5ef133605a881c57b2d9ca1a8232472c4ec0b4f4168a2d8c2f57a",
+    "at": "2026-10-25T22:28:33.077Z",
+    "durationMs": 213,
+    "reservationId": "e79387b8-e750-4270-ae5d-fd5465545a81",
+    "inputTokens": null,
+    "outputTokens": null,
+    "finish": "error",
+    "error": "EVALUATION_MODEL_FAILED",
+    "reasoningEffort": "max",
+    "outputBound": 16384,
+    "usageBreakdown": null
+  },
+  "nativeError": {
+    "code": "TRANSPORT",
+    "detailedCause": "unknown",
+    "providerRequestId": null
+  },
+  "report": {
+    "schemaVersion": 1,
+    "exportId": "ac5acb4a-f8f1-4cf9-aeb5-7d64ec9aadb6",
+    "machine": {
+      "relative": "reports/ac5acb4a-f8f1-4cf9-aeb5-7d64ec9aadb6/machine.json",
+      "hash": "47d4987858f1d585ae03bbafa7acd1d6b0bd7f62d1bed47ed01313eccb1551f1"
+    },
+    "review": {
+      "relative": "reports/ac5acb4a-f8f1-4cf9-aeb5-7d64ec9aadb6/review.json",
+      "hash": "c52b656d16b9e27b6af2d1be882066ad7577adc962339a7cd0be99480b640e22"
+    },
+    "verifiedAttempts": 9,
+    "reviewItems": 0,
+    "generatedAt": "2026-10-25T22:28:33.294Z"
+  },
+  "preservedUserEdit": {
+    "path": "docs/memory-phase-1.md",
+    "sha256": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+  }
+}
