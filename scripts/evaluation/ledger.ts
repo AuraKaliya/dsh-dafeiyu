@@ -17,11 +17,12 @@ const outcome=z.strictObject({state:z.enum(['needs-human-review','failed','block
   .refine(o=>o.state!=='needs-human-review'||o.programChecks.length>0&&o.programChecks.every(c=>c.passed),'Failed program checks cannot pass to human review');
 export type EvaluationOutcome=z.infer<typeof outcome>;
 const encoded=(value:unknown)=>JSON.stringify(value),digest=(value:unknown)=>createHash('sha256').update(encoded(value)).digest('hex');
+function freeze(value:unknown){if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}}
 function fee(tokens:number,rate:number){integer.parse(tokens);money.parse(rate);const value=(BigInt(tokens)*BigInt(rate)+999999n)/1000000n;if(value>BigInt(Number.MAX_SAFE_INTEGER))throw new Error('EVALUATION_COST_OVERFLOW');return Number(value);}
 /** Evaluation evidence only. This class never sends model/platform requests or edits the frozen source suite. */
 export class EvaluationLedger {
   private readonly db:DatabaseSync;readonly config:EvaluationConfig;
-  constructor(file:string,raw:EvaluationConfig,create=false){this.config=EvaluationConfigSchema.parse(raw);if(!existsSync(file)&&!create)throw new Error('EVALUATION_LEDGER_MISSING');if(create)mkdirSync(dirname(file),{recursive:true});this.db=new DatabaseSync(file);
+  constructor(file:string,raw:EvaluationConfig,create=false){this.config=EvaluationConfigSchema.parse(raw);freeze(this.config);if(!existsSync(file)&&!create)throw new Error('EVALUATION_LEDGER_MISSING');if(create)mkdirSync(dirname(file),{recursive:true});this.db=new DatabaseSync(file);
     try{this.db.exec('PRAGMA busy_timeout=5000;PRAGMA foreign_keys=ON;');const version=this.db.prepare('PRAGMA user_version').get()?.user_version;
       if(version===0&&create&&!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get())this.atomic(()=>{this.db.exec(`CREATE TABLE metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL,hash TEXT NOT NULL);
         CREATE TABLE attempts(id TEXT PRIMARY KEY,case_id TEXT NOT NULL,ordinal INTEGER NOT NULL,started_at TEXT NOT NULL,state TEXT NOT NULL,UNIQUE(case_id,ordinal));
