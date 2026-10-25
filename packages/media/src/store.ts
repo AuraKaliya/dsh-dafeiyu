@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { randomUUID,createHash } from 'node:crypto';
 import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
-import { MediaAssetRefSchema,MediaAssetRecordSchema,MediaSourceDescriptionSchema,MediaCoverageSchema,ExecutionScopeSchema,SourceDependencySchema,redactJson } from '@dafeiyu/contracts';
+import { MediaAssetRefSchema,MediaAssetRecordSchema,MediaSourceDescriptionSchema,MediaCoverageSchema,ExecutionScopeSchema,SourceDependencySchema,PersonaSourceRefSchema,redactJson } from '@dafeiyu/contracts';
 import type { MediaAssetRef,MediaAssetRecord,MediaSourceDescription,MediaAccess,MediaCoverage,ResourceProof } from '@dafeiyu/contracts';
 
 export const MEDIA_APPLICATION_ID=0x44464d35;
@@ -151,6 +151,14 @@ export class MediaStore {
     if(mediaHash(this.source(body.sourceId).description.origin)!==mediaHash(access.origin)||!this.exposureCurrent(id))throw new Error('MEDIA_SOURCE_STALE');return body;}
   exposureProof(body:MediaExposure):ResourceProof {const origin=this.source(body.sourceId).description.origin;return {provider:'media',scene:origin.scene,key:body.id,version:1,hash:mediaHash(body),roots:origin.roots,detail:{exposureId:body.id}};}
   exposureOrigin(id:string){return this.source(this.exposureRow(id).sourceId).description;}
+  /** Program-only immutable witness lookup; public reads must first pass exposure(access, id). */
+  exposureWitness(id:string){const body=this.exposureRow(id);if(!this.exposureCurrent(id))throw new Error('MEDIA_SOURCE_STALE');return body;}
+  assetWitness(ref:MediaAssetRef){if(!this.contentCurrent(ref))throw new Error('MEDIA_SOURCE_STALE');return this.asset(ref.id);}
+  bindObservation(access:MediaAccess,id:string,source:unknown){const ref=PersonaSourceRefSchema.parse(source),body=this.exposure(access,id);
+    if(ref.scopeKey!==scopeKey(body.scope)||ref.agentId!==body.scope.agentId||access.execution.producer!=='media')throw new Error('SCOPE_DENIED');
+    return this.atomic(()=>this.request(access,'observation:'+id,{id,ref},value=>PersonaSourceRefSchema.parse(value),()=>ref));}
+  observation(id:string){const body=this.exposureRow(id),row=this.db.prepare("SELECT receipt FROM media_requests WHERE scope_key=? AND producer='media' AND request_id=?").get(scopeKey(body.scope),'observation:'+id);
+    if(!row)throw new Error('MEDIA_OBSERVATION_REQUIRED');return PersonaSourceRefSchema.parse(JSON.parse(String(row.receipt)));}
   epoch(){return mediaHash([this.db.prepare('SELECT id,version,deleted FROM media_sources ORDER BY id').all(),this.db.prepare('SELECT id,version,state FROM media_assets ORDER BY id').all()]);}
   private contentCurrent(ref:MediaAssetRef,seen=new Set<string>()):boolean {if(seen.has(ref.id)||seen.size>=32)return false;seen.add(ref.id);const asset=this.asset(ref.id),source=this.source(asset.sourceId);
     return !source.deleted&&source.version===asset.sourceVersion&&(asset.state==='ready'||asset.state==='evicted')&&asset.version===ref.version&&mediaHash(this.ref(asset))===mediaHash(ref)&&(!asset.parent||this.contentCurrent(asset.parent,seen));}

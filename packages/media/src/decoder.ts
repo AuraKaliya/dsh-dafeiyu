@@ -42,7 +42,7 @@ export class MediaDecoder {
     const result=await this.run(this.tools.ffmpeg,['-nostdin','-hide_banner','-v','error','-threads','2','-protocol_whitelist',source.protocols,'-format_whitelist',formats,...this.inputOptions(metadata.format),'-ss',String(startMs/1000),'-i',source.uri,'-t',String((endMs-startMs)/1000),'-map','0:a:0','-vn','-ac','1','-ar','16000','-c:a','pcm_s16le','-f','s16le','pipe:1'],signal,this.limits.maxAudioMs*32+4096);
     if(!result.stdout.length||result.stdout.length%2)throw new Error('MEDIA_AUDIO_DECODE_FAILED');const samples=result.stdout.length/2,durationMs=samples/16,header=Buffer.alloc(44);
     header.write('RIFF');header.writeUInt32LE(result.stdout.length+36,4);header.write('WAVEfmt ',8);header.writeUInt32LE(16,16);header.writeUInt16LE(1,20);header.writeUInt16LE(1,22);header.writeUInt32LE(16000,24);header.writeUInt32LE(32000,28);header.writeUInt16LE(2,32);header.writeUInt16LE(16,34);header.write('data',36);header.writeUInt32LE(result.stdout.length,40);
-    return {data:Buffer.concat([header,result.stdout]),mime:'audio/wav' as const,sampleRate:16000,channels:1,samples,startMs,endMs:startMs+durationMs,requestedEndMs:endMs,
+    return {data:Buffer.concat([header,result.stdout]),mime:'audio/wav' as const,sampleRate:16000,channels:1,samples,startMs,endMs:startMs+durationMs,requestedEndMs:endMs,sourceDurationMs:metadata.durationMs,
       completeness:Math.abs(startMs+durationMs-endMs)<2?'complete' as const:'partial' as const,peakCommitBytes:result.peakCommitBytes};
   }
 }

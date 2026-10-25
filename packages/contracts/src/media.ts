@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ExecutionScopeSchema,ExtensionIdSchema } from './execution.js';
 import { ResourceProofSchema } from './resource-observation.js';
-import { PersonaRequestIdSchema } from './persona.js';
+import { PersonaRequestIdSchema,PersonaSourceRefSchema } from './persona.js';
 import type { ExecutionContextV3 } from './execution.js';
 import type { PersonaAccess } from './persona.js';
 import type { ResourceProof } from './resource-observation.js';
@@ -28,6 +28,12 @@ export const MediaAssetRecordSchema=z.strictObject({schemaVersion:z.literal(1),i
   sha256:hash.nullable(),bytes:z.number().int().nonnegative().safe().nullable(),mime:z.string().max(120).nullable(),
   parent:MediaAssetRefSchema.nullable(),processingHash:hash.nullable(),coverage:MediaCoverageSchema,createdAt:z.iso.datetime(),updatedAt:z.iso.datetime()});
 export type MediaAssetRecord=z.infer<typeof MediaAssetRecordSchema>;
+export const MediaVoiceEvidenceSchema=z.strictObject({schemaVersion:z.literal(1),exposure:ResourceProofSchema,origin:ResourceProofSchema,
+  source:MediaProviderRefSchema,audioAsset:MediaAssetRefSchema,pcm:MediaAssetRefSchema,observation:PersonaSourceRefSchema,
+  transcriptHash:hash,sourceDurationMs:z.number().positive().max(120000),
+  asr:z.strictObject({backend:z.literal('whisper.node'),version:z.literal('1.1.3'),modelSha256:hash}),
+  events:z.strictObject({backend:z.literal('yamnet-onnx'),modelSha256:hash,labelsSha256:hash,onnxruntimeVersion:z.string(),numpyVersion:z.string()})});
+export type MediaVoiceEvidence=z.infer<typeof MediaVoiceEvidenceSchema>;
 export const MediaAcquireSchema=z.strictObject({requestId:PersonaRequestIdSchema,source:MediaProviderRefSchema});
 export const MediaReadSchema=z.strictObject({requestId:PersonaRequestIdSchema,asset:MediaAssetRefSchema.optional(),source:MediaProviderRefSchema.optional(),
   mode:z.enum(['inspect','image','frames','audio','document']),pointsMs:z.array(z.number().int().nonnegative()).max(8).optional(),interval:MediaIntervalSchema.optional(),
@@ -48,4 +54,6 @@ export interface MediaPort {
   acquire(context:ExecutionContextV3,owner:string,input:z.infer<typeof MediaAcquireSchema>):Promise<MediaAssetRef>;
   inspect(context:ExecutionContextV3,owner:string,ref:MediaAssetRef):unknown;
   read(context:ExecutionContextV3,owner:string,input:z.infer<typeof MediaReadSchema>):Promise<unknown>;
+  voice?(context:ExecutionContextV3,owner:string,exposureId:string):{text:string;evidence:MediaVoiceEvidence};
+  voiceCurrent?(evidence:MediaVoiceEvidence):boolean;
 }

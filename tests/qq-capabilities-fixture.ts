@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, writeFile,mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile,mkdir,readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import type { Context } from '@deepseek-ai/cordis';
 import { join,resolve,relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -29,12 +31,13 @@ export function outcomes(request:GenerateOptions){return request.messages.flatMa
 const browseData=z.object({snapshotId:z.uuid(),nextCursor:z.uuid().nullable(),page:z.record(z.string(),z.json()).and(z.object({messages:z.array(z.object({id:z.string(),text:z.string(),occurredAt:z.string().nullable(),unsupported:z.array(z.string())})),limitations:z.array(z.string())}))});
 export function lastPage(request:GenerateOptions){const pages=outcomes(request).flatMap(outcome=>{const result=browseData.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(pages.length,'model must actually see a QQ page');return pages.at(-1)!;}
 
-export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],deliverResults=false,existingRoot,media=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];deliverResults?:boolean;existingRoot?:string;media?:boolean}={}){
+export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],deliverResults=false,existingRoot,media=false,audio=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean}={}){
   const scratch=testTempDir();if(existingRoot){const path=relative(resolve(process.env.DAFEIYU_TEST_RUN!),resolve(existingRoot));if(path.startsWith('..')||/^[A-Za-z]:/.test(path))throw new Error('FIXTURE_ROOT_OUTSIDE_MANAGED_RUN');}
   const root=existingRoot??await mkdtemp(join(scratch,'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
     mediaFiles:new Map<string,string>(),mediaCalls:[] as {action:string;params:unknown}[],visionReads:0,
     afterVisionRead:async():Promise<void>=>{},
+    transcript:'请整理这段虚构讨论',speechDetected:true,
     afterSend:async(_count:number):Promise<void>=>{},beforeVerify:async():Promise<void>=>{}};
   const server=createServer(async(req,res)=>{if(req.headers.authorization!=='Bearer '+token){res.writeHead(401).end();return;}
     let raw='';for await(const bytes of req)raw+=String(bytes);let data:unknown;
@@ -62,8 +65,15 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
     class Vision extends LlmAdapter{override async resolveModel(provider:string,id:string):Promise<LlmResolvedModelInfo>{return {provider,id,name:id,systemPromptUpdate:'in-history',toolUpdate:'in-history',inputModalities:['text','image']};}
       override async *stream(request:GenerateOptions):AsyncIterable<StreamChunk>{const images=request.messages.flatMap(m=>m.content.filter(b=>b.type==='image'));assert.ok(images.length);for(const image of images){await h.ctx.attachments.readImageRequest(image.attachment,{width:1024,height:1024,maxBytes:16*1024**2},request.signal);platform.visionReads++;}await platform.afterVisionRead();
         yield* textReply(JSON.stringify({schemaVersion:1,observations:images.map((_image,index)=>({image:index,description:'回环测试脚本视觉结果',visibleText:[],uncertainties:['未做真实模型验收']})),gaps:[]}));}}
-    h.ctx.llm.registerAdapter(['qq-media-fixture'],new Vision());mediaFiber=await h.ctx.plugin(Media,{agentId:'dafeiyu',profileId:'qq-capability-fixture',dataDir:join(root,'core'),createStore:true,
-      ffmpeg:process.env.DAFEIYU_TEST_FFMPEG??'D:/ffmpeg/ffmpeg-8.1-essentials_build/bin/ffmpeg.exe',ffprobe:process.env.DAFEIYU_TEST_FFPROBE??'D:/ffmpeg/ffmpeg-8.1-essentials_build/bin/ffprobe.exe',vision:{provider:'qq-media-fixture',model:'scripted'},documents:{python:process.env.DAFEIYU_TEST_DOCUMENT_PYTHON??'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe',pypdfVersion:'6.10.0'}});
+    const modelPath=join(root,'audio-model-fixture'),modelHash=createHash('sha256').update('scripted-model').digest('hex');if(audio)await writeFile(modelPath,'scripted-model');
+    const mediaSettings:Media.Config={agentId:'dafeiyu',profileId:'qq-capability-fixture',dataDir:join(root,'core'),createStore:true,
+      ffmpeg:process.env.DAFEIYU_TEST_FFMPEG??'D:/ffmpeg/ffmpeg-8.1-essentials_build/bin/ffmpeg.exe',ffprobe:process.env.DAFEIYU_TEST_FFPROBE??'D:/ffmpeg/ffmpeg-8.1-essentials_build/bin/ffprobe.exe',vision:{provider:'qq-media-fixture',model:'scripted'},documents:{python:process.env.DAFEIYU_TEST_DOCUMENT_PYTHON??'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe',pypdfVersion:'6.10.0'},
+      ...(audio?{audio:{whisper:{node:process.execPath,moduleDirectory:root,moduleVersion:'1.1.3',model:{path:modelPath,sha256:modelHash}},events:{python:'fixture.exe',model:{path:modelPath,sha256:modelHash},labels:{path:modelPath,sha256:modelHash},onnxruntimeVersion:'fixture',numpyVersion:'fixture'}}}:{})};
+    h.ctx.llm.registerAdapter(['qq-media-fixture'],new Vision());
+    mediaFiber=await h.ctx.plugin({name:'fixture-media',inject:['dafeiyu','llm'],apply:(context:Context)=>{new Media.MediaService(context,mediaSettings,audio?{audioWorker:{run:async spec=>{const request=z.object({input:z.string(),inputSha256:z.string(),samples:z.number()}).parse(JSON.parse(await readFile(spec.arguments[1]!,'utf8')));assert.equal(createHash('sha256').update(await readFile(request.input)).digest('hex'),request.inputSha256);
+      const result=spec.arguments[0]!.endsWith('whisper.cjs')?{schemaVersion:1,kind:'asr',inputSha256:request.inputSha256,samples:request.samples,backend:'whisper.node',version:'1.1.3',modelSha256:modelHash,completed:true,segments:[{startMs:0,endMs:request.samples/16,text:platform.transcript}]}:
+        {schemaVersion:1,kind:'events',inputSha256:request.inputSha256,samples:request.samples,backend:'yamnet-onnx',modelSha256:modelHash,labelsSha256:modelHash,onnxruntimeVersion:'fixture',numpyVersion:'fixture',windows:[{startMs:0,endMs:request.samples/16,scores:[{label:platform.speechDetected?'Speech':'Silence',score:0.9}]}]};
+      return {stdout:Buffer.from(JSON.stringify(result)),stderr:Buffer.alloc(0),peakCommitBytes:100,memoryLimitBytes:spec.memoryBytes};}}}:undefined);}});
     await h.ctx.dafeiyuMedia.recover();h.ctx.dafeiyuMedia.activate();}
   const config:QQ.Config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group,otherGroup],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,
     tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks,deliverResults},naturalNames:['大肥鱼'],...(media?{media:{enabled:true,cacheRoots:[join(root,'onebot-cache')]}}:{})};

@@ -1,0 +1,17 @@
+{
+  "stage": "media-5D-3a",
+  "date": "2026-10-25",
+  "baseline": "e53543a",
+  "result": "targeted-checks-passed",
+  "runId": "7a3cb007-fa88-436b-960a-38b6933acb18",
+  "tests": {"passed": 18, "failed": 0},
+  "scope": ["media-voice", "qq-media-ingress", "media-files"],
+  "actualLocalExecution": ["loopback file API", "FFmpeg", "PCM IO", "DSH exposure", "persistent source witnesses"],
+  "audioModels": "scripted backends with synthetic tone inputs",
+  "voiceTaskEnabled": false,
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false
+}

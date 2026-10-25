@@ -4,8 +4,8 @@ import type {} from '@dafeiyu/core';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema,MediaSourceDescriptionSchema,CapabilitySelectionSchema,ServiceGate } from '@dafeiyu/contracts';
-import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContextV3,ActionCapabilityV3 } from '@dafeiyu/contracts';
+import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema,MediaSourceDescriptionSchema,CapabilitySelectionSchema,ServiceGate,MediaVoiceEvidenceSchema } from '@dafeiyu/contracts';
+import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContextV3,ActionCapabilityV3,MediaVoiceEvidence } from '@dafeiyu/contracts';
 import { MediaStore,mediaHash } from './store.js';
 import type { StoredMediaSource,MediaExposure } from './store.js';
 import { MediaFiles,abortable } from './files.js';
@@ -18,6 +18,7 @@ import { MediaAnalysis } from './analysis.js';
 import { AudioPipeline,audioConfigSchema } from './audio.js';
 import type { AudioWorker } from './audio.js';
 import { DocumentReader,documentConfigSchema } from './documents.js';
+import { voiceWitness } from './voice.js';
 
 export const mediaConfigSchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100),dataDir:z.string().min(1),createStore:z.boolean().default(false),
   ffmpeg:z.string().min(1),ffprobe:z.string().min(1),maxBytes:z.number().int().min(1024).max(16*1024**3).default(1024**3),maxAssetBytes:z.number().int().min(1024).max(256*1024**2).default(64*1024**2),
@@ -124,12 +125,12 @@ export class MediaService extends Service implements MediaPort {
       const gaps=[...processed.gaps];if(windows.length>24)gaps.push('仅展示前24个声音窗口，完整处理覆盖另行记录');if(asr.length>4500)gaps.push('本次转写展示截断，需缩短区间继续读取');
       const text=`音频模型结果（实际音轨，未用字幕；不是已核实事实）：\nASR转写：\n${Array.from(asr).slice(0,4500).join('')}\n声音事件（原始模型分数，不是概率）：\n${descriptions.join('\n')||('code'in processed.events?processed.events.code:'无声音标签')}\n覆盖：${decoded.startMs}–${decoded.endMs}ms\n缺口：${gaps.join('；')}`;
       const coverage={acquiredBytes:p.broker?.coverage.transferredBytes??p.parent?.bytes??0,processed:[{kind:'audio' as const,unit:'milliseconds' as const,start:decoded.startMs,end:decoded.endMs}],exposed:true,gaps,completeness:'partial' as const};
-      const exposure=this.store.recordExposure(p.access,input.requestId,fingerprint,p.source,{assets:[asset],coverage,text,occurredAt:new Date().toISOString(),detail:z.json().parse(processed)});
+      const exposure=this.store.recordExposure(p.access,input.requestId,fingerprint,p.source,{assets:[asset],coverage,text,occurredAt:new Date().toISOString(),detail:z.json().parse({...processed,sourceDurationMs:decoded.sourceDurationMs,audioAsset:p.parent})});
       const observation=this.observed(context,p.access,exposure);this.store.finishJob(p.access,jobId,{exposureId:exposure.id,technicalCompleteness:processed.technicalCompleteness},null);return observation;
     }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}finally{if(lease)this.store.releaseLease(lease,'audio');}
   }
   private observed(context:ExecutionContextV3,access:MediaAccess,exposure:MediaExposure){access.guard();const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'media',{requestId:exposure.id,proof:this.store.exposureProof(exposure),text:exposure.text,occurredAt:exposure.occurredAt,coverage:exposure.coverage.gaps,
-    counts:{received:exposure.assets.length,processed:exposure.assets.length}});const cursor=z.object({next:z.object({offset:z.number(),textOffset:z.number()}).nullable()}).safeParse(exposure.detail);
+    counts:{received:exposure.assets.length,processed:exposure.assets.length}});this.store.bindObservation(access,exposure.id,observation.source);const cursor=z.object({next:z.object({offset:z.number(),textOffset:z.number()}).nullable()}).safeParse(exposure.detail);
     return {exposureId:exposure.id,text:exposure.text,coverage:exposure.coverage,assets:exposure.assets,observation,...(cursor.success?{next:cursor.data.next}:{})};}
   private async readDocument(context:ExecutionContextV3,input:Input,p:Prepared){if(!this.documents)throw new Error('MEDIA_DOCUMENTS_NOT_CONFIGURED');if(!('file'in p.input)||!p.parent)throw new Error('MEDIA_DOCUMENT_WHOLE_BYTES_REQUIRED');
     const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
@@ -144,6 +145,13 @@ export class MediaService extends Service implements MediaPort {
   }
   select(context:ExecutionContextV3,raw:unknown){const input=selectSchema.parse(raw),proof=this.store.exposureOrigin(input.exposureId),{provider,description}=this.describe(proof.ref),access=this.access(context,'media',description,provider),exposure=this.store.exposure(access,input.exposureId);
     const {exposureId,...selection}=input;return this.ctx.dafeiyu.selectCapabilityObservation(context,'media',description.origin.scene,selection,exposure.text);}
+  voice(context:ExecutionContextV3,owner:string,exposureId:string){const source=this.store.exposureOrigin(exposureId),{provider,description}=this.describe(source.ref),access=this.access(context,owner,description,provider),exposure=this.store.exposure(access,exposureId),result=voiceWitness(this.store,exposure);
+    if(!access.execution.historyTracked||!access.execution.historyDependencies?.some(d=>(d.kind==='capability'||d.kind==='execution-source')&&mediaHash(d.ref)===mediaHash(result.evidence.observation)))throw new Error('OBSERVATION_NOT_EXPOSED');
+    if(!this.voiceCurrent(result.evidence))throw new Error('MEDIA_SOURCE_STALE');access.guard();return result;
+  }
+  voiceCurrent(raw:MediaVoiceEvidence){try{if(!this.ready())return false;const evidence=MediaVoiceEvidenceSchema.parse(raw),body=this.store.exposureWitness(evidence.exposure.key),actual=voiceWitness(this.store,body);
+    return mediaHash(actual.evidence)===mediaHash(evidence)&&this.ctx.dafeiyu.capabilityResourceCurrent(evidence.exposure)&&this.ctx.dafeiyu.capabilityObservationCurrent({agentId:body.scope.agentId,route:body.scope.kind==='task'?body.scope.scopeKey:body.scope.route},evidence.observation);
+  }catch{return false;}}
   private actions():ActionCapabilityV3[]{const make=(id:string,inputSchema:z.ZodType,write:boolean,execute:(input:unknown,c:ExecutionContextV3)=>unknown|Promise<unknown>):ActionCapabilityV3=>({id,version:'1',description:({[MEDIA_ACTIONS[0]]:'按需取得已登记媒体源的字节，不表示已经理解。',[MEDIA_ACTIONS[1]]:'检查当前作用域内媒体资产及覆盖。',[MEDIA_ACTIONS[2]]:'读取实际图片、视频帧、音轨区间或文档片段。文档next.offset是单元序号，next.textOffset是该单元内Unicode字符位置；按返回游标继续。',[MEDIA_ACTIONS[3]]:'对已经读到的媒体观察选择不保存、原文、片段或摘要。'} as Record<string,string>)[id]!,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(i,c)=>{
       try{const data=z.json().parse(await execute(i,c)),observation=z.object({observation:z.object({source:z.object({id:z.string(),scopeKey:z.string(),version:z.number(),contentHash:z.string()})})}).safeParse(data);
         return {status:'succeeded',effects:write?'confirmed':'none',completeness:id===MEDIA_ACTIONS[2]?'partial':'complete',data,sources:observation.success?[observation.data.observation.source]:[],receipts:[]};}
