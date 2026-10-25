@@ -27,11 +27,12 @@ export const MediaAssetRecordSchema=z.strictObject({schemaVersion:z.literal(1),i
   parent:MediaAssetRefSchema.nullable(),processingHash:hash.nullable(),coverage:MediaCoverageSchema,createdAt:z.iso.datetime(),updatedAt:z.iso.datetime()});
 export type MediaAssetRecord=z.infer<typeof MediaAssetRecordSchema>;
 export const MediaAcquireSchema=z.strictObject({requestId:PersonaRequestIdSchema,source:MediaProviderRefSchema});
-export const MediaReadSchema=z.strictObject({requestId:PersonaRequestIdSchema,asset:MediaAssetRefSchema,
+export const MediaReadSchema=z.strictObject({requestId:PersonaRequestIdSchema,asset:MediaAssetRefSchema.optional(),source:MediaProviderRefSchema.optional(),
   mode:z.enum(['inspect','image','frames','audio','document']),pointsMs:z.array(z.number().int().nonnegative()).max(8).optional(),interval:MediaIntervalSchema.optional(),
-  offset:z.number().int().nonnegative().optional(),limit:z.number().int().min(1).max(8000).optional()});
+  offset:z.number().int().nonnegative().optional(),limit:z.number().int().min(1).max(8000).optional()}).refine(v=>!!v.asset!==!!v.source,'Choose one asset or source');
 export interface MediaAccess {readonly execution:PersonaAccess;readonly origin:ResourceProof;guard():void}
-export interface MediaByteStream {readonly bytes:number|null;readonly mime:string|null;readonly stream:AsyncIterable<Uint8Array>}
+export interface MediaByteStream {readonly bytes:number|null;readonly mime:string|null;readonly stream:AsyncIterable<Uint8Array>;
+  readonly totalBytes?:number;readonly range?:{start:number;end:number}|null}
 /** Program registration only. No model supplies a locator, header or filesystem path. */
 export interface MediaSourceProvider {
   readonly id:string;

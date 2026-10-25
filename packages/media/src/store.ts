@@ -90,24 +90,37 @@ export class MediaStore {
     const current=this.read(access,id),valid=z.object({sha256:z.string().regex(/^[a-f0-9]{64}$/),bytes:z.number().int().nonnegative().safe(),mime:z.string().min(1).max(120),kind:MediaAssetRecordSchema.shape.kind,coverage:MediaCoverageSchema}).parse(input);
     if(current.state==='ready'){const ref=this.ref(current);if(ref.sha256!==valid.sha256||ref.bytes!==valid.bytes||ref.mime!==valid.mime||ref.kind!==valid.kind)throw new Error('IDEMPOTENCY_CONFLICT');return ref;}
     if(current.state!=='staging'||!verify())throw new Error('MEDIA_BLOB_UNVERIFIED');
-    const blob=this.db.prepare('SELECT bytes,present FROM media_blobs WHERE sha256=?').get(valid.sha256);if(blob&&blob.bytes!==valid.bytes)throw new Error('MEDIA_BLOB_CONFLICT');if(blob?.present===0)throw new Error('MEDIA_BLOB_CLEANUP_PENDING');
+    const blob=this.db.prepare('SELECT bytes,present FROM media_blobs WHERE sha256=?').get(valid.sha256);if(blob&&blob.bytes!==valid.bytes)throw new Error('MEDIA_BLOB_CONFLICT');if(blob?.present===0)throw new Error('MEDIA_BLOB_CLEANUP_PENDING');if(blob?.present===3&&this.blobOwner(valid.sha256)!==id)throw new Error('MEDIA_BLOB_BUSY');
     this.db.prepare('INSERT INTO media_blobs VALUES(?,?,1,?) ON CONFLICT(sha256) DO UPDATE SET present=1').run(valid.sha256,valid.bytes,new Date().toISOString());
     const value={...current,...valid,state:'ready' as const,version:current.version+1,updatedAt:new Date().toISOString()};this.writeAsset(value);this.audit(access,'media.asset.ready',{assetId:id,version:value.version,bytes:value.bytes});access.guard();return this.ref(value);
   });}
   ref(record:MediaAssetRecord):MediaAssetRef{return MediaAssetRefSchema.parse({schemaVersion:1,id:record.id,version:record.version,kind:record.kind,sha256:record.sha256,bytes:record.bytes,mime:record.mime});}
+  reserveBlob(access:MediaAccess,assetId:string,sha256:string,bytes:number){return this.atomic(()=>{
+    if(this.read(access,assetId).state!=='staging')throw new Error('MEDIA_ASSET_UNAVAILABLE');z.string().regex(/^[a-f0-9]{64}$/).parse(sha256);z.number().int().nonnegative().safe().parse(bytes);
+    const old=this.db.prepare('SELECT bytes,present FROM media_blobs WHERE sha256=?').get(sha256);if(old&&old.bytes!==bytes)throw new Error('MEDIA_BLOB_CONFLICT');
+    if(old?.present===1)return false;if(old?.present===0)throw new Error('MEDIA_BLOB_CLEANUP_PENDING');
+    if(old?.present===3){if(this.blobOwner(sha256)!==assetId)throw new Error('MEDIA_BLOB_BUSY');return true;}
+    this.db.prepare('INSERT INTO media_blobs VALUES(?,?,3,?) ON CONFLICT(sha256) DO UPDATE SET present=3').run(sha256,bytes,new Date().toISOString());
+    this.db.prepare('INSERT INTO media_requests VALUES(?,?,?,?,?)').run('blob:'+sha256,'media',randomUUID(),sha256,JSON.stringify({assetId}));return true;
+  });}
+  private blobOwner(hash:string){const row=this.db.prepare("SELECT receipt FROM media_requests WHERE scope_key=? AND producer='media' ORDER BY rowid DESC LIMIT 1").get('blob:'+hash);return row?z.object({assetId:z.uuid()}).parse(JSON.parse(String(row.receipt))).assetId:null;}
+  abandonBlob(assetId:string,hash:string){if(this.blobOwner(hash)!==assetId)return;this.db.prepare('UPDATE media_blobs SET present=0 WHERE sha256=? AND present=3').run(hash);}
   requireRef(access:MediaAccess,raw:MediaAssetRef){const ref=MediaAssetRefSchema.parse(raw),asset=this.read(access,ref.id);
     if(asset.state!=='ready'||mediaHash(this.ref(asset))!==mediaHash(ref)||!this.db.prepare('SELECT 1 FROM media_blobs WHERE sha256=? AND bytes=? AND present=1').get(ref.sha256,ref.bytes))throw new Error('MEDIA_ASSET_UNAVAILABLE');return asset;}
+  abandon(access:MediaAccess,id:string,code:string){this.atomic(()=>{const current=this.asset(id);if(scopeKey(current.scope)!==scopeKey(access.execution.view.scope)||current.agentId!==this.identity.agentId)throw new Error('SCOPE_DENIED');
+    if(current.state!=='staging')return;this.writeAsset({...current,state:'failed',version:current.version+1,updatedAt:new Date().toISOString()});this.audit(access,'media.asset.failed',{assetId:id,code});});}
   deleteAsset(access:MediaAccess,id:string,expectedVersion:number){return this.atomic(()=>{const current=this.read(access,id);if(current.version!==expectedVersion)throw new Error('VERSION_CONFLICT');
     const value={...current,state:'deleted' as const,version:current.version+1,updatedAt:new Date().toISOString()};this.writeAsset(value);this.audit(access,'media.asset.deleted',{assetId:id,version:value.version});access.guard();return {id,version:value.version};});}
   lease(access:MediaAccess,ref:MediaAssetRef,owner:string,expiresAt:number){z.string().min(1).max(200).parse(owner);z.number().int().positive().safe().parse(expiresAt);return this.atomic(()=>{
     this.requireRef(access,ref);const id=randomUUID();this.db.prepare('INSERT INTO media_leases VALUES(?,?,?,?,?,0)').run(id,ref.id,ref.version,owner,expiresAt);return id;});}
   releaseLease(id:string,owner:string){return this.db.prepare('UPDATE media_leases SET released=1 WHERE id=? AND owner=?').run(z.uuid().parse(id),owner).changes===1;}
   reclaimable(now:number){return this.db.prepare("SELECT b.sha256,b.bytes FROM media_blobs b WHERE b.present=1 AND NOT EXISTS(SELECT 1 FROM media_assets a JOIN media_asset_revisions r ON r.id=a.id AND r.version=a.version JOIN media_leases l ON l.asset_id=a.id AND l.asset_version=a.version WHERE json_extract(r.body,'$.sha256')=b.sha256 AND l.released=0 AND l.expires_at>?) ORDER BY b.created_at").all(now).map(row=>({sha256:String(row.sha256),bytes:Number(row.bytes)}));}
-  evict(hash:string,now:number,remove:()=>void){this.atomic(()=>{if(!this.reclaimable(now).some(blob=>blob.sha256===hash))throw new Error('MEDIA_BLOB_PINNED');
+  beginEviction(hash:string,now:number){this.atomic(()=>{if(!this.reclaimable(now).some(blob=>blob.sha256===hash))throw new Error('MEDIA_BLOB_PINNED');
     this.db.prepare('UPDATE media_blobs SET present=0 WHERE sha256=?').run(hash);
     // Availability is separate from content/revocation version: retain a dated observation's proof.
     this.db.prepare("UPDATE media_assets SET state='evicted' WHERE state='ready' AND id IN(SELECT a.id FROM media_assets a JOIN media_asset_revisions r ON r.id=a.id AND r.version=a.version WHERE json_extract(r.body,'$.sha256')=?)").run(hash);
-  });this.completeRemoval(hash,remove);}
+  });}
+  evict(hash:string,now:number,remove:()=>void){this.beginEviction(hash,now);this.completeRemoval(hash,remove);}
   pendingRemoval(){return this.db.prepare('SELECT sha256,bytes FROM media_blobs WHERE present=0').all().map(row=>({sha256:String(row.sha256),bytes:Number(row.bytes)}));}
   completeRemoval(hash:string,remove:()=>void){if(!this.db.prepare('SELECT 1 FROM media_blobs WHERE sha256=? AND present=0').get(hash))throw new Error('MEDIA_CLEANUP_STATE_CONFLICT');
     remove();this.db.prepare('UPDATE media_blobs SET present=2 WHERE sha256=? AND present=0').run(hash);}
@@ -120,8 +133,9 @@ export class MediaStore {
     if(body.history.length&&!access.execution.validateHistory?.(body.history))throw new Error('SOURCE_STALE');if(error!==null&&!/^[A-Z0-9_]{1,100}$/.test(error))throw new Error('INVALID_INPUT');
     const value=z.json().parse(result);if(redactJson(value).redacted)throw new Error('PRIVATE_INPUT_REJECTED');this.db.prepare('UPDATE media_jobs SET state=?,result=?,error=? WHERE id=?').run(error?'failed':'completed',JSON.stringify(value),error,id);this.audit(access,'media.job.settled',{jobId:id,error});access.guard();});}
   recover(){return this.atomic(()=>{const jobs=Number(this.db.prepare("UPDATE media_jobs SET state='interrupted',error='PROCESS_INTERRUPTED' WHERE state='running'").run().changes);
+    this.db.prepare('UPDATE media_blobs SET present=0 WHERE present=3').run();
     for(const row of this.db.prepare("SELECT id FROM media_assets WHERE state='staging'").all()){const current=this.asset(String(row.id));this.writeAsset({...current,state:'failed',version:current.version+1,updatedAt:new Date().toISOString()});}return jobs;});}
-  counts(){return {sources:Number(this.db.prepare('SELECT count(*) AS n FROM media_sources').get()?.n),assets:Number(this.db.prepare('SELECT count(*) AS n FROM media_assets').get()?.n),bytes:Number(this.db.prepare('SELECT coalesce(sum(bytes),0) AS n FROM media_blobs WHERE present IN (0,1)').get()?.n)};}
+  counts(){return {sources:Number(this.db.prepare('SELECT count(*) AS n FROM media_sources').get()?.n),assets:Number(this.db.prepare('SELECT count(*) AS n FROM media_assets').get()?.n),bytes:Number(this.db.prepare('SELECT coalesce(sum(bytes),0) AS n FROM media_blobs WHERE present IN (0,1,3)').get()?.n)};}
   drain(publish:(body:unknown,id:string)=>void){for(const row of this.db.prepare('SELECT id,body FROM media_outbox WHERE delivered=0 ORDER BY rowid').all()){publish(JSON.parse(String(row.body)),String(row.id));this.db.prepare('UPDATE media_outbox SET delivered=1 WHERE id=?').run(row.id!);}}
   close(){if(this.closed)return;this.closed=true;this.db.close();}
 }

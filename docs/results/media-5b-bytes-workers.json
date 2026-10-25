@@ -1,0 +1,18 @@
+{
+  "stage": "media-5B",
+  "date": "2026-10-25",
+  "baseline": "7bd3094",
+  "result": "targeted-checks-passed",
+  "runId": "d8a9e65a-035a-4586-ab57-cba82c22ed20",
+  "tests": {"passed": 19, "failed": 0},
+  "scope": ["media-files", "media-decoder", "media-process", "media-store"],
+  "actualLocalExecution": ["SQLite", "byte IO and hashing", "loopback range HTTP", "FFmpeg 8.1", "Windows Job memory and lifecycle constraints"],
+  "fixtures": "synthetic images, video and audio only",
+  "correctedFailure": "MOV-specific decode options applied to PNG; now selected by inspected container",
+  "cleanupBlocked": false,
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "remaining": ["media service and model exposure", "ASR and sound events", "document parsing", "QQ media", "Host integration"]
+}
