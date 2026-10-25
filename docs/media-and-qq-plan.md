@@ -148,3 +148,5 @@ QQ用文字分段与媒体独立部件组成固定计划，尤其语音独立发
 - 5E-4：[QQ逐部件媒体传输](media-5e4-qq-transport.md)完成回环检查；继续5E-5最终正文TTS。
 - 5E-5：[最终正文TTS](media-5e5-final-speech.md)完成。5E-6与5F统一Host装配、迁移、对账及联合检查继续推进。
 - 5F-1：[Host配置与媒体文件迁移](media-5f1-host-storage.md)完成；继续运行装配与恢复对账。
+- 5F-2：[运行、状态与恢复对账](media-5f2-host-runtime.md)完成；使用实际本地Host和虚构文档，重启不重复模型或发送。
+- 5F-3／5E-6：[配置模板与阶段联合记录](media-5f3-integration.md)完成；阶段5本地开发结束，继续阶段6。所有真实模型／平台和发布全量回归仍延期。

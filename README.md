@@ -10,7 +10,7 @@
 
 阶段4自主活动已完成[方案](docs/autonomous-activity-plan.md)、4A计划／时间存储、4B核心来源锚点、4C唤醒／让出与整理调度、[4D Host联合检查](docs/activity-4d-integration.md)。activity库v1，按需启用；single-run不启动后台活动。
 
-阶段5已完成[统一媒体方案](docs/media-and-qq-plan.md)的5A—5D：受管字节／解码、图像／音频／文档读取、QQ按需媒体观察和[可选主人语音任务](docs/media-5d3b-voice-tasks.md)。真实模型／平台仍未验收；媒体发送与统一Host媒体装配尚未完成，继续[5E媒体交付](docs/media-delivery-5e-plan.md)后推进5F。
+阶段5已完成[统一媒体方案](docs/media-and-qq-plan.md)的5A—5F本地开发：受管音画／文档读取、QQ媒体观察与可选主人语音任务、逐部件媒体交付、批准正文TTS、[Host装配／迁移／恢复对账](docs/media-5f3-integration.md)。media库v2，真实模型／平台仍未验收，继续阶段6 B站首版。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
@@ -42,6 +42,8 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 | `@dafeiyu/channel-qq` | QQ能力插件；本机SnowLuma适配、明确账号范围、事件接入与交付 |
 | `@dafeiyu/timeline` | 当前会话行为检索、可见来源回查、分页和读取审计 |
 | `@dafeiyu/memory` | 隔离存储、版本与删除、来源依赖、中文FTS5、BGE召回、token分片及profile缓存；独立分析、候选、工作记忆与选中证据 |
+| `@dafeiyu/activity` | 持久活动计划、主动唤醒、活动时段和记忆整理调度 |
+| `@dafeiyu/media` | 有界媒体字节／解码、音画与文档观察、来源证据、回复资产与最终正文语音 |
 
 ## 文档
 
@@ -103,6 +105,6 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第三阶段时间线与来源接口](docs/phase-3-timeline.md)
 - [第三阶段验收](docs/phase-3-acceptance.md)
 
-`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。按计划／条件的记忆整理已接入自主活动；通用语义关系图、跨组主题融合，以及本项目中的B站、管理员任务、图片/语音理解和自主更新操作尚未接入。`demo:composition`展示无损组合与来源链；`npm run accept:memory-semantic`用虚构样本和当前绑定模型验证受控融合与原文重建。其余演示见各阶段文档。专属压缩需显式配置可用输入预算，不能与宿主另一压缩写者同时启用。
+`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。按计划／条件的记忆整理已接入自主活动；通用语义关系图、跨组主题融合，以及本项目中的B站、管理员任务和自主更新操作尚未接入。`demo:composition`展示无损组合与来源链；`npm run accept:memory-semantic`用虚构样本和当前绑定模型验证受控融合与原文重建。其余演示见各阶段文档。专属压缩需显式配置可用输入预算，不能与宿主另一压缩写者同时启用。
 
 Git 只管理源码、测试、模板和文档。运行数据库、登录凭据、私人记忆和聊天记录不入库。尚未配置远端仓库；没有部署或修改服务器。

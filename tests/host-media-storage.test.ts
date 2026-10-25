@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,writeFile,readFile,mkdir,symlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join,resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { loadHostConfig,initializeProfile,inspectHost,planMigration,applyMigration,verifyMigration,inspectStorage } from '@dafeiyu/host';
+import { loadHostConfig,initializeProfile,inspectHost,planMigration,applyMigration,verifyMigration,inspectStorage,pluginConfig } from '@dafeiyu/host';
 import { MediaStore,MediaFiles } from '@dafeiyu/media';
 import { taskScopeKey } from '@dafeiyu/contracts';
 import { testTempDir } from './test-temp.js';
@@ -18,6 +18,12 @@ async function seeded(){const f=await migrationFixture(),base=await mediaIoFixtu
   const source=store.rememberSource(access,base.source.description),data=Buffer.from('fixture media bytes'),ref=await files.ingest(access,'asset',source,{bytes:data.length,mime:'text/plain',stream:byteChunks(data)},new AbortController().signal);store.close();base.close();
   await mkdir(join(f.coreDir,'media-analysis'));await writeFile(join(f.coreDir,'media-analysis/session.jsonl'),'fictional analysis record\n');await writeFile(join(f.coreDir,'media/work/preserve-note.txt'),'not a formal media snapshot');
   const db=new DatabaseSync(join(f.coreDir,'media.sqlite'));db.exec('DROP TABLE media_reply_exports;DROP TABLE media_reply_heads;DROP TABLE media_reply_drafts;PRAGMA user_version=1;');db.close();return {...f,ref,data};}
+
+test('media example explicitly enables receiving without granting output or voice-task authority',()=>{
+  const prepared=loadHostConfig(resolve('profiles/host.media.example.json')),qq=pluginConfig(prepared,'channel-qq')!,media=pluginConfig(prepared,'media')!;
+  assert.equal(qq.media.enabled,true);assert.equal(qq.media.sendEnabled,false);assert.equal(qq.media.voiceDirectives,false);assert.equal(media.vision,undefined);assert.ok(media.documents);
+  assert.ok(prepared.config.authorityPolicies.every(p=>!p.actions.includes('dafeiyu_media_reply')));
+});
 
 test('media Host configuration checks dependencies, resolves paths and initializes an explicit v2 store',async()=>{
   const f=await profile(),prepared=loadHostConfig(f.file);assert.ok(prepared.order.indexOf('memory')<prepared.order.indexOf('media'));assert.ok(prepared.order.indexOf('core-execution')<prepared.order.indexOf('media'));assert.equal(inspectHost(prepared,f.coordination).canInitialize,true);
