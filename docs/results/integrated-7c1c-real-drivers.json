@@ -1,0 +1,205 @@
+{
+  "scope": "7C-1C actual state drivers with fictional transport",
+  "runs": [
+    {
+      "schemaVersion": 1,
+      "runId": "45650322-37b1-4150-a066-1b6e7f970df0",
+      "startedAt": "2026-10-25T19:40:01.619Z",
+      "finishedAt": "2026-10-25T19:40:05.448Z",
+      "stages": [
+        {
+          "name": "build",
+          "code": 0,
+          "signal": null,
+          "durationMs": 131
+        },
+        {
+          "name": "test-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 2441
+        },
+        {
+          "name": "tooling-types",
+          "code": 2,
+          "signal": null,
+          "durationMs": 1222
+        }
+      ],
+      "summary": null,
+      "reason": "TEST_STAGE_FAILED",
+      "cleanup": {
+        "removed": [
+          "73e58044-3293-49c4-8ebf-d47c95955535"
+        ],
+        "retained": [
+          {
+            "id": "45650322-37b1-4150-a066-1b6e7f970df0",
+            "bytes": 4074078
+          },
+          {
+            "id": "5819345f-c328-4ed5-b6d5-c921c8cf77cb",
+            "bytes": 4767461
+          },
+          {
+            "id": "90612a56-cbe0-4de9-9e7f-229edd14f2e5",
+            "bytes": 4767543
+          }
+        ],
+        "blocked": []
+      },
+      "freeBytes": 218125074432,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "schemaVersion": 1,
+      "runId": "728d34fb-1408-4c3d-96c8-4f86ade31f7b",
+      "startedAt": "2026-10-25T19:40:19.239Z",
+      "finishedAt": "2026-10-25T19:41:33.324Z",
+      "stages": [
+        {
+          "name": "build",
+          "code": 0,
+          "signal": null,
+          "durationMs": 126
+        },
+        {
+          "name": "test-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 2482
+        },
+        {
+          "name": "tooling-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 1236
+        },
+        {
+          "name": "tests",
+          "code": 0,
+          "signal": null,
+          "durationMs": 69901
+        }
+      ],
+      "summary": {
+        "success": true,
+        "counts": {
+          "tests": 5,
+          "failed": 0,
+          "passed": 5,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 5,
+          "suites": 0
+        },
+        "durationMs": 69838.7826,
+        "failures": []
+      },
+      "reason": null,
+      "cleanup": {
+        "removed": [
+          "728d34fb-1408-4c3d-96c8-4f86ade31f7b"
+        ],
+        "retained": [
+          {
+            "id": "45650322-37b1-4150-a066-1b6e7f970df0",
+            "bytes": 4074078
+          },
+          {
+            "id": "5819345f-c328-4ed5-b6d5-c921c8cf77cb",
+            "bytes": 4767461
+          },
+          {
+            "id": "90612a56-cbe0-4de9-9e7f-229edd14f2e5",
+            "bytes": 4767543
+          }
+        ],
+        "blocked": []
+      },
+      "freeBytes": 218123485184,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "schemaVersion": 1,
+      "runId": "f94109cc-177d-460d-9d13-a6a7d7e6bb31",
+      "startedAt": "2026-10-25T19:45:06.185Z",
+      "finishedAt": "2026-10-25T19:46:19.589Z",
+      "stages": [
+        {
+          "name": "build",
+          "code": 0,
+          "signal": null,
+          "durationMs": 130
+        },
+        {
+          "name": "test-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 2466
+        },
+        {
+          "name": "tooling-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 1252
+        },
+        {
+          "name": "tests",
+          "code": 0,
+          "signal": null,
+          "durationMs": 69474
+        }
+      ],
+      "summary": {
+        "success": true,
+        "counts": {
+          "tests": 1,
+          "failed": 0,
+          "passed": 1,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 1,
+          "suites": 0
+        },
+        "durationMs": 69411.7787,
+        "failures": []
+      },
+      "reason": null,
+      "cleanup": {
+        "removed": [
+          "f94109cc-177d-460d-9d13-a6a7d7e6bb31"
+        ],
+        "retained": [
+          {
+            "id": "45650322-37b1-4150-a066-1b6e7f970df0",
+            "bytes": 4074078
+          },
+          {
+            "id": "5819345f-c328-4ed5-b6d5-c921c8cf77cb",
+            "bytes": 4767461
+          },
+          {
+            "id": "90612a56-cbe0-4de9-9e7f-229edd14f2e5",
+            "bytes": 4767543
+          }
+        ],
+        "blocked": []
+      },
+      "freeBytes": 218123485184,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    }
+  ],
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "fullRegression": false
+}
