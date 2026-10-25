@@ -135,6 +135,12 @@ export class Journal {
     return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='task' AND json_extract(body,'$.visibility.agentId')=? AND json_extract(body,'$.visibility.taskId')=? ORDER BY seq")
       .all(route,agentId,taskId).map(row=>({...ExecutionEventSchema.parse(JSON.parse(text(row.body))),seq:Number(row.seq)}));
   }
+  /** Bounded program-state receipts for one Run; never returns message or operation bodies. */
+  executionRunStates(agentId:string,taskId:string,runId:string){z.uuid().parse(runId);
+    const schema=z.strictObject({id:z.uuid(),type:z.enum(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted']),at:z.iso.datetime({offset:true})});
+    return this.db.prepare("SELECT id,json_extract(body,'$.type') AS type,json_extract(body,'$.occurredAt') AS at FROM events WHERE route=? AND trace_id=? AND json_extract(body,'$.visibility.kind')='task' AND json_extract(body,'$.visibility.agentId')=? AND json_extract(body,'$.visibility.taskId')=? AND json_extract(body,'$.plugin')='core' AND json_extract(body,'$.type') IN ('run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted') ORDER BY seq LIMIT 8")
+      .all(taskScopeKey(agentId,taskId),runId,agentId,taskId).map(row=>schema.parse(row));
+  }
   /** Trusted outbox publishers supply a stable UUID; duplicates never create a second event. */
   appendOnce(input: NewEvent, id: string): EventRecord {
     z.uuid().parse(id);

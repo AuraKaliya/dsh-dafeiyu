@@ -59,3 +59,16 @@ export const MaintenanceAnalysisSchema=z.strictObject({schemaVersion:z.literal(1
     reason:short,supports:z.array(citation).min(1).max(16),counters:z.array(citation).max(16)})).max(8),
 });
 export type MaintenanceAnalysis=z.infer<typeof MaintenanceAnalysisSchema>;
+
+export const MaintenanceSchedulingItemSchema=z.strictObject({id:z.uuid(),scope:ExecutionScopeSchema,taskEpoch:version,runId:z.uuid(),watermark:hash,
+  expiresAt:z.iso.datetime(),state:MaintenanceStateSchema,version,reason:z.string().max(2000),retainedSources:z.number().int().nonnegative(),omittedSources:z.number().int().nonnegative()});
+export type MaintenanceSchedulingItem=z.infer<typeof MaintenanceSchedulingItemSchema>;
+/** Program-only metadata bridge. It conveys no content-reading or execution authority. */
+export interface MemoryMaintenanceSchedulingPort {
+  ready():boolean;
+  pending(after:number,limit:number):{items:MaintenanceSchedulingItem[];next:number|null};
+  inspect(id:string):MaintenanceSchedulingItem|null;
+  coalesce(id:string):MaintenanceSchedulingItem|null;
+  settleMetadata(id:string):boolean;
+  connect():()=>void;
+}

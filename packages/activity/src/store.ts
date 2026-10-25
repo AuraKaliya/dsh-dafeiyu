@@ -106,16 +106,19 @@ export class ActivityStore {
         this.revision(body);return {id:body.id,version:body.version};});});
   }
   private revision(body:ActivityScheduleBody){this.db.prepare('INSERT INTO activity_schedule_revisions VALUES(?,?,?,?)').run(body.id,body.version,JSON.stringify(body),activityHash(body));}
+  snapshot(id:string,version:number){const row=this.db.prepare('SELECT body,body_hash FROM activity_schedule_revisions WHERE id=? AND version=?').get(id,version);if(!row)throw new Error('ACTIVITY_REVISION_UNKNOWN');
+    const body=ActivityScheduleBodySchema.parse(JSON.parse(String(row.body)));if(activityHash(body)!==row.body_hash)throw new Error('ACTIVITY_STATE_CORRUPT');return body;}
   update(id:string,scope:ExecutionScope,raw:unknown,now:number){const input=updateSchema.parse(raw);return this.transaction(()=>{
     const current=this.get(id,scope),time=this.clock(now);return this.request(activityScope(scope),input.requestId,activityHash({kind:'update',id,input}),v=>z.object({id:z.uuid(),version:z.number()}).parse(v),()=>{
       if(current.body.version!==input.expectedVersion)throw new Error('VERSION_CONFLICT');if(current.body.state==='cancelled')throw new Error('ACTIVITY_CANCELLED');
       const {requestId:_request,expectedVersion:_expected,...patch}=input;const changedGoal=input.goal!==undefined&&input.goal!==current.body.goal;
       if(changedGoal&&(input.anchor===undefined||input.anchor===null))throw new Error('ACTIVITY_SOURCE_REQUIRED');
       const body=ActivityScheduleBodySchema.parse({...current.body,...patch,version:current.body.version+1,taskGeneration:current.body.taskGeneration+(changedGoal?1:0),updatedAt:new Date(time).toISOString()});this.validate(body);
+      const nextDue=input.trigger?initialDue(body.trigger):current.nextDue,status=body.state==='active'&&body.trigger.kind!=='condition'&&nextDue===null?'exhausted':body.state;
       this.revision(body);this.db.prepare('UPDATE activity_schedules SET version=?,task_generation=?,status=?,next_due=?,not_before=?,failures=0,error=NULL WHERE id=?')
-        .run(body.version,body.taskGeneration,body.state,input.trigger?initialDue(body.trigger):current.nextDue,time,id);
-      // Already-running work is settled by the service; queued intents cannot survive a changed plan.
-      this.db.prepare("UPDATE activity_occurrences SET state='cancelled',error='SCHEDULE_CHANGED',updated_at=? WHERE schedule_id=? AND state IN ('pending','accepted') AND started_at IS NULL").run(time,id);
+        .run(body.version,body.taskGeneration,status,nextDue,time,id);
+      // Already-running work may settle; queued and paused intents cannot survive a changed plan.
+      this.db.prepare("UPDATE activity_occurrences SET state='cancelled',error='SCHEDULE_CHANGED',updated_at=? WHERE schedule_id=? AND (state='waiting' OR state IN ('pending','accepted') AND started_at IS NULL)").run(time,id);
       this.db.prepare("UPDATE activity_outbox SET acknowledged=1 WHERE id IN(SELECT id FROM activity_occurrences WHERE schedule_id=? AND state='cancelled' AND run_id IS NULL)").run(id);
       return {id,version:body.version};});});}
   bindTask(id:string,generation:number,taskId:string,epoch:number){z.uuid().parse(taskId);z.number().int().positive().parse(epoch);
@@ -123,7 +126,8 @@ export class ActivityStore {
       const old=this.db.prepare('SELECT task_id,epoch FROM activity_tasks WHERE schedule_id=? AND generation=?').get(id,generation);
       if(old){if(old.task_id!==taskId||old.epoch!==epoch)throw new Error('ACTIVITY_TASK_CONFLICT');return;}
       this.db.prepare('INSERT INTO activity_tasks VALUES(?,?,?,?)').run(id,generation,taskId,epoch);});}
-  task(id:string){const row=this.db.prepare('SELECT t.task_id,t.epoch FROM activity_tasks t JOIN activity_schedules s ON s.id=t.schedule_id AND s.task_generation=t.generation WHERE s.id=?').get(id);
+  task(id:string,generation?:number){const row=generation===undefined?this.db.prepare('SELECT t.task_id,t.epoch FROM activity_tasks t JOIN activity_schedules s ON s.id=t.schedule_id AND s.task_generation=t.generation WHERE s.id=?').get(id):
+    this.db.prepare('SELECT task_id,epoch FROM activity_tasks WHERE schedule_id=? AND generation=?').get(id,generation);
     return row?{taskId:String(row.task_id),epoch:Number(row.epoch)}:null;}
   event(raw:ActivityDomainEvent){const event=ActivityDomainEventSchema.parse(raw),hash=activityHash(event);return this.transaction(()=>{
     const old=this.db.prepare('SELECT seq,body_hash FROM activity_domain_events WHERE id=?').get(event.id);if(old){if(old.body_hash!==hash)throw new Error('IDEMPOTENCY_CONFLICT');return Number(old.seq);}
@@ -139,8 +143,7 @@ export class ActivityStore {
     if(this.db.prepare("SELECT 1 FROM activity_occurrences WHERE schedule_id=? AND state IN ('pending','accepted','running') LIMIT 1").get(id))return null;
     if(Number(this.db.prepare("SELECT count(*) AS n FROM activity_occurrences WHERE state IN ('pending','accepted','running')").get()?.n)>=this.config.maxConcurrent)return null;
     if(this.used(time)>=this.config.dailyActiveMs)return null;
-    const last=this.db.prepare("SELECT json_extract(body,'$.createdAt') AS at FROM activity_occurrences ORDER BY rowid DESC LIMIT 1").get();
-    if(last&&time<Date.parse(String(last.at))+this.config.minIntervalMs)return null;
+    if(time<this.lastWake()+this.config.minIntervalMs)return null;
     const allowed=nextAllowed(time,plan.body.timeZone,plan.body.quiet);if(allowed>time){this.db.prepare('UPDATE activity_schedules SET not_before=? WHERE id=?').run(allowed,id);return null;}
     const conditional=this.condition(plan);let due:number|null,next:number|null;
     if(plan.body.trigger.kind==='condition'){if(!conditional)return null;due=time;next=null;}
@@ -158,6 +161,27 @@ export class ActivityStore {
   });}
   occurrence(id:string):StoredOccurrence {const row=this.db.prepare('SELECT * FROM activity_occurrences WHERE id=?').get(PersonaRequestIdSchema.parse(id));if(!row)throw new Error('ACTIVITY_OCCURRENCE_UNKNOWN');
     const body=WakeOccurrenceBodySchema.parse(JSON.parse(String(row.body)));if(activityHash(body)!==row.body_hash)throw new Error('ACTIVITY_STATE_CORRUPT');return {body,state:ActivityOccurrenceStateSchema.parse(row.state),runId:row.run_id===null?null:String(row.run_id),startedAt:row.started_at===null?null:Number(row.started_at),error:row.error===null?null:String(row.error)};}
+  byRun(runId:string):StoredOccurrence|null {const direct=this.db.prepare('SELECT id FROM activity_occurrences WHERE run_id=?').get(runId);
+    const historic=direct?null:this.db.prepare("SELECT occurrence_id FROM activity_run_events WHERE json_extract(body,'$.runId')=? ORDER BY rowid DESC LIMIT 1").get(runId);
+    return direct||historic?this.occurrence(String(direct?.id??historic?.occurrence_id)):null;}
+  lastWake(){const occurrence=this.db.prepare("SELECT json_extract(body,'$.createdAt') AS at FROM activity_occurrences ORDER BY rowid DESC LIMIT 1").get();
+    const resume=this.db.prepare("SELECT max(json_extract(receipt,'$.at')) AS at FROM activity_requests WHERE json_extract(receipt,'$.kind')='resume-intent'").get();return Math.max(occurrence?Date.parse(String(occurrence.at)):-Infinity,resume?.at===null?-Infinity:Number(resume?.at??-Infinity));}
+  maintenancePlan(id:string){const row=this.db.prepare("SELECT s.id FROM activity_schedules s JOIN activity_schedule_revisions r ON r.id=s.id AND r.version=s.version WHERE json_extract(r.body,'$.maintenanceId')=? ORDER BY s.rowid DESC LIMIT 1").get(id);return row?this.get(String(row.id)):null;}
+  pauseIntent(id:string,runId:string,reason:'foreground'|'daily-budget'|'time-budget',expectedVersion:number,now:number){
+    const parse=(value:unknown)=>z.object({kind:z.literal('pause-intent'),requestId:PersonaRequestIdSchema,runId:z.uuid(),reason:z.enum(['foreground','daily-budget','time-budget']),expectedVersion:z.number(),at:z.number()}).parse(value);
+    return this.transaction(()=>{const occurrence=this.occurrence(id);if(occurrence.runId!==runId)throw new Error('ACTIVITY_RECEIPT_CONFLICT');const requestId=activityHash(['pause',id,runId,reason]);
+      return this.request(`pause:${id}`,requestId,activityHash([id,runId,reason]),parse,()=>({kind:'pause-intent' as const,requestId,runId,reason,expectedVersion,at:this.clock(now)}));});}
+  pausedBy(id:string,runId:string){const row=this.db.prepare("SELECT receipt FROM activity_requests WHERE scope_key=? AND json_extract(receipt,'$.runId')=? ORDER BY rowid DESC LIMIT 1").get(`pause:${id}`,runId);
+    return row?z.object({reason:z.enum(['foreground','daily-budget','time-budget']),at:z.number()}).parse(JSON.parse(String(row.receipt))):null;}
+  resumeIntent(id:string,parentRunId:string,checkpointId:string,taskVersion:number,now:number){
+    const parse=(raw:unknown)=>z.object({kind:z.literal('resume-intent'),requestId:PersonaRequestIdSchema,parentRunId:z.uuid(),checkpointId:z.uuid(),taskVersion:z.number(),at:z.number()}).parse(raw);
+    return this.transaction(()=>{const current=this.occurrence(id);if(current.state!=='waiting'||current.runId!==parentRunId)throw new Error('ACTIVITY_RESUME_CONFLICT');
+      const requestId=activityHash(['resume',id,parentRunId]);return this.request(`resume:${id}`,requestId,activityHash([id,parentRunId]),parse,
+        ()=>({kind:'resume-intent' as const,requestId,parentRunId,checkpointId,taskVersion,at:this.clock(now)}));});}
+  attachResume(id:string,parentRunId:string,runId:string,now:number){this.transaction(()=>{
+    const current=this.occurrence(id);if(current.runId===runId)return;if(current.runId!==parentRunId||current.state!=='waiting')throw new Error('ACTIVITY_RESUME_CONFLICT');
+    this.db.prepare("UPDATE activity_occurrences SET run_id=?,state='accepted',started_at=NULL,error=NULL,updated_at=? WHERE id=?").run(runId,this.clock(now),id);
+  });}
   outbox(){return this.db.prepare("SELECT o.id FROM activity_outbox o JOIN activity_occurrences r ON r.id=o.id WHERE o.acknowledged=0 AND r.state='pending' ORDER BY o.rowid LIMIT 32").all().map(row=>this.occurrence(String(row.id)));}
   acknowledge(id:string,runId:string,now:number){z.uuid().parse(runId);this.transaction(()=>{const occurrence=this.occurrence(id);if(occurrence.runId&&occurrence.runId!==runId)throw new Error('ACTIVITY_RECEIPT_CONFLICT');
     this.db.prepare('UPDATE activity_occurrences SET run_id=?,state=?,updated_at=? WHERE id=?').run(runId,occurrence.state==='pending'?'accepted':occurrence.state,this.clock(now),id);
@@ -168,12 +192,17 @@ export class ActivityStore {
   block(id:string,code:string,now:number){if(!/^[A-Z0-9_]{1,100}$/.test(code))throw new Error('INVALID_INPUT');this.transaction(()=>{this.get(id);this.clock(now);this.db.prepare("UPDATE activity_schedules SET status='blocked',error=? WHERE id=?").run(code,id);});}
   runEvent(raw:unknown){const event=runEventSchema.parse(raw),fingerprint=activityHash(event);return this.transaction(()=>{
     const old=this.db.prepare('SELECT body_hash FROM activity_run_events WHERE id=?').get(event.id);if(old){if(old.body_hash!==fingerprint)throw new Error('IDEMPOTENCY_CONFLICT');return;}
-    const occurrence=this.occurrence(event.occurrenceId);if(occurrence.runId&&occurrence.runId!==event.runId)throw new Error('ACTIVITY_RECEIPT_CONFLICT');
+    const occurrence=this.occurrence(event.occurrenceId);
+    if(occurrence.runId&&occurrence.runId!==event.runId){
+      if(this.byRun(event.runId)?.body.id!==occurrence.body.id)throw new Error('ACTIVITY_RECEIPT_CONFLICT');
+      this.db.prepare('INSERT INTO activity_run_events VALUES(?,?,?,?)').run(event.id,event.occurrenceId,JSON.stringify(event),fingerprint);return;
+    }
     const at=Date.parse(event.at),plan=this.get(occurrence.body.scheduleId);
     this.db.prepare('INSERT INTO activity_run_events VALUES(?,?,?,?)').run(event.id,event.occurrenceId,JSON.stringify(event),fingerprint);
     this.db.prepare('UPDATE activity_occurrences SET run_id=? WHERE id=?').run(event.runId,event.occurrenceId);
     this.db.prepare('UPDATE activity_outbox SET acknowledged=1 WHERE id=?').run(event.occurrenceId);
-    if(event.state==='running'){if(occurrence.state==='cancelled')return;this.db.prepare("UPDATE activity_occurrences SET state='running',started_at=coalesce(started_at,?),updated_at=? WHERE id=?").run(at,at,event.occurrenceId);return;}
+    if(occurrence.state==='cancelled')return;
+    if(event.state==='running'){this.db.prepare("UPDATE activity_occurrences SET state='running',started_at=coalesce(started_at,?),updated_at=? WHERE id=?").run(at,at,event.occurrenceId);return;}
     if(['completed','waiting','failed','blocked'].includes(occurrence.state))return;
     let state:ActivityOccurrenceState=event.unknownEffects||event.state==='interrupted'?'blocked':event.state;
     let code:string|null=event.unknownEffects?'OPERATION_UNCERTAIN':event.state==='interrupted'?'PROCESS_INTERRUPTED':null;
@@ -186,6 +215,7 @@ export class ActivityStore {
     else if(state==='completed')this.db.prepare('UPDATE activity_schedules SET failures=0,error=NULL WHERE id=?').run(plan.body.id);
   });}
   used(now:number){return Number(this.db.prepare('SELECT coalesce(sum(milliseconds),0) AS n FROM activity_usage WHERE day=?').get(localTime(now,this.config.timeZone).day)?.n);}
+  occurrenceUsed(id:string){return Number(this.db.prepare("SELECT coalesce(sum(u.milliseconds),0) AS n FROM activity_usage u WHERE u.run_id IN (SELECT DISTINCT json_extract(body,'$.runId') FROM activity_run_events WHERE occurrence_id=?)").get(id)?.n);}
   active(){return this.db.prepare("SELECT id FROM activity_occurrences WHERE state IN ('accepted','running','waiting') ORDER BY rowid LIMIT ?").all(this.config.maxPlans).map(row=>this.occurrence(String(row.id)));}
   counts(){return {plans:Number(this.db.prepare('SELECT count(*) AS n FROM activity_schedules').get()?.n),
     states:Object.fromEntries(this.db.prepare('SELECT status,count(*) AS n FROM activity_schedules GROUP BY status').all().map(row=>[String(row.status),Number(row.n)])),

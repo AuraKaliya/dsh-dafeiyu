@@ -478,6 +478,7 @@ export class ExecutionCoordinator {
   }}
   async whenIdle(){while(this.queued.size)await Promise.all([...this.queued.values()]);if(this.failure)throw new Error(this.failure);}
   get health(){return {active:this.active.size,queued:this.queued.size,error:this.failure};}
+  get foregroundPending(){return this.d.store.list(['accepted','queued']).filter(run=>run.definition.scope.kind==='task'&&['explicit-task','mixed'].includes(this.motivation(run).kind)).length;}
 }
 function safeCode(error:unknown):string{return error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'EXECUTION_FAILED';}
 function freezeOrigin(raw:RunOrigin):RunOrigin{const origin=RunOriginSchema.parse(raw);if(origin.kind==='message')Object.freeze(origin.conversation);return Object.freeze(origin);}

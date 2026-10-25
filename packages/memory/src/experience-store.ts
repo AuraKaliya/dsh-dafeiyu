@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { ExperienceRevisionSchema,ExperienceReviewSchema,ExperienceRelationSchema,MaintenanceRequestInputSchema,
-  MaintenanceSnapshotSchema,MaintenanceStateSchema,MaintenanceLifecycleSchema,PersonaSourceRefSchema,redactJson } from '@dafeiyu/contracts';
+  MaintenanceSnapshotSchema,MaintenanceStateSchema,MaintenanceLifecycleSchema,MaintenanceSchedulingItemSchema,PersonaSourceRefSchema,redactJson } from '@dafeiyu/contracts';
 import type { PersonaAccess,PersonaSourceRef,ExperienceRevision,MaintenanceSnapshot,MaintenanceLifecycle,MaintenanceState } from '@dafeiyu/contracts';
 import type { PersonaResolver } from './persona-store.js';
 import { personaDigest,personaScope,uniqueSources,sourceKey } from './persona-digest.js';
@@ -182,4 +182,33 @@ export class ExperienceStore {
   relations(access:PersonaAccess,id:string){const row=this.snapshot(access,id);this.validate(access,row.input,row.state!=='completed');
     return this.db.prepare('SELECT body FROM experience_relations WHERE scope_key=? AND maintenance_id=? ORDER BY rowid LIMIT 32').all(personaScope(access.view.scope),id).map(r=>z.json().parse(JSON.parse(String(r.body))));}
   counts(){const rows=this.db.prepare('SELECT state,count(*) AS n FROM maintenance_requests GROUP BY state').all();return Object.fromEntries(rows.map(r=>[String(r.state),Number(r.n)]));}
+  schedulingItem(id:string){const row=this.db.prepare('SELECT body,state,version FROM maintenance_requests WHERE id=?').get(z.uuid().parse(id));if(!row)return null;
+    const body=MaintenanceSnapshotSchema.parse(JSON.parse(String(row.body)));return MaintenanceSchedulingItemSchema.parse({id:body.id,scope:body.scope,taskEpoch:body.taskEpoch,runId:body.runId,
+      watermark:body.watermark,expiresAt:body.expiresAt,state:row.state,version:row.version,reason:body.event?.type??'explicit-request',retainedSources:body.sources.length,omittedSources:body.omittedSources??0});}
+  settleMetadata(id:string){return this.transaction(()=>{
+    const row=this.db.prepare('SELECT body,state FROM maintenance_requests WHERE id=?').get(id);if(!row)return false;const input=MaintenanceSnapshotSchema.parse(JSON.parse(String(row.body)));
+    if(input.sources.length||input.omittedSources||!input.event||!['ready','waiting-scheduler'].includes(String(row.state)))return false;
+    const result={experienceIds:[],experienceBasis:[],persona:[],summaryRef:null,dependencies:[],model:null,policy:'experience-e-v1',metadataOnly:true};
+    this.db.prepare("UPDATE maintenance_requests SET state='completed',version=version+1,result=?,updated_at=? WHERE id=?").run(JSON.stringify(result),new Date().toISOString(),id);
+    this.db.prepare('INSERT INTO maintenance_watermarks VALUES(?,?,?,?)').run(input.scope.agentId,personaScope(input.scope),id,input.watermark);
+    const eventId=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(eventId,JSON.stringify({id:eventId,type:'memory.maintenance.metadata-settled',scope:input.scope,runId:input.runId,origin:input.event.origin,
+      operationId:input.runId,causedBy:input.event.id,producer:'memory-maintenance',at:new Date().toISOString(),data:{id,inference:false}}));return true;
+  });}
+  pendingScheduling(agentId:string,after:number,limit:number){z.number().int().nonnegative().parse(after);z.number().int().min(1).max(100).parse(limit);
+    const rows=this.db.prepare("SELECT rowid,id FROM maintenance_requests WHERE agent_id=? AND rowid>? AND state IN ('waiting-scheduler','ready') AND json_extract(body,'$.motivation.kind')<>'maintenance' ORDER BY rowid LIMIT ?")
+      .all(agentId,after,limit);return {items:rows.flatMap(row=>{const item=this.schedulingItem(String(row.id));return item?[item]:[];}),next:rows.length===limit?Number(rows.at(-1)!.rowid):null};}
+  coalesceScheduling(id:string){return this.transaction(()=>{
+    const row=this.db.prepare('SELECT body,state FROM maintenance_requests WHERE id=?').get(z.uuid().parse(id));if(!row)return null;
+    const input=MaintenanceSnapshotSchema.parse(JSON.parse(String(row.body)));
+    if(!['waiting-scheduler','ready'].includes(String(row.state))||input.event?.type!=='evidence.changed')return this.schedulingItem(id);
+    const candidates=this.db.prepare("SELECT body FROM maintenance_requests WHERE agent_id=? AND scope_key=? AND json_extract(body,'$.runId')=? AND json_extract(body,'$.event.type') IN ('run.completed','run.waiting','run.failed','run.cancelled','run.interrupted') AND state IN ('waiting-scheduler','ready','running','completed') ORDER BY rowid DESC LIMIT 8")
+      .all(input.scope.agentId,personaScope(input.scope),input.runId);
+    for(const candidate of candidates){const target=MaintenanceSnapshotSchema.parse(JSON.parse(String(candidate.body)));
+      if(target.taskEpoch!==input.taskEpoch||target.goal!==input.goal||input.sources.some(ref=>!target.sources.some(other=>sourceKey(ref)===sourceKey(other))))continue;
+      this.db.prepare("UPDATE maintenance_requests SET state='cancelled',version=version+1,error='COALESCED_REQUEST',result=?,updated_at=? WHERE id=?")
+        .run(JSON.stringify({coalescedInto:target.id}),new Date().toISOString(),id);
+      const eventId=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(eventId,JSON.stringify({id:eventId,type:'memory.maintenance.coalesced',scope:input.scope,runId:input.runId,origin:input.event.origin,
+        operationId:input.runId,causedBy:input.event.id,producer:'memory-maintenance',at:new Date().toISOString(),data:{id,coalescedInto:target.id}}));return this.schedulingItem(target.id);
+    }return this.schedulingItem(id);
+  });}
 }

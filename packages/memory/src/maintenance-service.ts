@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Context } from '@deepseek-ai/cordis';
 import { MaintenanceAnalysisSchema,MaintenanceRequestInputSchema,ExperienceReviewSchema,PersonaSourceRefSchema,PersonaKindSchema,PersonaRequestIdSchema,ExperienceBasisSchema } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3,ExecutionContextV3,PersonaAccess,PersonaSourceRef,MaintenanceAnalysis } from '@dafeiyu/contracts';
+import type { ActionCapabilityV3,ExecutionContextV3,PersonaAccess,PersonaSourceRef,MaintenanceAnalysis,MemoryMaintenanceSchedulingPort } from '@dafeiyu/contracts';
 import { AnalysisRuntime } from './analysis-runtime.js';
 import { AnalysisError } from './analysis-types.js';
 import type { MemoryStore } from './store.js';
@@ -29,11 +29,12 @@ export class MaintenanceService {
   private readonly pending=new Set<Promise<unknown>>();
   private readonly active=new Set<string>();
   private closed=false;
+  private schedulerConnected=false;
   private finalCounts:Record<string,number>={};
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   readonly config:z.output<typeof maintenanceConfigSchema>;
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly persona:PersonaService,directory:string,
-    config:z.input<typeof maintenanceConfigSchema>,agentId:string,private readonly ready:()=>boolean){
+    config:z.input<typeof maintenanceConfigSchema>,private readonly agentId:string,private readonly ready:()=>boolean){
     this.config=maintenanceConfigSchema.parse(config);this.runtime=new AnalysisRuntime(ctx,join(directory,'maintenance-sessions'),this.config.maxOutputBytes);
     this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'memory-maintenance',version:MEMORY_VERSION,agentId,
       requires:['memory.execution.v1','persona.stage-state.v1'],provides:['memory.maintenance.v1'],lifecycleReady:ready,actions:this.actions()});
@@ -131,9 +132,15 @@ export class MaintenanceService {
     ];
   }
   recover(){this.persona.experiences.recover();}
+  schedulingPort():MemoryMaintenanceSchedulingPort {return Object.freeze({ready:()=>this.ready()&&!this.closed,
+    pending:(after:number,limit:number)=>this.persona.experiences.pendingScheduling(this.agentId,after,limit),
+    inspect:(id:string)=>{const item=this.persona.experiences.schedulingItem(id);return item?.scope.agentId===this.agentId?item:null;},
+    coalesce:(id:string)=>{try{return this.persona.experiences.schedulingItem(id)?.scope.agentId===this.agentId?this.persona.experiences.coalesceScheduling(id):null;}finally{this.persona.flush();}},
+    settleMetadata:(id:string)=>{try{return this.persona.experiences.schedulingItem(id)?.scope.agentId===this.agentId&&this.persona.experiences.settleMetadata(id);}finally{this.persona.flush();}},
+    connect:()=>{if(this.schedulerConnected)throw new Error('DUPLICATE_PROVIDER');this.schedulerConnected=true;return ()=>{this.schedulerConnected=false;};}});}
   cancel(){this.controller.abort();}
   async whenIdle(){await Promise.allSettled([...this.pending]);}
   get health(){return {state:this.closed?'closed' as const:this.ready()&&!this.controller.signal.aborted?'ready' as const:'paused' as const,active:this.active.size,
-    requests:this.closed?this.finalCounts:this.persona.experiences.counts(),scheduler:'not-configured' as const};}
+    requests:this.closed?this.finalCounts:this.persona.experiences.counts(),scheduler:this.schedulerConnected?'connected' as const:'not-configured' as const};}
   async close(){this.cancel();this.handle.dispose();await this.whenIdle();await this.runtime.close();this.finalCounts=this.persona.experiences.counts();this.closed=true;}
 }

@@ -1,0 +1,14 @@
+{
+  "step":"activity-4C","date":"2026-10-25","baseline":"8c4ae02",
+  "checks":[
+    {"runId":"557174e9-6a13-4261-b149-9e7cd78d1238","passed":19,"failed":0},
+    {"runId":"31fab81b-18a9-43d5-97fd-90d5d42879ce","passed":4,"failed":0},
+    {"runId":"8e4d33c6-7031-4edd-9141-d16f657e7d81","passed":7,"failed":0},
+    {"runId":"e07342e8-1b92-437e-83a3-78956c76c207","tests":null,"passed":false,"correction":"Remove unreachable repeated cancelled-state branch"},
+    {"runId":"79efb050-5fc8-4ba8-adba-4352c32d7db5","passed":26,"failed":0},
+    {"runId":"bb5408f0-91a6-4981-bb09-b8b7d2dc1d9c","passed":27,"failed":0}
+  ],
+  "clock":"injected UTC and monotonic clocks for scheduling tests",
+  "execution":"real local DSH and SQLite with scripted model and fictional evidence",
+  "hostIntegrated":false,"fullRegression":false,"realModel":false,"realPlatform":false,"serverConnected":false,"cleanupBlocked":false
+}

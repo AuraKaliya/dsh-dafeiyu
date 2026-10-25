@@ -107,3 +107,17 @@ test('creating another plan cannot bypass the global minimum wake interval',asyn
     complete(f.store,occurrence,base,base+1000);assert.equal(f.store.issue(second.id,base+1000),null);assert.ok(f.store.issue(second.id,base+60000));
   }finally{f.close();}
 });
+
+test('failed periodic runs back off and replacement of paused work cannot charge its elapsed time twice',async()=>{
+  const f=await fixture();try{const plan=f.create(),occurrence=f.store.issue(plan.id,base)!,runId=randomUUID();f.store.acknowledge(occurrence.id,runId,base);
+    f.store.runEvent({id:randomUUID(),occurrenceId:occurrence.id,runId,state:'running',at:iso(base),unknownEffects:false});
+    f.store.runEvent({id:randomUUID(),occurrenceId:occurrence.id,runId,state:'failed',at:iso(base+1000),unknownEffects:false});
+    assert.equal(f.store.get(plan.id).failures,1);assert.equal(f.store.issue(plan.id,base+60000),null);
+    const next=f.store.issue(plan.id,base+61000)!;assert.ok(next);const resumedId=randomUUID();f.store.acknowledge(next.id,resumedId,base+61000);
+    f.store.runEvent({id:randomUUID(),occurrenceId:next.id,runId:resumedId,state:'running',at:iso(base+61000),unknownEffects:false});
+    f.store.runEvent({id:randomUUID(),occurrenceId:next.id,runId:resumedId,state:'waiting',at:iso(base+62000),unknownEffects:false});
+    f.store.update(plan.id,f.scope,{requestId:'replace-paused',expectedVersion:1,trigger:{kind:'once',at:iso(base+120000)}},base+62000);
+    f.store.runEvent({id:randomUUID(),occurrenceId:next.id,runId:resumedId,state:'cancelled',at:iso(base+63000),unknownEffects:false});
+    assert.equal(f.store.used(base),2000);assert.equal(f.store.occurrence(next.id).state,'cancelled');assert.equal(f.store.get(plan.id).status,'active');
+  }finally{f.close();}
+});
