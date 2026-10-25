@@ -14,6 +14,8 @@ export const MediaSourceDescriptionSchema=z.strictObject({ref:MediaProviderRefSc
   bytesHint:z.number().int().nonnegative().safe().nullable(),durationMsHint:z.number().int().nonnegative().safe().nullable(),
   rangeReadable:z.boolean(),publicContent:z.boolean().default(false)}).refine(v=>v.ref.provider===v.origin.provider,'Media source provider mismatch');
 export type MediaSourceDescription=z.infer<typeof MediaSourceDescriptionSchema>;
+export const MediaAttachmentSchema=z.strictObject({schemaVersion:z.literal(1),source:MediaProviderRefSchema,kind:MediaKindSchema,name:z.string().max(200).nullable()});
+export type MediaAttachment=z.infer<typeof MediaAttachmentSchema>;
 export const MediaAssetRefSchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),version,kind:MediaKindSchema,sha256:hash,bytes:z.number().int().nonnegative().safe(),mime:z.string().min(1).max(120)});
 export type MediaAssetRef=z.infer<typeof MediaAssetRefSchema>;
 export const MediaIntervalSchema=z.strictObject({startMs:z.number().int().nonnegative(),endMs:z.number().int().positive()}).refine(v=>v.endMs>v.startMs);

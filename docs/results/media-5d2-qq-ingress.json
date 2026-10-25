@@ -1,0 +1,20 @@
+{
+  "stage": "media-5D-2",
+  "date": "2026-10-25",
+  "baseline": "4275fa5",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "424acf6f-1821-4511-820b-a6042defa0cb", "passed": 25, "failed": 0, "scope": ["qq-media-ingress", "provenance"]},
+    {"runId": "7ee1208d-09d3-492a-9f33-95d67092e603", "passed": 35, "failed": 0, "scope": ["qq-media-ingress", "qq-capabilities", "qq-cache", "qq-task-acceptance"]}
+  ],
+  "countsOverlap": true,
+  "correctedFailure": "Media tool results lacked precise conversation source-policy integration; source receipts and verified text hashes now replace the legacy fallback for these tools",
+  "actualLocalExecution": ["loopback OneBot HTTP/WebSocket", "DSH", "SQLite", "FFmpeg", "bounded document parser", "selective memory"],
+  "model": "scripted vision fixture",
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false,
+  "remaining": ["direct owner voice task binding", "media delivery", "Host integration", "real platform evaluation"]
+}

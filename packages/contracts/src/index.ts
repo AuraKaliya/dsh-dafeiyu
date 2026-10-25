@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ConversationSchema } from './conversation.js';
+import { MediaAttachmentSchema } from './media.js';
 import type { Conversation } from './conversation.js';
 export * from './conversation.js';
 export * from './redaction.js';
@@ -45,6 +46,7 @@ export const MessageSchema = z.strictObject({
   sender: z.strictObject({ id, displayName: z.string().max(200) }),
   text: z.string().min(1).max(32_000),
   mainText: z.string().max(32_000).optional(),
+  media:z.array(MediaAttachmentSchema).max(8).optional(),
   replyTo: id.optional(),
 });
 export type InboundMessage = z.infer<typeof MessageSchema>;

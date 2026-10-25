@@ -65,7 +65,15 @@ export class MemorySourcePolicy implements SourcePolicy {
         if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,ref,digest(JSON.stringify(view.page))))return this.missing(scope);
         return [{...scoped(scope),kind:'capability',ref}];
       }
-      if(name==='qq_groups'||name==='qq_observe_select')return [];
+      if(name==='dafeiyu_media_read'||name==='qq_media_list'){
+        const outcome=ActionOutcomeSchema.parse(data);if(outcome.status!=='succeeded'||outcome.data===null)return [];
+        const value=z.record(z.string(),z.json()).parse(outcome.data);if(value.observation===undefined)return [];
+        const observation=z.object({source:PersonaSourceRefSchema}).parse(value.observation),{observation:_observation,...view}=value;
+        const actual=name==='dafeiyu_media_read'?z.string().parse(view.text):JSON.stringify(view);
+        if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,observation.source,digest(actual)))return this.missing(scope);
+        return [{...scoped(scope),kind:'capability',ref:observation.source}];
+      }
+      if(['qq_groups','qq_observe_select','dafeiyu_media_select','dafeiyu_media_acquire','dafeiyu_media_inspect'].includes(name))return [];
       if(name==='dafeiyu_source_open'||name.includes('_deleted_')||name==='dafeiyu_memory_analysis_open'
         ||name==='dafeiyu_tool_feedback_open'||/deleted_lookup_only|historical_evidence_only/.test(text))return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];
       const feedback=z.object({dafeiyuFeedback:FeedbackMetaSchema}).safeParse(meta);

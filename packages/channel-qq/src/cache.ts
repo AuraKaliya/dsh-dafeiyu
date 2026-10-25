@@ -1,16 +1,18 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { redactContent } from '@dafeiyu/contracts';
+import { redactContent,MediaAttachmentSchema } from '@dafeiyu/contracts';
+import type { MediaAttachment } from '@dafeiyu/contracts';
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const key = z.string().min(1).max(120), routeSchema = z.string().min(1).max(2000);
-const metadataSchema = z.strictObject({ occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string().max(80)).max(16), truncated: z.boolean().nullable(), known: z.boolean() });
+const metadataSchema = z.strictObject({ occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string().max(80)).max(16), truncated: z.boolean().nullable(), known: z.boolean(),media:z.array(MediaAttachmentSchema).max(8).optional() });
 const refSchema = z.strictObject({ id: z.string().min(1).max(80), version: z.number().int().positive(), hash: z.string().length(64) });
 export const QqCacheProofSchema = z.strictObject({ route: routeSchema, parts: z.array(refSchema).max(20), hash: z.string().length(64) });
 export type QqCacheProof = z.infer<typeof QqCacheProofSchema>;
 const itemSchema = z.strictObject({ id: z.string(), sender: z.string(), receivedSequence: z.number().int().positive(), text: z.string(),
   occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string()), legacyMetadata: z.boolean(), cacheTextTruncated: z.boolean().nullable(),
+  media:z.array(MediaAttachmentSchema).max(8).optional(),
   range: z.strictObject({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), total: z.number().int().nonnegative() }) });
 const pageSchema = z.strictObject({ order: z.literal('received-newest-first'), watermark: z.number().int().nonnegative(), oldestCachedSequence: z.number().int().nonnegative(),
   messages: z.array(itemSchema).max(20), limitations: z.array(z.string()) });
@@ -43,12 +45,12 @@ export class QqCache {
     this.db.prepare('INSERT INTO qq_message_meta VALUES(?,?,1,?,0,?)').run(route, row.id, hash, JSON.stringify(body));
     return { ...body, version: 1, hash, deleted: false };
   }
-  remember(route: string, id: string, sender: string, raw: string, metadata?: { occurredAt: string|null; unsupported: readonly string[] }): boolean {
+  remember(route: string, id: string, sender: string, raw: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[] }): boolean {
     routeSchema.parse(route); z.string().min(1).max(80).parse(id);
     const sanitized = redactContent(raw).value;
     let text = sanitized.slice(0, 32000);
     if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
-    const body = metadataSchema.parse({ occurredAt: metadata?.occurredAt ?? null, unsupported: [...new Set(metadata?.unsupported ?? [])].slice(0, 16).map(kind => redactContent(kind).value.slice(0, 80)), truncated: sanitized.length > text.length, known: metadata !== undefined });
+    const body = metadataSchema.parse({ occurredAt: metadata?.occurredAt ?? null, unsupported: [...new Set(metadata?.unsupported ?? [])].slice(0, 16).map(kind => redactContent(kind).value.slice(0, 80)), truncated: sanitized.length > text.length, known: metadata !== undefined,...(metadata?.media?{media:metadata.media}:{}) });
     const hash = digest({ sender, text, ...body });
     return this.atomic(() => {
       const old = this.db.prepare('SELECT version,hash,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
@@ -117,7 +119,7 @@ export class QqCache {
         const points = Array.from(redactContent(row.text).value), start = row.seq === query.sequence ? query.offset : 0;
         if (start > points.length) throw new Error('CURSOR_STALE');
         const item = { id: row.id, sender: row.sender, receivedSequence: row.seq, text: '', occurredAt: meta.occurredAt, unsupported: meta.unsupported,
-          legacyMetadata: !meta.known, cacheTextTruncated: meta.truncated, range: { start, end: start, total: points.length } };
+          legacyMetadata: !meta.known, cacheTextTruncated: meta.truncated,...(meta.media?{media:meta.media}:{}), range: { start, end: start, total: points.length } };
         let low = start, high = points.length;
         while (low < high) { const end = Math.ceil((low + high) / 2), candidate = { ...item, text: points.slice(start, end).join(''), range: { ...item.range, end } };
           if (JSON.stringify({ ...page, messages: [...page.messages, candidate] }).length <= 8000) low = end; else high = end - 1; }
