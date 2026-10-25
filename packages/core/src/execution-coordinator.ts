@@ -21,6 +21,8 @@ import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskSourceSchema
 import type { MessageTaskBinding,MessageTaskSource,NativeExpressionAccess,PersonaSourceRef } from '@dafeiyu/contracts';
 import { ExecutionEvidence } from './execution-evidence.js';
 import type { NativeContext } from './execution-evidence.js';
+import { MediaReplyAuthoritySchema } from '@dafeiyu/contracts';
+import { mediaAuthorityBodySchema } from './media-authority.js';
 
 export const ExecutionOptionsSchema=z.strictObject({profileId:ProducerSchema,createStore:z.boolean().default(false),
   policies:HostConfigSchema.shape.authorityPolicies,maxPendingRuns:z.number().int().min(1).max(1000).default(100),
@@ -261,6 +263,26 @@ export class ExecutionCoordinator {
       action:{owner:action.owner,id:action.id,version:action.version,pluginVersion:action.pluginVersion,hash:runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})},foundationHash:run.snapshot?.personaVersion??null,
       dependencies:access.historyDependencies??[],sources:[...new Map([...access.admittedSources,...access.inputs.flatMap(i=>i.sourceRef?[i.sourceRef]:[])].map(ref=>[runtimeHash(ref),ref])).values()]});
     access.guard();this.d.store.bindInput(run.id,`activity-anchor:${body.id}`,body);return ActivityAnchorSchema.strip().parse({...body,hash:runtimeHash(body)});
+  }
+  captureMediaReply(context:ExecutionContextV3,pluginId:string,payloadHash:string,access:PersonaAccess){this.authority(context,pluginId,'local-write');
+    if(!access.historyTracked||access.operationId!==context.operationId||access.view.runId!==context.runId||access.producer!==pluginId)throw new Error('SCOPE_DENIED');
+    const run=this.d.store.get(context.runId),request=this.d.store.request(run.requestKey),action=this.grants.get(context)!.action;
+    const item=run.definition.origin.kind==='message'?this.d.journal.get(run.definition.origin.inboundId):null,producer=item?.extensionId??request.producer;
+    const body=mediaAuthorityBodySchema.parse({schemaVersion:1,id:randomUUID(),kind:'media-reply-authority',runId:run.id,operationId:context.operationId,scope:run.definition.scope,intentVersion:run.definition.intentVersion,payloadHash,
+      inboundHash:item?runtimeHash(item.message):null,foundationHash:run.snapshot?.personaVersion,policy:{producer,id:run.definition.policyId,hash:runtimeHash(this.policy(producer,run.definition.policyId))},
+      action:{owner:action.owner,id:action.id,version:action.version,pluginVersion:action.pluginVersion,hash:runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})},
+      dependencies:access.historyDependencies??[],sources:[...access.admittedSources,...access.inputs.flatMap(i=>i.sourceRef?[i.sourceRef]:[])]});
+    access.guard();this.d.store.bindInput(run.id,'media-reply-authority:'+body.id,body);return MediaReplyAuthoritySchema.strip().parse({...body,hash:runtimeHash(body)});
+  }
+  mediaReplyFacts(raw:unknown){const authority=MediaReplyAuthoritySchema.parse(raw),run=this.d.store.get(authority.runId),body=mediaAuthorityBodySchema.parse(this.d.store.readInput(run.id,'media-reply-authority:'+authority.id));
+    const guard=()=>{if(runtimeHash(body)!==authority.hash||runtimeHash(MediaReplyAuthoritySchema.strip().parse({...body,hash:authority.hash}))!==runtimeHash(authority)||runtimeHash(body.scope)!==runtimeHash(run.definition.scope)||body.intentVersion!==run.definition.intentVersion)throw new Error('SCOPE_DENIED');
+      if(this.d.store.get(run.id).state!=='completed')throw new Error('MEDIA_REPLY_RUN_NOT_COMPLETED');const operation=this.d.store.operation(body.operationId);
+      if(operation.runId!==run.id||operation.plugin!==body.action.owner||operation.state!=='finished'||operation.outcome?.status!=='succeeded'||operation.outcome.effects!=='confirmed')throw new Error('MEDIA_REPLY_OPERATION_UNCONFIRMED');
+      if(runtimeHash(this.policy(body.policy.producer,body.policy.id))!==body.policy.hash||this.d.persona().version!==body.foundationHash)throw new Error('MEDIA_REPLY_AUTHORITY_CHANGED');
+      if(!this.d.registry.actions().some(action=>action.owner===body.action.owner&&action.id===body.action.id&&action.version===body.action.version&&action.pluginVersion===body.action.pluginVersion&&action.active()&&runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})===body.action.hash))throw new Error('MEDIA_REPLY_AUTHORITY_CHANGED');
+      if(run.definition.origin.kind==='message'){const item=this.d.journal.get(run.definition.origin.inboundId);if(runtimeHash(item.message)!==body.inboundHash||this.d.journal.messageRecalled({agentId:this.d.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');}
+      else{const task=this.repository().readState(this.d.agentId,run.definition.taskId!);if(task.epoch!==body.intentVersion||task.status!=='active')throw new Error('SOURCE_STALE');this.validateMessageAncestors(run);}
+    };guard();const access=this.d.personas.access(run,this.inputsFor(run),this.d.signal,guard);return {authority,body,run,execution:access,guard};
   }
   maintenanceAnchor(runId:string,taskId:string,epoch:number):ActivityAnchor {
     const run=this.d.store.get(z.uuid().parse(runId));if(run.definition.scope.kind!=='task'||run.definition.taskId!==taskId||run.definition.intentVersion!==epoch||!['completed','waiting','failed','cancelled','interrupted'].includes(run.state))throw new Error('SCOPE_DENIED');

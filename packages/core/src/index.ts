@@ -19,10 +19,10 @@ import { MemoryObservationSchema,ObservationSourceReadSchema,ObservationSourceCh
 import type { Conversation,ObservationAuthority } from '@dafeiyu/contracts';
 import { TaskCoordinator,bindTaskProvider,bindTaskMemoryProvider,bindExpressionProvider } from './task-coordinator.js';
 import { TaskDelivery } from './task-delivery.js';
-import { prepareReplySources } from './reply-sources.js';
+import { prepareReplySources,prepareCapturedReplySources } from './reply-sources.js';
 import type { MessageTaskBinding } from '@dafeiyu/contracts';
 import type { NativeExpressionPort } from '@dafeiyu/contracts';
-import type { MediaPort,MediaAccess,MediaSourceProvider,MediaAssetRef } from '@dafeiyu/contracts';
+import type { MediaPort,MediaAccess,MediaSourceProvider,MediaAssetRef,MediaReplyAccess } from '@dafeiyu/contracts';
 import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema } from '@dafeiyu/contracts';
 import { NativeTaskDelivery } from './native-task-delivery.js';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
@@ -30,7 +30,7 @@ import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
 import { CapabilityRegistryV3 } from './registry-v3.js';
 import { ExecutionCoordinator,ExecutionOptionsSchema } from './execution-coordinator.js';
 import type { ExecutionOptions } from './execution-coordinator.js';
-import { RuntimeStore } from './runtime-store.js';
+import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import { RunScheduler } from './run-scheduler.js';
 import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
@@ -71,6 +71,7 @@ export class DafeiyuService extends Service {
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
   private nativeExpressionPort:NativeExpressionPort|undefined;
   private mediaPort:MediaPort|undefined;
+  private readonly mediaReplyAccesses=new WeakSet<MediaReplyAccess>();
   bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({...(port.signal?{signal:port.signal}:{}),ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
   bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port),...(port.voice?{voice:port.voice.bind(port)}:{}),...(port.voiceCurrent?{voiceCurrent:port.voiceCurrent.bind(port)}:{})});
     this.mediaPort=bound;return ()=>{if(this.mediaPort===bound)this.mediaPort=undefined;};}
@@ -85,6 +86,24 @@ export class DafeiyuService extends Service {
   readMedia(context:ExecutionContextV3,owner:string,input:unknown){this.executionAuthority(context,owner);if(!this.mediaPort?.ready())throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.read(context,owner,MediaReadSchema.parse(input));}
   mediaVoiceEvidence(context:ExecutionContextV3,owner:string,exposureId:string){this.executionAuthority(context,owner);if(!this.mediaPort?.ready()||!this.mediaPort.voice)throw new Error('MEDIA_VOICE_NOT_CONFIGURED');return this.mediaPort.voice(context,owner,z.uuid().parse(exposureId));}
   mediaVoiceCurrent(evidence:import('@dafeiyu/contracts').MediaVoiceEvidence){return this.mediaPort?.ready()===true&&this.mediaPort.voiceCurrent?.(evidence)===true;}
+  captureMediaReplyAuthority(context:ExecutionContextV3,owner:string,payloadHash:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.captureMediaReply(context,owner,payloadHash,this.personaAccess(context,owner,'local-write'));}
+  async prepareMediaReplyAccess(authority:unknown,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');signal=AbortSignal.any([signal,this.controller.signal]);const facts=this.executions.mediaReplyFacts(authority),run=facts.run;
+    if(run.definition.origin.kind!=='message'||reply.taskResult)throw new Error('MEDIA_NATIVE_DELIVERY_NOT_CONFIGURED');
+    const item=this.journal.get(run.definition.origin.inboundId),source=this.extensions.get(item.extensionId);
+    if(!run.result||reply.id!==item.id+':reply'||reply.sourceMessageId!==item.message.id||runtimeHash(reply.conversation)!==runtimeHash(item.message.conversation)||createHash('sha256').update(reply.text).digest('hex')!==run.result.textHash)throw new Error('DELIVERY_BINDING_CONFLICT');
+    const completed=this.journal.events(item.route).findLast(event=>event.traceId===item.id&&event.type==='turn.completed');let captured:Awaited<ReturnType<typeof prepareCapturedReplySources>>|undefined,final:Awaited<ReturnType<typeof prepareReplySources>>|undefined,allocated:MediaReplyAccess|undefined;
+    try{captured=await prepareCapturedReplySources(this.config.agentId,item,facts.body.dependencies,this.contexts,()=>this.compactionBinding(),signal);
+      final=await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal);
+      const expiresAt=new Date(Date.parse(run.updatedAt)+900000).toISOString(),target=Object.freeze({...item.message.conversation}),text=reply.text;
+      let access:MediaReplyAccess,released=false;const release=()=>{if(released)return;released=true;signal.removeEventListener('abort',release);this.mediaReplyAccesses.delete(access);captured!.release();final!.release();};
+      const guard=()=>{signal.throwIfAborted();this.controller.signal.throwIfAborted();if(!this.mediaReplyAccesses.has(access)||!source?.active||this.fatal||Date.parse(expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');
+        facts.guard();this.validateRunPersona(run);captured!.guard();final!.guard();};
+      access=Object.freeze({execution:Object.freeze({...facts.execution,guard}),authority:facts.authority,payloadHash:facts.body.payloadHash,replyId:reply.id,text,target,sourceMessageId:item.message.id,inboundId:item.id,anchor:Object.freeze({kind:'reply' as const,inboundId:item.id}),expiresAt,guard,
+        release});allocated=access;
+      this.mediaReplyAccesses.add(access);signal.addEventListener('abort',release,{once:true});if(signal.aborted)release();guard();return access;
+    }catch(error){if(allocated)allocated.release();else{captured?.release();final?.release();}throw error;}
+  }
+  validateMediaReplyAccess(access:MediaReplyAccess){if(!this.mediaReplyAccesses.has(access))throw new Error('SCOPE_DENIED');access.guard();}
   async prepareMessageTaskExpression(runId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const port=this.nativeExpressionPort,access=await this.executions.nativeResultAccess(runId);if(port!==this.nativeExpressionPort)throw new Error('DEPENDENCY_UNAVAILABLE');return port.prepare(access);}
   async openMessageTaskExpression(runId:string,packetId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.open(await this.executions.nativeResultAccess(runId),packetId);}
   async withdrawMessageTaskExpression(runId:string,packetId:string,version:number){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.withdraw(await this.executions.nativeResultAccess(runId),packetId,version);}

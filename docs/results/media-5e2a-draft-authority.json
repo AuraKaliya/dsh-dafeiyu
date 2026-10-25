@@ -1,0 +1,18 @@
+{
+  "stage": "media-5E-2a",
+  "date": "2026-10-25",
+  "baseline": "1cc724d",
+  "result": "targeted-checks-passed",
+  "mediaSchema": 2,
+  "checks": [
+    {"runId": "d05afa9c-f706-4691-adbc-d367a5006e3e", "passed": 18, "failed": 0, "scope": ["media-store", "qq-delivery"]},
+    {"runId": "2e53038b-1015-4877-a051-94bd96a4b9a0", "passed": 12, "failed": 0, "scope": ["media-reply-store", "media-reply-authority", "media-store"]}
+  ],
+  "countsOverlap": true,
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false,
+  "remaining": ["draft actions and scoped byte export", "native target material", "QQ media transport", "TTS integration", "Host integration"]
+}
