@@ -1,0 +1,10 @@
+{
+  "stage": "media-5F-2", "date": "2026-10-25", "baseline": "5351ac5", "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "4cec26fb-16db-4488-a3ce-9d4a5c9f3803", "passed": 24, "failed": 0, "scope": ["host-runtime", "media-reply-pipeline"]},
+    {"runId": "bee772e1-2287-47a5-9dbd-ed7b77e7344e", "passed": 8, "failed": 0, "scope": ["host-media-runtime", "media-voice"]},
+    {"runId": "88088954-3528-4a1e-9f47-13235cea7aa6", "passed": 2, "failed": 0, "scope": ["host-media-runtime"]}
+  ],
+  "countsOverlap": true, "actualLocalExecution": ["DSH Host document task and restart", "SQLite recovery reconciliation", "loopback HTTP"],
+  "realModel": false, "realPlatform": false, "fullRegression": false, "serverAccess": false, "cleanupBlocked": false
+}

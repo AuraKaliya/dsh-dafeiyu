@@ -184,6 +184,7 @@ export class MediaStore {
     this.db.prepare('UPDATE media_blobs SET present=0 WHERE present=3').run();
     for(const row of this.db.prepare("SELECT id FROM media_assets WHERE state='staging'").all()){const current=this.asset(String(row.id));this.writeAsset({...current,state:'failed',version:current.version+1,updatedAt:new Date().toISOString()});}return jobs;});}
   counts(){return {sources:Number(this.db.prepare('SELECT count(*) AS n FROM media_sources').get()?.n),assets:Number(this.db.prepare('SELECT count(*) AS n FROM media_assets').get()?.n),bytes:Number(this.db.prepare('SELECT coalesce(sum(bytes),0) AS n FROM media_blobs WHERE present IN (0,1,3)').get()?.n)};}
+  jobs(){return Object.fromEntries(this.db.prepare('SELECT state,count(*) AS n FROM media_jobs GROUP BY state').all().map(row=>[String(row.state),Number(row.n)]));}
   drain(publish:(body:unknown,id:string)=>void){for(const row of this.db.prepare('SELECT id,body FROM media_outbox WHERE delivered=0 ORDER BY rowid').all()){publish(JSON.parse(String(row.body)),String(row.id));this.db.prepare('UPDATE media_outbox SET delivered=1 WHERE id=?').run(row.id!);}}
   close(){if(this.closed)return;this.closed=true;this.db.close();}
 }

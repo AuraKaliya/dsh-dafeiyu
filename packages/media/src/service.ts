@@ -4,8 +4,8 @@ import type {} from '@dafeiyu/core';
 import { join } from 'node:path';
 import { randomUUID,createHash } from 'node:crypto';
 import { z } from 'zod';
-import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema,MediaSourceDescriptionSchema,CapabilitySelectionSchema,ServiceGate,MediaVoiceEvidenceSchema,MediaReplyDraftInputSchema } from '@dafeiyu/contracts';
-import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContextV3,ActionCapabilityV3,MediaVoiceEvidence,MediaReplyAccess,NativeExpressionAccess,PersonaAccess,PersonaSourceRef,Conversation } from '@dafeiyu/contracts';
+import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema,MediaSourceDescriptionSchema,CapabilitySelectionSchema,ServiceGate,MediaVoiceEvidenceSchema,MediaReplyDraftInputSchema,ExecutionScopeSchema,RunOriginSchema } from '@dafeiyu/contracts';
+import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContextV3,ActionCapabilityV3,MediaVoiceEvidence,MediaReplyAccess,NativeExpressionAccess,PersonaAccess,PersonaSourceRef,Conversation,ReplyMediaManifest } from '@dafeiyu/contracts';
 import { MediaStore,mediaHash } from './store.js';
 import type { StoredMediaSource,MediaExposure } from './store.js';
 import { MediaFiles,abortable } from './files.js';
@@ -53,6 +53,8 @@ export class MediaService extends Service implements MediaPort {
   private readonly unbind:()=>void;
   private tail:Promise<unknown>=Promise.resolve();
   private closing:Promise<void>|undefined;
+  private finalCounts:{sources:number;assets:number;bytes:number;drafts:number;exports:number;jobs:Record<string,number>}|undefined;
+  private reconciliation={settled:0,pending:0,conflicts:0};
   constructor(ctx:Context,raw:Config,testBackends?:{audioWorker?:AudioWorker;ttsWorker?:AudioWorker}){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
     if(ctx.get('attachments'))throw new Error('MEDIA_ATTACHMENTS_CONFLICT');
     this.store=new MediaStore(join(this.config.dataDir,'media.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore);
@@ -77,7 +79,7 @@ export class MediaService extends Service implements MediaPort {
   private describe(ref:MediaSourceDescription['ref']){const provider=this.providers.get(ref.provider),raw=provider?.describe(ref.key);if(!provider||!raw)throw new Error('MEDIA_SOURCE_UNAVAILABLE');const description=MediaSourceDescriptionSchema.parse(raw);if(mediaHash(ref)!==mediaHash(description.ref))throw new Error('MEDIA_SOURCE_STALE');return {provider,description};}
   private access(context:ExecutionContextV3,owner:string,description:MediaSourceDescription,provider:Readonly<MediaSourceProvider>){this.gate.assertActive();const access=this.ctx.dafeiyu.mediaAccess(context,owner,description.origin),fingerprint=mediaHash(description);
     const guard=()=>{access.guard();if(!this.ready()||this.providers.get(provider.id)!==provider||mediaHash(provider.describe(description.ref.key))!==fingerprint)throw new Error('MEDIA_SOURCE_STALE');};guard();return {...access,guard};}
-  private serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>{this.gate.assertActive();return work();});this.tail=result.catch(()=>{});return result;}
+  private serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>{this.gate.assertActive();return work();}).finally(()=>this.flush());this.tail=result.catch(()=>{});return result;}
   private async acquireWithin(context:ExecutionContextV3,owner:string,input:z.output<typeof MediaAcquireSchema>,signal:AbortSignal){const {provider,description}=this.describe(input.source),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description),cancel=new AbortController();
     try{const opened=await abortable(provider.open(input.source.key,null,AbortSignal.any([signal,cancel.signal])),signal);return await this.files.ingest(access,input.requestId,source,opened,signal);}finally{cancel.abort();}}
   acquire(context:ExecutionContextV3,owner:string,input:z.output<typeof MediaAcquireSchema>){return this.serial(()=>this.acquireWithin(context,owner,input,AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)])));}
@@ -189,8 +191,19 @@ export class MediaService extends Service implements MediaPort {
     return [make(MEDIA_ACTIONS[0],MediaAcquireSchema,false,(i,c)=>this.acquire(c,'media',MediaAcquireSchema.parse(i))),make(MEDIA_ACTIONS[1],MediaAssetRefSchema,false,(i,c)=>this.inspect(c,'media',MediaAssetRefSchema.parse(i))),make(MEDIA_ACTIONS[2],MediaReadSchema,false,(i,c)=>this.read(c,'media',MediaReadSchema.parse(i))),make(MEDIA_ACTIONS[3],selectSchema,true,(i,c)=>this.select(c,i)),
       {...make(MEDIA_ACTIONS[4],MediaReplyDraftInputSchema,true,(i,c)=>this.prepareReply(c,i)),description:'准备当前Run的回复媒体草案，尚未发送。expectedVersion首次0，之后用currentVersion；parts为空取消。图片／语音会归一化，as:file保留原字节；final-voice仅在配置TTS时将核心批准的最终正文合成语音，不传自由文本。目标和正文由核心确定。'},
       {...make(MEDIA_ACTIONS[5],z.strictObject({}),false,(_i,c)=>this.replies.status(c)),description:'查看当前Run的媒体草案版本、选中数量和冻结状态，不读取其它任务。'}];}
-  async recover(){if(this.gate.state!=='registered')return;this.store.recover();await this.files.initialize();await this.files.cleanWork();this.gate.recovered();}
+  flush(){if(this.gate.state==='closed')return;this.store.drain((raw,id)=>{const row=z.object({scope:ExecutionScopeSchema,origin:RunOriginSchema,runId:z.uuid(),operationId:z.string(),causedBy:z.string().nullable(),type:z.string(),at:z.string(),data:z.record(z.string(),z.json())}).parse(raw),scope=row.scope;
+    const event={agentId:scope.agentId,route:scope.kind==='task'?scope.scopeKey:scope.route,traceId:scope.kind==='task'?row.runId:row.origin.kind==='message'?row.origin.inboundId:row.runId,operationId:row.operationId,causedBy:row.causedBy,type:row.type,plugin:'media',pluginVersion:'0.1.0',occurredAt:row.at,sources:[],data:{...row.data,origin:row.origin}};
+    if(scope.kind==='task')this.ctx.dafeiyu.journal.appendExecutionOnce({...event,taskId:scope.taskId,runId:row.runId},id);else this.ctx.dafeiyu.journal.appendOnce(event,id);
+  });}
+  reconcile(read:(manifest:ReplyMediaManifest)=>'sent'|'unknown'|'blocked'|'pending'|'conflict'){const counts={settled:0,pending:0,conflicts:0};for(const entry of this.store.replies.exports()){
+    if(entry.state!=='ready'){for(const lease of entry.leases)this.store.releaseLease(lease.id,lease.owner);continue;}
+    const state=read(entry.manifest);if(state==='conflict'){counts.conflicts++;continue;}if(state==='pending'){counts.pending++;continue;}
+    this.store.replies.settle(entry.manifest.replyId,state);for(const lease of entry.leases)this.store.releaseLease(lease.id,lease.owner);counts.settled++;
+  }this.reconciliation=counts;return {...counts};}
+  async recover(){if(this.gate.state!=='registered')return;this.store.recover();await this.files.initialize();await this.files.cleanWork();this.flush();this.gate.recovered();}
   activate(){this.gate.activate();}
   whenIdle(){return this.tail;}
-  close():Promise<void>{if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.closing=(async()=>{await this.tail;this.unbind();this.handle.dispose();this.replySpeech?.close();this.images.close();this.store.close();this.gate.close();})();return this.closing;}
+  cancelRunning(){this.controller.abort();}
+  get health(){return {lifecycle:this.gate.state,modalities:{vision:!!this.config.vision,asr:!!this.config.audio?.whisper,events:!!this.config.audio?.events,documents:!!this.config.documents,tts:!!this.config.tts},counts:this.finalCounts??{...this.store.counts(),...this.store.replies.counts(),jobs:this.store.jobs()},reconciliation:{...this.reconciliation}};}
+  close():Promise<void>{if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.closing=(async()=>{await this.tail;this.flush();this.finalCounts={...this.store.counts(),...this.store.replies.counts(),jobs:this.store.jobs()};this.unbind();this.handle.dispose();this.replySpeech?.close();this.images.close();this.store.close();this.gate.close();})();return this.closing;}
 }

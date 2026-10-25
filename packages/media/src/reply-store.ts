@@ -49,4 +49,5 @@ export class MediaReplyStore {
   });}
   settle(replyId:string,status:'sent'|'unknown'|'blocked'){if(this.db.prepare("UPDATE media_reply_exports SET state=? WHERE reply_id=? AND state='ready'").run(status,replyId).changes!==1&&this.exported(replyId)?.state!==status)throw new Error('MEDIA_EXPORT_STATE_CONFLICT');}
   counts(){return {drafts:Number(this.db.prepare('SELECT count(*) AS n FROM media_reply_drafts').get()?.n),exports:Number(this.db.prepare('SELECT count(*) AS n FROM media_reply_exports').get()?.n)};}
+  exports(){return this.db.prepare('SELECT reply_id FROM media_reply_exports ORDER BY rowid').all().map(row=>this.exported(String(row.reply_id))!);}
 }

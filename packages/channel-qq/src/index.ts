@@ -21,6 +21,7 @@ import { QqMediaConfigSchema } from './media-reader.js';
 import { QqMediaTransport } from './media-transport.js';
 import { QqMediaDeliveryLedger } from './media-delivery.js';
 export { QqStore } from './store.js';
+export { QqMediaDeliveryLedger } from './media-delivery.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
 export { naturallyAddressed } from './trigger.js';
