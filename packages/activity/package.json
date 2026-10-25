@@ -1,0 +1,7 @@
+{
+  "name":"@dafeiyu/activity","version":"0.1.0","private":true,"type":"module",
+  "main":"./lib/index.js","types":"./lib/index.d.ts",
+  "exports":{".":{"types":"./lib/index.d.ts","default":"./lib/index.js"},"./store":{"types":"./lib/store.d.ts","default":"./lib/store.js"}},
+  "dependencies":{"@dafeiyu/contracts":"0.15.0","@dafeiyu/core":"0.15.0","@dafeiyu/journal":"0.4.0","zod":"4.4.3"},
+  "peerDependencies":{"@deepseek-ai/cordis":"4.0.5"}
+}

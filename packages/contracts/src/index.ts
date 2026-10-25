@@ -25,6 +25,7 @@ export * from './resource-observation.js';
 export * from './message-task.js';
 export * from './native-expression.js';
 export * from './memory-maintenance.js';
+export * from './activity.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';

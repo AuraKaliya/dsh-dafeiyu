@@ -23,6 +23,9 @@
       "path": "packages/memory"
     },
     {
+      "path": "packages/activity"
+    },
+    {
       "path": "packages/host"
     }
   ]
