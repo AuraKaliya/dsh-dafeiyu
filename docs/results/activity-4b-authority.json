@@ -1,0 +1,12 @@
+{
+  "step":"activity-4B","date":"2026-10-25","baseline":"7b65e10",
+  "checks":[
+    {"runId":"c2352401-6992-470f-8861-bc96aebd8bf2","passed":14,"failed":0},
+    {"runId":"656394c4-a566-4db0-be1d-6ec9c7825138","passed":9,"failed":0},
+    {"runId":"79f41ddd-ceb1-410f-845a-c4c470f7d395","passed":5,"failed":1,"correction":"Register and activate the managed fixture before core admission"},
+    {"runId":"9990efbc-8493-4929-9920-a3014b8accd5","passed":6,"failed":0},
+    {"runId":"8d9bb5bd-0906-41c7-8492-49e49f10959b","passed":13,"failed":0},
+    {"runId":"5758e612-8e49-4f55-aa46-cf552f1d5eec","passed":10,"failed":0}
+  ],
+  "schedulerStarted":false,"fullRegression":false,"realModel":false,"realPlatform":false,"serverConnected":false,"cleanupBlocked":false
+}

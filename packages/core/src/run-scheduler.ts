@@ -8,5 +8,5 @@ export class RunScheduler {
     const front=this.queue.findIndex(item=>item.foreground),next=this.queue.splice(front<0?0:front,1)[0]!;this.used++;
     let released=false;next.resolve(()=>{if(released)return;released=true;this.used--;this.pump();});
   }}
-  get status(){return {active:this.used,waiting:this.queue.length};}
+  get status(){return {active:this.used,waiting:this.queue.length,foregroundWaiting:this.queue.filter(item=>item.foreground).length};}
 }

@@ -85,3 +85,4 @@ activity为可选插件，默认关闭。Host检查memory、来源跟踪、对�
 
 - 4-方案：已核对现有wake／任务／记忆接口；本文先提交，尚未开始阶段4功能开发。
 - 4A：[存储与时间规则检查](activity-4a-storage.md)完成，9项定向测试通过；核心授权、计时运行和Host装配按4B—4D继续。
+- 4B：[来源锚点、计划工具和优先／继续链检查](activity-4b-authority.md)完成；保持managed装配屏障，未启动计时运行。

@@ -195,6 +195,12 @@ export class RuntimeStore {
   bindInput(runId:string,id:string,body:unknown):void{const value=z.json().parse(body);this.transaction(()=>{const run=this.get(runId);if(!['accepted','queued','running','cancelling'].includes(run.state))throw new Error('RUN_NOT_RUNNING');
     const old=this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId,id);if(old){if(runtimeHash(JSON.parse(string(old.body)))!==runtimeHash(value))throw new Error('INPUT_BINDING_CONFLICT');return;}this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,id,JSON.stringify(value));});}
   readInput(runId:string,id:string):Json|null{this.get(runId);const row=this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId,id);return row?z.json().parse(JSON.parse(string(row.body))):null;}
+  /** A program-only maintenance authority record, never new model output in a finished Run. */
+  bindMaintenanceAnchor(runId:string,id:string,body:unknown):void{const value=z.json().parse(body);this.transaction(()=>{
+    const run=this.get(runId);if(run.definition.scope.kind!=='task'||!id.startsWith('activity-anchor:'))throw new Error('SCOPE_DENIED');
+    const old=this.readInput(runId,id);if(old!==null){if(runtimeHash(old)!==runtimeHash(value))throw new Error('INPUT_BINDING_CONFLICT');return;}
+    this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,id,JSON.stringify(value));
+  });}
   findContext(id:string):Json|null{this.open();const row=this.db.prepare('SELECT body FROM run_inputs WHERE input_id=? ORDER BY rowid DESC LIMIT 1').get(id);return row?z.json().parse(JSON.parse(string(row.body))):null;}
   appendExecutionEvent(runId:string,type:string,data:Record<string,Json>):string{return this.transaction(()=>{this.get(runId);return this.event(runId,type,data);});}
   operations(runId:string){this.open();return this.db.prepare('SELECT id FROM run_operations WHERE run_id=? ORDER BY ordinal').all(runId).map(row=>this.operation(string(row.id)));}

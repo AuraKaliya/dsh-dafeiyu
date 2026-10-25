@@ -101,3 +101,9 @@ test('unexpected schemas, identity changes and all-day quiet configuration fail 
   const db=new DatabaseSync(f.file);db.exec('PRAGMA user_version=99');db.close();const future=await readFile(f.file);assert.throws(()=>new ActivityStore(f.file,f.identity),/SCHEMA_UNSUPPORTED/);assert.deepEqual(await readFile(f.file),future);
   assert.throws(()=>new ActivityStore(join(f.root,'missing.sqlite'),f.identity),/MIGRATION_REQUIRED/);
 });
+
+test('creating another plan cannot bypass the global minimum wake interval',async()=>{
+  const f=await fixture();try{const first=f.create(),second=f.create({requestId:'second'}),occurrence=f.store.issue(first.id,base)!;
+    complete(f.store,occurrence,base,base+1000);assert.equal(f.store.issue(second.id,base+1000),null);assert.ok(f.store.issue(second.id,base+60000));
+  }finally{f.close();}
+});

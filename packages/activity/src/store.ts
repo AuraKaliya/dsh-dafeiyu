@@ -14,7 +14,8 @@ const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileI
 const createSchema=ActivityScheduleBodySchema.omit({id:true,version:true,createdAt:true,updatedAt:true,taskGeneration:true}).extend({requestId:PersonaRequestIdSchema});
 const updateSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().positive(),state:ActivityScheduleBodySchema.shape.state.optional(),
   trigger:ActivityScheduleBodySchema.shape.trigger.optional(),missed:ActivityScheduleBodySchema.shape.missed.optional(),quiet:ActivityScheduleBodySchema.shape.quiet.optional(),
-  timeZone:ActivityScheduleBodySchema.shape.timeZone.optional(),goal:ActivityScheduleBodySchema.shape.goal.optional(),anchor:ActivityScheduleBodySchema.shape.anchor.optional()})
+  timeZone:ActivityScheduleBodySchema.shape.timeZone.optional(),goal:ActivityScheduleBodySchema.shape.goal.optional(),anchor:ActivityScheduleBodySchema.shape.anchor.optional(),
+  basis:ActivityScheduleBodySchema.shape.basis.optional(),configHash:ActivityScheduleBodySchema.shape.configHash.optional()})
   .refine(v=>[v.state,v.trigger,v.missed,v.quiet,v.timeZone,v.goal,v.anchor].some(value=>value!==undefined),'Empty activity update');
 const runEventSchema=z.strictObject({id:z.uuid(),occurrenceId:PersonaRequestIdSchema,runId:z.uuid(),state:z.enum(['running','completed','waiting','failed','cancelled','interrupted']),
   at:z.iso.datetime({offset:true}),unknownEffects:z.boolean()});
@@ -138,6 +139,8 @@ export class ActivityStore {
     if(this.db.prepare("SELECT 1 FROM activity_occurrences WHERE schedule_id=? AND state IN ('pending','accepted','running') LIMIT 1").get(id))return null;
     if(Number(this.db.prepare("SELECT count(*) AS n FROM activity_occurrences WHERE state IN ('pending','accepted','running')").get()?.n)>=this.config.maxConcurrent)return null;
     if(this.used(time)>=this.config.dailyActiveMs)return null;
+    const last=this.db.prepare("SELECT json_extract(body,'$.createdAt') AS at FROM activity_occurrences ORDER BY rowid DESC LIMIT 1").get();
+    if(last&&time<Date.parse(String(last.at))+this.config.minIntervalMs)return null;
     const allowed=nextAllowed(time,plan.body.timeZone,plan.body.quiet);if(allowed>time){this.db.prepare('UPDATE activity_schedules SET not_before=? WHERE id=?').run(allowed,id);return null;}
     const conditional=this.condition(plan);let due:number|null,next:number|null;
     if(plan.body.trigger.kind==='condition'){if(!conditional)return null;due=time;next=null;}

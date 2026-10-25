@@ -14,7 +14,9 @@ import type { RunScheduler } from './run-scheduler.js';
 import type { NativeAction } from './execution-frame.js';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
-import { SourceDependencySchema,MaintenanceLifecycleSchema } from '@dafeiyu/contracts';
+import { SourceDependencySchema,MaintenanceLifecycleSchema,ActivityAnchorSchema,TaskCreateSchema } from '@dafeiyu/contracts';
+import type { ActivityAnchor,MaintenanceLifecycle } from '@dafeiyu/contracts';
+import { ActivityAuthoritySchema } from './activity-authority.js';
 import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskSourceSchema,MessageTaskControlSchema,PersonaSourceRefSchema,TaskResultAnchorSchema } from '@dafeiyu/contracts';
 import type { MessageTaskBinding,MessageTaskSource,NativeExpressionAccess,PersonaSourceRef } from '@dafeiyu/contracts';
 import { ExecutionEvidence } from './execution-evidence.js';
@@ -50,6 +52,7 @@ export class ExecutionCoordinator {
   private failure:string|null=null;
   private readonly evidence=new Map<string,ExecutionEvidence>();
   private readonly messageBindings=new Map<string,MessageTaskBinding>();
+  private readonly lifecycleObservers=new Map<string,(event:MaintenanceLifecycle)=>void>();
   constructor(private readonly d:Dependencies){d.personas.enrich=(access,run)=>{if(run.definition.scope.kind!=='task')return access;
     const scoped={...access,motivation:this.motivation(run),resourceAllowed:(scene:Conversation)=>this.allowedResource(run,scene)};return this.evidenceFor(run,scoped).access(scoped);};}
   private allowedResource(run:StoredRun,scene:Conversation):boolean {
@@ -179,6 +182,9 @@ export class ExecutionCoordinator {
   producer(raw:string,options?:unknown){const producer=ProducerSchema.parse(raw),declared=z.strictObject({motivation:MotivationSchema}).optional().parse(options);
     if(!this.d.options.policies.some(policy=>policy.producers.includes(producer)))throw new Error('SCOPE_DENIED');
     return Object.freeze({
+      createTask:(raw:unknown)=>{this.d.assertAccepting();const input=TaskCreateSchema.parse(raw),requestId=`producer:${runtimeHash([producer,input.requestId])}`;
+        const id=this.repository().create(this.d.agentId,{...input,requestId});return this.taskRef(producer,id);},
+      taskState:(ref:TaskRef)=>this.repository().readState(this.d.agentId,this.resolveTask(producer,ref)),
       submitTask:(raw:unknown,task?:TaskRef)=>{const input=ExecutionRequestSchema.parse(raw);if('taskId'in input&&(!task||this.resolveTask(producer,task)!==input.taskId))throw new Error('SCOPE_DENIED');return this.submit(producer,input,undefined,null,null,declared?.motivation);},
       openTask:(id:string)=>{this.d.assertAccepting();this.repository().readState(this.d.agentId,z.uuid().parse(id));return this.taskRef(producer,id);},
       updateTask:(ref:TaskRef,input:unknown)=>{this.d.assertAccepting();return this.repository().update(this.d.agentId,this.resolveTask(producer,ref),TaskUpdateSchema.parse(input));},
@@ -205,6 +211,7 @@ export class ExecutionCoordinator {
         if(this.d.store.request(parent.requestKey).producer!==producer||parent.definition.taskId!==input.taskId)throw new Error('SCOPE_DENIED');
         if(['accepted','queued','running','cancelling'].includes(parent.state))throw new Error('RUN_NOT_QUIESCENT');
         if(this.repository().readState(this.d.agentId,input.taskId).epoch!==parent.definition.intentVersion)throw new Error('TASK_NOT_ACTIVE');
+        this.validateWakeChain(parent,this.repository().readState(this.d.agentId,input.taskId));
         if(this.d.store.operations(parent.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('OPERATION_UNCERTAIN');
         this.d.store.readCheckpoint(parent.id,input.checkpointId);
         const {parentRunId,checkpointId,...request}=input;
@@ -216,6 +223,54 @@ export class ExecutionCoordinator {
   }
   bindWake(provider:WakeAuthorityProvider):()=>void{const producer=ProducerSchema.parse(provider.producerId);if(this.wakes.has(producer))throw new Error('DUPLICATE_PROVIDER');
     const bound={producerId:producer,validate:provider.validate.bind(provider)};this.wakes.set(producer,bound);return ()=>{if(this.wakes.get(producer)===bound)this.wakes.delete(producer);};}
+  bindLifecycle(owner:string,receive:(event:MaintenanceLifecycle)=>void):()=>void{
+    ProducerSchema.parse(owner);if(this.lifecycleObservers.has(owner))throw new Error('DUPLICATE_PROVIDER');this.lifecycleObservers.set(owner,receive);
+    return ()=>{if(this.lifecycleObservers.get(owner)===receive)this.lifecycleObservers.delete(owner);};
+  }
+  private validateWakeChain(run:StoredRun,task:import('@dafeiyu/contracts').TaskState):void {
+    const visited=new Set<string>();let current:StoredRun|null=run;
+    while(current){if(visited.has(current.id)||visited.size>=64||current.definition.taskId!==task.id||current.definition.intentVersion!==task.epoch)throw new Error('WAKE_NOT_AUTHORIZED');visited.add(current.id);
+      if(current.definition.origin.kind==='wake'&&!this.wakes.get(current.definition.origin.producerId)?.validate(current.definition.origin,task))throw new Error('WAKE_NOT_AUTHORIZED');
+      current=current.definition.parentRunId?this.d.store.get(current.definition.parentRunId):null;
+    }
+  }
+  captureActivity(context:ExecutionContextV3,pluginId:string):ActivityAnchor {
+    const access=this.personaAccess(context,pluginId,'local-write');if(access.view.scope.kind!=='task'||!access.historyTracked)throw new Error('SCOPE_DENIED');
+    const run=this.d.store.get(context.runId),request=this.d.store.request(run.requestKey),action=this.grants.get(context)!.action;
+    const body=ActivityAuthoritySchema.parse({schemaVersion:1,id:randomUUID(),kind:'execution',runId:run.id,operationId:context.operationId,scope:run.definition.scope,intentVersion:run.definition.intentVersion,
+      policy:{producer:request.producer,id:run.definition.policyId,hash:runtimeHash(this.policy(request.producer,run.definition.policyId))},
+      action:{owner:action.owner,id:action.id,version:action.version,pluginVersion:action.pluginVersion,hash:runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})},foundationHash:run.snapshot?.personaVersion??null,
+      dependencies:access.historyDependencies??[],sources:[...new Map([...access.admittedSources,...access.inputs.flatMap(i=>i.sourceRef?[i.sourceRef]:[])].map(ref=>[runtimeHash(ref),ref])).values()]});
+    access.guard();this.d.store.bindInput(run.id,`activity-anchor:${body.id}`,body);return ActivityAnchorSchema.strip().parse({...body,hash:runtimeHash(body)});
+  }
+  maintenanceAnchor(runId:string,taskId:string,epoch:number):ActivityAnchor {
+    const run=this.d.store.get(z.uuid().parse(runId));if(run.definition.scope.kind!=='task'||run.definition.taskId!==taskId||run.definition.intentVersion!==epoch||!['completed','waiting','failed','cancelled','interrupted'].includes(run.state))throw new Error('SCOPE_DENIED');
+    const request=this.d.store.request(run.requestKey),id=run.id;
+    const existing=this.d.store.readInput(run.id,`activity-anchor:${id}`);if(existing){const value=ActivityAuthoritySchema.parse(existing);return ActivityAnchorSchema.strip().parse({...value,hash:runtimeHash(value)});}
+    const body=ActivityAuthoritySchema.parse({schemaVersion:1,id,kind:'maintenance',runId:run.id,operationId:run.id,scope:run.definition.scope,intentVersion:epoch,
+      policy:{producer:request.producer,id:run.definition.policyId,hash:runtimeHash(this.policy(request.producer,run.definition.policyId))},action:null,foundationHash:run.snapshot?.personaVersion??null,dependencies:[],sources:[]});
+    this.d.store.bindMaintenanceAnchor(run.id,`activity-anchor:${id}`,body);return ActivityAnchorSchema.strip().parse({...body,hash:runtimeHash(body)});
+  }
+  activityAnchorStatus(raw:unknown):{state:'valid'|'pending'|'stale';code:string|null}{
+    try{
+      const anchor=ActivityAnchorSchema.parse(raw),run=this.d.store.get(anchor.runId),body=ActivityAuthoritySchema.parse(this.d.store.readInput(run.id,`activity-anchor:${anchor.id}`));
+      if(runtimeHash(body)!==anchor.hash||runtimeHash(ActivityAnchorSchema.strip().parse({...body,hash:anchor.hash}))!==runtimeHash(anchor))throw new Error('SCOPE_DENIED');
+      if(run.definition.scope.kind!=='task'||runtimeHash(run.definition.scope)!==runtimeHash(body.scope)||run.definition.intentVersion!==body.intentVersion)throw new Error('SCOPE_DENIED');
+      const task=this.repository().readState(this.d.agentId,run.definition.taskId!),policy=this.policy(body.policy.producer,body.policy.id);
+      if(task.epoch!==body.intentVersion||task.status!=='active')throw new Error('TASK_NOT_ACTIVE');
+      if(runtimeHash(policy)!==body.policy.hash||body.foundationHash&&this.d.persona().version!==body.foundationHash)throw new Error('ACTIVITY_POLICY_CHANGED');
+      const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload);if(saved.messageSource)this.validateMessageAncestors(run);
+      if(body.action&&!this.d.registry.actions().some(action=>action.owner===body.action!.owner&&action.id===body.action!.id&&action.version===body.action!.version&&action.pluginVersion===body.action!.pluginVersion&&action.active()&&runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})===body.action!.hash))throw new Error('ACTIVITY_PLUGIN_CHANGED');
+      const inputs=this.inputsFor(run),guard=()=>{const current=this.repository().readState(this.d.agentId,task.id);if(current.epoch!==body.intentVersion||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');};
+      const access=this.d.personas.access(run,inputs,this.d.signal,guard);
+      if(!this.evidenceFor(run,access).validate(body.dependencies)||body.sources.some(ref=>!this.d.memory()?.validate(access,ref)))throw new Error('SOURCE_STALE');
+      if(body.kind==='maintenance')return {state:'valid',code:null};
+      const op=this.d.store.operation(body.operationId);if(op.runId!==run.id||op.plugin!==body.action?.owner)throw new Error('SCOPE_DENIED');
+      if(['accepted','queued','running','cancelling'].includes(run.state))return {state:'pending',code:null};
+      if(!['completed','waiting'].includes(run.state)||op.state!=='finished'||!['succeeded','partial'].includes(op.outcome?.status??'')||op.outcome?.effects==='unknown')throw new Error('ACTIVITY_ORIGIN_INCOMPLETE');
+      return {state:'valid',code:null};
+    }catch(error){return {state:'stale',code:error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'ACTIVITY_SOURCE_STALE'};}
+  }
   private submit(producer:string,input:Request,origin:RunOrigin={kind:'native',producerId:producer,requestId:input.requestId},parentRunId:string|null=null,checkpointId:string|null=null,motivation?:Motivation,messageSource?:MessageTaskSource){
     this.d.assertAccepting();this.policy(producer,input.policyId);
     if(!this.repository().ready())throw new Error('DEPENDENCY_UNAVAILABLE');
@@ -263,7 +318,7 @@ export class ExecutionCoordinator {
     this.queued.set(run.id,work);this.taskQueues.set(taskId,work);
   }
   private async process(id:string):Promise<void>{
-    const release=await this.d.scheduler.acquire(false);
+    const release=await this.d.scheduler.acquire(['explicit-task','mixed'].includes(this.motivation(this.d.store.get(id)).kind));
     try{if(!this.d.accepting()||this.failure)return;let run=this.d.store.get(id);if(!['accepted','queued'].includes(run.state))return;
       const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);let runPersona:RunPersona|undefined;
       try{
@@ -282,7 +337,7 @@ export class ExecutionCoordinator {
         const guard=()=>{signal.throwIfAborted();if(!repository.ready()||this.d.repository()!==repository)throw new Error('DEPENDENCY_UNAVAILABLE');
           if(saved.messageSource)this.validateMessageAncestors(run);
           const current=repository.readState(this.d.agentId,task.id);if(current.epoch!==task.epoch||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');
-          if(run.definition.origin.kind==='wake'&&!this.wakes.get(request.producer)?.validate(run.definition.origin,current))throw new Error('WAKE_NOT_AUTHORIZED');
+          this.validateWakeChain(run,current);
           if(runtimeHash(repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules))!==inputHash)throw new Error('SOURCE_STALE');
           if(this.d.memory()!==memory||memory&&!memory.ready()||actions.some(action=>!action.active())||contributors.some(entry=>!entry.active()))throw new Error('DEPENDENCY_UNAVAILABLE');};
         runPersona=this.d.personas.prepare(run,persona,this.d.model,inputs,signal,guard);
@@ -405,17 +460,18 @@ export class ExecutionCoordinator {
       type:event.type,plugin:operation?.plugin??'core',pluginVersion:operation?.pluginVersion??CORE_VERSION,occurredAt:event.at,sources:[],data:event.data},event.id);
     if(run.state==='completed'&&run.result)this.d.memory()?.bindResult(run.definition.taskId!,run.id,run.definition.intentVersion,{result:run.result,continuity:this.d.store.readInput(run.id,'continuity-reference')});
     const lifecycle=this.d.memory()?.recordLifecycle;
-    if(lifecycle){
+    if(lifecycle||this.lifecycleObservers.size){
       const changed=event.type==='operation.succeeded'&&operation&&((operation.plugin==='memory-execution'&&['dafeiyu_execution_contribute','dafeiyu_execution_select'].includes(operation.action))||operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select');
       const type=changed?'evidence.changed':event.type;
       if(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed'].includes(type)){
         const facts=z.object({goal:z.string(),epoch:z.number()}).safeParse(this.d.store.readInput(run.id,'task-facts'));
         const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),goal=facts.success?facts.data.goal:'goal'in saved.input?saved.input.goal:'';
         const operations=type==='run.running'?[]:this.d.store.operations(run.id);
-        lifecycle(MaintenanceLifecycleSchema.parse({id:event.id,scope:run.definition.scope,runId:run.id,taskEpoch:run.definition.intentVersion,
+        const entry=MaintenanceLifecycleSchema.parse({id:event.id,scope:run.definition.scope,runId:run.id,taskEpoch:run.definition.intentVersion,
           origin:run.definition.origin,motivation:this.motivation(run),type,goal,at:event.at,
           operations:operations.slice(0,256).map(op=>({id:op.id,action:op.action,status:op.outcome?.status??(op.state==='started'?'started':'unknown'),
-            effects:op.outcome?.effects??'unknown',completeness:op.outcome?.completeness??'unknown'})),omittedOperations:Math.max(0,operations.length-256)}));
+            effects:op.outcome?.effects??'unknown',completeness:op.outcome?.completeness??'unknown'})),omittedOperations:Math.max(0,operations.length-256)});
+        lifecycle?.(entry);for(const observer of this.lifecycleObservers.values())observer(structuredClone(entry));
       }
     }
     this.d.store.acknowledgeEvent(event.id);
