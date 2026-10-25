@@ -12,13 +12,17 @@ export const platformId = z.union([z.string().regex(/^-?\d+$/), z.number().int()
 const responseSchema = z.object({ status: z.string(), retcode: z.number(), data: z.unknown() });
 export class OneBot {
   constructor(private readonly base: string, private readonly token: string, readonly botId: string, private readonly timeoutMs: number) {}
-  async call(action: 'get_login_info' | 'get_status' | 'get_group_list' | 'send_private_msg' | 'send_group_msg', params: object, signal?: AbortSignal): Promise<unknown> {
+  async call(action: 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'send_private_msg' | 'send_group_msg', params: object, signal?: AbortSignal): Promise<unknown> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const response = await fetch(new URL(action, this.base), { method: 'POST', redirect: 'error',
       headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json' }, body: JSON.stringify(params),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (!response.ok) throw new Error('ONEBOT_HTTP_FAILURE');
-    const body = responseSchema.parse(await response.json());
+    const reader=response.body?.getReader();if(!reader)throw new Error('ONEBOT_INVALID_RESPONSE');const chunks:Uint8Array[]=[];let bytes=0;
+    try{while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.byteLength;if(bytes>2*1024**2){await reader.cancel();throw new Error('ONEBOT_RESPONSE_LIMIT');}chunks.push(part.value);}}
+    finally{reader.releaseLock();}
+    let raw:unknown;try{raw=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new Error('ONEBOT_INVALID_RESPONSE');}
+    const body = responseSchema.parse(raw);
     if (body.status !== 'ok' || body.retcode !== 0) throw new Error('ONEBOT_REJECTED_OR_UNKNOWN');
     return body.data;
   }

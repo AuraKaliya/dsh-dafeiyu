@@ -1,0 +1,19 @@
+{
+  "stage": "media-5D-1",
+  "date": "2026-10-25",
+  "baseline": "9dc1bd3",
+  "result": "targeted-checks-passed",
+  "qqSchema": 5,
+  "checks": [
+    {"runId": "7c94cdb1-29bf-4f18-be0c-f287ef25d635", "passed": 24, "failed": 0, "scope": ["qq-media-source", "qq-cache", "qq-delivery-ledger", "qq-storage"]},
+    {"runId": "2de53ccc-abd3-45d2-855c-4329fa677ac5", "passed": 19, "failed": 0, "scope": ["qq-media-source", "qq"]}
+  ],
+  "countsOverlap": true,
+  "actualLocalExecution": ["SQLite migration", "file/range IO", "path and address rejection", "loopback OneBot HTTP/WebSocket", "DSH text compatibility"],
+  "deferred": ["QQ media ingress", "voice task authority", "media delivery", "real platform validation", "public HTTPS success path"],
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false
+}

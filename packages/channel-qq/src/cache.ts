@@ -34,6 +34,7 @@ export class QqCache {
   private epoch(route: string): number { return Number(this.db.prepare('SELECT epoch FROM qq_cache_state WHERE route=?').get(route)?.epoch ?? 0); }
   generation(route?:string):number {return route?this.epoch(route):Number(this.db.prepare('SELECT coalesce(sum(epoch),0) AS n FROM qq_cache_state').get()?.n);}
   known(route:string,id:string):boolean{return !!this.db.prepare('SELECT 1 FROM qq_message_meta WHERE route=? AND id=?').get(route,id)||!!this.db.prepare('SELECT 1 FROM messages WHERE route=? AND id=?').get(route,id);}
+  recalled(route:string,id:string):boolean{return this.db.prepare('SELECT deleted FROM qq_message_meta WHERE route=? AND id=?').get(route,id)?.deleted===1;}
   private bump(route: string): void { this.db.prepare('INSERT INTO qq_cache_state VALUES(?,1) ON CONFLICT(route) DO UPDATE SET epoch=epoch+1').run(route); }
   private meta(route: string, row: CachedRow) {
     const existing = this.db.prepare('SELECT version,hash,body,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, row.id);
