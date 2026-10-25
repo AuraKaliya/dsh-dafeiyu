@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join,resolve } from 'node:path';
+import { EvaluationCatalog } from '../../scripts/evaluation/catalog.ts';
+import { EvaluationWorkspace } from '../../scripts/evaluation/workspace.ts';
+import { runContinuityOffline } from '../../scripts/evaluation/continuity.ts';
+if(!process.env.DAFEIYU_TEST_RUN||!tmpdir().startsWith(process.env.DAFEIYU_TEST_RUN))throw new Error('MANAGED_TEST_RUN_REQUIRED');
+test('H06 preserves two real summary generations and exposes verified current views after actual restart',async t=>{const catalog=new EvaluationCatalog(resolve('.')),parent=await mkdtemp(join(tmpdir(),'eval-h06-')),workspace=await EvaluationWorkspace.create(resolve('.'),join(parent,'run'),catalog,'a'.repeat(40));try{const measurements:unknown[]=[];for(const condition of ['full','compressed','compressed-restarted']){const result=await runContinuityOffline(catalog,catalog.case('H06-'+condition+'-1'),workspace);assert.equal(result.state,'needs-human-review',JSON.stringify({condition,result}));const artifact=result.artifacts.find(a=>a.relative.endsWith('program.json'))!,program=JSON.parse((await workspace.read(artifact.relative,artifact.hash)).toString());measurements.push({condition,...program.evidence['actual-compaction-condition']});}t.diagnostic(JSON.stringify({sample:'H06',measurements}));assert.equal(workspace.ledger.report().humanAccepted,false);}finally{workspace.close();}});

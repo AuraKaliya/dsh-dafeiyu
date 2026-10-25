@@ -25,7 +25,7 @@ export function installEvaluationBilling(ctx:Context,ledger:EvaluationLedger,raw
       if(chunk.type==='usage'){try{usage=totalUsage(chunk.usage);}catch{usage=null;error='EVALUATION_USAGE_INVALID';}}
       if(chunk.type==='finish'){finish=chunk.reason.kind;complete=true;if(['error','aborted'].includes(finish))error??='EVALUATION_MODEL_FAILED';}
       yield chunk;
-    }}catch{error??='EVALUATION_STREAM_FAILED';throw new Error(error);}
+    }}catch(caught){error??=caught instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(caught.message)?caught.message:'EVALUATION_STREAM_FAILED';throw new Error(error);}
     finally{if(!complete){usage=null;error??='EVALUATION_STREAM_INTERRUPTED';}if(reservationId)ledger.settle(reservationId,usage);
       ledger.recordCall({...base,phase:'finished',at:new Date().toISOString(),durationMs:Math.max(0,Date.now()-started),inputTokens:usage?.inputTokens??null,outputTokens:usage?.outputTokens??null,finish,error});}
   });
