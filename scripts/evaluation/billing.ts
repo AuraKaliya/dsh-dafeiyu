@@ -11,9 +11,10 @@ export const BillingRouteSchema=z.strictObject({provider:z.string().min(1).max(1
 function totalUsage(raw:TokenUsage){const usage=z.object({inputTokens:count,outputTokens:count,cacheReadTokens:count.optional(),cacheWriteTokens:count.optional(),totalTokens:count.optional(),reasoningTokens:count.optional()}).parse(raw),inputTokens=usage.inputTokens+(usage.cacheReadTokens??0)+(usage.cacheWriteTokens??0);count.parse(inputTokens);
   if(usage.totalTokens!==undefined&&usage.totalTokens!==inputTokens+usage.outputTokens||usage.reasoningTokens!==undefined&&usage.reasoningTokens>usage.outputTokens)throw new Error('EVALUATION_USAGE_INCONSISTENT');return {inputTokens,outputTokens:usage.outputTokens,breakdown:{uncachedInputTokens:usage.inputTokens,cacheReadTokens:usage.cacheReadTokens??0,cacheWriteTokens:usage.cacheWriteTokens??0,outputTokens:usage.outputTokens,reasoningTokens:usage.reasoningTokens??null}};}
 /** Reads DSH's frozen request without rewriting it; every next() dispatch is covered, including summary sessions. */
-export function installEvaluationBilling(ctx:Context,ledger:EvaluationLedger,raw:z.infer<typeof BillingRouteSchema>,attemptId:()=>string){const route=Object.freeze(BillingRouteSchema.parse(raw));
+export function installEvaluationBilling(ctx:Context,ledger:EvaluationLedger,raw:z.infer<typeof BillingRouteSchema>,attemptId:()=>string,onRejected?:(code:string)=>void){const route=Object.freeze(BillingRouteSchema.parse(raw));
   if(ledger.config.mode==='offline'&&(route.provider!=='local-test'||route.model!=='scripted'))throw new Error('EVALUATION_OFFLINE_ROUTE_REQUIRED');
   return ctx.on('llm/stream',async function*(options,next){
+    try{
     if(options.provider!==route.provider||options.model!==route.model)throw new Error('EVALUATION_ROUTE_CHANGED');options.signal?.throwIfAborted();
     const info=await ctx.llm.resolveModelInfo(route.provider,route.model,options.signal);if(info.context?.contextWindow!==route.contextWindow)throw new Error('EVALUATION_MODEL_CAPACITY_CHANGED');
     const output=options.maxTokens??info.defaultMaxTokens??route.contextWindow;if(!Number.isSafeInteger(output)||output<1||output>route.contextWindow)throw new Error('EVALUATION_OUTPUT_BOUND_INVALID');
@@ -29,5 +30,6 @@ export function installEvaluationBilling(ctx:Context,ledger:EvaluationLedger,raw
     }}catch(caught){error??=caught instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(caught.message)?caught.message:'EVALUATION_STREAM_FAILED';throw new Error(error);}
     finally{if(!complete||invalidUsage||finish==='error'||finish==='aborted'){usage=null;error??='EVALUATION_STREAM_INTERRUPTED';}if(reservationId)ledger.settle(reservationId,usage?{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens}:null);
       ledger.recordCall({...base,phase:'finished',at:new Date().toISOString(),durationMs:Math.max(0,Date.now()-started),inputTokens:usage?.inputTokens??null,outputTokens:usage?.outputTokens??null,finish,error,usageBreakdown:usage?.breakdown??null});}
+    }catch(rejected){onRejected?.(rejected instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(rejected.message)?rejected.message:'EVALUATION_CALL_REJECTED');throw rejected;}
   });
 }
