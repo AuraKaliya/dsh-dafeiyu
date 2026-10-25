@@ -1,0 +1,287 @@
+{
+  "scope": "7C-1A targeted offline budget and billing checks",
+  "runs": [
+    {
+      "schemaVersion": 1,
+      "runId": "73e58044-3293-49c4-8ebf-d47c95955535",
+      "startedAt": "2026-10-25T19:10:00.99Z",
+      "finishedAt": "2026-10-25T19:10:04.88Z",
+      "stages": [
+        {
+          "name": "build",
+          "code": 0,
+          "signal": null,
+          "durationMs": 130
+        },
+        {
+          "name": "test-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 2525
+        },
+        {
+          "name": "tooling-types",
+          "code": 2,
+          "signal": null,
+          "durationMs": 1146
+        }
+      ],
+      "summary": null,
+      "reason": "TEST_STAGE_FAILED",
+      "cleanup": {
+        "removed": [
+          "f82987ac-eb18-48ff-9cdd-46de2182fc59"
+        ],
+        "retained": [
+          {
+            "id": "29ccf421-87e0-4b5b-a20d-5ab4b944f107",
+            "bytes": 8630997
+          },
+          {
+            "id": "73e58044-3293-49c4-8ebf-d47c95955535",
+            "bytes": 4073862
+          },
+          {
+            "id": "c6a650c2-5d17-4bff-b5dd-5ced4d9cf603",
+            "bytes": 12926867
+          }
+        ],
+        "blocked": []
+      },
+      "freeBytes": 213603422208,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "schemaVersion": 1,
+      "runId": "5819345f-c328-4ed5-b6d5-c921c8cf77cb",
+      "startedAt": "2026-10-25T19:10:19.074Z",
+      "finishedAt": "2026-10-25T19:10:23.381Z",
+      "stages": [
+        {
+          "name": "build",
+          "code": 0,
+          "signal": null,
+          "durationMs": 129
+        },
+        {
+          "name": "test-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 2472
+        },
+        {
+          "name": "tooling-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 1174
+        },
+        {
+          "name": "tests",
+          "code": 1,
+          "signal": null,
+          "durationMs": 446
+        }
+      ],
+      "summary": {
+        "success": false,
+        "counts": {
+          "tests": 14,
+          "failed": 1,
+          "passed": 13,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 14,
+          "suites": 0
+        },
+        "durationMs": 384.592,
+        "failures": [
+          {
+            "name": "billing binds system and effort, refuses a larger completion bound, and keeps raw cache categories",
+            "file": "evaluation-real-billing.test.ts"
+          }
+        ]
+      },
+      "reason": "TEST_STAGE_FAILED",
+      "cleanup": {
+        "removed": [
+          "c6a650c2-5d17-4bff-b5dd-5ced4d9cf603"
+        ],
+        "retained": [
+          {
+            "id": "29ccf421-87e0-4b5b-a20d-5ab4b944f107",
+            "bytes": 8630997
+          },
+          {
+            "id": "5819345f-c328-4ed5-b6d5-c921c8cf77cb",
+            "bytes": 4767461
+          },
+          {
+            "id": "73e58044-3293-49c4-8ebf-d47c95955535",
+            "bytes": 4073862
+          }
+        ],
+        "blocked": []
+      },
+      "freeBytes": 213611655168,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "schemaVersion": 1,
+      "runId": "90612a56-cbe0-4de9-9e7f-229edd14f2e5",
+      "startedAt": "2026-10-25T19:10:52.353Z",
+      "finishedAt": "2026-10-25T19:10:57.037Z",
+      "stages": [
+        {
+          "name": "build",
+          "code": 0,
+          "signal": null,
+          "durationMs": 128
+        },
+        {
+          "name": "test-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 2494
+        },
+        {
+          "name": "tooling-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 1169
+        },
+        {
+          "name": "tests",
+          "code": 1,
+          "signal": null,
+          "durationMs": 760
+        }
+      ],
+      "summary": {
+        "success": false,
+        "counts": {
+          "tests": 14,
+          "failed": 1,
+          "passed": 13,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 14,
+          "suites": 0
+        },
+        "durationMs": 685.0457,
+        "failures": [
+          {
+            "name": "billing binds system and effort, refuses a larger completion bound, and keeps raw cache categories",
+            "file": "evaluation-real-billing.test.ts"
+          }
+        ]
+      },
+      "reason": "TEST_STAGE_FAILED",
+      "cleanup": {
+        "removed": [
+          "29ccf421-87e0-4b5b-a20d-5ab4b944f107"
+        ],
+        "retained": [
+          {
+            "id": "5819345f-c328-4ed5-b6d5-c921c8cf77cb",
+            "bytes": 4767461
+          },
+          {
+            "id": "73e58044-3293-49c4-8ebf-d47c95955535",
+            "bytes": 4073862
+          },
+          {
+            "id": "90612a56-cbe0-4de9-9e7f-229edd14f2e5",
+            "bytes": 4767543
+          }
+        ],
+        "blocked": []
+      },
+      "freeBytes": 213613051904,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "schemaVersion": 1,
+      "runId": "86a7d871-3406-4a46-abf3-1874d3a35b54",
+      "startedAt": "2026-10-25T19:11:22.91Z",
+      "finishedAt": "2026-10-25T19:11:26.99Z",
+      "stages": [
+        {
+          "name": "build",
+          "code": 0,
+          "signal": null,
+          "durationMs": 128
+        },
+        {
+          "name": "test-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 2455
+        },
+        {
+          "name": "tooling-types",
+          "code": 0,
+          "signal": null,
+          "durationMs": 1170
+        },
+        {
+          "name": "tests",
+          "code": 0,
+          "signal": null,
+          "durationMs": 258
+        }
+      ],
+      "summary": {
+        "success": true,
+        "counts": {
+          "tests": 1,
+          "failed": 0,
+          "passed": 1,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 1,
+          "suites": 0
+        },
+        "durationMs": 177.5576,
+        "failures": []
+      },
+      "reason": null,
+      "cleanup": {
+        "removed": [
+          "86a7d871-3406-4a46-abf3-1874d3a35b54"
+        ],
+        "retained": [
+          {
+            "id": "5819345f-c328-4ed5-b6d5-c921c8cf77cb",
+            "bytes": 4767461
+          },
+          {
+            "id": "73e58044-3293-49c4-8ebf-d47c95955535",
+            "bytes": 4073862
+          },
+          {
+            "id": "90612a56-cbe0-4de9-9e7f-229edd14f2e5",
+            "bytes": 4767543
+          }
+        ],
+        "blocked": []
+      },
+      "freeBytes": 213613051904,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    }
+  ],
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "fullRegression": false
+}
