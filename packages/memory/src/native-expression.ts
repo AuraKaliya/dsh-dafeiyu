@@ -30,7 +30,7 @@ export class NativeExpression implements NativeExpressionPort {
     for(const candidate of candidates){const source=candidate.source;let material:string|null=null,fence:string|null=null,kind:'reported'|'inference'='reported',mediaStamp:string|null=null;
       if(source.kind==='memory')material=this.expression.nativeMemoryMaterial(scope.agentId,source,anchor.target,access.expressionPolicy??null);
       else if(candidate.view!==null){const observed=this.store.capabilities.withAccess(access.execution,()=>{const media=this.ctx.dafeiyu.nativeMediaObservedMaterial(access.execution,source,anchor.target,candidate.view!);if(media){kind=media.kind;mediaStamp=media.stamp;}
-        return this.store.capabilities.expressionView(access.execution,source,anchor.target,candidate.view!,!!media);});material=observed?.text??null;fence=observed?.fence??null;}
+        return this.store.capabilities.expressionView(access.execution,source,anchor.target,candidate.view!,!!media,(proof,view)=>this.ctx.dafeiyu.capabilityPublicView(proof,view));});material=observed?.text??null;fence=observed?.fence??null;}
       if(material===null){forbidden=true;continue;}if(evidence.length>=16)throw new Error('NATIVE_EXPRESSION_CAPACITY');
       evidence.push({id:`S${evidence.length+1}`,kind,text:material});proofs.push({source,viewHash:hash(material),fence,...(mediaStamp?{mediaStamp}:{})});
     }

@@ -32,7 +32,7 @@ export function outcomes(request:GenerateOptions){return request.messages.flatMa
 const browseData=z.object({snapshotId:z.uuid(),nextCursor:z.uuid().nullable(),page:z.record(z.string(),z.json()).and(z.object({messages:z.array(z.object({id:z.string(),text:z.string(),occurredAt:z.string().nullable(),unsupported:z.array(z.string())})),limitations:z.array(z.string())}))});
 export function lastPage(request:GenerateOptions){const pages=outcomes(request).flatMap(outcome=>{const result=browseData.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(pages.length,'model must actually see a QQ page');return pages.at(-1)!;}
 
-export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],extraTaskResources=[],explorationResources,deliverResults=false,existingRoot,media=false,audio=false,voiceDirectives=false,mediaSend=false,tts=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];extraTaskResources?:Conversation[];explorationResources?:Conversation[];deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean;voiceDirectives?:boolean;mediaSend?:boolean;tts?:boolean}={}){
+export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],extraTaskResources=[],explorationResources,beforeActivate,deliverResults=false,existingRoot,media=false,audio=false,voiceDirectives=false,mediaSend=false,tts=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];extraTaskResources?:Conversation[];explorationResources?:Conversation[];beforeActivate?:(ctx:Context,root:string)=>Promise<void>;deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean;voiceDirectives?:boolean;mediaSend?:boolean;tts?:boolean}={}){
   const scratch=testTempDir();if(existingRoot){const path=relative(resolve(process.env.DAFEIYU_TEST_RUN!),resolve(existingRoot));if(path.startsWith('..')||/^[A-Za-z]:/.test(path))throw new Error('FIXTURE_ROOT_OUTSIDE_MANAGED_RUN');}
   const root=existingRoot??await mkdtemp(join(scratch,'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
@@ -82,6 +82,7 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
   // Unbound v2 cache is deliberately retained, but must never appear in new account-bound pages.
   const old=new QQ.QqStore(join(root,'qq','qq.sqlite'));old.remember(JSON.stringify(['group',group]),'900',owner,'UNBOUND_CACHE_SENTINEL');old.close();
   let fiber=await h.ctx.plugin(QQ,config);
+  await beforeActivate?.(h.ctx,root);
   h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();await h.core.recoverExecutions();h.core.recover();h.core.activate({deferWork:true});
   const ready=async()=>{await h.ctx.dafeiyuQQ.start();await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&wss.clients.size>0);};await ready();h.core.activate();
   const emit=(event:object)=>{for(const ws of wss.clients)if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(event));};

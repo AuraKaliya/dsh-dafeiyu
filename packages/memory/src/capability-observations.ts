@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { CapabilityObservationSchema,CapabilitySelectionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema,SourceDependencySchema,PersonaSourceRefSchema,redactJson,conversationKey } from '@dafeiyu/contracts';
-import type { CapabilityObservationAccess,PersonaAccess,PersonaSourceRef,TimelineScope,MemoryAccessPurpose,Conversation } from '@dafeiyu/contracts';
+import type { CapabilityObservationAccess,PersonaAccess,PersonaSourceRef,TimelineScope,MemoryAccessPurpose,Conversation,ResourceProof } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import { conservativeBoundary } from './boundary.js';
 import { personaScope } from './persona-digest.js';
@@ -67,8 +67,8 @@ export class CapabilityObservations {
   }
   material(access:PersonaAccess,ref:PersonaSourceRef){return this.withAccess(access,()=>{const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||!this.valid(scope,ref))return null;
     return {text:JSON.stringify(row.body),dependencies:row.body.parent?[row.body.parent]:[],rootSources:row.body.proof.roots};});}
-  expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string,publicMedia=false):{text:string;fence:string}|null{return this.withAccess(access,()=>{
-    const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||conversationKey(scope.agentId,row.body.proof.scene)!==conversationKey(scope.agentId,target)&&!(publicMedia&&row.body.proof.provider==='media')
+  expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string,publicMedia=false,publicView?:(proof:ResourceProof,view:string)=>boolean):{text:string;fence:string}|null{return this.withAccess(access,()=>{
+    const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||conversationKey(scope.agentId,row.body.proof.scene)!==conversationKey(scope.agentId,target)&&!(publicMedia&&row.body.proof.provider==='media')&&!(access.resourceAllowed?.(row.body.proof.scene)&&publicView?.(row.body.proof,view))
       ||!this.valid(scope,ref,textHash(view))||this.suppressed(scope,row.body.proof)||this.suppressed({agentId:scope.agentId,route:conversationKey(scope.agentId,target)},row.body.proof))return null;
     const versions=new Map<string,number>();for(const route of new Set([scope.route,conversationKey(scope.agentId,target)])){
       for(const memory of this.db.prepare('SELECT i.id,i.version,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,route)){

@@ -271,6 +271,7 @@ export class DafeiyuService extends Service {
     if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const scene=ConversationSchema.parse(raw);this.executions.authorizeResource(context,pluginId,scene);return scene;
   }
   capabilityResourceCurrent(raw:unknown):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registryV3.resourceCurrent(proof.data);}
+  capabilityPublicView(raw:unknown,view:string):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registryV3.publicView(proof.data,view);}
   capabilityResourceEpoch(scope?:TimelineScope):string {return this.registryV3.resourceEpoch(scope);}
   capabilityResourceEpochWithout(providerId:string,scope?:TimelineScope):string {return this.registryV3.resourceEpoch(scope,providerId);}
   capabilityHistoryCurrent(scope:TimelineScope,deps:readonly SourceDependency[]):boolean {

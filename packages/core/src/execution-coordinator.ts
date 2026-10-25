@@ -522,7 +522,7 @@ export class ExecutionCoordinator {
     if(run.state==='completed'&&run.result)this.d.memory()?.bindResult(run.definition.taskId!,run.id,run.definition.intentVersion,{result:run.result,continuity:this.d.store.readInput(run.id,'continuity-reference')});
     const lifecycle=this.d.memory()?.recordLifecycle;
     if(lifecycle||this.lifecycleObservers.size){
-      const changed=event.type==='operation.succeeded'&&operation&&((operation.plugin==='memory-execution'&&['dafeiyu_execution_contribute','dafeiyu_execution_select'].includes(operation.action))||operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select');
+      const changed=event.type==='operation.succeeded'&&operation&&((operation.plugin==='memory-execution'&&['dafeiyu_execution_contribute','dafeiyu_execution_select'].includes(operation.action))||operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select'||operation.plugin==='bilibili'&&operation.action==='bili_observe_select');
       const type=changed?'evidence.changed':event.type;
       if(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed'].includes(type)){
         const facts=z.object({goal:z.string(),epoch:z.number()}).safeParse(this.d.store.readInput(run.id,'task-facts'));
