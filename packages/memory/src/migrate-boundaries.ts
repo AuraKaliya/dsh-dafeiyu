@@ -7,7 +7,7 @@ import { conservativeBoundary,boundaryDigest } from './boundary.js';
  * No old row, fingerprint, content hash, tombstone, source fence or generation is rewritten. */
 export function migrateMemoryBoundaries(db:DatabaseSync):void {
   const version=db.prepare('PRAGMA user_version').get()?.user_version;
-if(version===2||version===3||version===4||version===5||version===6||version===7||version===8||version===9||version===10){db.prepare('SELECT id,revision,body,boundary_hash FROM memory_boundaries LIMIT 0').all();return;}
+if(version===2||version===3||version===4||version===5||version===6||version===7||version===8||version===9||version===10||version===11){db.prepare('SELECT id,revision,body,boundary_hash FROM memory_boundaries LIMIT 0').all();return;}
   if(version!==1)throw new Error('Unsupported memory boundary migration');
   db.exec(`CREATE TABLE memory_boundaries(id TEXT NOT NULL,revision INTEGER NOT NULL,body TEXT NOT NULL,boundary_hash TEXT NOT NULL,
     PRIMARY KEY(id,revision),FOREIGN KEY(id,revision) REFERENCES memory_revisions(id,revision));

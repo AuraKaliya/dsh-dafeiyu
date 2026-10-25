@@ -35,7 +35,7 @@ test('multi-store migration creates verified backups and preserves legacy rows, 
   const originalSession=await readFile(join(fixture.sessionsDir,'fictional.jsonl'));
   const plan=await planMigration(fixture);assert.equal(inspectStorage(memoryFile,'memory').version,1);
   const result=await applyMigration(plan);assert.equal(result.complete,true);assert.equal(verifyMigration(plan).passed,true);
-const after=new DatabaseSync(memoryFile);try{assert.deepEqual(legacySnapshot(after),before);assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,10);assert.equal(after.prepare('SELECT count(*) AS n FROM execution_sources').get()?.n,0);assert.equal(after.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=7').get()?.n,1);}finally{after.close();}
+const after=new DatabaseSync(memoryFile);try{assert.deepEqual(legacySnapshot(after),before);assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,11);assert.equal(after.prepare('SELECT count(*) AS n FROM execution_sources').get()?.n,0);assert.equal(after.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=7').get()?.n,1);}finally{after.close();}
   assert.deepEqual(await readFile(join(fixture.sessionsDir,'fictional.jsonl')),originalSession);
   await access(join(fixture.backupDir,plan.id,'0-journal.sqlite'));await access(join(fixture.backupDir,plan.id,'1-memory.sqlite'));
   const marker=JSON.parse(await readFile(join(fixture.coreDir,'migration-state.json'),'utf8'));assert.equal(marker.complete,true);
@@ -89,7 +89,7 @@ test('WAL setup waits within the existing busy budget for a real legacy reader t
     {eval:true,workerData:{file,module:new URL('../packages/memory/lib/store.js',import.meta.url).href}});
   try{
     await new Promise<void>((resolve,reject)=>{worker.on('message',value=>{if(value==='opening')timer=setTimeout(()=>{reader.exec('ROLLBACK');released=true;},150);else if(value==='done')resolve();});worker.once('error',reject);worker.once('exit',code=>{if(code!==0)reject(new Error('Migration worker failed'));});});
-    assert.equal(released,true);assert.equal(inspectStorage(file,'memory').version,10);
+    assert.equal(released,true);assert.equal(inspectStorage(file,'memory').version,11);
   }finally{if(timer)clearTimeout(timer);if(!released)reader.exec('ROLLBACK');reader.close();await worker.terminate();}
 });
 

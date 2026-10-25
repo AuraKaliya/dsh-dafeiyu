@@ -9,7 +9,7 @@ import type { TaskExpression } from './expression.js';
 import { verifyPersonaDelivery } from './expression-runtime.js';
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function migrateNativeExpression(db:DatabaseSync){const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===10){db.prepare('SELECT * FROM native_expression_packets LIMIT 0').all();return;}
+  if(version===10||version===11){db.prepare('SELECT * FROM native_expression_packets LIMIT 0').all();return;}
   if(version!==9)throw new Error('Unsupported native expression database');
   db.exec(`CREATE TABLE native_expression_packets(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,version INTEGER NOT NULL,withdrawn INTEGER NOT NULL,body TEXT NOT NULL,UNIQUE(agent_id,run_id));
     CREATE TRIGGER native_expression_immutable BEFORE UPDATE OF id,agent_id,task_id,run_id,body ON native_expression_packets BEGIN SELECT RAISE(ABORT,'Immutable native expression'); END;

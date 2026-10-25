@@ -28,9 +28,11 @@ import { ExecutionSources } from './execution-sources.js';
 import { ExecutionMemoryState } from './execution-memory-state.js';
 import { CapabilityObservations, migrateCapabilityObservations } from './capability-observations.js';
 import { NativeExpression,migrateNativeExpression } from './native-expression.js';
+import { migrateExperience } from './migrate-experience.js';
+import { ExperienceStore } from './experience-store.js';
 
 export const MEMORY_APPLICATION_ID = 0x44464d31;
-export const MEMORY_SCHEMA_VERSION = 10;
+export const MEMORY_SCHEMA_VERSION = 11;
 const APPLICATION_ID = MEMORY_APPLICATION_ID;
 const string = (value: unknown): string => z.string().parse(value);
 const integer = (value: unknown): number => z.number().int().safe().parse(value);
@@ -74,7 +76,7 @@ export class MemoryStore {
       const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
       const tables = this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
       const fresh = app === 0 && version === 0 && tables === 0;
-      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7&&version!==8&&version!==9&&version!==10))) throw new Error('Unsupported memory database identity or schema');
+      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7&&version!==8&&version!==9&&version!==10&&version!==11))) throw new Error('Unsupported memory database identity or schema');
       configureSqlite(this.db);
       if (fresh) this.transaction(() => this.db.exec(`
         CREATE TABLE memory_items(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,
@@ -112,6 +114,7 @@ export class MemoryStore {
       this.transaction(()=>migrateCapabilityObservations(this.db));
       this.capabilities=new CapabilityObservations(this.db,this);
       this.transaction(()=>migrateNativeExpression(this.db));
+      this.transaction(()=>migrateExperience(this.db));
     } catch (error) { this.db.close(); throw error; }
   }
   private transaction<T>(work: () => T): T {
@@ -132,6 +135,7 @@ export class MemoryStore {
   }
   taskMemory(tasks:TaskWorkspace,retrieval:MemoryRetrieval|null){return new TaskMemory(this.db,work=>this.transaction(work),this,tasks,retrieval);}
   personaStore(resolve:PersonaResolver){return new PersonaStore(this.db,work=>this.transaction(work),resolve);}
+  experienceStore(resolve:PersonaResolver){return new ExperienceStore(this.db,work=>this.transaction(work),resolve);}
   executionSources(resolve:PersonaResolver){return new ExecutionSources(this.db,work=>this.transaction(work),resolve);}
   executionState(sources:ExecutionSources,resolve:PersonaResolver){return new ExecutionMemoryState(this.db,this,sources,resolve);}
   /** Trusted same-store composition; callers must keep this synchronous. */

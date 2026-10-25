@@ -1,0 +1,13 @@
+{
+  "step": "memory-E1", "date": "2026-10-25", "planCommit": "70c0e85",
+  "schema": {"memory": 11, "runtime": 3, "qq": 4},
+  "checks": [
+    {"runId": "c595d166-0e36-4771-87c6-aadd1a56efbe", "phase": "build", "passed": false, "reason": "Two strict JSON type errors, corrected"},
+    {"runId": "cbf2e039-0039-47e1-9d50-c1bef3036711", "tests": 16, "passed": 16, "failed": 0},
+    {"runId": "dc1586f2-e783-40b6-829b-42fc2bb7b8c0", "tests": 107, "passed": 106, "failed": 1, "reason": "One stale schema tuple assertion, corrected"},
+    {"runId": "ed76bb07-71fe-45af-bbe0-cabd7b66e08f", "tests": 14, "passed": 14, "failed": 0}
+  ],
+  "fullRegression": false, "realModel": false, "realPlatform": false, "serverConnected": false,
+  "temporaryStorage": "D-drive managed runner; successes removed; failures bounded", "cleanupBlocked": false,
+  "preservedDirtySha256": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+}

@@ -72,9 +72,9 @@ test('profile migration resumes between current memory and runtime v2 with all o
   const fixture=await migrationFixture(),memoryFile=join(fixture.memoryDir,'memory.sqlite'),runtimeFile=join(fixture.coreDir,'runtime.sqlite');new MemoryStore(memoryFile).close();
   const memory=new DatabaseSync(memoryFile);removePersonaTables(memory);memory.close();const original=new RuntimeStore(runtimeFile,fixture.identity,{create:true});const run=accepted(original);original.close();
   const runtime=new DatabaseSync(runtimeFile);runtime.exec('DROP TABLE native_deliveries;DROP TABLE run_persona_manifests;PRAGMA user_version=1');runtime.close();
-  const plan=await planMigration(fixture);assert.deepEqual(plan.files.filter(file=>file.kind==='memory'||file.kind==='runtime').map(file=>file.targetVersion),[10,3]);
+  const plan=await planMigration(fixture);assert.deepEqual(plan.files.filter(file=>file.kind==='memory'||file.kind==='runtime').map(file=>file.targetVersion),[11,3]);
   await assert.rejects(applyMigration(plan,{afterStep:kind=>{if(kind==='memory')throw new Error('fixture interruption');}}),/BACKUP_RETAINED/);
-  assert.equal(inspectStorage(memoryFile,'memory').version,10);assert.equal(inspectStorage(runtimeFile,'runtime').version,1);
+  assert.equal(inspectStorage(memoryFile,'memory').version,11);assert.equal(inspectStorage(runtimeFile,'runtime').version,1);
   await applyMigration(plan);assert.equal(inspectStorage(runtimeFile,'runtime').version,3);assert.equal((await applyMigration(plan)).complete,true);
   const verified=new RuntimeStore(runtimeFile,fixture.identity);try{assert.deepEqual(verified.get(run.id),run);assert.equal(verified.personaBinding(run.id).kind,'legacy-unbound');}finally{verified.close();}
 });
@@ -84,7 +84,7 @@ test('memory v8 to v9 adds observation bookkeeping without changing prior person
   dropCapabilityFixtureSchema(db);db.exec('PRAGMA user_version=8');db.prepare('INSERT INTO persona_profiles VALUES(?,?)').run('fish',0);
   const before=db.prepare('SELECT * FROM persona_profiles').all();db.close();const bytes=await readFile(file);
   assert.equal(inspectStorage(file,'memory').version,8);assert.deepEqual(await readFile(file),bytes);new MemoryStore(file).close();new MemoryStore(file).close();
-  const after=new DatabaseSync(file,{readOnly:true});try{assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,10);assert.deepEqual(after.prepare('SELECT * FROM persona_profiles').all(),before);
+  const after=new DatabaseSync(file,{readOnly:true});try{assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,11);assert.deepEqual(after.prepare('SELECT * FROM persona_profiles').all(),before);
     assert.equal(after.prepare('SELECT count(*) AS n FROM capability_observations').get()?.n,0);assert.equal(after.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=9').get()?.n,1);
   }finally{after.close();}
 });
