@@ -1,0 +1,20 @@
+{
+  "step":"activity-4D","date":"2026-10-25","baseline":"d1604f5",
+  "checks":[
+    {"runId":"d452c121-76b0-4ea7-8047-18399eb4eead","passed":21,"failed":0},
+    {"runId":"c280ce26-31dd-4e13-b849-10b2e194934b","passed":21,"failed":0},
+    {"runId":"c421dee8-61ca-44f9-9fab-fa2115087313","passed":4,"failed":0},
+    {"runId":"74d63921-6a38-4333-b936-890b34cc3aed","passed":0,"failed":1,"correction":"Validate historical activity context by its immutable occurrence and same Task"},
+    {"runId":"c37bb86a-7df2-4b7e-8143-9fa0fb71be06","passed":14,"failed":0},
+    {"runId":"ab7231c9-e687-4313-8071-6b5dd03211d4","passed":18,"failed":0},
+    {"runId":"ea6ab70c-2ac0-41bc-8a96-2f93d3effcdc","tests":null,"passed":false,"correction":"Use NonNullable when referring to the optional fixture options type"},
+    {"runId":"281ed822-eae4-4cf7-8a72-f0e9dc927e27","passed":10,"failed":0},
+    {"runId":"2a4a32c8-de63-49b1-ac23-fe4a10045a15","passed":11,"failed":0},
+    {"runId":"2a51c6ff-7bc4-47b4-9bca-85531b5b6f45","passed":20,"failed":1,"correction":"Synthetic v9 database must remove later v11 tables"},
+    {"runId":"f2ad6b14-54e0-4e66-9cbd-d6437f6cfa86","passed":9,"failed":0}
+  ],
+  "localDevelopment":"complete","nextStage":"media-and-qq-design",
+  "fullRegression":false,"realModel":false,"realPlatform":false,"serverConnected":false,"releaseTagged":false,
+  "schemas":{"activity":1,"memory":11,"runtime":3,"qq":4},"cleanupBlocked":false,
+  "preservedDirtySha256":"CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+}

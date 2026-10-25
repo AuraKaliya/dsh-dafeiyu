@@ -7,6 +7,7 @@ import { MemoryStore,MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { inspectStorage } from '@dafeiyu/host';
 import { qqCapabilityFixture,scene,otherGroup,lastPage,bot,group,until,outcomes } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
+import { dropExperienceFixtureSchema } from './legacy-execution-fixture.js';
 type Fixture=Awaited<ReturnType<typeof qqCapabilityFixture>>;
 const native=(r:{sessionId?:unknown})=>String(r.sessionId).startsWith('dafeiyu-task-');
 function rows(h:Fixture){const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{return db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE q.producer='qq-tasks' ORDER BY r.rowid").all().map(row=>String(row.id));}finally{db.close();}}
@@ -64,7 +65,7 @@ test('deleting then restoring target memory cannot revive an older native expres
 
 test('memory v9 upgrades preserve existing task, intent and observation rows and start with no native expression packets',async()=>{
   const h=await qqCapabilityFixture({tasks:true});await h.message('迁移用虚构来源');await task(h);await h.close();const path=join(h.root,'memory','memory.sqlite'),db=new DatabaseSync(path);
-  const tables=['task_workspaces','task_intent_events','capability_observations'],before=tables.map(table=>db.prepare(`SELECT * FROM ${table}`).all());db.exec('DROP TABLE native_expression_packets;DELETE FROM memory_schema_migrations WHERE version=10;PRAGMA user_version=9;');db.close();
+  const tables=['task_workspaces','task_intent_events','capability_observations'],before=tables.map(table=>db.prepare(`SELECT * FROM ${table}`).all());dropExperienceFixtureSchema(db);db.exec('DROP TABLE native_expression_packets;DELETE FROM memory_schema_migrations WHERE version=10;PRAGMA user_version=9;');db.close();
   assert.equal(inspectStorage(path,'memory').version,9);new MemoryStore(path).close();const after=new DatabaseSync(path,{readOnly:true});try{assert.deepEqual(tables.map(table=>after.prepare(`SELECT * FROM ${table}`).all()),before);assert.equal(after.prepare('SELECT count(*) AS n FROM native_expression_packets').get()?.n,0);assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);}finally{after.close();}
 });
 

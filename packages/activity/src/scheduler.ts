@@ -24,7 +24,7 @@ export class ActivityScheduler {
   constructor(private readonly ctx:Context,private readonly store:ActivityStore,private readonly configHash:string,private readonly ready:()=>boolean,private readonly now:()=>number,private readonly monotonic:()=>number=()=>performance.now()){
     this.explore=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'self-exploration',basis:['scheduled-autonomous-exploration']}});
     this.maintain=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'maintenance',basis:['durable-memory-maintenance-request']}});
-    this.unbindWake=ctx.dafeiyu.bindWakeAuthority({producerId:'activity',validate:(origin,task)=>this.authorized(origin,task)});
+    this.unbindWake=ctx.dafeiyu.bindWakeAuthority({producerId:'activity',validate:(origin,task)=>this.authorized(origin,task),sourceAnchor:origin=>this.store.snapshot(origin.scheduleId,origin.scheduleVersion).anchor});
     try{this.unbindEvents=ctx.dafeiyu.bindExecutionLifecycle('activity',event=>this.receive(event));}catch(error){this.unbindWake();throw error;}
   }
   bindMemory(port:MemoryMaintenanceSchedulingPort){if(this.memory)throw new Error('DUPLICATE_PROVIDER');this.disconnectMemory=port.connect();this.memory=port;}
@@ -55,6 +55,9 @@ export class ActivityScheduler {
   }
   context(view:ExecutionView):ContextItem[] {
     const occurrence=this.occurrence(view);if(!occurrence||view.scope.kind!=='task'||occurrence.body.taskId!==view.scope.taskId)return [];
+    return this.contextFor(occurrence);
+  }
+  private contextFor(occurrence:StoredOccurrence):ContextItem[] {
     const plan=this.store.snapshot(occurrence.body.scheduleId,occurrence.body.scheduleVersion);
     const text=JSON.stringify({kind:'activity-occurrence',purpose:plan.purpose,scheduleId:plan.id,scheduleVersion:plan.version,occurrenceId:occurrence.body.id,
       dueAt:occurrence.body.dueAt,reason:occurrence.body.reason,eventId:occurrence.body.eventId,goal:plan.goal,maintenanceId:plan.maintenanceId,
@@ -62,9 +65,11 @@ export class ActivityScheduler {
     return [ContextItemSchema.parse({id:`activity:${occurrence.body.id}`,version:'1',text,expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:`dafeiyu:activity:${occurrence.body.id}`,version:'1',hash:activityHash(text)}]})];
   }
   contextCurrent(view:ExecutionView,item:ContextItem){try{
-    const occurrence=this.occurrence(view);if(!occurrence)return false;const plan=this.store.snapshot(occurrence.body.scheduleId,occurrence.body.scheduleVersion);
+    if(view.scope.kind!=='task'||view.scope.agentId!==this.store.identity.agentId||!item.id.startsWith('activity:'))return false;
+    const occurrence=this.store.occurrence(item.id.slice('activity:'.length));if(occurrence.body.taskId!==view.scope.taskId)return false;
+    const plan=this.store.snapshot(occurrence.body.scheduleId,occurrence.body.scheduleVersion);
     // History keeps the immutable occurrence, while live wake authorization separately checks cancellation.
-    return !!plan.anchor&&this.ctx.dafeiyu.activityAnchorStatus(plan.anchor).state==='valid'&&this.context(view).some(value=>activityHash(value)===activityHash(item));
+    return !!plan.anchor&&this.ctx.dafeiyu.activityAnchorStatus(plan.anchor).state==='valid'&&this.contextFor(occurrence).some(value=>activityHash(value)===activityHash(item));
   }catch{return false;}}
   private receive(event:MaintenanceLifecycle){
     if(this.closed)return;
@@ -160,6 +165,7 @@ export class ActivityScheduler {
   stop(){this.started=false;if(this.timer)clearInterval(this.timer);this.timer=undefined;}
   tick():Promise<void>{if(this.pending)return this.pending;if(!this.started||this.closed||!this.ready()||!this.dependenciesReady()||!this.ctx.dafeiyu.accepting)return Promise.resolve();
     const work=Promise.resolve().then(()=>{
+      if(!this.started||this.closed||!this.ready()||!this.ctx.dafeiyu.accepting)return;
       const now=this.now();this.importMemory(now);this.controlActive(now);if(this.pressure())return;
       this.dispatch(now);
       for(const id of this.store.due(now)){const plan=this.store.get(id),source=this.source(plan);if(source.state==='pending')continue;

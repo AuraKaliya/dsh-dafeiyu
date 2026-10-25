@@ -30,5 +30,6 @@ export const WakeRequestSchema = ExistingTaskRequestSchema.extend({origin:WakeOr
 export interface WakeAuthorityProvider {
   readonly producerId:string;
   validate(origin:Extract<z.infer<typeof RunOriginSchema>,{kind:'wake'}>,task:TaskState):boolean;
+  sourceAnchor?(origin:Extract<z.infer<typeof RunOriginSchema>,{kind:'wake'}>,task:TaskState):import('./activity.js').ActivityAnchor|null;
 }
 export const ProducerSchema=ExtensionIdSchema;

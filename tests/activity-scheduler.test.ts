@@ -16,12 +16,12 @@ import { testTempDir } from './test-temp.js';
 type H=Awaited<ReturnType<typeof executionHarness>>;
 const memoryActions=['dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_execution_select'];
 const request={requestId:'plan',title:'虚构探索安排',goal:'决定一次自主探索',policyId:'test-policy'};
-async function fixture(response:Response,options:{settings?:z.input<typeof ActivityConfigSchema>;extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>;directory?:string;now?:number;maxConcurrentRuns?:number}={}){
+async function fixture(response:Response,options:{settings?:z.input<typeof ActivityConfigSchema>;extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>;directory?:string;now?:number;maxConcurrentRuns?:number;context?:NonNullable<Parameters<typeof executionHarness>[4]>['context']}={}){
   const directory=options.directory??await mkdtemp(join(testTempDir(),'activity-scheduler-')),dataDir=join(directory,'activity'),settings={explorationPolicy:'test-policy',maintenancePolicy:'test-policy',...options.settings};
   if(!options.directory)new ActivityStore(join(dataDir,'activity.sqlite'),{agentId:'dafeiyu',profileId:'test'},settings,true).close();let now=options.now??Date.now(),monotonic=0,activity!:ActivityService;
   const configure=async(ctx:Context)=>{activity=new ActivityService(ctx,{agentId:'dafeiyu',profileId:'test',dataDir,settings},()=>now,()=>monotonic);
     if(settings.maintenance)activity.bindMaintenance(ctx.dafeiyuMemory.maintenance!.schedulingPort());activity.recover();activity.activate();};
-  const h=await executionHarness(directory,response,options.extension,!options.directory,{sourceTracking:true,...(settings.maintenance?{maintenance:{}}:{}),...(options.maxConcurrentRuns?{maxConcurrentRuns:options.maxConcurrentRuns}:{}),extraActions:[...ACTIVITY_ACTIONS,...memoryActions],extraProducers:['activity'],beforeActivate:configure});
+  const h=await executionHarness(directory,response,options.extension,!options.directory,{sourceTracking:true,...(settings.maintenance?{maintenance:{}}:{}),...(options.context?{context:options.context}:{}),...(options.maxConcurrentRuns?{maxConcurrentRuns:options.maxConcurrentRuns}:{}),extraActions:[...ACTIVITY_ACTIONS,...memoryActions],extraProducers:['activity'],beforeActivate:configure});
   return {h,activity,directory,now:()=>now,advance:(ms:number)=>{now+=ms;monotonic+=Math.max(0,ms);},start:()=>activity.start(false),tick:()=>activity.tick(),close:h.close};
 }
 function read(directory:string,sql:string,which='activity'){const file=which==='activity'?'activity/activity.sqlite':which==='memory'?'memory/memory.sqlite':'core/runtime.sqlite';const db=new DatabaseSync(join(directory,file),{readOnly:true});try{return db.prepare(sql).all();}finally{db.close();}}
@@ -144,5 +144,19 @@ test('a missed lifecycle consumer is repaired from bounded authoritative Run rec
     const calls=f.h.adapter.requests.length;await f.tick();assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'completed');assert.equal(f.h.adapter.requests.length,calls);
     const task=String(read(f.directory,"SELECT json_extract(body,'$.taskId') AS id FROM activity_occurrences")[0]!.id),run=String(read(f.directory,'SELECT run_id FROM activity_occurrences')[0]!.run_id);
     assert.deepEqual(f.h.core.journal.executionRunStates('other-agent',task,run),[]);
+  }finally{await f.close();}
+});
+
+test('maintenance cannot reintroduce a revoked planning source through its derived Task goal, even when activity context was omitted',async()=>{
+  let f:Awaited<ReturnType<typeof fixture>>,mode='plan',step=0;
+  const extension={id:'fixture',version:'1',actions:[{id:'fixture_save',version:'1',description:'selected fictional content',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
+    execute:async(_i:unknown,c:ExecutionContextV3)=>{const source=f.h.memory.persona!.recordObservation(c,{requestId:'source',text:'虚构观察，保留来源',kind:'primary',resource:'fixture:scope',occurredAt:new Date().toISOString(),coverage:['test'],completeness:'partial'},'fixture');
+      const saved=f.h.memory.persona!.contribute(c,{requestId:'save',source:source.id,version:source.version,mode:'original',reason:'选择保存'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:z.json().parse(saved),sources:[],receipts:[]};}}]};
+  f=await fixture(()=>++step===1?mode==='plan'?call('dafeiyu_activity_plan',planInput(f.now()+60000)):call('fixture_save',{}):textReply('测试步骤结束'),{extension,settings:{maintenance:true},context:{maxBytes:0}});
+  try{const parent=f.h.port.submitTask(request);await f.h.core.whenIdle();mode='explore';step=0;f.start();f.advance(60000);await f.tick();await f.h.core.whenIdle();
+    assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'completed');
+    f.h.port.updateTask(parent.task,{requestId:'revoke-parent',expectedVersion:1,status:'paused'});const calls=f.h.adapter.requests.length;
+    await f.tick();f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.equal(f.h.adapter.requests.length,calls);
+    assert.equal(read(f.directory,"SELECT status FROM activity_schedules WHERE id<>(SELECT id FROM activity_schedules ORDER BY rowid LIMIT 1)")[0]?.status,'blocked');
   }finally{await f.close();}
 });

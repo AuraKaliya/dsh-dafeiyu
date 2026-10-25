@@ -1,6 +1,6 @@
 # 大肥鱼本地统一运行入口
 
-本入口对应第一阶段1F，并已接入QQ文字／任务流程和记忆E。支持统一检查、初始化、迁移、常驻启动、一次性原生任务和状态查询。1G完整评价、自主活动、完整媒体和B站仍按后续阶段实施；此入口不自动部署服务器。
+本入口对应第一阶段1F，并已接入QQ文字／任务流程、记忆E和自主活动。支持统一检查、初始化、迁移、常驻启动、一次性原生任务和状态查询。1G完整评价、完整媒体和B站仍按后续阶段实施；此入口不自动部署服务器。
 
 ## 1. 先使用隔离的测试配置
 
@@ -101,7 +101,7 @@ Host状态的 `services.qq.capabilities` 表示动作已注册，`services.memor
 - 模型路由显式配置；本进程DSH_HOME在加载DSH之前绑定到profile内部，不跟随桌面默认模型／数据路径。
 - 状态快照位于core目录的`host-status.json`；它只保存元数据、时间、健康和计数。status还要核对PID、占用nonce、配置及更新时间，旧ready文件不能证明在线。
 - 根配置`context.compactionInputTokens`或memory插件的完整compaction配置二选一。成长区域由`persona.growthRegion`控制，不能再在普通regions里重复定义。
-- analysis、retrieval、compaction等未配置时明确显示；`configured`不等于已探测远端服务可用。activity、media、bilibili目前为not-configured。
+- analysis、retrieval、compaction等未配置时明确显示；`configured`不等于已探测远端服务可用。activity可按第9节启用；media、bilibili尚未装配。
 - 新profile初始化不会写入底色模板或预设偏好；更换启动配置不会重置阶段人格。没有新增每轮调用次数上限。
 
 退出码：0表示命令完成；1表示错误或任务失败；2表示检查未就绪、任务等待／中断或启动取消。status成功读取离线状态仍返回0，需查看`online`与状态字段。
@@ -134,10 +134,26 @@ node scripts/dafeiyu-host.mjs migrate verify --config path/to/host.json --plan .
 
 [host.memory.example.json](../profiles/host.memory.example.json)是隔离的本机脚本模型配置，启用`memory.config.sourceTracking`和`maintenance`。它用于装配检查；默认固定回复本身不会自主调用分析工具，不代表真实归纳质量。已有QQ profile可在memory配置中加`maintenance: {}`，并把需要的整理动作加入对应原生任务policy；聊天policy不因此获得跨任务正文权限。
 
-任务中的操作和选材完成后，记忆保存当前task/epoch的整理请求。当前没有activity，`services.memory.maintenance.scheduler`显示`not-configured`，请求为`waiting-scheduler`。不会因生成请求直接调用模型。按需整理在相同Task的获准Run中进行：先`dafeiyu_memory_maintenance_status`取得ID，再`dafeiyu_memory_consolidate`，然后读结果／经验。请求ID、taskId或模型参数不授予其它范围的访问权。
+任务中的操作和选材完成后，记忆保存当前task/epoch的整理请求。没有配置activity时，`services.memory.maintenance.scheduler`显示`not-configured`，请求为`waiting-scheduler`。不会因生成请求直接调用模型。按需整理在相同Task的获准Run中进行：先`dafeiyu_memory_maintenance_status`取得ID，再`dafeiyu_memory_consolidate`，然后读结果／经验。请求ID、taskId或模型参数不授予其它范围的访问权。
 
 默认一次独立分析预算为120秒、输入64 KiB、输出32 KiB；Core Run仍有自身时间限制，实际取较先到达者。没有按工具调用次数终止。超限、失效、取消和模型失败保存状态，不自动重试；更正输入后申请新请求。没有已保留证据时仅记录活动事实，不凭任务完成推断爱好或知识。
 
 `dafeiyu_experience_review`以expectedVersion追加复核记录。经验状态为accepted仍是有条件的经验，不是事实保证。`dafeiyu_memory_persona_candidate`只能明确选择proposed候选，后续试行／采用沿既有persona接口。经历修订保留旧推断作为历史输入；当前结果及人格依赖固定内容身份，旧建议不能静默变成新判断。撤下或来源变更立即阻断使用。
 
 Host状态只展示整理状态／计数，不显示目标、经验正文或来源。关闭后保留最后计数。源库升级到v11不初始化历史人格、不扫描旧聊天补造经历。完整检查见[记忆E联合记录](memory-e4-integration.md)。
+
+## 9. 自主活动与自动整理
+
+[host.activity.example.json](../profiles/host.activity.example.json)启用可选activity插件及记忆调度，仍使用本机脚本模型与隔离目录。固定回复模型本身不会主动制定计划，实际工具选择与行为质量留待真实模型验收。规划工具为`dafeiyu_activity_plan/update/status`，只在获准原生Task中使用；QQ可先通过已实现的任务入口进入相应Task。
+
+配置区分`activity-explore`与`activity-maintenance`策略，资源默认空。加入QQ／媒体／B站能力时需明确添加能力及资源范围；活动计划、来源引用或Task ID不授予额外权限。首版不自动把自主探索结果发到聊天。
+
+daemon在统一ready后启动计时；single-run只装配和保存计划，不启动后台活动或投递积压。关闭先停新调度，再排空核心运行并保留回执。`services.activity`显示运行状态、计划／机会计数与稳定故障码；记忆调度桥连接时`services.memory.maintenance.scheduler`为`connected`，这与计时器是否运行是两件事。
+
+默认每5秒轻量检查，最小全局唤醒间隔60秒、活动并发1、最多100个未结束计划、单次活动最多5分钟、每天1小时活动时间。它们是可配置的时间／容量约束，不是工具调用次数或费用预算。安静时段默认空，按IANA时区解释；周期按UTC经过时间计算。coalesce为默认错过政策，不补跑整夜每次积压。
+
+有前台工作时合作暂停并按原权限检查点继续；未知效果阻断重放。达到单次时间预算时保留进度并等待重新规划，不伪装任务完成。计划改变会废止旧的排队／暂停机会，已开始的活动可在原权限下收尾。旧来源失效后隐藏旧目标，不能只切回active便复活它。
+
+记忆自行判断待办：同Run且来源被完整覆盖的选材请求可合并；没有内容证据的请求只落定活动事实。有证据的整理通过同Task的maintenance Run执行，并保留原始经历动机。整理不会递归唤醒自己。
+
+activity使用独立`core/activity.sqlite` v1，memory仍为v11、runtime v3。已有profile首次启用activity必须走第6节显式迁移；迁移将备份旧库并追加新库，不以init替换数据。以后关闭插件仍保留其权威数据。插件只在进程存活时计时；系统启动、服务器守护和正式部署未在本阶段配置。详见[自主活动联合检查](activity-4d-integration.md)。

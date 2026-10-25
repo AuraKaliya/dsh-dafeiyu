@@ -10,6 +10,7 @@ import { initialDue,elapsedDue,nextAllowed,validateQuiet,localTime,daySlices } f
 
 export const ACTIVITY_APPLICATION_ID=0x44464134;
 export const ACTIVITY_SCHEMA_VERSION=1;
+export const ACTIVITY_TABLES=['activity_metadata','activity_schedules','activity_schedule_revisions','activity_tasks','activity_occurrences','activity_outbox','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage','activity_clock'] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const createSchema=ActivityScheduleBodySchema.omit({id:true,version:true,createdAt:true,updatedAt:true,taskGeneration:true}).extend({requestId:PersonaRequestIdSchema});
 const updateSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().positive(),state:ActivityScheduleBodySchema.shape.state.optional(),
@@ -43,6 +44,7 @@ export class ActivityStore {
       if(version===0&&app===0&&empty&&create){configureSqlite(this.db);this.transaction(()=>this.initialize());}
       else if(version!==ACTIVITY_SCHEMA_VERSION||app!==ACTIVITY_APPLICATION_ID)throw new Error('ACTIVITY_SCHEMA_UNSUPPORTED');
       const stored=this.db.prepare('SELECT body FROM activity_metadata WHERE id=1').get();if(!stored||canonical(JSON.parse(String(stored.body)))!==canonical(this.identity))throw new Error('ACTIVITY_IDENTITY_MISMATCH');
+      for(const table of ACTIVITY_TABLES)this.db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
       configureSqlite(this.db);
     }catch(error){this.db.close();throw error;}
   }

@@ -87,3 +87,4 @@ activity为可选插件，默认关闭。Host检查memory、来源跟踪、对�
 - 4A：[存储与时间规则检查](activity-4a-storage.md)完成，9项定向测试通过；核心授权、计时运行和Host装配按4B—4D继续。
 - 4B：[来源锚点、计划工具和优先／继续链检查](activity-4b-authority.md)完成；保持managed装配屏障，未启动计时运行。
 - 4C：[唤醒、让出／继续、未知效果与记忆调度检查](activity-4c-scheduling.md)完成。无证据的纯活动事实由记忆轻量落定；有证据才安排维护Run。4D继续接入Host。
+- 4D：[Host装配／迁移与联合记录](activity-4d-integration.md)完成。历史机会同Task校验，来源锚点独立进入原生输入证明；真实评估和发布全量回归仍延期。继续阶段5。

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { ContextItemSchema,ExecutionToolReceiptSchema,PersonaSourceRefSchema,SourceDependencySchema } from '@dafeiyu/contracts';
+import { ContextItemSchema,ExecutionToolReceiptSchema,PersonaSourceRefSchema,SourceDependencySchema,ActivityAnchorSchema } from '@dafeiyu/contracts';
+import type { ActivityAnchor } from '@dafeiyu/contracts';
 import type { PersonaAccess,PersonaSourceRef,ExecutionMemoryPort,SourceDependency,CompactionProvider,ContextItem,TaskRepositoryPort } from '@dafeiyu/contracts';
 import type { RuntimeStore,StoredRun } from './runtime-store.js';
 import { runtimeHash } from './runtime-store.js';
@@ -9,7 +10,7 @@ import type { CapabilityRegistryV3 } from './registry-v3.js';
 import type { ContextEvidenceView } from './context-runtime.js';
 
 const dependencies=z.array(SourceDependencySchema).max(4096);
-const inputProof=z.strictObject({schemaVersion:z.literal(1),epoch:z.number().int().positive(),inputHash:z.string(),sources:z.array(PersonaSourceRefSchema),continuity:z.strictObject({id:z.uuid(),hash:z.string()}).nullable()});
+const inputProof=z.strictObject({schemaVersion:z.literal(1),epoch:z.number().int().positive(),inputHash:z.string(),sources:z.array(PersonaSourceRefSchema),continuity:z.strictObject({id:z.uuid(),hash:z.string()}).nullable(),authorities:z.array(ActivityAnchorSchema).max(64).optional()});
 const contextRecord=z.strictObject({owner:z.string(),region:z.string(),item:ContextItemSchema});
 export interface NativeContext {owner:string;region:string;item:ContextItem}
 
@@ -24,13 +25,13 @@ export class ExecutionEvidence {
   private bound:ReturnType<ExecutionEvidence['binding']>|undefined;
   constructor(readonly run:StoredRun,private readonly store:RuntimeStore,private readonly memory:()=>ExecutionMemoryPort|undefined,
     private readonly personas:PersonaRuntime,private readonly registry:CapabilityRegistryV3,private readonly repository:TaskRepositoryPort,
-    private readonly rules:readonly string[],private readonly base:PersonaAccess){}
+    private readonly rules:readonly string[],private readonly base:PersonaAccess,private readonly authorityValid:(anchor:ActivityAnchor)=>boolean=()=>false,private readonly authorityRequired:(run:StoredRun)=>boolean=()=>false){}
   access(base=this.base):PersonaAccess{return {...base,sourceRules:this.rules,historyDependencies:this.admitted,historyTracked:true,
     validateHistory:deps=>this.validate(deps),operationFinished:id=>{try{const op=this.store.operation(id),run=this.store.get(op.runId);return run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&['succeeded','partial'].includes(op.outcome?.status??'');}catch{return false;}},
     verifyMemorySource:ref=>{try{if(ref.kind!=='memory'||!ref.selectionId||!ref.authorization||!this.rules.includes(ref.authorization.policyId))return null;
       const input=this.repository.readSelectedInputs(ref.agentId,this.run.definition.taskId!,[`task-link:${ref.selectionId}`],this.rules)[0];
       return input?.sourceRef&&runtimeHash(input.sourceRef)===runtimeHash(ref)?{text:input.text,rootSources:input.rootSources??[]}:null;}catch{return null;}}};}
-  recordInput(input:unknown,sources:readonly PersonaSourceRef[],continuity:{id:string;hash:string}|null){this.store.bindInput(this.run.id,'native-program',{schemaVersion:1,epoch:this.run.definition.intentVersion,inputHash:runtimeHash(input),sources,continuity});}
+  recordInput(input:unknown,sources:readonly PersonaSourceRef[],continuity:{id:string;hash:string}|null,authorities:readonly ActivityAnchor[]=[]){this.store.bindInput(this.run.id,'native-program',{schemaVersion:1,epoch:this.run.definition.intentVersion,inputHash:runtimeHash(input),sources,continuity,authorities});}
   setContexts(contexts:NativeContext[]){this.contexts=contexts;
     for(const context of contexts)this.store.bindInput(this.run.id,`context:${runtimeHash(this.dependency(context))}`,context);}
   private dependency({owner,region,item}:NativeContext):Extract<SourceDependency,{kind:'context'}>{return {kind:'context',agentId:this.base.view.scope.agentId,route:this.route(),owner,region,id:item.id,version:item.version,hash:digestSource(JSON.stringify([item.text,item.sources]))};}
@@ -48,6 +49,7 @@ export class ExecutionEvidence {
     if(dep.kind==='execution-source')return this.memory()?.validate(this.access(),dep.ref)??false;
     if(dep.kind==='execution-input'){const run=this.store.get(dep.runId),body=inputProof.safeParse(this.store.readInput(dep.runId,'native-program'));
       return run.definition.taskId===this.run.definition.taskId&&body.success&&body.data.epoch===run.definition.intentVersion&&runtimeHash(body.data)===dep.hash
+        &&(!this.authorityRequired(run)||!!body.data.authorities?.length)&&(body.data.authorities??[]).every(anchor=>this.authorityValid(anchor))
         &&body.data.sources.every(ref=>this.memory()?.validate(this.access(),ref))&&(!body.data.continuity||(()=>{const checkpoint=this.memory()?.checkpoint(this.access(),body.data.continuity.id,true);return !!checkpoint&&runtimeHash(checkpoint)===body.data.continuity.hash;})());}
     if(dep.kind==='execution-operation'){const op=this.store.operation(dep.operationId),run=this.store.get(op.runId),body=this.store.readInput(op.runId,`operation-inputs:${op.id}`);
       return op.runId===dep.runId&&run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&!!op.outcome&&runtimeHash(op.outcome)===dep.hash

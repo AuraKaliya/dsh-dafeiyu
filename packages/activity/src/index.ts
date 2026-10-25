@@ -1,6 +1,7 @@
 export { ActivityStore,ACTIVITY_APPLICATION_ID,ACTIVITY_SCHEMA_VERSION } from './store.js';
-export { ActivityConfigSchema } from '@dafeiyu/contracts';
+export { ActivityConfigSchema,ActivityConfigSchema as ActivityPluginConfigSchema } from '@dafeiyu/contracts';
 export { ActivityService,ACTIVITY_ACTIONS } from './service.js';
+export { validateQuiet } from './time.js';
 export type { Config } from './service.js';
 import { ActivityService } from './service.js';
 import type { Config } from './service.js';

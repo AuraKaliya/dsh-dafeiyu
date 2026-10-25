@@ -53,6 +53,9 @@ export class ExecutionCoordinator {
   private readonly evidence=new Map<string,ExecutionEvidence>();
   private readonly messageBindings=new Map<string,MessageTaskBinding>();
   private readonly lifecycleObservers=new Map<string,(event:MaintenanceLifecycle)=>void>();
+  private anchorDepth=0;
+  private readonly anchorChecking=new Set<string>();
+  private readonly anchorMemo=new Map<string,{state:'valid'|'pending'|'stale';code:string|null}>();
   constructor(private readonly d:Dependencies){d.personas.enrich=(access,run)=>{if(run.definition.scope.kind!=='task')return access;
     const scoped={...access,motivation:this.motivation(run),resourceAllowed:(scene:Conversation)=>this.allowedResource(run,scene)};return this.evidenceFor(run,scoped).access(scoped);};}
   private allowedResource(run:StoredRun,scene:Conversation):boolean {
@@ -172,7 +175,8 @@ export class ExecutionCoordinator {
   authorizeResource(context:ExecutionContextV3,pluginId:string,scene:Conversation){this.authority(context,pluginId);if(!this.allowedResource(this.d.store.get(context.runId),scene))throw new Error('RESOURCE_SCOPE_DENIED');}
   private motivation(run:StoredRun):Motivation{return savedSchema.parse(this.d.store.request(run.requestKey).payload).motivation??{kind:'unknown',basis:[]};}
   private evidenceFor(run:StoredRun,access:PersonaAccess){const current=this.evidence.get(run.id);if(current)return current;const request=this.d.store.request(run.requestKey);
-    const value=new ExecutionEvidence(run,this.d.store,this.d.memory,this.d.personas,this.d.registry,this.repository(),this.policy(request.producer,run.definition.policyId).sourceRules,access);this.evidence.set(run.id,value);return value;}
+    const value=new ExecutionEvidence(run,this.d.store,this.d.memory,this.d.personas,this.d.registry,this.repository(),this.policy(request.producer,run.definition.policyId).sourceRules,access,
+      anchor=>this.activityAnchorStatus(anchor).state==='valid',sourceRun=>this.wakeOrigins(sourceRun).some(origin=>!!this.wakes.get(origin.producerId)?.sourceAnchor));this.evidence.set(run.id,value);return value;}
   private repository(){const value=this.d.repository();if(!value)throw new Error('DEPENDENCY_UNAVAILABLE');return value;}
   private policy(producer:string,id:string){const value=this.d.options.policies.find(p=>p.id===id&&p.producers.includes(producer));if(!value)throw new Error('SCOPE_DENIED');return value;}
   private ref(producer:string,run:StoredRun){const reference=Object.freeze({id:run.id});this.refs.set(reference,{producer,id:run.id});return reference;}
@@ -222,7 +226,14 @@ export class ExecutionCoordinator {
     });
   }
   bindWake(provider:WakeAuthorityProvider):()=>void{const producer=ProducerSchema.parse(provider.producerId);if(this.wakes.has(producer))throw new Error('DUPLICATE_PROVIDER');
-    const bound={producerId:producer,validate:provider.validate.bind(provider)};this.wakes.set(producer,bound);return ()=>{if(this.wakes.get(producer)===bound)this.wakes.delete(producer);};}
+    const bound={producerId:producer,validate:provider.validate.bind(provider),...(provider.sourceAnchor?{sourceAnchor:provider.sourceAnchor.bind(provider)}:{})};this.wakes.set(producer,bound);return ()=>{if(this.wakes.get(producer)===bound)this.wakes.delete(producer);};}
+  private wakeOrigins(run:StoredRun){const origins:Extract<RunOrigin,{kind:'wake'}>[]=[],seen=new Set<string>();let current:StoredRun|null=run;
+    while(current){if(seen.has(current.id)||seen.size>=64)throw new Error('WAKE_NOT_AUTHORIZED');seen.add(current.id);if(current.definition.origin.kind==='wake')origins.push(current.definition.origin);
+      current=current.definition.parentRunId?this.d.store.get(current.definition.parentRunId):null;}return origins;
+  }
+  private wakeSources(run:StoredRun,task:import('@dafeiyu/contracts').TaskState){return this.wakeOrigins(run).flatMap(origin=>{
+    const provider=this.wakes.get(origin.producerId);if(!provider?.sourceAnchor)return [];const anchor=provider.sourceAnchor(origin,task);
+    if(!anchor||this.activityAnchorStatus(anchor).state!=='valid')throw new Error('SOURCE_STALE');return [ActivityAnchorSchema.parse(anchor)];});}
   bindLifecycle(owner:string,receive:(event:MaintenanceLifecycle)=>void):()=>void{
     ProducerSchema.parse(owner);if(this.lifecycleObservers.has(owner))throw new Error('DUPLICATE_PROVIDER');this.lifecycleObservers.set(owner,receive);
     return ()=>{if(this.lifecycleObservers.get(owner)===receive)this.lifecycleObservers.delete(owner);};
@@ -247,11 +258,21 @@ export class ExecutionCoordinator {
     const run=this.d.store.get(z.uuid().parse(runId));if(run.definition.scope.kind!=='task'||run.definition.taskId!==taskId||run.definition.intentVersion!==epoch||!['completed','waiting','failed','cancelled','interrupted'].includes(run.state))throw new Error('SCOPE_DENIED');
     const request=this.d.store.request(run.requestKey),id=run.id;
     const existing=this.d.store.readInput(run.id,`activity-anchor:${id}`);if(existing){const value=ActivityAuthoritySchema.parse(existing);return ActivityAnchorSchema.strip().parse({...value,hash:runtimeHash(value)});}
+    const program=this.d.store.readInput(run.id,'native-program');
     const body=ActivityAuthoritySchema.parse({schemaVersion:1,id,kind:'maintenance',runId:run.id,operationId:run.id,scope:run.definition.scope,intentVersion:epoch,
-      policy:{producer:request.producer,id:run.definition.policyId,hash:runtimeHash(this.policy(request.producer,run.definition.policyId))},action:null,foundationHash:run.snapshot?.personaVersion??null,dependencies:[],sources:[]});
+      policy:{producer:request.producer,id:run.definition.policyId,hash:runtimeHash(this.policy(request.producer,run.definition.policyId))},action:null,foundationHash:run.snapshot?.personaVersion??null,
+      dependencies:program?[{kind:'execution-input',agentId:this.d.agentId,route:run.definition.scope.scopeKey,runId:run.id,hash:runtimeHash(program)}]:[],sources:[]});
     this.d.store.bindMaintenanceAnchor(run.id,`activity-anchor:${id}`,body);return ActivityAnchorSchema.strip().parse({...body,hash:runtimeHash(body)});
   }
   activityAnchorStatus(raw:unknown):{state:'valid'|'pending'|'stale';code:string|null}{
+    const outer=this.anchorDepth++===0;let key:string|undefined,added=false;
+    try{key=runtimeHash(raw);const cached=this.anchorMemo.get(key);if(cached)return cached;
+      if(this.anchorChecking.has(key)||this.anchorChecking.size>=128)return {state:'stale',code:'ACTIVITY_AUTHORITY_CYCLE'};
+      this.anchorChecking.add(key);added=true;const value=this.checkActivityAnchor(raw);this.anchorMemo.set(key,value);return value;
+    }catch{return {state:'stale',code:'ACTIVITY_SOURCE_STALE'};}
+    finally{if(key&&added)this.anchorChecking.delete(key);this.anchorDepth--;if(outer)this.anchorMemo.clear();}
+  }
+  private checkActivityAnchor(raw:unknown):{state:'valid'|'pending'|'stale';code:string|null}{
     try{
       const anchor=ActivityAnchorSchema.parse(raw),run=this.d.store.get(anchor.runId),body=ActivityAuthoritySchema.parse(this.d.store.readInput(run.id,`activity-anchor:${anchor.id}`));
       if(runtimeHash(body)!==anchor.hash||runtimeHash(ActivityAnchorSchema.strip().parse({...body,hash:anchor.hash}))!==runtimeHash(anchor))throw new Error('SCOPE_DENIED');
@@ -260,6 +281,7 @@ export class ExecutionCoordinator {
       if(task.epoch!==body.intentVersion||task.status!=='active')throw new Error('TASK_NOT_ACTIVE');
       if(runtimeHash(policy)!==body.policy.hash||body.foundationHash&&this.d.persona().version!==body.foundationHash)throw new Error('ACTIVITY_POLICY_CHANGED');
       const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload);if(saved.messageSource)this.validateMessageAncestors(run);
+      if(body.kind==='maintenance'&&!body.dependencies.length&&this.d.store.readInput(run.id,'native-program'))throw new Error('ACTIVITY_LEGACY_AUTHORITY_UNAVAILABLE');
       if(body.action&&!this.d.registry.actions().some(action=>action.owner===body.action!.owner&&action.id===body.action!.id&&action.version===body.action!.version&&action.pluginVersion===body.action!.pluginVersion&&action.active()&&runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})===body.action!.hash))throw new Error('ACTIVITY_PLUGIN_CHANGED');
       const inputs=this.inputsFor(run),guard=()=>{const current=this.repository().readState(this.d.agentId,task.id);if(current.epoch!==body.intentVersion||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');};
       const access=this.d.personas.access(run,inputs,this.d.signal,guard);
@@ -362,7 +384,7 @@ export class ExecutionCoordinator {
           continuation:saved.parentRunId?{parentRunId:saved.parentRunId,checkpoint:this.d.store.readCheckpoint(saved.parentRunId,saved.checkpointId!),operations:this.d.store.operations(saved.parentRunId).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))}:null,
           continuity:prior?{checkpointId:prior.id,previousRunId:prior.runId,sessionChanged:prior.sessionId!==sessionId,completedOperations:prior.completedOperations,unknownOperations:prior.unknownOperations,summary:prior.summary,gaps:prior.gaps}:null,
           gaps:[...(omitted?[`${omitted}项上下文未进入本轮，不能猜测其内容`]:[]),...(!prior?['未取得可核验接续检查点；不据此虚构过去']:[])]});
-        evidence.recordInput(program,inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),prior?{id:prior.id,hash:runtimeHash(prior)}:null);
+        evidence.recordInput(program,inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),prior?{id:prior.id,hash:runtimeHash(prior)}:null,this.wakeSources(run,task));
         const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validate(evidence.exposed()))throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
         const result=await this.d.runtime.runExecution({mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:task.goal,inputs,actions:bound,guard:admittedGuard,program,contexts,evidence,
           audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},

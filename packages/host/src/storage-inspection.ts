@@ -5,8 +5,9 @@ import { RUNTIME_APPLICATION_ID, RuntimeIdentitySchema } from '@dafeiyu/core/run
 import type { RuntimeIdentity } from '@dafeiyu/core/runtime-store';
 import { MEMORY_APPLICATION_ID } from '@dafeiyu/memory/store';
 import { inspectQqSchema } from '@dafeiyu/channel-qq';
+import { ACTIVITY_APPLICATION_ID,ACTIVITY_SCHEMA_VERSION,ACTIVITY_TABLES } from '@dafeiyu/activity/store';
 
-export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query';
+export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity';
 const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
   query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
   memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8,9,10,11],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
@@ -15,6 +16,7 @@ const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;version
   analysis:{app:0x44464131,versions:[1],tables:['jobs','ownership','audit_outbox']},
   working:{app:0x44465731,versions:[1],tables:['states','revisions','requests','outbox']},
   feedback:{app:0x44464631,versions:[1],tables:['archives','states','requests','events','outbox']},
+  activity:{app:ACTIVITY_APPLICATION_ID,versions:[ACTIVITY_SCHEMA_VERSION],tables:ACTIVITY_TABLES},
   retrieval:{app:0x44465232,versions:[1,2],tables:['chunks','snapshots','vector_cache']},
 };
 export interface StorageInspection {kind:StorageKind;exists:boolean;version:number;applicationId:number;supported:boolean;activeOwner:boolean;integrity:boolean;identityMatches:boolean}
@@ -39,6 +41,8 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
     let identityMatches=true;
     if(kind==='runtime'&&supported&&identity){const row=db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();
       const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
+    if(kind==='activity'&&supported&&identity){const row=db.prepare('SELECT body FROM activity_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));
+      identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='runtime'&&supported&&version>=2)supported=tables.has('run_persona_manifests');
     if(kind==='runtime'&&supported&&version>=3)supported=tables.has('native_deliveries');
     if(kind==='memory'&&supported){
@@ -47,7 +51,8 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
         5:['task_memory_policies','task_memory_policy_revisions','task_memory_grants','task_memory_requests','task_memory_hits'],6:['expression_policies','expression_policy_revisions','expression_requests','expression_packets','expression_jobs'],
         7:['execution_scopes','execution_sources','execution_observations','execution_contributions','growth_selections','growth_revisions','growth_requests','task_execution_results','execution_memory_requests','execution_memory_outbox'],
         8:['persona_candidates','persona_candidate_revisions','persona_profiles','persona_profile_revisions','persona_dependencies','persona_requests','persona_outbox','continuity_checkpoints','task_intent_events'],
-        9:['capability_observations','capability_selections'],10:['native_expression_packets']};
+        9:['capability_observations','capability_selections'],10:['native_expression_packets'],
+        11:['experience_items','experience_revisions','experience_relations','maintenance_events','maintenance_requests','maintenance_receipts','maintenance_watermarks']};
       supported=Object.entries(stages).every(([stage,names])=>version<Number(stage)||names.every(name=>tables.has(name)));
     }
     const integrity=Object.values(db.prepare('PRAGMA quick_check').get()??{})[0]==='ok'&&db.prepare('PRAGMA foreign_key_check').get()===undefined;
