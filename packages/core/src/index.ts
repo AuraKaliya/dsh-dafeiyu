@@ -118,7 +118,7 @@ export class DafeiyuService extends Service {
     this.validateNativeMediaReplyAuthority(facts.authority,native);const packet=provider.open(native,row.material.packetId);if(packet.sourceStamp!==row.material.sourceStamp||runtimeHash(packet.media)!==runtimeHash(native.media))throw new Error('SOURCE_STALE');
     const basis=()=>{signal.throwIfAborted();facts.guard();native.guard();if(this.nativeExpressionPort!==provider||provider.open(native,packet.id).sourceStamp!==packet.sourceStamp||this.runStore!.nativeDeliveries.verifyCredential(facts.run.id)!==text||!['ready','sending'].includes(this.runStore!.nativeDeliveries.get(facts.run.id)!.state))throw new Error('SOURCE_STALE');};
     const persona=this.targetPersona(item,row.id,signal,basis);if(persona.stamp!==row.material.personaHash||persona.foundationHash!==row.material.foundationHash||runtimeHash(this.analysisModelRoute())!==row.material.modelHash)throw new Error('SOURCE_STALE');
-    let access:MediaReplyAccess;const guard=()=>{if(!this.mediaReplyAccesses.has(access)||Date.parse(native.anchor.expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');persona.guard();};
+    let access:MediaReplyAccess,checking=false;const guard=()=>{if(checking)throw new Error('MEDIA_REPLY_AUTHORITY_CYCLE');checking=true;try{if(!this.mediaReplyAccesses.has(access)||Date.parse(native.anchor.expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');persona.guard();}finally{checking=false;}};
     access=Object.freeze({execution:Object.freeze({...native.execution,guard}),authority:facts.authority,payloadHash:facts.body.payloadHash,replyId:reply.id,text,target:Object.freeze({...row.anchor.target}),sourceMessageId:item.message.id,inboundId:item.id,anchor:row.anchor,expiresAt:row.anchor.expiresAt,approvedMedia:native.media,guard,release:()=>{this.mediaReplyAccesses.delete(access);}});
     this.mediaReplyAccesses.add(access);try{guard();return access;}catch(error){access.release();throw error;}
   }
@@ -438,6 +438,7 @@ export class DafeiyuService extends Service {
       if(c.taskDelivery!==undefined&&c.taskDelivery!=='simulated')throw new Error('Task delivery requires simulated capability');
       if(c.deliveryValidation!==undefined&&c.deliveryValidation!=='per-segment')throw new Error('Invalid delivery validation contract');
       if(c.deliverTaskResult!==undefined&&typeof c.deliverTaskResult!=='function')throw new Error('Invalid task result delivery contract');
+      if(c.mediaDelivery!==undefined&&(c.mediaDelivery!=='parts-v1'||c.deliveryValidation!=='per-segment'||typeof c.deliverMedia!=='function')||c.deliverMedia!==undefined&&c.mediaDelivery!=='parts-v1')throw new Error('Invalid media delivery contract');
       const key = JSON.stringify([c.channel, c.account]);
       if (!c.channel || !c.account || channelKeys.has(key)) throw new Error('Duplicate or invalid channel/account');
       channelKeys.add(key);
@@ -462,6 +463,7 @@ export class DafeiyuService extends Service {
         ...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),
         ...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),
         ...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{}),
+        ...(channel.mediaDelivery?{mediaDelivery:channel.mediaDelivery}:{}),...(channel.deliverMedia?{deliverMedia:channel.deliverMedia.bind(channel)}:{}),
         ...(channel.description ? { description: channel.description } : {}),
         deliver: channel.deliver.bind(channel) })),
       actions: (extension.actions ?? []).map(action => ({ name: action.name, description: action.description,
@@ -681,7 +683,7 @@ export class DafeiyuService extends Service {
         const draft=activeMedia.replyDraft(runId!);if(!draft||draft.id!==selection.currentDraftId||draft.version!==selection.currentVersion||draft.selected!==selection.selected)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');
         mediaAccess=await this.prepareMediaReplyAccess(draft.authority,item.reply,signal);const manifest=await activeMedia.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaManifestId=manifest.id;
         const guarded=()=>{authority();mediaAccess!.guard();if(this.mediaPort!==activeMedia||!activeMedia!.ready())throw new Error('SOURCE_STALE');activeMedia!.validateReply!(mediaAccess!,manifest.id);};guarded();invoked=true;
-        result=await channel.deliverMedia({...item.reply,media:manifest},signal,guarded,position=>{guarded();return activeMedia!.readReplyPart!(mediaAccess!,manifest.id,position);});
+        result=await channel.deliverMedia(structuredClone({...item.reply,media:manifest}),signal,guarded,position=>{guarded();return activeMedia!.readReplyPart!(mediaAccess!,manifest.id,position);});
       }else{invoked=true;result = await channel.deliver(item.reply,signal,authority);}
       if (result.status === 'sent' && !result.receiptId) throw new Error('Missing transport receipt');
     } catch(error) { const code=error instanceof Error&&['MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH','MEDIA_REPLY_OPERATION_UNCONFIRMED','MEDIA_TARGET_DENIED','MEDIA_SIZE_LIMIT','MEDIA_BLOB_CORRUPT','MEDIA_TTS_NOT_CONFIGURED'].includes(error.message)?error.message:'SOURCE_STALE';

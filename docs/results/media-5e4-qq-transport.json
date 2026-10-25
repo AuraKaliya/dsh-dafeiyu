@@ -1,0 +1,18 @@
+{
+  "stage": "media-5E-4",
+  "date": "2026-10-25",
+  "baseline": "c6f313f",
+  "result": "targeted-checks-passed",
+  "runId": "b1a00859-8e7b-4833-aa53-36c4b39b24f5",
+  "tests": {"passed": 33, "failed": 0},
+  "scope": ["qq-media-delivery", "core", "qq-delivery"],
+  "actualLocalExecution": ["loopback HTTP/WebSocket", "OneBot message arrays and Base64", "SQLite part receipts", "FFmpeg", "DSH target rendering"],
+  "models": "scripted",
+  "platform": "loopback fixture only",
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "performanceCertified": false,
+  "cleanupBlocked": false
+}

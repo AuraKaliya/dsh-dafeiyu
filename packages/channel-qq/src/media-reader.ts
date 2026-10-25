@@ -11,7 +11,7 @@ import type { MediaByteStream } from '@dafeiyu/contracts';
 import type { QqMediaLocator } from './media-store.js';
 import type { OneBot } from './onebot.js';
 
-export const QqMediaConfigSchema=z.strictObject({enabled:z.boolean().default(false),cacheRoots:z.array(z.string().min(1)).max(8).default([]),httpsHosts:z.array(z.string().regex(/^[a-zA-Z0-9.-]+$/)).max(16).default([]),maxReadBytes:z.number().int().min(1024).max(256*1024**2).default(64*1024**2),voiceDirectives:z.boolean().default(false)});
+export const QqMediaConfigSchema=z.strictObject({enabled:z.boolean().default(false),sendEnabled:z.boolean().default(false),cacheRoots:z.array(z.string().min(1)).max(8).default([]),httpsHosts:z.array(z.string().regex(/^[a-zA-Z0-9.-]+$/)).max(16).default([]),maxReadBytes:z.number().int().min(1024).max(256*1024**2).default(64*1024**2),voiceDirectives:z.boolean().default(false)});
 type Range={start:number;end:number}|null;
 export function publicIpv4(value:string){if(isIP(value)!==4)return false;const [a,b,c]=value.split('.').map(Number);return a!==0&&a!==10&&a!==127&&a!>=1&&a!<224&&!(a===100&&b!>=64&&b!<=127)&&!(a===169&&b===254)&&!(a===172&&b!>=16&&b!<=31)&&!(a===192&&(b===168||b===0||b===2||b===88&&c===99))&&!(a===198&&(b===18||b===19||b===51&&c===100))&&!(a===203&&b===0&&c===113);}
 function bounds(range:Range,total:number){const start=range?.start??0,end=range?.end??total-1;if(range&&(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>=total))throw new Error('QQ_MEDIA_RANGE_INVALID');return {start,end};}

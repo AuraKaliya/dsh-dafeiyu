@@ -40,7 +40,7 @@ export class MediaReplies {
     const payload=this.host.ctx.dafeiyu.validateNativeMediaReplyAuthority(draft.authority,access);if(payload!==mediaHash(mediaDraftContentSchema.strip().parse(draft)))throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');
     const parts=draft.parts.map(part=>{if(part.kind!=='asset')return {kind:'final-voice' as const};
       const guard=()=>{access.execution.guard();if(!access.execution.resourceAllowed?.(part.source.origin.scene)||!this.host.sourceCurrent(part.source)||!part.source.publicContent&&mediaHash(part.source.origin.scene)!==mediaHash(access.anchor.target))throw new Error('MEDIA_TARGET_DENIED');};guard();
-      this.host.store.requireRef({execution:access.execution,origin:part.source.origin,guard},part.asset);const delivery=part.as??(part.asset.kind==='image'?'image':part.asset.kind==='audio'?'record':'file');
+      const stored=this.host.store.assetWitness(part.asset);if(mediaHash(stored.scope)!==mediaHash(access.execution.view.scope)||stored.taskEpoch!==access.execution.intentVersion)throw new Error('SCOPE_DENIED');guard();const delivery=part.as??(part.asset.kind==='image'?'image':part.asset.kind==='audio'?'record':'file');
       return {kind:'asset' as const,delivery,asset:part.asset,name:delivery==='file'?filename(part.source,part.asset):null};});
     const fence=this.fence(access.execution,access.anchor.target,draft);access.guard();
     return NativeMediaMaterialSchema.parse({draftId:draft.id,draftVersion:draft.version,parts,sourceStamp:mediaHash({authority:draft.authority,content:mediaDraftContentSchema.strip().parse(draft),target:access.anchor.target,fence:fence.stamp})});
@@ -51,7 +51,7 @@ export class MediaReplies {
     const fence=this.fence(access.execution,access.target,current.draft);
     if(current.draft.scope.kind==='task'&&(!access.approvedMedia||access.approvedMedia.draftId!==current.draft.id||access.approvedMedia.draftVersion!==current.draft.version||access.approvedMedia.sourceStamp!==mediaHash({authority:current.draft.authority,content:mediaDraftContentSchema.strip().parse(current.draft),target:access.target,fence:fence.stamp})))throw new Error('MEDIA_NATIVE_DELIVERY_NOT_CONFIGURED');return current.draft;
   }
-  private partAccess(access:MediaReplyAccess,source:MediaSourceDescription){const guard=()=>{this.access(access);if(!this.host.sourceCurrent(source)||!source.publicContent&&mediaHash(source.origin.scene)!==mediaHash(access.target))throw new Error('MEDIA_TARGET_DENIED');};guard();return {execution:access.execution,origin:source.origin,guard};}
+  private partAccess(access:MediaReplyAccess,source:MediaSourceDescription){const guard=()=>{this.host.ctx.dafeiyu.validateMediaReplyAccess(access);if(!this.host.sourceCurrent(source)||!source.publicContent&&mediaHash(source.origin.scene)!==mediaHash(access.target))throw new Error('MEDIA_TARGET_DENIED');};guard();return {execution:access.execution,origin:source.origin,guard};}
   private frozenBinding(access:MediaReplyAccess,draft:MediaDraft,manifest:ReplyMediaManifest){const {credential,...body}=manifest;
     if(manifest.replyId!==access.replyId||manifest.runId!==access.execution.view.runId||manifest.draft.id!==draft.id||manifest.draft.version!==draft.version||mediaHash(manifest.target)!==mediaHash(access.target)||manifest.sourceMessageId!==access.sourceMessageId||mediaHash(manifest.anchor)!==mediaHash(access.anchor)
       ||manifest.textHash!==createHash('sha256').update(access.text).digest('hex')||manifest.expiresAt!==access.expiresAt||manifest.sourceStamp!==mediaHash({authority:access.authority,parts:draft.parts,fence:this.fence(access.execution,access.target,draft).stamp})||credential!==mediaHash(body)||manifest.parts.length!==draft.parts.length)throw new Error('MEDIA_EXPORT_BINDING_INVALID');
@@ -60,7 +60,7 @@ export class MediaReplies {
   }
   async finalize(access:MediaReplyAccess){const draft=this.access(access);if(!draft.parts.length)return null;
     const old=this.host.store.replies.exported(access.replyId);if(old){this.frozenBinding(access,draft,old.manifest);if(old.state!=='ready')throw new Error('MEDIA_EXPORT_STATE_CONFLICT');
-      for(const part of draft.parts)if(part.kind==='asset'){const scope=this.partAccess(access,part.source);this.host.store.requireRef(scope,part.asset);await this.host.files.verified(part.asset);scope.guard();}return old.manifest;}
+      for(const part of draft.parts)if(part.kind==='asset'){const scope=this.partAccess(access,part.source);this.host.store.requireRef(scope,part.asset);await this.host.files.verified(part.asset);scope.guard();}this.access(access);return old.manifest;}
     const parts:ReplyMediaPart[]=[],leases:{id:string;owner:string}[]=[],id=randomUUID(),owner='media-export:'+id;let frozen=false;
     try{for(const selected of draft.parts){if(selected.kind!=='asset')throw new Error('MEDIA_TTS_NOT_CONFIGURED');const scope=this.partAccess(access,selected.source);this.host.store.requireRef(scope,selected.asset);await this.host.files.verified(selected.asset);scope.guard();
         const kind=selected.as??(selected.asset.kind==='image'?'image':selected.asset.kind==='audio'?'record':'file');parts.push(kind==='file'?{kind,asset:selected.asset,name:filename(selected.source,selected.asset)}:{kind,asset:selected.asset});
@@ -72,7 +72,7 @@ export class MediaReplies {
   }
   async bytes(access:MediaReplyAccess,manifestId:string,position:number){const draft=this.access(access),exported=this.host.store.replies.exported(access.replyId);if(!exported||exported.state!=='ready'||exported.manifest.id!==manifestId||exported.manifest.draft.id!==draft.id||!Number.isSafeInteger(position)||position<0)throw new Error('MEDIA_EXPORT_UNAVAILABLE');
     this.frozenBinding(access,draft,exported.manifest);const selected=draft.parts[position],part=exported.manifest.parts[position];if(!selected||selected.kind!=='asset'||!part||mediaHash(part.asset)!==mediaHash(selected.asset))throw new Error('MEDIA_EXPORT_BINDING_INVALID');
-    const scope=this.partAccess(access,selected.source);this.host.store.requireRef(scope,part.asset);return this.host.files.bytes(part.asset,access.execution.view.signal,scope.guard);
+    const scope=this.partAccess(access,selected.source);this.host.store.requireRef(scope,part.asset);const data=await this.host.files.bytes(part.asset,access.execution.view.signal,scope.guard);this.validate(access,manifestId);return data;
   }
   validate(access:MediaReplyAccess,id:string){const draft=this.access(access),exported=this.host.store.replies.exported(access.replyId);if(!exported||exported.manifest.id!==id||exported.state!=='ready')throw new Error('MEDIA_EXPORT_UNAVAILABLE');this.frozenBinding(access,draft,exported.manifest);
     for(const part of draft.parts)if(part.kind==='asset')this.host.store.requireRef(this.partAccess(access,part.source),part.asset);

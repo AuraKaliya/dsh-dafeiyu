@@ -2,7 +2,7 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { API_VERSION, LifecycleModeSchema, conversationKey,TaskResultAnchorSchema } from '@dafeiyu/contracts';
-import type { Conversation, DeliveryResult, ExtensionHandle, Reply,TaskResultAnchor } from '@dafeiyu/contracts';
+import type { Conversation, DeliveryResult, ExtensionHandle, Reply,TaskResultAnchor,ReplyMediaManifest } from '@dafeiyu/contracts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import WebSocket from 'ws';
@@ -18,6 +18,8 @@ import { QqDeliveryLedger } from './delivery.js';
 import { QqTaskCapabilities,QqTasksConfigSchema,QQ_TASK_ACTIONS } from './tasks.js';
 import { QqMedia,QQ_MEDIA_ACTIONS } from './media.js';
 import { QqMediaConfigSchema } from './media-reader.js';
+import { QqMediaTransport } from './media-transport.js';
+import { QqMediaDeliveryLedger } from './media-delivery.js';
 export { QqStore } from './store.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
@@ -67,6 +69,7 @@ export class QqChannel extends Service {
   private readonly api: OneBot;
   private readonly store: QqStore;
   private readonly transport: QqSegmentedTransport;
+  private readonly mediaTransport:QqMediaTransport;
   private closedDeliveryCounts:ReturnType<QqDeliveryLedger['counts']>|undefined;
   private readonly groups: GroupDirectory;
   private readonly handle: ExtensionHandle;
@@ -94,6 +97,7 @@ export class QqChannel extends Service {
     super(ctx, 'dafeiyuQQ'); this.config = configSchema.parse(raw);
     if((this.config.capabilities.enabled||this.config.tasks.enabled)&&this.config.lifecycleMode!=='managed')throw new Error('QQ_CAPABILITIES_REQUIRE_MANAGED');
     if(this.config.media.enabled&&(!this.config.capabilities.enabled||this.config.lifecycleMode!=='managed'))throw new Error('QQ_MEDIA_REQUIRE_CAPABILITIES');
+    if(this.config.media.sendEnabled&&!this.config.media.enabled)throw new Error('QQ_MEDIA_SEND_DEPENDENCY_REQUIRED');
     if(this.config.media.voiceDirectives&&(!this.config.media.enabled||!this.config.tasks.enabled))throw new Error('QQ_VOICE_TASK_DEPENDENCY_REQUIRED');
     this.config.httpURL = loopbackURL(this.config.httpURL, 'http:'); this.config.wsURL = loopbackURL(this.config.wsURL, 'ws:');
     this.token = readFileSync(this.config.tokenFile, 'utf8').trim();
@@ -103,16 +107,22 @@ export class QqChannel extends Service {
     let registration:ExtensionHandle|undefined;
     try {
       this.store.delivery.recover();
+      this.store.mediaDelivery.recover();
       this.transport=new QqSegmentedTransport({ledger:this.store.delivery,check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
         confirmed:(reply,text,receipt)=>{this.counters.segmentsConfirmed++;if(this.store.delivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
           if(reply.taskResult)this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,'[任务交付占位：正文须经核心任务来源验证后回查，不能据此推断任务内容。]',{occurredAt:null,unsupported:['task-result-body-withheld']});
           else this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text);}});
+      this.mediaTransport=new QqMediaTransport({ledger:this.store.mediaDelivery,legacyProgress:id=>this.store.delivery.progress(id),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,part,data,signal)=>this.sendMediaPart(reply,part,data,signal),confirmed:(reply,part,receipt)=>{
+        this.counters.segmentsConfirmed++;if(this.store.mediaDelivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
+        const text=reply.taskResult?'[任务媒体交付占位：须经核心来源校验后回查，不能从此推断任务内容。]':part.kind==='text'?part.text:'[已发送受控媒体部件：'+part.kind+'；此占位不包含原媒体内容。]';
+        this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text,{occurredAt:null,unsupported:part.kind==='text'?[]:['delivered-media-withheld']});}});
       this.groups = new GroupDirectory({ account: this.config.botId, allowed: this.config.groupIds, config: this.config.groupSync, store: this.store,
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
       this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
         channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',
-          description: this.config.media.enabled?'QQ消息包含文字及受控媒体引用。使用qq_media_list查看当前消息或范围内缓存消息的媒体；再自行决定调用dafeiyu_media_read读取图片、音轨、视频帧或文档。元信息不等于已理解；平台取件或处理失败应如实报告。尚未开放多媒体发送。':'当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
+          description: this.config.media.enabled?'QQ消息包含文字及受控媒体引用。qq_media_list列出媒体，dafeiyu_media_read按需读取；元信息不等于理解。'+(this.config.media.sendEnabled?'dafeiyu_media_reply准备回复附件，最终由核心核验后逐部件交付，准备回执不表示已经发送。':'媒体输出尚未开启，请用文字回复。'):'当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
+          ...(this.config.media.enabled&&this.config.media.sendEnabled?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority)=>this.deliverTaskResult(reply,anchor,signal,authority) }] });
       if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing)});
@@ -126,8 +136,9 @@ export class QqChannel extends Service {
     this.handle.observe({ conversation: conversation ?? { channel: 'qq', account: this.config.botId, kind: 'local', id: '__transport__' }, type, data: { code } });
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
-    media:{enabled:this.config.media.enabled,registered:!!this.media&&!this.stopped,actions:this.media&&!this.stopped?[...QQ_MEDIA_ACTIONS]:[],voiceDirectives:this.config.media.voiceDirectives},
-    groupIds: [...this.config.groupIds], groupSync: this.groups.status(), delivery:this.closedDeliveryCounts??this.store.delivery.counts(),tasks:{enabled:this.config.tasks.enabled,registered:!!this.tasks&&!this.stopped,deliverResults:this.config.tasks.enabled&&this.config.tasks.deliverResults,actions:this.tasks&&!this.stopped?[...QQ_TASK_ACTIONS]:[]},capabilities:{enabled:this.config.capabilities.enabled,registered:!!this.capabilities&&!this.stopped,actions:this.capabilities&&!this.stopped?[...QQ_ACTIONS]:[]},counters: { ...this.counters }, at: new Date().toISOString() }; }
+    media:{enabled:this.config.media.enabled,sendEnabled:this.config.media.sendEnabled,registered:!!this.media&&!this.stopped,actions:this.media&&!this.stopped?[...QQ_MEDIA_ACTIONS]:[],voiceDirectives:this.config.media.voiceDirectives},
+    groupIds: [...this.config.groupIds], groupSync: this.groups.status(), delivery:this.closedDeliveryCounts??this.deliveryCounts(),tasks:{enabled:this.config.tasks.enabled,registered:!!this.tasks&&!this.stopped,deliverResults:this.config.tasks.enabled&&this.config.tasks.deliverResults,actions:this.tasks&&!this.stopped?[...QQ_TASK_ACTIONS]:[]},capabilities:{enabled:this.config.capabilities.enabled,registered:!!this.capabilities&&!this.stopped,actions:this.capabilities&&!this.stopped?[...QQ_ACTIONS]:[]},counters: { ...this.counters }, at: new Date().toISOString() }; }
+  private deliveryCounts(){const a=this.store.delivery.counts(),b=this.store.mediaDelivery.counts();return {plans:a.plans+b.plans,pending:a.pending+b.pending,unknown:a.unknown+b.unknown};}
   private cacheRoute(scene:Conversation):string {return this.config.capabilities.enabled?qqResourceRoute(scene):JSON.stringify([scene.kind,scene.id]);}
   private allowed(scene:Conversation):boolean {return !this.stopped&&this.state!=='rejected'&&scene.channel==='qq'&&scene.account===this.config.botId&&
     (scene.kind==='private'?scene.id===this.config.ownerId:scene.kind==='group'&&this.groups.effective().includes(scene.id));}
@@ -250,17 +261,21 @@ export class QqChannel extends Service {
   }
   deliver(reply: Reply, signal: AbortSignal, authority?:()=>void): Promise<DeliveryResult> {
     if(this.stopped)return Promise.resolve({status:'not-sent',code:'CHANNEL_OFFLINE'});
+    if(reply.media||this.store.mediaDelivery.progress(reply.id))return Promise.resolve({status:'not-sent',code:'MEDIA_DELIVERY_AUTHORITY_REQUIRED'});
     if(reply.taskResult&&typeof authority!=='function')return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
     const task = this.transport.deliver(reply, AbortSignal.any([signal,this.controller.signal]),authority);
     this.sending.add(task);
     void task.finally(() => this.sending.delete(task)).catch(() => {});
     return task;
   }
+  deliverMedia(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>):Promise<DeliveryResult>{if(this.stopped||!this.config.media.enabled||!this.config.media.sendEnabled)return Promise.resolve({status:'not-sent',code:'CHANNEL_OFFLINE'});
+    const work=this.mediaTransport.deliver(reply,AbortSignal.any([signal,this.controller.signal]),authority,bytes);this.sending.add(work);void work.finally(()=>this.sending.delete(work)).catch(()=>{});return work;
+  }
   deliverTaskResult(reply:Reply,raw:TaskResultAnchor,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>{const anchor=TaskResultAnchorSchema.parse(raw);
     if(typeof authority!=='function'||conversationKey(this.config.agentId,anchor.target)!==conversationKey(this.config.agentId,reply.conversation))return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
     return this.deliver({...reply,taskResult:anchor},signal,authority);}
-  deliveryStatus(replyId:string){if(!this.stopped)return this.store.delivery.progress(replyId);
-    const db=new DatabaseSync(resolve(this.config.dataDir,'qq.sqlite'),{readOnly:true});try{return new QqDeliveryLedger(db).progress(replyId);}finally{db.close();}}
+  deliveryStatus(replyId:string){if(!this.stopped)return this.store.mediaDelivery.progress(replyId)??this.store.delivery.progress(replyId);
+    const db=new DatabaseSync(resolve(this.config.dataDir,'qq.sqlite'),{readOnly:true});try{return new QqMediaDeliveryLedger(db).progress(replyId)??new QqDeliveryLedger(db).progress(replyId);}finally{db.close();}}
   private async checkDelivery(reply: Reply, signal: AbortSignal): Promise<void> {
     if (this.stopped || this.state!=='online') throw new Error('CHANNEL_OFFLINE');
     const conversation = reply.conversation;
@@ -286,6 +301,11 @@ export class QqChannel extends Service {
       const result = z.object({ message_id: platformId }).parse(await this.api.call(action, params, signal));
       return result.message_id;
   }
+  private async sendMediaPart(reply:Reply&{media:ReplyMediaManifest},part:import('./media-delivery.js').QqMediaDeliveryPlan['parts'][number],data:Uint8Array|null,signal:AbortSignal){
+    const value=part.kind==='text'?{type:'text',data:{text:part.text}}:{type:part.kind,data:{file:'base64://'+Buffer.from(data!).toString('base64'),...(part.kind==='file'?{name:part.name}:{})}};
+    const message=[...(reply.conversation.kind==='group'&&(part.kind==='text'||part.kind==='image')?[{type:'reply',data:{id:reply.sourceMessageId}}]:[]),value],action=reply.conversation.kind==='private'?'send_private_msg':'send_group_msg';
+    return z.object({message_id:platformId}).parse(await this.api.call(action,{[reply.conversation.kind==='private'?'user_id':'group_id']:Number(reply.conversation.id),message},signal)).message_id;
+  }
   async close(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true; this.state = 'stopped'; this.controller.abort();
@@ -295,7 +315,7 @@ export class QqChannel extends Service {
     this.groups.pause(); await this.groups.whenIdle();
     if (this.retry) clearTimeout(this.retry); if (this.heartbeat) clearInterval(this.heartbeat);
     this.socket?.terminate(); await this.queue; this.handle.dispose();
-    await Promise.allSettled([...this.sending]);this.closedDeliveryCounts=this.store.delivery.counts();this.store.close();
+    await Promise.allSettled([...this.sending]);this.closedDeliveryCounts=this.deliveryCounts();this.store.close();
   }
 }
 export async function apply(ctx: Context, config: Config): Promise<void> { const channel = new QqChannel(ctx, config); if(config.lifecycleMode!=='managed')await channel.start(); }
