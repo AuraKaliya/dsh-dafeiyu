@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 1,
+  "profileId": "bilibili-local-development",
+  "agent": {
+    "id": "dafeiyu"
+  },
+  "paths": {
+    "core": "../.runtime/bilibili-local-development/core",
+    "memory": "../.runtime/bilibili-local-development/memory",
+    "sessions": "../.runtime/bilibili-local-development/sessions",
+    "query": "../.runtime/bilibili-local-development/query.sqlite",
+    "channels": {
+      "channel-qq": "../.runtime/bilibili-local-development/qq"
+    }
+  },
+  "modelRoutes": {
+    "chat": {
+      "provider": "local-test",
+      "model": "scripted"
+    }
+  },
+  "persona": {
+    "fixedFile": "./persona.test.md",
+    "kind": "test"
+  },
+  "plugins": [
+    {
+      "id": "model-scripted",
+      "required": true
+    },
+    {
+      "id": "timeline",
+      "required": true,
+      "config": {
+        "execution": true
+      }
+    },
+    {
+      "id": "memory",
+      "required": true,
+      "config": {
+        "sourceTracking": true,
+        "maintenance": {}
+      }
+    },
+    {
+      "id": "media",
+      "required": true,
+      "config": {
+        "ffmpeg": "D:/tools/ffmpeg/bin/ffmpeg.exe",
+        "ffprobe": "D:/tools/ffmpeg/bin/ffprobe.exe",
+        "vision": {
+          "provider": "local-test",
+          "model": "scripted"
+        },
+        "audio": {
+          "whisper": {
+            "node": "D:/tools/node/node.exe",
+            "moduleDirectory": "D:/tools/audio/node_modules",
+            "moduleVersion": "1.1.3",
+            "model": {
+              "path": "D:/tools/audio/ggml-tiny.bin",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          },
+          "events": {
+            "python": "D:/tools/audio/python.exe",
+            "model": {
+              "path": "D:/tools/audio/yamnet.onnx",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "labels": {
+              "path": "D:/tools/audio/yamnet-labels.csv",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "onnxruntimeVersion": "1.31.0",
+            "numpyVersion": "2.5.4"
+          }
+        }
+      }
+    },
+    {
+      "id": "bilibili",
+      "required": true,
+      "config": {
+        "minIntervalMs": 1000,
+        "backoffMs": 900000,
+        "maxPages": 4096,
+        "topics": []
+      }
+    },
+    {
+      "id": "activity",
+      "required": true,
+      "config": {
+        "maintenance": true,
+        "timeZone": "Asia/Shanghai"
+      }
+    },
+    {
+      "id": "channel-qq",
+      "required": false,
+      "config": {
+        "botId": "12345678",
+        "ownerId": "87654321",
+        "groupIds": [
+          "11223344"
+        ],
+        "naturalNames": [
+          "大肥鱼",
+          "蓝色大肥鱼"
+        ],
+        "capabilities": {
+          "enabled": true
+        },
+        "tasks": {
+          "enabled": true,
+          "policyId": "qq-task",
+          "deliverResults": true,
+          "explorationResources": [
+            {
+              "channel": "bilibili",
+              "account": "public",
+              "kind": "local",
+              "id": "public"
+            }
+          ]
+        },
+        "httpURL": "http://127.0.0.1:13000/",
+        "wsURL": "ws://127.0.0.1:13001/",
+        "tokenFile": "../.runtime/bilibili-local-development/onebot.token"
+      }
+    }
+  ],
+  "authorityPolicies": [
+    {
+      "id": "local",
+      "producers": [
+        "host-cli"
+      ],
+      "actions": [
+        "dafeiyu_activity_plan",
+        "dafeiyu_activity_update",
+        "dafeiyu_activity_status",
+        "bili_discover",
+        "bili_search_sources",
+        "bili_search",
+        "bili_video",
+        "bili_comments",
+        "bili_subtitles",
+        "bili_danmaku",
+        "bili_media",
+        "bili_observe_select",
+        "dafeiyu_media_acquire",
+        "dafeiyu_media_inspect",
+        "dafeiyu_media_read",
+        "dafeiyu_media_select",
+        "dafeiyu_task_intent",
+        "dafeiyu_task_object",
+        "dafeiyu_execution_source_open",
+        "dafeiyu_execution_contribute",
+        "dafeiyu_execution_select"
+      ],
+      "allowLocalWrite": true,
+      "resources": [
+        {
+          "channel": "bilibili",
+          "account": "public",
+          "kind": "local",
+          "id": "public"
+        }
+      ]
+    },
+    {
+      "id": "conversation",
+      "producers": [
+        "channel-qq"
+      ],
+      "actions": [
+        "qq_groups",
+        "qq_browse",
+        "qq_observe_select",
+        "qq_task_submit",
+        "qq_task_status",
+        "qq_task_control"
+      ],
+      "allowLocalWrite": true
+    },
+    {
+      "id": "qq-task",
+      "producers": [
+        "qq-tasks"
+      ],
+      "actions": [
+        "bili_discover",
+        "bili_search_sources",
+        "bili_search",
+        "bili_video",
+        "bili_comments",
+        "bili_subtitles",
+        "bili_danmaku",
+        "bili_media",
+        "bili_observe_select",
+        "dafeiyu_media_acquire",
+        "dafeiyu_media_inspect",
+        "dafeiyu_media_read",
+        "dafeiyu_media_select",
+        "dafeiyu_task_intent",
+        "dafeiyu_task_object",
+        "dafeiyu_execution_source_open",
+        "dafeiyu_execution_contribute",
+        "dafeiyu_execution_select"
+      ],
+      "allowLocalWrite": true,
+      "resources": [
+        {
+          "channel": "bilibili",
+          "account": "public",
+          "kind": "local",
+          "id": "public"
+        }
+      ]
+    },
+    {
+      "id": "activity-explore",
+      "producers": [
+        "activity"
+      ],
+      "actions": [
+        "dafeiyu_activity_plan",
+        "dafeiyu_activity_update",
+        "dafeiyu_activity_status",
+        "bili_discover",
+        "bili_search_sources",
+        "bili_search",
+        "bili_video",
+        "bili_comments",
+        "bili_subtitles",
+        "bili_danmaku",
+        "bili_media",
+        "bili_observe_select",
+        "dafeiyu_media_acquire",
+        "dafeiyu_media_inspect",
+        "dafeiyu_media_read",
+        "dafeiyu_media_select",
+        "dafeiyu_task_intent",
+        "dafeiyu_task_object",
+        "dafeiyu_execution_source_open",
+        "dafeiyu_execution_contribute",
+        "dafeiyu_execution_select"
+      ],
+      "allowLocalWrite": true,
+      "resources": [
+        {
+          "channel": "bilibili",
+          "account": "public",
+          "kind": "local",
+          "id": "public"
+        }
+      ]
+    },
+    {
+      "id": "activity-maintenance",
+      "producers": [
+        "activity"
+      ],
+      "actions": [
+        "dafeiyu_memory_maintenance_status",
+        "dafeiyu_memory_consolidate",
+        "dafeiyu_memory_maintenance_result",
+        "dafeiyu_experience_read",
+        "dafeiyu_experience_review",
+        "dafeiyu_memory_persona_candidate",
+        "dafeiyu_persona_status"
+      ],
+      "allowLocalWrite": true,
+      "resources": [
+        {
+          "channel": "bilibili",
+          "account": "public",
+          "kind": "local",
+          "id": "public"
+        }
+      ]
+    }
+  ]
+}

@@ -19,6 +19,8 @@ async function fixture(){const root=await mkdtemp(join(testTempDir(),'bili-')),f
 const response=(data:unknown,status=200):HttpResponse=>{const bytes=Buffer.from(JSON.stringify(data));return {status,headers:{'content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};};
 const page={kind:'discover' as const,sourceKey:'popular:1',data:{titles:['虚构天文']},coverage:['本页'],fields:[{id:'title:0',text:'虚构天文'}]};
 
+test('page capacity blocks new cache growth without deleting history or breaking duplicate receipts',async()=>{const f=await fixture();f.store.close();const store=new BiliStore(f.file,f.identity,false,1);try{store.begin(f.context,'first',{});const saved=store.complete(f.context,'first',page);assert.throws(()=>store.begin(f.context,'second',{}),/PAGE_CAPACITY/);assert.equal(store.begin(f.context,'first',{})?.id,saved.id);assert.deepEqual(store.page(saved.owner,saved.id),saved);assert.equal(store.counts.requests,1);}finally{store.close();}});
+
 test('Bili v1 validates identity, preserves immutable observations and recovers without replaying requests',async()=>{const f=await fixture();let store=f.store;try{
   assert.equal(store.begin(f.context,'one',{page:1}),null);const saved=store.complete(f.context,'one',page);assert.deepEqual(store.begin(f.context,'one',{page:1}),saved);assert.throws(()=>store.begin(f.context,'one',{page:2}),/IDEMPOTENCY_CONFLICT/);
   assert.equal(store.current(store.proof(saved)),true);assert.throws(()=>store.page('b'.repeat(64),saved.id),/UNAVAILABLE/);store.begin(f.context,'pending',{});store.backoff(Date.now(),60000);store.close();

@@ -101,7 +101,7 @@ Host状态的 `services.qq.capabilities` 表示动作已注册，`services.memor
 - 模型路由显式配置；本进程DSH_HOME在加载DSH之前绑定到profile内部，不跟随桌面默认模型／数据路径。
 - 状态快照位于core目录的`host-status.json`；它只保存元数据、时间、健康和计数。status还要核对PID、占用nonce、配置及更新时间，旧ready文件不能证明在线。
 - 根配置`context.compactionInputTokens`或memory插件的完整compaction配置二选一。成长区域由`persona.growthRegion`控制，不能再在普通regions里重复定义。
-- analysis、retrieval、compaction等未配置时明确显示；`configured`不等于已探测远端服务可用。activity可按第9节启用；media见下文，bilibili尚未装配。
+- analysis、retrieval、compaction等未配置时明确显示；`configured`不等于已探测远端服务可用。activity、media和bilibili见下文。
 - 新profile初始化不会写入底色模板或预设偏好；更换启动配置不会重置阶段人格。没有新增每轮调用次数上限。
 
 退出码：0表示命令完成；1表示错误或任务失败；2表示检查未就绪、任务等待／中断或启动取消。status成功读取离线状态仍返回0，需查看`online`与状态字段。
@@ -167,3 +167,9 @@ activity使用独立`core/activity.sqlite` v1，memory为v11；阶段4交付时r
 QQ接收用`media.enabled`；发送另需`sendEnabled:true`并在对应策略加入`dafeiyu_media_reply`及`dafeiyu_media_reply_status`。缓存目录只列出实际平台缓存根；HTTPS取件主机逐个允许，不接受任意URL或重定向。直接主人语音任务需`voiceDirectives:true`、QQ tasks以及两个音频后端，仍以原消息主人和完整音轨证据为准。TTS通过`media.tts`配置固定本机System.Speech声音；它只合成核心批准的最终正文，质量留待真实验收。
 
 首次在已有profile启用media，或media v1升v2，必须显式迁移。备份包括数据库、实际对象和正式分析会话的hash清单；处理中间目录不作为正式材料复制。停止时排空／取消媒体工作，重启仅据匹配的固定计划和回执对账；未知发送不重发。`services.media`显示计数和可用配置，不包含媒体正文；配置存在也不等于模型／平台已验收。详见[阶段检查](media-5f3-integration.md)。
+
+## 11. B站首版
+
+`profiles/host.bilibili.example.json`是完整结构模板，使用前需替换虚构账号、工具占位路径、全零权重hash和模型路由。默认匿名，独立本机会话可选；不复制服务器凭据。首次启用必须显式迁移到bilibili v1，关闭插件保留数据。插件不注册B站渠道或发布动作。
+
+QQ明确任务、聊天兴趣和activity唤醒都调用同一B站能力；兴趣资源需要tasks.explorationResources和任务策略resources共同声明。启动没有任何活动计划时不会自动创建刷视频任务。音画、字幕、评论和弹幕分别举证；搜索词必须来自获准来源。状态services.bilibili只显示计数、媒体接线与退避，真正模态配置结合services.media判断。详细动作、支持格式、容量与尚未真实验收的限制见[B站使用说明](bili-usage.md)。

@@ -1,6 +1,6 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前仓库包版本仍为0.19.0，Host和activity为0.1.0；正式阶段版本与标签在统一验收后处理。统一运行入口、QQ文字／任务流程、记忆E及自主活动已完成本地开发，见[本地使用说明](docs/host-usage.md)。真实模型／平台统一验收和服务器切换尚未进行。
+当前仓库包版本仍为0.19.0，Host、activity、media和bilibili为0.1.0；正式阶段版本与标签在统一验收后处理。统一运行入口、QQ、记忆E、自主活动、统一媒体及B站首版已完成本地开发，见[本地使用说明](docs/host-usage.md)。真实模型／平台统一验收和服务器切换尚未进行。
 
 第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，1F结束时529项回归通过。用户于2026-10-25决定将真实模型与整体验收延后至整体开发完成；[162次场景样本已保留](docs/phase1g-deferred-samples.md)，1G尚未通过，继续阶段2开发并保留本地程序回归。1A音画探针单独记录，现有QQ和服务器未切换。
 
@@ -11,6 +11,8 @@
 阶段4自主活动已完成[方案](docs/autonomous-activity-plan.md)、4A计划／时间存储、4B核心来源锚点、4C唤醒／让出与整理调度、[4D Host联合检查](docs/activity-4d-integration.md)。activity库v1，按需启用；single-run不启动后台活动。
 
 阶段5已完成[统一媒体方案](docs/media-and-qq-plan.md)的5A—5F本地开发：受管音画／文档读取、QQ媒体观察与可选主人语音任务、逐部件媒体交付、批准正文TTS、[Host装配／迁移／恢复对账](docs/media-5f3-integration.md)。media库v2，真实模型／平台仍未验收，继续阶段6 B站首版。
+
+阶段6已完成[B站方案](docs/bilibili-capabilities-plan.md)的6A—6D本地开发：只读搜索／页面／字幕／弹幕／评论、独立音画来源、选择性记忆、QQ任务与兴趣、自主活动、Host和bilibili v1迁移。见[阶段记录](docs/bili-6d3-integration.md)及[使用边界](docs/bili-usage.md)。下一步准备整体验收，不能把脚本模型与合成媒体结果当作真实平台或理解质量通过。
 
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
@@ -44,6 +46,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 | `@dafeiyu/memory` | 隔离存储、版本与删除、来源依赖、中文FTS5、BGE召回、token分片及profile缓存；独立分析、候选、工作记忆与选中证据 |
 | `@dafeiyu/activity` | 持久活动计划、主动唤醒、活动时段和记忆整理调度 |
 | `@dafeiyu/media` | 有界媒体字节／解码、音画与文档观察、来源证据、回复资产与最终正文语音 |
+| `@dafeiyu/bilibili` | 只读发现／搜索、公开视频及字幕弹幕评论、音画来源、观察与选择性记忆 |
 
 ## 文档
 
@@ -105,6 +108,6 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [第三阶段时间线与来源接口](docs/phase-3-timeline.md)
 - [第三阶段验收](docs/phase-3-acceptance.md)
 
-`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。按计划／条件的记忆整理已接入自主活动；通用语义关系图、跨组主题融合，以及本项目中的B站、管理员任务和自主更新操作尚未接入。`demo:composition`展示无损组合与来源链；`npm run accept:memory-semantic`用虚构样本和当前绑定模型验证受控融合与原文重建。其余演示见各阶段文档。专属压缩需显式配置可用输入预算，不能与宿主另一压缩写者同时启用。
+`profiles/persona.test.md` 是虚构测试人格，不是线上人格或私人记忆的复制品。按计划／条件的记忆整理已接入自主活动；通用语义关系图、跨组主题融合，以及本项目中的管理员任务和自主更新操作尚未接入。`demo:composition`展示无损组合与来源链；`npm run accept:memory-semantic`用虚构样本和当前绑定模型验证受控融合与原文重建。其余演示见各阶段文档。专属压缩需显式配置可用输入预算，不能与宿主另一压缩写者同时启用。
 
 Git 只管理源码、测试、模板和文档。运行数据库、登录凭据、私人记忆和聊天记录不入库。尚未配置远端仓库；没有部署或修改服务器。
