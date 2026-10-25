@@ -94,7 +94,7 @@ export class QqChannel extends Service {
     super(ctx, 'dafeiyuQQ'); this.config = configSchema.parse(raw);
     if((this.config.capabilities.enabled||this.config.tasks.enabled)&&this.config.lifecycleMode!=='managed')throw new Error('QQ_CAPABILITIES_REQUIRE_MANAGED');
     if(this.config.media.enabled&&(!this.config.capabilities.enabled||this.config.lifecycleMode!=='managed'))throw new Error('QQ_MEDIA_REQUIRE_CAPABILITIES');
-    if(this.config.media.voiceDirectives)throw new Error('QQ_VOICE_DIRECTIVES_NOT_CONFIGURED');
+    if(this.config.media.voiceDirectives&&(!this.config.media.enabled||!this.config.tasks.enabled))throw new Error('QQ_VOICE_TASK_DEPENDENCY_REQUIRED');
     this.config.httpURL = loopbackURL(this.config.httpURL, 'http:'); this.config.wsURL = loopbackURL(this.config.wsURL, 'ws:');
     this.token = readFileSync(this.config.tokenFile, 'utf8').trim();
     if (this.token.length < 32) throw new Error('OneBot token must be at least 32 characters');
@@ -116,7 +116,7 @@ export class QqChannel extends Service {
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority)=>this.deliverTaskResult(reply,anchor,signal,authority) }] });
       if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing)});
-      if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,deliverResults:this.config.tasks.deliverResults,naturalNames:this.config.naturalNames,...(this.config.tasks.expressionPolicy?{expressionPolicy:this.config.tasks.expressionPolicy}:{})});
+      if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,deliverResults:this.config.tasks.deliverResults,naturalNames:this.config.naturalNames,voiceDirectives:this.config.media.voiceDirectives,...(this.config.tasks.expressionPolicy?{expressionPolicy:this.config.tasks.expressionPolicy}:{})});
       if(this.config.media.enabled)this.media=new QqMedia(ctx,{agentId:this.config.agentId,store:this.store,api:this.api,settings:this.config.media,allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&this.state==='online',sourceEpoch:()=>JSON.stringify([this.state==='rejected',this.groups.effective()]),rejectIdentity:()=>{this.verified=false;this.state='rejected';this.error='ACCOUNT_MISMATCH';this.socket?.terminate();}});
     } catch (error) {this.media?.close();this.tasks?.close();this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
     ctx.effect(() => () => this.close(), 'qq.close');
@@ -126,7 +126,7 @@ export class QqChannel extends Service {
     this.handle.observe({ conversation: conversation ?? { channel: 'qq', account: this.config.botId, kind: 'local', id: '__transport__' }, type, data: { code } });
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
-    media:{enabled:this.config.media.enabled,registered:!!this.media&&!this.stopped,actions:this.media&&!this.stopped?[...QQ_MEDIA_ACTIONS]:[],voiceDirectives:false},
+    media:{enabled:this.config.media.enabled,registered:!!this.media&&!this.stopped,actions:this.media&&!this.stopped?[...QQ_MEDIA_ACTIONS]:[],voiceDirectives:this.config.media.voiceDirectives},
     groupIds: [...this.config.groupIds], groupSync: this.groups.status(), delivery:this.closedDeliveryCounts??this.store.delivery.counts(),tasks:{enabled:this.config.tasks.enabled,registered:!!this.tasks&&!this.stopped,deliverResults:this.config.tasks.enabled&&this.config.tasks.deliverResults,actions:this.tasks&&!this.stopped?[...QQ_TASK_ACTIONS]:[]},capabilities:{enabled:this.config.capabilities.enabled,registered:!!this.capabilities&&!this.stopped,actions:this.capabilities&&!this.stopped?[...QQ_ACTIONS]:[]},counters: { ...this.counters }, at: new Date().toISOString() }; }
   private cacheRoute(scene:Conversation):string {return this.config.capabilities.enabled?qqResourceRoute(scene):JSON.stringify([scene.kind,scene.id]);}
   private allowed(scene:Conversation):boolean {return !this.stopped&&this.state!=='rejected'&&scene.channel==='qq'&&scene.account===this.config.botId&&

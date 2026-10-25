@@ -1,0 +1,20 @@
+{
+  "stage": "media-5D-3b",
+  "date": "2026-10-25",
+  "baseline": "d71ecc7",
+  "result": "targeted-checks-passed-after-fixes",
+  "runtimeSchema": 4,
+  "checks": [
+    {"runId": "878b2810-51cb-4c41-9aa8-6a90c06bd994", "passed": 23, "failed": 0, "scope": ["qq-task-acceptance", "qq-task-control", "native-delivery-store"]},
+    {"runId": "bf67fb72-1046-4ebe-b996-eaa071c3e0ce", "passed": 26, "failed": 1, "note": "runtime-store 7/7 and storage-migration 9/9; voice fixture failure corrected later"},
+    {"runId": "ed77a631-025e-4df8-b479-3544b823cef6", "passed": 33, "failed": 0, "scope": ["qq-voice-task", "host-runtime"]}
+  ],
+  "countsOverlap": true,
+  "correctedIssues": ["Host status parser rejected runtime v4", "synthetic event injection during reconnect gap", "voice fixture reused one idempotency id across distinct source inputs"],
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false,
+  "remaining": ["media reply parts and delivery", "unified Host media integration", "overall real evaluation"]
+}

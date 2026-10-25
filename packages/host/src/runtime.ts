@@ -13,6 +13,7 @@ import Credentials from '@deepseek-ai/dsh-credentials-local';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import * as DeepSeek from '@deepseek-ai/dsh-llm-deepseek-api-key';
 import * as Core from '@dafeiyu/core';
+import { RUNTIME_SCHEMA_VERSION } from '@dafeiyu/core/runtime-store';
 import * as Memory from '@dafeiyu/memory';
 import * as Activity from '@dafeiyu/activity';
 import * as Timeline from '@dafeiyu/timeline';
@@ -47,7 +48,7 @@ export interface PluginHealth {id:string;required:boolean;state:'configured'|'st
 export interface HostSnapshot {schemaVersion:1;profileId:string;agentId:string;instanceId:string;pid:number;at:string;configHash:string;foundationHash:string;
   phase:HostPhase;mode:'daemon'|'single-run';accepting:boolean;error:string|null;plugins:PluginHealth[];features:string[];
   services:{memory:ReturnType<Memory.MemoryService['runtimeHealth']>|null;activity:Activity.ActivityService['health']|null;taskDelivery:ReturnType<Core.DafeiyuService['getStatus']>['nativeDelivery'];qq:{state:string;groupSync:string;groupError:string|null;effectiveGroups:number;lastGroupSync:string|null;capabilities:boolean;tasks:{enabled:boolean;registered:boolean;deliverResults:boolean};delivery:{plans:number;pending:number;unknown:number}}|null};
-  counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:2;memory:11;runtime:3;activity:1|null};}
+  counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:2;memory:11;runtime:typeof RUNTIME_SCHEMA_VERSION;activity:1|null};}
 export interface HostRunResult {taskId:string;runId:string;state:string;error:string|null;result:string|null}
 class FixedModel extends LlmAdapter {
   constructor(private readonly response:string){super();}
@@ -142,7 +143,7 @@ export class ManagedHost {
   snapshot():HostSnapshot{const core=this.coreValue?.getStatus(),qq=this.qqValue?.getStatus();return {schemaVersion:1,profileId:this.config.config.profileId,agentId:this.config.config.agent.id,instanceId:this.instanceId,pid:process.pid,at:new Date().toISOString(),configHash:this.config.hash,foundationHash:this.config.foundation.hash,
       phase:this.phase,mode:this.mode,accepting:['ready','degraded'].includes(this.phase)&&!!this.coreValue?.accepting,error:this.error,plugins:this.health.map(p=>({...p})),features:this.coreValue?.capabilityManifest().features??[],
       services:{memory:this.memoryValue?.runtimeHealth()??null,activity:this.activityValue?.health??null,taskDelivery:core?.nativeDelivery??null,qq:qq?{state:qq.state,groupSync:qq.groupSync.state,groupError:qq.groupSync.error,effectiveGroups:qq.groupSync.effectiveIds.length,lastGroupSync:qq.groupSync.lastSuccessAt,capabilities:qq.capabilities.registered,tasks:{enabled:qq.tasks.enabled,registered:qq.tasks.registered,deliverResults:qq.tasks.deliverResults},delivery:qq.delivery}:null},
-      counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:2,memory:11,runtime:3,activity:existsSync(join(this.config.paths.core,'activity.sqlite'))?1:null}};}
+      counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:2,memory:11,runtime:RUNTIME_SCHEMA_VERSION,activity:existsSync(join(this.config.paths.core,'activity.sqlite'))?1:null}};}
   publish(){if(!this.lease)return;const file=join(this.config.paths.core,'host-status.json'),temp=file+'.'+randomUUID()+'.tmp';writeFileSync(temp,JSON.stringify(this.snapshot(),null,2)+'\n',{flag:'wx'});renameSync(temp,file);}
   run(raw:unknown):Promise<HostRunResult>{if(!['ready','degraded'].includes(this.phase))throw new Error('HOST_NOT_READY');if(!this.memoryValue)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     const work=this.performRun(raw).finally(()=>this.jobs.delete(work));this.jobs.add(work);return work;}

@@ -70,8 +70,14 @@ export class ExecutionCoordinator {
     const request=this.d.store.request(run.requestKey),source=savedSchema.parse(request.payload).messageSource;if(source)this.validateMessageSource(source);
     return (source?.resources??this.policy(request.producer,run.definition.policyId).resources).map(scene=>({...scene}));}
   bindMessageTasks(binding:MessageTaskBinding):()=>void{if(this.messageBindings.has(binding.id))throw new Error('DUPLICATE_PROVIDER');this.policy(binding.id,binding.policyId);
-    const captured=Object.freeze({...binding,classify:binding.classify.bind(binding),active:binding.active.bind(binding)});this.messageBindings.set(binding.id,captured);return ()=>{if(this.messageBindings.get(binding.id)===captured)this.messageBindings.delete(binding.id);};}
-  private messageBindingHash(binding:MessageTaskBinding){const {classify:_classify,active:_active,autoDeliver:_auto,...identity}=binding;return runtimeHash({identity,policy:this.policy(binding.id,binding.policyId)});}
+    const captured=Object.freeze({...binding,classify:binding.classify.bind(binding),active:binding.active.bind(binding),...(binding.voice?{voice:Object.freeze({version:binding.voice.version,resolve:binding.voice.resolve.bind(binding.voice),current:binding.voice.current.bind(binding.voice)})}:{})});this.messageBindings.set(binding.id,captured);return ()=>{if(this.messageBindings.get(binding.id)===captured)this.messageBindings.delete(binding.id);};}
+  private messageBindingHash(binding:MessageTaskBinding){const {classify:_classify,active:_active,autoDeliver:_auto,voice:_voice,...identity}=binding;return runtimeHash({identity,policy:this.policy(binding.id,binding.policyId)});}
+  private messageDirective(binding:MessageTaskBinding,context:ExecutionContextV3,message:import('@dafeiyu/contracts').InboundMessage,exposureId?:string){
+    const directive=binding.classify(message);if(message.mainText?.trim()||exposureId===undefined)return {directive,voice:undefined};
+    if(message.sender.id!==binding.ownerId)throw new Error('TASK_DIRECTIVE_REQUIRED');if(!binding.voice)throw new Error('VOICE_DIRECTIVES_NOT_CONFIGURED');
+    const resolved=binding.voice.resolve(context,message,exposureId);if(!binding.voice.current(message,resolved.evidence))throw new Error('SOURCE_STALE');
+    return {directive:binding.classify({...message,mainText:resolved.text}),voice:{bindingVersion:binding.voice.version,evidence:resolved.evidence}};
+  }
   describeMessageResult(id:string){const run=this.d.store.get(id),source=savedSchema.safeParse(this.d.store.request(run.requestKey).payload);if(!['completed','waiting'].includes(run.state)||run.definition.scope.kind!=='task'||!source.success||!source.data.messageSource)return null;
     const provenance=source.data.messageSource,binding=this.messageBindings.get(provenance.bindingId),item=this.d.journal.get(provenance.inboundId);
     return {item,autoDeliver:binding?.active()&&binding.autoDeliver===true,anchor:TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:run.definition.taskId,runId:run.id,inboundId:item.id,target:provenance.conversation,intentVersion:run.definition.intentVersion,authorityVersion:provenance.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})})};}
@@ -79,7 +85,9 @@ export class ExecutionCoordinator {
     if(!binding?.active()||this.messageBindingHash(binding)!==source.authorityVersion||item.extensionId!==binding.channelExtensionId||item.message.conversation.channel!==binding.channel||item.message.conversation.account!==binding.account
       ||runtimeHash(item.message)!==source.messageHash||runtimeHash(item.message.conversation)!==runtimeHash(source.conversation)||source.kind==='explicit-task'&&item.message.sender.id!==binding.ownerId
       ||this.d.journal.messageRecalled({agentId:this.d.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
-    if(source.control){const control=this.d.journal.get(source.control.inboundId);if(control.extensionId!==binding.channelExtensionId||control.message.sender.id!==binding.ownerId||runtimeHash(control.message.conversation)!==runtimeHash(source.conversation)||runtimeHash(control.message)!==source.control.messageHash||this.d.journal.messageRecalled({agentId:this.d.agentId,route:control.route},control.message.id))throw new Error('SOURCE_STALE');}
+    if(source.voice&&(source.kind!=='explicit-task'||!binding.voice||binding.voice.version!==source.voice.bindingVersion||!binding.voice.current(item.message,source.voice.evidence)))throw new Error('SOURCE_STALE');
+    if(source.control){const control=this.d.journal.get(source.control.inboundId);if(control.extensionId!==binding.channelExtensionId||control.message.sender.id!==binding.ownerId||runtimeHash(control.message.conversation)!==runtimeHash(source.conversation)||runtimeHash(control.message)!==source.control.messageHash||this.d.journal.messageRecalled({agentId:this.d.agentId,route:control.route},control.message.id))throw new Error('SOURCE_STALE');
+      if(source.control.voice&&(!binding.voice||binding.voice.version!==source.control.voice.bindingVersion||!binding.voice.current(control.message,source.control.voice.evidence)))throw new Error('SOURCE_STALE');}
     return {binding,item};}
   private validateMessageAncestors(run:StoredRun){const seen=new Set<string>();let current:StoredRun|null=run;while(current){if(seen.has(current.id))throw new Error('SOURCE_STALE');seen.add(current.id);const saved=savedSchema.parse(this.d.store.request(current.requestKey).payload);if(saved.messageSource)this.validateMessageSource(saved.messageSource);
       const parent:StoredRun|null=current.definition.parentRunId?this.d.store.get(current.definition.parentRunId):null;if(parent&&(parent.definition.taskId!==run.definition.taskId||parent.definition.intentVersion!==run.definition.intentVersion))throw new Error('SOURCE_STALE');current=parent;}}
@@ -88,10 +96,10 @@ export class ExecutionCoordinator {
     const item=this.d.journal.get(run.definition.origin.inboundId),binding=[...this.messageBindings.values()].find(binding=>binding.pluginId===pluginId&&binding.channelExtensionId===item.extensionId);
     if(!binding?.active()||item.message.conversation.channel!==binding.channel||item.message.conversation.account!==binding.account||item.message.mainText===undefined||!item.message.text.startsWith(item.message.mainText)
       ||this.d.journal.messageRecalled({agentId:this.d.agentId,route:item.route},item.message.id))throw new Error('SCOPE_DENIED');return {binding,item};}
-  submitMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw),directive=binding.classify(item.message);
+  submitMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
     if(input.kind==='explicit-task'&&(item.message.sender.id!==binding.ownerId||directive.kind!=='submit'))throw new Error('TASK_DIRECTIVE_REQUIRED');
     const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:[])].map(scene=>[runtimeHash(scene),scene])).values()];
-    const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources});
+    const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{})});
     const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:null]),title:input.kind==='explicit-task'?Array.from(directive.text).slice(0,80).join(''):'自主探索',goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId});
     this.validateMessageSource(source);const accepted=this.submit(binding.id,request,undefined,null,null,{kind:input.kind,basis:[`message:${item.id}`]},source);
     return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:input.kind,sourceInboundId:item.id};
@@ -137,12 +145,12 @@ export class ExecutionCoordinator {
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
       resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
-  controlMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskControlSchema.parse(raw),directive=binding.classify(item.message);
+  controlMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskControlSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
     if(item.message.sender.id!==binding.ownerId||directive.kind!==input.action)throw new Error('TASK_DIRECTIVE_REQUIRED');
     if(redactJson(z.json().parse(directive)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
     const latest=this.findMessageTask(binding,item.message.conversation,input.taskId),requestId=runtimeHash([item.id,input.taskId,input.action,input.objectionId??null]),producer=`message-control:${binding.id}`,old=this.d.store.findRequest(producer,requestId);
     const run=old?this.d.store.get(z.object({runId:z.uuid()}).parse(old.payload).runId):latest;
-    const control=this.d.store.prepareRequest(producer,requestId,{kind:'message-control',runId:run.id,issuerRunId:context.runId,input,inboundId:item.id,messageHash:runtimeHash(item.message),directive});
+    const control=this.d.store.prepareRequest(producer,requestId,{kind:'message-control',runId:run.id,issuerRunId:context.runId,input,inboundId:item.id,messageHash:runtimeHash(item.message),directive,...(voice?{voice}:{})});
     const receiptId=`message-control:${control.id}`,receipt=this.d.store.readInput(context.runId,receiptId);if(receipt)return z.record(z.string(),z.json()).parse(receipt);
     const port=this.producer(binding.id),taskRef=port.openTask(input.taskId);let resumed:{task:TaskRef;run:RunRef;state:string}|undefined,changed=false;
     try {
@@ -154,7 +162,7 @@ export class ExecutionCoordinator {
       changed=true;
       if(!this.messageIntent(run)?.blocking){const checkpoint=this.d.store.checkpoints(run.id).at(-1);if(!checkpoint)throw new Error('SOURCE_STALE');
         const parentSource=savedSchema.parse(this.d.store.request(run.requestKey).payload).messageSource;if(!parentSource)throw new Error('MESSAGE_REQUIRED');
-        const nextSource=MessageTaskSourceSchema.parse({...parentSource,control:{inboundId:item.id,messageHash:runtimeHash(item.message)}});this.validateMessageSource(nextSource);
+        const nextSource=MessageTaskSourceSchema.parse({...parentSource,control:{inboundId:item.id,messageHash:runtimeHash(item.message),...(voice?{voice}:{})}});this.validateMessageSource(nextSource);
         resumed=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([control.id,'resume']),taskId:input.taskId,expectedVersion:task.version,policyId:binding.policyId}),{kind:'continuation',parentRunId:run.id,checkpointId:checkpoint},run.id,checkpoint,this.motivation(run),nextSource);}
     }else{
       if(input.action==='revise')z.string().trim().min(1).max(2000).parse(directive.text);
@@ -164,7 +172,7 @@ export class ExecutionCoordinator {
       for(const previous of this.d.store.list(['accepted','queued','running','waiting']))if(previous.definition.taskId===input.taskId)this.control(binding.id,previous,{requestId:runtimeHash([control.id,previous.id,'cancel']),expectedVersion:previous.version,reason:'主人修改或取消任务'},'cancel');
       if(input.action==='revise'){
         const resources=[...new Map([item.message.conversation,...this.policy(binding.id,binding.policyId).resources].map(scene=>[runtimeHash(scene),scene])).values()];
-        const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:'explicit-task',resources});
+        const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:'explicit-task',resources,...(voice?{voice}:{})});
         resumed=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([control.id,'revise']),taskId:input.taskId,expectedVersion:updated.version,policyId:binding.policyId}),undefined,null,null,{kind:'explicit-task',basis:[`message:${item.id}`]},source);
       }
     }

@@ -31,7 +31,7 @@ export function outcomes(request:GenerateOptions){return request.messages.flatMa
 const browseData=z.object({snapshotId:z.uuid(),nextCursor:z.uuid().nullable(),page:z.record(z.string(),z.json()).and(z.object({messages:z.array(z.object({id:z.string(),text:z.string(),occurredAt:z.string().nullable(),unsupported:z.array(z.string())})),limitations:z.array(z.string())}))});
 export function lastPage(request:GenerateOptions){const pages=outcomes(request).flatMap(outcome=>{const result=browseData.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(pages.length,'model must actually see a QQ page');return pages.at(-1)!;}
 
-export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],deliverResults=false,existingRoot,media=false,audio=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean}={}){
+export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],deliverResults=false,existingRoot,media=false,audio=false,voiceDirectives=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean;voiceDirectives?:boolean}={}){
   const scratch=testTempDir();if(existingRoot){const path=relative(resolve(process.env.DAFEIYU_TEST_RUN!),resolve(existingRoot));if(path.startsWith('..')||/^[A-Za-z]:/.test(path))throw new Error('FIXTURE_ROOT_OUTSIDE_MANAGED_RUN');}
   const root=existingRoot??await mkdtemp(join(scratch,'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
@@ -76,7 +76,7 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
       return {stdout:Buffer.from(JSON.stringify(result)),stderr:Buffer.alloc(0),peakCommitBytes:100,memoryLimitBytes:spec.memoryBytes};}}}:undefined);}});
     await h.ctx.dafeiyuMedia.recover();h.ctx.dafeiyuMedia.activate();}
   const config:QQ.Config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group,otherGroup],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,
-    tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks,deliverResults},naturalNames:['大肥鱼'],...(media?{media:{enabled:true,cacheRoots:[join(root,'onebot-cache')]}}:{})};
+    tokenFile,dataDir:join(root,'qq'),lifecycleMode:'managed',requestTimeoutMs:500,reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks,deliverResults},naturalNames:['大肥鱼'],...(media?{media:{enabled:true,cacheRoots:[join(root,'onebot-cache')],voiceDirectives}}:{})};
   // Unbound v2 cache is deliberately retained, but must never appear in new account-bound pages.
   const old=new QQ.QqStore(join(root,'qq','qq.sqlite'));old.remember(JSON.stringify(['group',group]),'900',owner,'UNBOUND_CACHE_SENTINEL');old.close();
   let fiber=await h.ctx.plugin(QQ,config);

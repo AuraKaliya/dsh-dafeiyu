@@ -12,7 +12,7 @@ export type NativeDeliveryMaterial=z.infer<typeof materialSchema>;
 const renderRef=z.strictObject({sessionId:z.string(),messageSeq:z.number().int().positive(),turnEndSeq:z.number().int().positive(),textHash:z.string().length(64)});
 const rowSchema=z.object({id:z.uuid(),run_id:z.uuid(),state:stateSchema,version:z.number().int().positive(),anchor:z.string(),material:z.string().nullable(),render_ref:z.string().nullable(),body:z.string().nullable(),credential:z.string().nullable(),receipt:z.string().nullable(),error:z.string().nullable()});
 export function migrateNativeDeliveries(db:DatabaseSync){const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===3){db.prepare('SELECT * FROM native_deliveries LIMIT 0').all();return;}if(version!==2)throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
+  if(version===3||version===4){db.prepare('SELECT * FROM native_deliveries LIMIT 0').all();return;}if(version!==2)throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
   db.exec(`CREATE TABLE native_deliveries(id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),state TEXT NOT NULL,version INTEGER NOT NULL,anchor TEXT NOT NULL,material TEXT,render_ref TEXT,body TEXT,credential TEXT,receipt TEXT,error TEXT);
     CREATE TRIGGER native_delivery_anchor_immutable BEFORE UPDATE OF id,run_id,anchor ON native_deliveries BEGIN SELECT RAISE(ABORT,'Immutable delivery anchor'); END;
     CREATE TRIGGER native_delivery_material_immutable BEFORE UPDATE OF material ON native_deliveries WHEN OLD.material IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable delivery material'); END;
