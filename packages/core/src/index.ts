@@ -224,6 +224,7 @@ export class DafeiyuService extends Service {
   }
   capabilityResourceCurrent(raw:unknown):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registryV3.resourceCurrent(proof.data);}
   capabilityResourceEpoch(scope?:TimelineScope):string {return this.registryV3.resourceEpoch(scope);}
+  capabilityResourceEpochWithout(providerId:string,scope?:TimelineScope):string {return this.registryV3.resourceEpoch(scope,providerId);}
   capabilityHistoryCurrent(scope:TimelineScope,deps:readonly SourceDependency[]):boolean {
     const session=this.journal.sessionFor(scope);return !!session&&this.runtime.summarySourcesCurrent(session,deps);
   }

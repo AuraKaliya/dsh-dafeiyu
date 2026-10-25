@@ -53,3 +53,13 @@ test('startup recovery removes only owned work and reserved uncommitted blobs',a
     assert.deepEqual(await readdir(f.files.work),['protected-evidence.txt']);
   }finally{f.close();}
 });
+
+test('derived observations keep historical coverage after cache eviction but not after logical parent deletion',async()=>{
+  const f=await mediaIoFixture();try{
+    const parent=await f.files.ingest(f.access,'parent',f.source,{bytes:4,mime:'text/plain',stream:byteChunks(Buffer.from('raw!'))},signal());
+    const child=await f.files.ingest(f.access,'child',f.source,{bytes:4,mime:'text/plain',stream:byteChunks(Buffer.from('part'))},signal(),{parent});
+    const exposure=f.store.recordExposure(f.access,'read',{},f.source,{assets:[child],coverage:{acquiredBytes:4,processed:[],exposed:true,gaps:['synthetic receipt'],completeness:'partial'},text:'模拟观察',occurredAt:new Date().toISOString(),detail:{fixture:true}});
+    f.store.beginEviction(child.sha256,Date.now());await f.files.cleanPending();assert.equal(f.store.exposureCurrent(exposure.id),true);
+    f.store.deleteAsset(f.access,parent.id,parent.version);assert.equal(f.store.exposureCurrent(exposure.id),false);assert.throws(()=>f.store.read(f.access,child.id),/SOURCE_STALE/);
+  }finally{f.close();}
+});

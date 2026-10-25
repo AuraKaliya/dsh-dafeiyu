@@ -1,0 +1,19 @@
+{
+  "stage": "media-5C-1",
+  "date": "2026-10-25",
+  "baseline": "b9e6af9",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "cd8f27b5-61a5-4814-86ea-c64f005d528e", "passed": 26, "failed": 0, "scope": ["media-vision", "media-store", "media-authority", "capability-observation"]},
+    {"runId": "80d81a5a-2f7a-450d-bee9-da19404d49ec", "passed": 11, "failed": 0, "scope": ["media-files", "media-vision"]}
+  ],
+  "countsOverlap": true,
+  "actualLocalExecution": ["DSH isolated image request", "scoped attachment reads", "FFmpeg", "SQLite", "core grants", "selective memory"],
+  "model": "scripted fixture",
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false,
+  "remaining": ["ASR and sound events", "documents", "QQ media", "Host integration", "real multimedia quality evaluation"]
+}

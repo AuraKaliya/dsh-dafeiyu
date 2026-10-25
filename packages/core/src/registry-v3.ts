@@ -38,7 +38,7 @@ function freezeTree(value: unknown): void {
 export class CapabilityRegistryV3 {
   private resourceState(entry:Entry,scope?:TimelineScope){try{const epoch=entry.resourceProofs?.epoch(scope);return typeof epoch==='string'&&epoch.length<=8000?{ready:entry.active&&entry.ready(),epoch}:{ready:false,epoch:'INVALID_RESOURCE_EPOCH'};}catch{return {ready:false,epoch:'RESOURCE_UNAVAILABLE'};}}
   resourceCurrent(proof:ResourceProof):boolean {const entry=this.entries.get(proof.provider);try{return !!entry&&this.resourceState(entry).ready&&entry.resourceProofs?.current(proof)===true;}catch{return false;}}
-  resourceEpoch(scope?:TimelineScope):string{return JSON.stringify([...this.entries.values()].filter(entry=>entry.active&&entry.resourceProofs).flatMap(entry=>{const state=this.resourceState(entry,scope);return state.epoch===''?[]:[[entry.metadata.id,state]];}));}
+  resourceEpoch(scope?:TimelineScope,excluding?:string):string{return JSON.stringify([...this.entries.values()].filter(entry=>entry.active&&entry.resourceProofs&&entry.metadata.id!==excluding).flatMap(entry=>{const state=this.resourceState(entry,scope);return state.epoch===''?[]:[[entry.metadata.id,state]];}));}
   contributors(){return [...this.entries.values()].filter(entry=>entry.active&&entry.ready()).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,version:entry.metadata.version,context,active:()=>entry.active&&entry.ready(),signal:entry.controller.signal})));}
   private readonly entries = new Map<string, Entry>();
   hasId(id: string): boolean { return this.entries.has(id); }
