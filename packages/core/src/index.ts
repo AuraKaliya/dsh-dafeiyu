@@ -320,6 +320,7 @@ export class DafeiyuService extends Service {
   createMaintenanceAnchor(runId:string,taskId:string,epoch:number){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.maintenanceAnchor(runId,taskId,epoch);}
   activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:this.executions?.foregroundPending??0};}
   executionAuthority(context:ExecutionContextV3,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authority(context,pluginId);}
+  explicitTaskInstruction(context:ExecutionContextV3,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.explicitTaskInstruction(context,pluginId);}
   executionEvents(context:ExecutionContextV3,pluginId:string){const authority=this.executionAuthority(context,pluginId);if(authority.scope.kind!=='task')throw new Error('UNSUPPORTED_EXECUTION_ORIGIN');return this.journal.executionEvents(authority.agentId,authority.scope.taskId);}
   registerExtensionV3(extension:ExtensionV3):ExtensionHandleV3 {
     this.assertOpen();

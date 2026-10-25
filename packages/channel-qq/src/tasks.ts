@@ -1,10 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
-import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskControlSchema } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3,ExecutionContextV3,InboundMessage,MediaVoiceEvidence } from '@dafeiyu/contracts';
+import { MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskControlSchema,ConversationSchema } from '@dafeiyu/contracts';
+import type { ActionCapabilityV3,ExecutionContextV3,InboundMessage,MediaVoiceEvidence,Conversation } from '@dafeiyu/contracts';
 
 export const QQ_TASK_ACTIONS=['qq_task_submit','qq_task_status','qq_task_control'] as const;
-export const QqTasksConfigSchema=z.strictObject({enabled:z.boolean().default(false),deliverResults:z.boolean().default(true),policyId:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('qq-task'),expressionPolicy:z.strictObject({id:z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),version:z.number().int().positive()}).optional()});
+export const QqTasksConfigSchema=z.strictObject({enabled:z.boolean().default(false),deliverResults:z.boolean().default(true),policyId:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('qq-task'),explorationResources:z.array(ConversationSchema).max(32).optional(),expressionPolicy:z.strictObject({id:z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),version:z.number().int().positive()}).optional()});
 export function qqTaskDirective(message:Pick<InboundMessage,'mainText'>,names:readonly string[]=[]):{kind:'submit'|'cancel'|'revise'|'resolve'|'none';text:string}{
   let text=message.mainText?.trim()??'';
   for(const name of [...names].sort((a,b)=>b.length-a.length)){const prefix=text.startsWith('@'+name)?'@'+name:text.startsWith(name)?name:null;if(prefix){text=text.slice(prefix.length).replace(/^[\s，,：:！!。]+/u,'');break;}}
@@ -16,13 +16,13 @@ export class QqTaskCapabilities {
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   private readonly unbind:()=>void;
   private closed=false;
-  constructor(private readonly ctx:Context,config:{agentId:string;botId:string;ownerId:string;policyId:string;naturalNames:readonly string[];deliverResults:boolean;voiceDirectives?:boolean;expressionPolicy?:{id:string;version:number}}){
+  constructor(private readonly ctx:Context,config:{agentId:string;botId:string;ownerId:string;policyId:string;naturalNames:readonly string[];deliverResults:boolean;voiceDirectives?:boolean;explorationResources?:readonly Conversation[];expressionPolicy?:{id:string;version:number}}){
     const current=(message:InboundMessage,evidence:MediaVoiceEvidence)=>!this.closed&&message.sender.id===config.ownerId&&message.conversation.channel==='qq'&&message.conversation.account===config.botId&&!message.mainText?.trim()
       &&evidence.origin.provider==='qq-media'&&JSON.stringify(message.conversation)===JSON.stringify(evidence.origin.scene)
       &&z.object({messageId:z.literal(message.id),sender:z.literal(config.ownerId)}).safeParse(evidence.origin.detail).success
       &&message.media?.some(m=>m.kind==='audio'&&m.source.provider===evidence.source.provider&&m.source.key===evidence.source.key)===true&&ctx.dafeiyu.mediaVoiceCurrent(evidence);
     this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'qq-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1',...(config.voiceDirectives?['media.assets.v1']:[]),...(config.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])],provides:['qq.tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
-    try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'qq-tasks',pluginId:'qq-tasks',channelExtensionId:'channel-qq',channel:'qq',account:config.botId,ownerId:config.ownerId,policyId:config.policyId,version:'1',autoDeliver:config.deliverResults,...(config.expressionPolicy?{expressionPolicy:config.expressionPolicy}:{}),classify:message=>qqTaskDirective(message,config.naturalNames),active:()=>!this.closed,
+    try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'qq-tasks',pluginId:'qq-tasks',channelExtensionId:'channel-qq',channel:'qq',account:config.botId,ownerId:config.ownerId,policyId:config.policyId,version:'1',autoDeliver:config.deliverResults,...(config.explorationResources?.length?{explorationResources:config.explorationResources}:{}),...(config.expressionPolicy?{expressionPolicy:config.expressionPolicy}:{}),classify:message=>qqTaskDirective(message,config.naturalNames),active:()=>!this.closed,
       ...(config.voiceDirectives?{voice:{version:'qq-record-asr-v1',current,resolve:(context:ExecutionContextV3,message:InboundMessage,id:string)=>{const result=ctx.dafeiyu.mediaVoiceEvidence(context,'qq-tasks',id);if(!current(message,result.evidence))throw new Error('VOICE_MESSAGE_MISMATCH');return result;}}}:{})});}
     catch(error){this.handle.dispose();throw error;}
   }

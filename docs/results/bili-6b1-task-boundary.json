@@ -1,0 +1,1 @@
+{"stage":"bilibili-6B-1","date":"2026-10-25","baseline":"7c38d38","runId":"4c78f2ba-7441-4911-9c1a-a53d410efb6e","passed":24,"failed":0,"scope":["bili-task-boundary","qq-task-acceptance","qq-task-control"],"realModel":false,"realPlatform":false,"fullRegression":false,"serverAccess":false,"cleanupBlocked":false}

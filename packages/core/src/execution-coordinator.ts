@@ -72,7 +72,8 @@ export class ExecutionCoordinator {
     if(run.definition.origin.kind==='message')return [this.d.journal.get(run.definition.origin.inboundId).message.conversation];
     const request=this.d.store.request(run.requestKey),source=savedSchema.parse(request.payload).messageSource;if(source)this.validateMessageSource(source);
     return (source?.resources??this.policy(request.producer,run.definition.policyId).resources).map(scene=>({...scene}));}
-  bindMessageTasks(binding:MessageTaskBinding):()=>void{if(this.messageBindings.has(binding.id))throw new Error('DUPLICATE_PROVIDER');this.policy(binding.id,binding.policyId);
+  bindMessageTasks(binding:MessageTaskBinding):()=>void{if(this.messageBindings.has(binding.id))throw new Error('DUPLICATE_PROVIDER');const policy=this.policy(binding.id,binding.policyId);
+    if(binding.explorationResources?.some(scene=>!policy.resources.some(allowed=>runtimeHash(allowed)===runtimeHash(scene))))throw new Error('EXPLORATION_RESOURCE_DENIED');
     const captured=Object.freeze({...binding,classify:binding.classify.bind(binding),active:binding.active.bind(binding),...(binding.voice?{voice:Object.freeze({version:binding.voice.version,resolve:binding.voice.resolve.bind(binding.voice),current:binding.voice.current.bind(binding.voice)})}:{})});this.messageBindings.set(binding.id,captured);return ()=>{if(this.messageBindings.get(binding.id)===captured)this.messageBindings.delete(binding.id);};}
   private messageBindingHash(binding:MessageTaskBinding){const {classify:_classify,active:_active,autoDeliver:_auto,voice:_voice,...identity}=binding;return runtimeHash({identity,policy:this.policy(binding.id,binding.policyId)});}
   private messageDirective(binding:MessageTaskBinding,context:ExecutionContextV3,message:import('@dafeiyu/contracts').InboundMessage,exposureId?:string){
@@ -101,7 +102,7 @@ export class ExecutionCoordinator {
       ||this.d.journal.messageRecalled({agentId:this.d.agentId,route:item.route},item.message.id))throw new Error('SCOPE_DENIED');return {binding,item};}
   submitMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
     if(input.kind==='explicit-task'&&(item.message.sender.id!==binding.ownerId||directive.kind!=='submit'))throw new Error('TASK_DIRECTIVE_REQUIRED');
-    const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:[])].map(scene=>[runtimeHash(scene),scene])).values()];
+    const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:binding.explorationResources??[])].map(scene=>[runtimeHash(scene),scene])).values()];
     const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{})});
     const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:null]),title:input.kind==='explicit-task'?Array.from(directive.text).slice(0,80).join(''):'自主探索',goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId});
     this.validateMessageSource(source);const accepted=this.submit(binding.id,request,undefined,null,null,{kind:input.kind,basis:[`message:${item.id}`]},source);
@@ -187,6 +188,10 @@ export class ExecutionCoordinator {
     }catch(error){if(changed)throw new Error('TASK_CONTROL_INCOMPLETE');throw error;}
   }
   authorizeResource(context:ExecutionContextV3,pluginId:string,scene:Conversation){this.authority(context,pluginId);if(!this.allowedResource(this.d.store.get(context.runId),scene))throw new Error('RESOURCE_SCOPE_DENIED');}
+  explicitTaskInstruction(context:ExecutionContextV3,pluginId:string){this.authority(context,pluginId);const run=this.d.store.get(context.runId);if(run.definition.scope.kind!=='task')return null;
+    const source=savedSchema.parse(this.d.store.request(run.requestKey).payload).messageSource;if(!source||source.kind!=='explicit-task'||source.voice)return null;
+    this.validateMessageAncestors(run);const {binding,item}=this.validateMessageSource(source),directive=binding.classify(item.message);if(!['submit','revise'].includes(directive.kind)||!item.message.mainText?.trim())return null;
+    return {text:directive.text,sourceId:item.id,sourceHash:source.messageHash};}
   private motivation(run:StoredRun):Motivation{return savedSchema.parse(this.d.store.request(run.requestKey).payload).motivation??{kind:'unknown',basis:[]};}
   private evidenceFor(run:StoredRun,access:PersonaAccess){const current=this.evidence.get(run.id);if(current)return current;const request=this.d.store.request(run.requestKey);
     const value=new ExecutionEvidence(run,this.d.store,this.d.memory,this.d.personas,this.d.registry,this.repository(),this.policy(request.producer,run.definition.policyId).sourceRules,access,
