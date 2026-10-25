@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "codeRevision": "75111bd",
+  "realModel": true,
+  "realPlatform": false,
+  "serverAccess": false,
+  "cumulativeDispatches": 97,
+  "budget": {
+    "maximum": 60000000,
+    "spent": 4957236,
+    "held": 0,
+    "unknown": 0,
+    "remaining": 55042764
+  },
+  "phaseBudgets": {
+    "allocation": {
+      "calibration": 10000000,
+      "formal": 35000000,
+      "retest": 15000000
+    },
+    "used": {
+      "calibration": 4957236,
+      "formal": 0,
+      "retest": 0
+    },
+    "remaining": {
+      "calibration": 5042764,
+      "formal": 35000000,
+      "retest": 15000000
+    },
+    "hash": "c679946ad7bc5aa8346035135c37c3856384082c0c3e97d842acc432128180a2"
+  },
+  "execution": {
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 483671,
+    "calibrationMs": 483671,
+    "remainingActiveMs": 21116329,
+    "phase": null,
+    "ownerPid": null,
+    "running": false
+  },
+  "failedAttempt": "4df86a0d-cfc7-4034-bc9b-e03d9d0c7b24",
+  "failedChecks": [
+    {
+      "id": "actual-compaction-condition",
+      "passed": false,
+      "evidenceHash": "9743a04dec49418ddc98277dd32a9f9b2fcf76df44e9118235f978ff03ede15e"
+    },
+    {
+      "id": "required-summary-lineage",
+      "passed": false,
+      "evidenceHash": "4065f9741dccb8293688aad12a82fe82dcf944bacc67539e192e252b2404bc8e"
+    }
+  ],
+  "compaction": {
+    "committed": 3,
+    "failed": 6,
+    "summaries": 3,
+    "validVisibleSummaries": 3,
+    "unresolvedVisibleSummaries": 0,
+    "fragmentLineageDepth": 1,
+    "visibleLineageDepth": 1,
+    "viewReplacements": 3,
+    "sessionId": "dafeiyu-task-70c172fd-f101-41e5-991e-1f21cc510921",
+    "events": 277
+  },
+  "lineage": {
+    "depth": 1,
+    "visibleDepth": 1,
+    "scriptedDuplicateFixture": false
+  },
+  "formalCasesStarted": 0,
+  "humanAccepted": false,
+  "sourceReport": "reports/d3b353a7-b98b-4114-a17f-3592b38e48fd/index.json"
+}
