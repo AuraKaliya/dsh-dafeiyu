@@ -2,10 +2,10 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,createHash } from 'node:crypto';
 import { z } from 'zod';
 import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema,MediaSourceDescriptionSchema,CapabilitySelectionSchema,ServiceGate,MediaVoiceEvidenceSchema,MediaReplyDraftInputSchema } from '@dafeiyu/contracts';
-import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContextV3,ActionCapabilityV3,MediaVoiceEvidence,MediaReplyAccess } from '@dafeiyu/contracts';
+import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContextV3,ActionCapabilityV3,MediaVoiceEvidence,MediaReplyAccess,NativeExpressionAccess,PersonaAccess,PersonaSourceRef,Conversation } from '@dafeiyu/contracts';
 import { MediaStore,mediaHash } from './store.js';
 import type { StoredMediaSource,MediaExposure } from './store.js';
 import { MediaFiles,abortable } from './files.js';
@@ -147,6 +147,12 @@ export class MediaService extends Service implements MediaPort {
   readReplyPart(access:MediaReplyAccess,id:string,position:number){return this.replies.bytes(access,id,position);}
   validateReply(access:MediaReplyAccess,id:string){return this.replies.validate(access,id);}
   settleReply(access:MediaReplyAccess,id:string,state:'sent'|'unknown'|'blocked'){return this.replies.settle(access,id,state);}
+  nativeMaterial(access:NativeExpressionAccess){return this.replies.native(access);}
+  observedMaterial(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string){try{access.guard();const body=this.store.exposureByObservation(ref);if(!body||body.text!==view||body.scope.kind!=='task'||access.view.scope.kind!=='task'||mediaHash(body.scope)!==mediaHash(access.view.scope)||body.taskEpoch!==access.intentVersion)return null;
+    const source=this.store.exposureOrigin(body.id);if(!access.resourceAllowed?.(source.origin.scene)||!this.sourceCurrent(source)||!source.publicContent&&mediaHash(source.origin.scene)!==mediaHash(target))return null;
+    if(!this.ctx.dafeiyu.capabilityObservationCurrent({agentId:body.scope.agentId,route:body.scope.scopeKey},ref,createHash('sha256').update(view).digest('hex')))return null;
+    access.guard();return {kind:body.assets.every(a=>a.kind==='document')?'reported' as const:'inference' as const,stamp:mediaHash({proof:this.store.exposureProof(body),target})};
+  }catch{return null;}}
   private observed(context:ExecutionContextV3,access:MediaAccess,exposure:MediaExposure){access.guard();const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'media',{requestId:exposure.id,proof:this.store.exposureProof(exposure),text:exposure.text,occurredAt:exposure.occurredAt,coverage:exposure.coverage.gaps,
     counts:{received:exposure.assets.length,processed:exposure.assets.length}});this.store.bindObservation(access,exposure.id,observation.source);const cursor=z.object({next:z.object({offset:z.number(),textOffset:z.number()}).nullable()}).safeParse(exposure.detail);
     return {exposureId:exposure.id,text:exposure.text,coverage:exposure.coverage,assets:exposure.assets,observation,...(cursor.success?{next:cursor.data.next}:{})};}

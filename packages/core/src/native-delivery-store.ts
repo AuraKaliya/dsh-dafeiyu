@@ -7,7 +7,7 @@ const canonical=(value:Json):string=>value===null||typeof value!=='object'?JSON.
 export const nativeDeliveryHash=(value:unknown)=>createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');
 const stateSchema=z.enum(['accepted','rendering','verifying','ready','sending','sent','not-sent','partial','uncertain','rejected','interrupted']);
 export type NativeDeliveryState=z.infer<typeof stateSchema>;
-const materialSchema=z.strictObject({packetId:z.uuid(),sourceStamp:z.string().length(64),foundationHash:z.string().length(64),personaHash:z.string().length(64),modelHash:z.string().length(64)});
+const materialSchema=z.strictObject({packetId:z.uuid(),sourceStamp:z.string().length(64),foundationHash:z.string().length(64),personaHash:z.string().length(64),modelHash:z.string().length(64),mediaStamp:z.string().length(64).optional()});
 export type NativeDeliveryMaterial=z.infer<typeof materialSchema>;
 const renderRef=z.strictObject({sessionId:z.string(),messageSeq:z.number().int().positive(),turnEndSeq:z.number().int().positive(),textHash:z.string().length(64)});
 const rowSchema=z.object({id:z.uuid(),run_id:z.uuid(),state:stateSchema,version:z.number().int().positive(),anchor:z.string(),material:z.string().nullable(),render_ref:z.string().nullable(),body:z.string().nullable(),credential:z.string().nullable(),receipt:z.string().nullable(),error:z.string().nullable()});
@@ -46,5 +46,6 @@ export class NativeDeliveryStore {
   recent(target:Conversation){return this.db.prepare("SELECT run_id FROM native_deliveries WHERE state='sent' AND json_extract(anchor,'$.target.channel')=? AND json_extract(anchor,'$.target.account')=? AND json_extract(anchor,'$.target.kind')=? AND json_extract(anchor,'$.target.id')=? ORDER BY rowid DESC LIMIT 2").all(target.channel,target.account,target.kind,target.id).map(row=>this.get(String(row.run_id))!);}
   counts(){const values=new Map(this.db.prepare('SELECT state,count(*) AS n FROM native_deliveries GROUP BY state').all().map(row=>[stateSchema.parse(row.state),Number(row.n)])),sum=(states:readonly NativeDeliveryState[])=>states.reduce((n,state)=>n+(values.get(state)??0),0);
     return {total:[...values.values()].reduce((a,b)=>a+b,0),pending:sum(['accepted','rendering','verifying','ready','sending']),sent:sum(['sent']),partial:sum(['partial']),uncertain:sum(['uncertain']),blocked:sum(['not-sent','rejected','interrupted'])};}
+  mediaSettlementPending(runId:string,manifestId:string){z.uuid().parse(manifestId);this.atomic(()=>{const row=this.get(runId);if(!row)throw new Error('DELIVERY_STATE_CONFLICT');this.event(runId,'native.delivery.media-settlement-pending',{manifestId,state:row.state});});}
   status(runId:string){const row=this.get(runId);return row?{deliveryId:row.id,runId:row.runId,taskId:row.anchor.taskId,state:row.state,version:row.version,receiptId:row.receipt,error:row.error}:null;}
 }

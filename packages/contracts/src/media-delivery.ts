@@ -5,6 +5,7 @@ import { TaskResultAnchorSchema } from './native-expression.js';
 import { ExecutionScopeSchema } from './execution.js';
 import { PersonaRequestIdSchema } from './persona.js';
 import type { PersonaAccess } from './persona.js';
+import type { NativeMediaMaterial } from './media.js';
 
 const hash=z.string().regex(/^[a-f0-9]{64}$/);
 export const ReplyMediaPartSchema=z.discriminatedUnion('kind',[
@@ -26,4 +27,4 @@ export const MediaReplyDraftInputSchema=z.strictObject({requestId:PersonaRequest
 /** Core-created, short-lived access to a persisted completed reply. Never constructed from model input. */
 export interface MediaReplyAccess {readonly execution:PersonaAccess;readonly authority:MediaReplyAuthority;readonly payloadHash:string;
   readonly replyId:string;readonly text:string;readonly target:z.infer<typeof ConversationSchema>;readonly sourceMessageId:string;readonly inboundId:string;
-  readonly anchor:z.infer<typeof ReplyMediaManifestSchema>['anchor'];readonly expiresAt:string;guard():void;release():void;}
+  readonly anchor:z.infer<typeof ReplyMediaManifestSchema>['anchor'];readonly expiresAt:string;readonly approvedMedia?:NativeMediaMaterial;guard():void;release():void;}

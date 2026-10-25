@@ -74,7 +74,7 @@ export class DafeiyuService extends Service {
   private readonly mediaReplyAccesses=new WeakSet<MediaReplyAccess>();
   bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({...(port.signal?{signal:port.signal}:{}),ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
   bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port),...(port.voice?{voice:port.voice.bind(port)}:{}),...(port.voiceCurrent?{voiceCurrent:port.voiceCurrent.bind(port)}:{}),
-    ...(port.replyDraft?{replyDraft:port.replyDraft.bind(port)}:{}),...(port.finalizeReply?{finalizeReply:port.finalizeReply.bind(port)}:{}),...(port.readReplyPart?{readReplyPart:port.readReplyPart.bind(port)}:{}),...(port.validateReply?{validateReply:port.validateReply.bind(port)}:{}),...(port.settleReply?{settleReply:port.settleReply.bind(port)}:{})});
+    ...(port.replyDraft?{replyDraft:port.replyDraft.bind(port)}:{}),...(port.finalizeReply?{finalizeReply:port.finalizeReply.bind(port)}:{}),...(port.readReplyPart?{readReplyPart:port.readReplyPart.bind(port)}:{}),...(port.validateReply?{validateReply:port.validateReply.bind(port)}:{}),...(port.settleReply?{settleReply:port.settleReply.bind(port)}:{}),...(port.nativeMaterial?{nativeMaterial:port.nativeMaterial.bind(port)}:{}),...(port.observedMaterial?{observedMaterial:port.observedMaterial.bind(port)}:{})});
     this.mediaPort=bound;return ()=>{if(this.mediaPort===bound)this.mediaPort=undefined;};}
   registerMediaProvider(provider:MediaSourceProvider){if(!this.mediaPort)throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.registerProvider(provider);}
   mediaAccess(context:ExecutionContextV3,owner:string,raw:unknown):MediaAccess {
@@ -89,7 +89,8 @@ export class DafeiyuService extends Service {
   mediaVoiceCurrent(evidence:import('@dafeiyu/contracts').MediaVoiceEvidence){return this.mediaPort?.ready()===true&&this.mediaPort.voiceCurrent?.(evidence)===true;}
   captureMediaReplyAuthority(context:ExecutionContextV3,owner:string,payloadHash:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.captureMediaReply(context,owner,payloadHash,this.personaAccess(context,owner,'local-write'));}
   async prepareMediaReplyAccess(authority:unknown,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');signal=AbortSignal.any([signal,this.controller.signal]);const facts=this.executions.mediaReplyFacts(authority),run=facts.run;
-    if(run.definition.origin.kind!=='message'||reply.taskResult)throw new Error('MEDIA_NATIVE_DELIVERY_NOT_CONFIGURED');
+    if(run.definition.origin.kind!=='message')return this.prepareNativeMediaReplyAccess(facts,reply,signal);
+    if(reply.taskResult)throw new Error('DELIVERY_BINDING_CONFLICT');
     const item=this.journal.get(run.definition.origin.inboundId),source=this.extensions.get(item.extensionId);
     if(!run.result||reply.id!==item.id+':reply'||reply.sourceMessageId!==item.message.id||runtimeHash(reply.conversation)!==runtimeHash(item.message.conversation)||createHash('sha256').update(reply.text).digest('hex')!==run.result.textHash)throw new Error('DELIVERY_BINDING_CONFLICT');
     const completed=this.journal.events(item.route).findLast(event=>event.traceId===item.id&&event.type==='turn.completed');let captured:Awaited<ReturnType<typeof prepareCapturedReplySources>>|undefined,final:Awaited<ReturnType<typeof prepareReplySources>>|undefined,allocated:MediaReplyAccess|undefined;
@@ -107,6 +108,27 @@ export class DafeiyuService extends Service {
   }
   validateMediaReplyAccess(access:MediaReplyAccess){if(!this.mediaReplyAccesses.has(access))throw new Error('SCOPE_DENIED');access.guard();}
   ownsMediaReplyAccess(access:MediaReplyAccess){return this.mediaReplyAccesses.has(access);}
+  private targetPersona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void){const foundation=this.persona(),scope={kind:'conversation' as const,agentId:this.config.agentId,route:item.route};
+    const access:PersonaAccess={view:{runId:id,taskId:null,scope,origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},signal},producer:'core-target-persona',operationId:id,startedEventId:null,intentVersion:0,motivation:{kind:'conversation-invitation',basis:[`task-result:${item.id}`]},inputs:[],admittedSources:[],guard};
+    const target=this.personas.prepareTarget(access);return {text:foundation.text,foundationHash:foundation.version,stamp:target.stamp,items:target.items,guard:()=>{if(this.persona().version!==foundation.version)throw new Error('SOURCE_STALE');target.guard();}};}
+  private async prepareNativeMediaReplyAccess(facts:ReturnType<ExecutionCoordinator['mediaReplyFacts']>,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>{
+    const native=await this.executions!.nativeResultAccess(facts.run.id),row=this.runStore!.nativeDeliveries.get(facts.run.id),provider=this.nativeExpressionPort;
+    if(!row?.material||!row.renderRef||!provider?.ready()||!native.media||row.material.mediaStamp!==native.media.sourceStamp||!['ready','sending'].includes(row.state)||reply.id!=='native-delivery:'+row.id||!reply.taskResult||runtimeHash(reply.taskResult)!==runtimeHash(row.anchor)||runtimeHash(native.anchor)!==runtimeHash(row.anchor)||runtimeHash(reply.conversation)!==runtimeHash(row.anchor.target))throw new Error('DELIVERY_BINDING_CONFLICT');
+    const item=this.journal.get(row.anchor.inboundId),text=this.runStore!.nativeDeliveries.verifyCredential(facts.run.id);if(text!==reply.text||reply.sourceMessageId!==item.message.id)throw new Error('DELIVERY_BODY_MISMATCH');
+    this.validateNativeMediaReplyAuthority(facts.authority,native);const packet=provider.open(native,row.material.packetId);if(packet.sourceStamp!==row.material.sourceStamp||runtimeHash(packet.media)!==runtimeHash(native.media))throw new Error('SOURCE_STALE');
+    const basis=()=>{signal.throwIfAborted();facts.guard();native.guard();if(this.nativeExpressionPort!==provider||provider.open(native,packet.id).sourceStamp!==packet.sourceStamp||this.runStore!.nativeDeliveries.verifyCredential(facts.run.id)!==text||!['ready','sending'].includes(this.runStore!.nativeDeliveries.get(facts.run.id)!.state))throw new Error('SOURCE_STALE');};
+    const persona=this.targetPersona(item,row.id,signal,basis);if(persona.stamp!==row.material.personaHash||persona.foundationHash!==row.material.foundationHash||runtimeHash(this.analysisModelRoute())!==row.material.modelHash)throw new Error('SOURCE_STALE');
+    let access:MediaReplyAccess;const guard=()=>{if(!this.mediaReplyAccesses.has(access)||Date.parse(native.anchor.expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');persona.guard();};
+    access=Object.freeze({execution:Object.freeze({...native.execution,guard}),authority:facts.authority,payloadHash:facts.body.payloadHash,replyId:reply.id,text,target:Object.freeze({...row.anchor.target}),sourceMessageId:item.message.id,inboundId:item.id,anchor:row.anchor,expiresAt:row.anchor.expiresAt,approvedMedia:native.media,guard,release:()=>{this.mediaReplyAccesses.delete(access);}});
+    this.mediaReplyAccesses.add(access);try{guard();return access;}catch(error){access.release();throw error;}
+  }
+  validateNativeMediaReplyAuthority(authority:unknown,access:import('@dafeiyu/contracts').NativeExpressionAccess){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');access.guard();const facts=this.executions.mediaReplyFacts(authority),actual=this.executions.describeMessageResult(facts.run.id);
+    if(facts.run.definition.scope.kind!=='task'||runtimeHash(facts.run.definition.scope)!==runtimeHash(access.execution.view.scope)||!actual||runtimeHash(actual.anchor)!==runtimeHash(access.anchor))throw new Error('SCOPE_DENIED');
+    if(facts.body.dependencies.length&&!access.execution.validateHistory?.(facts.body.dependencies)||facts.body.sources.some(source=>!this.executionMemoryPort?.validate(access.execution,source)))throw new Error('SOURCE_STALE');
+    facts.guard();return facts.body.payloadHash;
+  }
+  nativeMediaObservedMaterial(access:PersonaAccess,source:PersonaSourceRef,target:Conversation,view:string){return this.mediaPort?.ready()?this.mediaPort.observedMaterial?.(access,source,target,view)??null:null;}
+  nativeMediaTargetMaterial(access:import('@dafeiyu/contracts').NativeExpressionAccess){return this.mediaPort?.ready()?this.mediaPort.nativeMaterial?.(access)??null:null;}
   async prepareMessageTaskExpression(runId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const port=this.nativeExpressionPort,access=await this.executions.nativeResultAccess(runId);if(port!==this.nativeExpressionPort)throw new Error('DEPENDENCY_UNAVAILABLE');return port.prepare(access);}
   async openMessageTaskExpression(runId:string,packetId:string){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.open(await this.executions.nativeResultAccess(runId),packetId);}
   async withdrawMessageTaskExpression(runId:string,packetId:string,version:number){if(!this.executions||!this.nativeExpressionPort?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeExpressionPort.withdraw(await this.executions.nativeResultAccess(runId),packetId,version);}
@@ -239,7 +261,7 @@ export class DafeiyuService extends Service {
   }
   bindCapabilityObservations(port:CapabilityObservationPort):()=>void {
     this.assertOpen();if(this.capabilityObservationPort)throw new Error('DUPLICATE_PROVIDER');
-    const bound=Object.freeze({ready:port.ready.bind(port),record:port.record.bind(port),select:port.select.bind(port),valid:port.valid.bind(port)});this.capabilityObservationPort=bound;
+    const bound=Object.freeze({ready:port.ready.bind(port),record:port.record.bind(port),select:port.select.bind(port),valid:port.valid.bind(port),...(port.mediaFence?{mediaFence:port.mediaFence.bind(port)}:{})});this.capabilityObservationPort=bound;
     return ()=>{if(this.capabilityObservationPort===bound)this.capabilityObservationPort=undefined;};
   }
   capabilityResources(context:ExecutionContextV3,pluginId:string):readonly Conversation[]{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.resources(context,pluginId);}
@@ -255,6 +277,7 @@ export class DafeiyuService extends Service {
   capabilityObservationCurrent(scope:TimelineScope,source:PersonaSourceRef,exposedHash?:string):boolean {
     return !!this.capabilityObservationPort?.ready()&&this.capabilityObservationPort.valid(scope,source,exposedHash);
   }
+  mediaExpressionFence(access:PersonaAccess,target:Conversation,roots:readonly string[]){access.guard();const port=this.capabilityObservationPort;if(!port?.ready()||!port.mediaFence)throw new Error('DEPENDENCY_UNAVAILABLE');return port.mediaFence(access,target,roots);}
   recordCapabilityObservation(context:ExecutionContextV3,pluginId:string,raw:unknown) {
     const input=CapabilityObservationSchema.parse(raw);if(input.proof.provider!==pluginId)throw new Error('SCOPE_DENIED');
     const scene=this.authorizeCapabilityResource(context,pluginId,input.proof.scene),execution=this.personaAccess(context,pluginId);
@@ -276,16 +299,14 @@ export class DafeiyuService extends Service {
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,personas:this.personas,
       repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
-      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal,projectConversation:()=>this.conversationRuns!.project(),settled:id=>{void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
+      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal,media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),settled:id=>{void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
     this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:this.config.turnTimeoutMs*2+this.config.deliveryTimeoutMs,
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
       channel:item=>{const entry=this.extensions.get(item.extensionId),capability=entry?.extension.channels?.find(channel=>channel.channel===item.message.conversation.channel&&channel.account===item.message.conversation.account);
         return entry?.active&&capability?{identity:entry,id:entry.extension.id,version:entry.extension.version,capability,signal:entry.controller.signal}:null;},
       enqueue:(route,work)=>this.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire(false),
-      persona:(item,id,signal,guard)=>{const foundation=this.persona(),scope={kind:'conversation' as const,agentId:this.config.agentId,route:item.route};
-        const access:import('@dafeiyu/contracts').PersonaAccess={view:{runId:id,taskId:null,scope,origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},signal},producer:'core-target-persona',operationId:id,startedEventId:null,intentVersion:0,motivation:{kind:'conversation-invitation',basis:[`task-result:${item.id}`]},inputs:[],admittedSources:[],guard};
-        const target=this.personas.prepareTarget(access);return {text:foundation.text,foundationHash:foundation.version,stamp:target.stamp,items:target.items,guard:()=>{guard();if(this.persona().version!==foundation.version)throw new Error('SOURCE_STALE');target.guard();}};},
+      persona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),media:()=>this.mediaPort,mediaAccess:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),
     });
   }
   async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}

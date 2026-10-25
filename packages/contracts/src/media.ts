@@ -6,6 +6,7 @@ import type { ExecutionContextV3 } from './execution.js';
 import type { PersonaAccess } from './persona.js';
 import type { ResourceProof } from './resource-observation.js';
 import type { MediaReplyAccess,MediaReplyAuthority,ReplyMediaManifest } from './media-delivery.js';
+import type { NativeExpressionAccess } from './native-expression.js';
 
 export const MediaKindSchema=z.enum(['image','audio','video','document']);
 const hash=z.string().regex(/^[a-f0-9]{64}$/),version=z.number().int().positive();
@@ -35,6 +36,9 @@ export const MediaVoiceEvidenceSchema=z.strictObject({schemaVersion:z.literal(1)
   asr:z.strictObject({backend:z.literal('whisper.node'),version:z.literal('1.1.3'),modelSha256:hash}),
   events:z.strictObject({backend:z.literal('yamnet-onnx'),modelSha256:hash,labelsSha256:hash,onnxruntimeVersion:z.string(),numpyVersion:z.string()})});
 export type MediaVoiceEvidence=z.infer<typeof MediaVoiceEvidenceSchema>;
+export const NativeMediaMaterialSchema=z.strictObject({draftId:z.uuid(),draftVersion:z.number().int().positive(),sourceStamp:hash,
+  parts:z.array(z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('asset'),delivery:z.enum(['image','record','file']),asset:MediaAssetRefSchema,name:z.string().max(160).nullable()}),z.strictObject({kind:z.literal('final-voice')})])).min(1).max(8)});
+export type NativeMediaMaterial=z.infer<typeof NativeMediaMaterialSchema>;
 export const MediaAcquireSchema=z.strictObject({requestId:PersonaRequestIdSchema,source:MediaProviderRefSchema});
 export const MediaReadSchema=z.strictObject({requestId:PersonaRequestIdSchema,asset:MediaAssetRefSchema.optional(),source:MediaProviderRefSchema.optional(),
   mode:z.enum(['inspect','image','frames','audio','document']),pointsMs:z.array(z.number().int().nonnegative()).max(8).optional(),interval:MediaIntervalSchema.optional(),
@@ -62,4 +66,6 @@ export interface MediaPort {
   readReplyPart?(access:MediaReplyAccess,manifestId:string,position:number):Promise<Uint8Array>;
   validateReply?(access:MediaReplyAccess,manifestId:string):void;
   settleReply?(access:MediaReplyAccess,manifestId:string,state:'sent'|'unknown'|'blocked'):void;
+  nativeMaterial?(access:NativeExpressionAccess):NativeMediaMaterial|null;
+  observedMaterial?(access:PersonaAccess,source:import('./persona.js').PersonaSourceRef,target:import('./conversation.js').Conversation,view:string):{kind:'reported'|'inference';stamp:string}|null;
 }

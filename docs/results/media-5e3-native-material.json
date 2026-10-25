@@ -1,0 +1,20 @@
+{
+  "stage": "media-5E-3",
+  "date": "2026-10-25",
+  "baseline": "c0df07e",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "d982743c-0838-4f97-afa0-9d9f06aeec84", "passed": 16, "failed": 0, "scope": ["native-media-expression", "qq-task-delivery"]},
+    {"runId": "1e6bc08c-767a-477c-9be5-cce28f3dac5d", "passed": 4, "failed": 0, "scope": ["native-delivery-store", "media-reply-authority"]}
+  ],
+  "countsOverlap": true,
+  "actualLocalExecution": ["isolated DSH target renderer", "SQLite", "document bytes", "loopback acquisition"],
+  "models": "scripted task, target and verifier",
+  "mediaTransportEnabled": false,
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false,
+  "remaining": ["actual loopback media parts and native byte-export integration", "TTS", "Host media assembly"]
+}

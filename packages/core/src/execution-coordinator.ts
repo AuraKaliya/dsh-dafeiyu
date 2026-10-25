@@ -37,6 +37,7 @@ interface Dependencies {
   turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number;maxBytes:number;prepareTimeoutMs:number};signal:AbortSignal;
   projectConversation?:()=>Promise<void>;
   settled?:(runId:string)=>void;
+  media?:()=>import('@dafeiyu/contracts').MediaPort|undefined;
 }
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null}
 type Request=z.output<typeof ExecutionRequestSchema>;
@@ -127,7 +128,9 @@ export class ExecutionCoordinator {
       else if(dependency.kind==='execution-operation'){
         const operation=this.d.store.operation(dependency.operationId),outcome=operation.outcome;visit(z.array(SourceDependencySchema).parse(this.d.store.readInput(operation.runId,`operation-inputs:${operation.id}`)));
         const page=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
-        if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
+        const media=z.object({text:z.string(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
+        if(media.success&&operation.plugin==='media'&&operation.action==='dafeiyu_media_read'){const key=runtimeHash(media.data.observation.source);views.set(key,media.data.text);add(media.data.observation.source);}
+        else if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
           if(operation.plugin!=='qq-capabilities'||operation.action!=='qq_browse')opaque=true;}
         else if(!(operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select')&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action)))opaque=true;
         if(!outcome||outcome.effects==='unknown'||outcome.status==='unknown')opaque=true;
@@ -142,7 +145,8 @@ export class ExecutionCoordinator {
     if(candidates.size>64)throw new Error('CAPACITY_EXCEEDED');
     const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
     const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
-    return {execution:access,anchor,question:source.kind==='self-exploration'?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],opaqueInfluence:opaque,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),guard};
+    const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],opaqueInfluence:opaque,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),guard};
+    const media=this.d.media?.()?.nativeMaterial?.(expression);return media?{...expression,media}:expression;
   }
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
@@ -276,7 +280,7 @@ export class ExecutionCoordinator {
   }
   mediaReplyFacts(raw:unknown){const authority=MediaReplyAuthoritySchema.parse(raw),run=this.d.store.get(authority.runId),body=mediaAuthorityBodySchema.parse(this.d.store.readInput(run.id,'media-reply-authority:'+authority.id));
     const guard=()=>{if(runtimeHash(body)!==authority.hash||runtimeHash(MediaReplyAuthoritySchema.strip().parse({...body,hash:authority.hash}))!==runtimeHash(authority)||runtimeHash(body.scope)!==runtimeHash(run.definition.scope)||body.intentVersion!==run.definition.intentVersion)throw new Error('SCOPE_DENIED');
-      if(this.d.store.get(run.id).state!=='completed')throw new Error('MEDIA_REPLY_RUN_NOT_COMPLETED');const operation=this.d.store.operation(body.operationId);
+      const state=this.d.store.get(run.id).state;if(state!=='completed'&&!(run.definition.scope.kind==='task'&&state==='waiting'))throw new Error('MEDIA_REPLY_RUN_NOT_COMPLETED');const operation=this.d.store.operation(body.operationId);
       if(operation.runId!==run.id||operation.plugin!==body.action.owner||operation.state!=='finished'||operation.outcome?.status!=='succeeded'||operation.outcome.effects!=='confirmed')throw new Error('MEDIA_REPLY_OPERATION_UNCONFIRMED');
       if(runtimeHash(this.policy(body.policy.producer,body.policy.id))!==body.policy.hash||this.d.persona().version!==body.foundationHash)throw new Error('MEDIA_REPLY_AUTHORITY_CHANGED');
       if(!this.d.registry.actions().some(action=>action.owner===body.action.owner&&action.id===body.action.id&&action.version===body.action.version&&action.pluginVersion===body.action.pluginVersion&&action.active()&&runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})===body.action.hash))throw new Error('MEDIA_REPLY_AUTHORITY_CHANGED');

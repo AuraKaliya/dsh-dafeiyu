@@ -1,7 +1,7 @@
 import { randomUUID,createHash } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
-import { MediaReplyDraftInputSchema,ReplyMediaManifestSchema } from '@dafeiyu/contracts';
-import type { MediaAssetRef,MediaReplyAccess,MediaSourceDescription,ExecutionContextV3,ReplyMediaPart,ReplyMediaManifest } from '@dafeiyu/contracts';
+import { MediaReplyDraftInputSchema,ReplyMediaManifestSchema,NativeMediaMaterialSchema } from '@dafeiyu/contracts';
+import type { MediaAssetRef,MediaReplyAccess,MediaSourceDescription,ExecutionContextV3,ReplyMediaPart,ReplyMediaManifest,NativeExpressionAccess } from '@dafeiyu/contracts';
 import type { MediaStore } from './store.js';
 import { mediaHash } from './store.js';
 import { mediaDraftContentSchema } from './reply-store.js';
@@ -36,14 +36,25 @@ export class MediaReplies {
   }
   status(context:ExecutionContextV3){this.host.ctx.dafeiyu.executionAuthority(context,'media');const value=this.host.store.replies.current(context.runId);return value?{draftId:value.draft.id,version:value.draft.version,selected:value.draft.parts.length,frozen:value.frozen}:{draftId:null,version:0,selected:0,frozen:false};}
   pending(runId:string){const value=this.host.store.replies.current(runId);return value?{id:value.draft.id,version:value.draft.version,selected:value.draft.parts.length,authority:value.draft.authority}:null;}
+  native(access:NativeExpressionAccess){const current=this.host.store.replies.current(access.execution.view.runId);if(!current||!current.draft.parts.length){access.guard();return null;}const draft=current.draft;
+    const payload=this.host.ctx.dafeiyu.validateNativeMediaReplyAuthority(draft.authority,access);if(payload!==mediaHash(mediaDraftContentSchema.strip().parse(draft)))throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');
+    const parts=draft.parts.map(part=>{if(part.kind!=='asset')return {kind:'final-voice' as const};
+      const guard=()=>{access.execution.guard();if(!access.execution.resourceAllowed?.(part.source.origin.scene)||!this.host.sourceCurrent(part.source)||!part.source.publicContent&&mediaHash(part.source.origin.scene)!==mediaHash(access.anchor.target))throw new Error('MEDIA_TARGET_DENIED');};guard();
+      this.host.store.requireRef({execution:access.execution,origin:part.source.origin,guard},part.asset);const delivery=part.as??(part.asset.kind==='image'?'image':part.asset.kind==='audio'?'record':'file');
+      return {kind:'asset' as const,delivery,asset:part.asset,name:delivery==='file'?filename(part.source,part.asset):null};});
+    const fence=this.fence(access.execution,access.anchor.target,draft);access.guard();
+    return NativeMediaMaterialSchema.parse({draftId:draft.id,draftVersion:draft.version,parts,sourceStamp:mediaHash({authority:draft.authority,content:mediaDraftContentSchema.strip().parse(draft),target:access.anchor.target,fence:fence.stamp})});
+  }
+  private fence(execution:MediaReplyAccess['execution'],target:MediaReplyAccess['target'],draft:MediaDraft){const fence=this.host.ctx.dafeiyu.mediaExpressionFence(execution,target,[...new Set(draft.parts.flatMap(p=>p.kind==='asset'?p.source.origin.roots:[]))]);if(!fence.allowed)throw new Error('MEDIA_SOURCE_SUPPRESSED');return fence;}
   private access(access:MediaReplyAccess){this.host.ctx.dafeiyu.validateMediaReplyAccess(access);if(!this.host.ready())throw new Error('MEDIA_NOT_CONFIGURED');const current=this.host.store.replies.current(access.execution.view.runId);
     if(!current||mediaHash(current.draft.authority)!==mediaHash(access.authority)||mediaHash(mediaDraftContentSchema.strip().parse(current.draft))!==access.payloadHash)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');
-    if(current.draft.scope.kind==='task')throw new Error('MEDIA_NATIVE_DELIVERY_NOT_CONFIGURED');return current.draft;
+    const fence=this.fence(access.execution,access.target,current.draft);
+    if(current.draft.scope.kind==='task'&&(!access.approvedMedia||access.approvedMedia.draftId!==current.draft.id||access.approvedMedia.draftVersion!==current.draft.version||access.approvedMedia.sourceStamp!==mediaHash({authority:current.draft.authority,content:mediaDraftContentSchema.strip().parse(current.draft),target:access.target,fence:fence.stamp})))throw new Error('MEDIA_NATIVE_DELIVERY_NOT_CONFIGURED');return current.draft;
   }
   private partAccess(access:MediaReplyAccess,source:MediaSourceDescription){const guard=()=>{this.access(access);if(!this.host.sourceCurrent(source)||!source.publicContent&&mediaHash(source.origin.scene)!==mediaHash(access.target))throw new Error('MEDIA_TARGET_DENIED');};guard();return {execution:access.execution,origin:source.origin,guard};}
   private frozenBinding(access:MediaReplyAccess,draft:MediaDraft,manifest:ReplyMediaManifest){const {credential,...body}=manifest;
     if(manifest.replyId!==access.replyId||manifest.runId!==access.execution.view.runId||manifest.draft.id!==draft.id||manifest.draft.version!==draft.version||mediaHash(manifest.target)!==mediaHash(access.target)||manifest.sourceMessageId!==access.sourceMessageId||mediaHash(manifest.anchor)!==mediaHash(access.anchor)
-      ||manifest.textHash!==createHash('sha256').update(access.text).digest('hex')||manifest.expiresAt!==access.expiresAt||manifest.sourceStamp!==mediaHash({authority:access.authority,parts:draft.parts})||credential!==mediaHash(body)||manifest.parts.length!==draft.parts.length)throw new Error('MEDIA_EXPORT_BINDING_INVALID');
+      ||manifest.textHash!==createHash('sha256').update(access.text).digest('hex')||manifest.expiresAt!==access.expiresAt||manifest.sourceStamp!==mediaHash({authority:access.authority,parts:draft.parts,fence:this.fence(access.execution,access.target,draft).stamp})||credential!==mediaHash(body)||manifest.parts.length!==draft.parts.length)throw new Error('MEDIA_EXPORT_BINDING_INVALID');
     for(const [i,selected] of draft.parts.entries()){if(selected.kind!=='asset')throw new Error('MEDIA_TTS_NOT_CONFIGURED');const kind=selected.as??(selected.asset.kind==='image'?'image':selected.asset.kind==='audio'?'record':'file');
       const expected=kind==='file'?{kind,asset:selected.asset,name:filename(selected.source,selected.asset)}:{kind,asset:selected.asset};if(mediaHash(manifest.parts[i])!==mediaHash(expected))throw new Error('MEDIA_EXPORT_BINDING_INVALID');}
   }
@@ -55,7 +66,7 @@ export class MediaReplies {
         const kind=selected.as??(selected.asset.kind==='image'?'image':selected.asset.kind==='audio'?'record':'file');parts.push(kind==='file'?{kind,asset:selected.asset,name:filename(selected.source,selected.asset)}:{kind,asset:selected.asset});
         leases.push({id:this.host.store.lease(scope,selected.asset,owner,Date.parse(access.expiresAt)),owner});}
       const fields={schemaVersion:1 as const,id,replyId:access.replyId,runId:access.execution.view.runId,target:access.target,sourceMessageId:access.sourceMessageId,anchor:access.anchor,textHash:createHash('sha256').update(access.text).digest('hex'),draft:{id:draft.id,version:draft.version},parts,
-        sourceStamp:mediaHash({authority:access.authority,parts:draft.parts}),expiresAt:access.expiresAt};const manifest=ReplyMediaManifestSchema.parse({...fields,credential:mediaHash(fields)});
+        sourceStamp:mediaHash({authority:access.authority,parts:draft.parts,fence:this.fence(access.execution,access.target,draft).stamp}),expiresAt:access.expiresAt};const manifest=ReplyMediaManifestSchema.parse({...fields,credential:mediaHash(fields)});
       this.host.store.replies.freeze(draft,manifest,leases,()=>{this.access(access);for(const part of draft.parts)if(part.kind==='asset')this.partAccess(access,part.source).guard();});frozen=true;this.host.store.releaseLeases('media-draft:'+draft.id);return manifest;
     }finally{if(!frozen)for(const lease of leases)this.host.store.releaseLease(lease.id,lease.owner);}
   }

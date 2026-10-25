@@ -24,4 +24,5 @@ export interface CapabilityObservationPort {
   record(access: CapabilityObservationAccess, input: z.output<typeof CapabilityObservationSchema>): { source: PersonaSourceRef; duplicate: boolean };
   select(access: CapabilityObservationAccess, input: z.output<typeof CapabilitySelectionSchema>, actualView: string): Record<string, unknown>;
   valid(scope: TimelineScope, source: PersonaSourceRef, exposedHash?: string): boolean;
+  mediaFence?(access:PersonaAccess,target:Conversation,roots:readonly string[]):{allowed:boolean;stamp:string};
 }

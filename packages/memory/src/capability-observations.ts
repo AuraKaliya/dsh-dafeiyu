@@ -67,8 +67,8 @@ export class CapabilityObservations {
   }
   material(access:PersonaAccess,ref:PersonaSourceRef){return this.withAccess(access,()=>{const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||!this.valid(scope,ref))return null;
     return {text:JSON.stringify(row.body),dependencies:row.body.parent?[row.body.parent]:[],rootSources:row.body.proof.roots};});}
-  expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string):{text:string;fence:string}|null{return this.withAccess(access,()=>{
-    const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||conversationKey(scope.agentId,row.body.proof.scene)!==conversationKey(scope.agentId,target)
+  expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string,publicMedia=false):{text:string;fence:string}|null{return this.withAccess(access,()=>{
+    const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||conversationKey(scope.agentId,row.body.proof.scene)!==conversationKey(scope.agentId,target)&&!(publicMedia&&row.body.proof.provider==='media')
       ||!this.valid(scope,ref,textHash(view))||this.suppressed(scope,row.body.proof)||this.suppressed({agentId:scope.agentId,route:conversationKey(scope.agentId,target)},row.body.proof))return null;
     const versions=new Map<string,number>();for(const route of new Set([scope.route,conversationKey(scope.agentId,target)])){
       for(const memory of this.db.prepare('SELECT i.id,i.version,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,route)){
@@ -76,6 +76,12 @@ export class CapabilityObservations {
           if(old?.body.proof.provider===row.body.proof.provider&&old.body.proof.roots.some(root=>row.body.proof.roots.includes(root)))versions.set(String(memory.id),Number(memory.version));}
       }
     }return {text:view,fence:digest([...versions].sort(([a],[b])=>a.localeCompare(b)))};
+  });}
+  mediaFence(access:PersonaAccess,target:Conversation,roots:readonly string[]){return this.withAccess(access,()=>{const scope=this.scope(access),wanted=new Set(z.array(z.string().min(1).max(600)).max(512).parse(roots)),versions:unknown[]=[];let allowed=true;
+    for(const route of new Set([scope.route,conversationKey(scope.agentId,target)]))for(const row of this.db.prepare('SELECT i.id,i.version,i.deleted,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,route)){
+      const linked=revisionSchema.parse(JSON.parse(String(row.body))).sources.some(source=>source.kind==='capability'&&this.row({agentId:scope.agentId,route},source.ref.slice('dafeiyu:capability:'.length))?.body.proof.roots.some(root=>wanted.has(root)));
+      if(linked){versions.push([route,String(row.id),Number(row.version),Number(row.deleted)]);if(row.deleted===1)allowed=false;}
+    }access.guard();return {allowed,stamp:digest(versions.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))))};
   });}
   memoryMaterial(access:PersonaAccess,ref:PersonaSourceRef){if(ref.kind!=='memory'||ref.scopeKey!==personaScope(access.view.scope)||ref.authorization||ref.range||ref.selectionId)return null;
     return this.withAccess(access,()=>{const scope=this.scope(access),item=this.memory.read(scope,ref.id,'normal',ref.revision,access.view.scope.kind==='task'?'internal':'expression');

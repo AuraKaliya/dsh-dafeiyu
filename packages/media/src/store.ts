@@ -170,6 +170,9 @@ export class MediaStore {
     return this.atomic(()=>this.request(access,'observation:'+id,{id,ref},value=>PersonaSourceRefSchema.parse(value),()=>ref));}
   observation(id:string){const body=this.exposureRow(id),row=this.db.prepare("SELECT receipt FROM media_requests WHERE scope_key=? AND producer='media' AND request_id=?").get(scopeKey(body.scope),'observation:'+id);
     if(!row)throw new Error('MEDIA_OBSERVATION_REQUIRED');return PersonaSourceRefSchema.parse(JSON.parse(String(row.receipt)));}
+  exposureByObservation(raw:unknown){const ref=PersonaSourceRefSchema.parse(raw);if(ref.kind!=='execution-source')return null;
+    const row=this.db.prepare("SELECT request_id,receipt FROM media_requests WHERE scope_key=? AND producer='media' AND request_id LIKE 'observation:%' AND json_extract(receipt,'$.id')=?").get(ref.scopeKey,ref.id);
+    if(!row||mediaHash(PersonaSourceRefSchema.parse(JSON.parse(String(row.receipt))))!==mediaHash(ref))return null;return this.exposureWitness(String(row.request_id).slice('observation:'.length));}
   epoch(){return mediaHash([this.db.prepare('SELECT id,version,deleted FROM media_sources ORDER BY id').all(),this.db.prepare('SELECT id,version,state FROM media_assets ORDER BY id').all()]);}
   private contentCurrent(ref:MediaAssetRef,seen=new Set<string>()):boolean {if(seen.has(ref.id)||seen.size>=32)return false;seen.add(ref.id);const asset=this.asset(ref.id),source=this.source(asset.sourceId);
     return !source.deleted&&source.version===asset.sourceVersion&&(asset.state==='ready'||asset.state==='evicted')&&asset.version===ref.version&&mediaHash(this.ref(asset))===mediaHash(ref)&&(!asset.parent||this.contentCurrent(asset.parent,seen));}

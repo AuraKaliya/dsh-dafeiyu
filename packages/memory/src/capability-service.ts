@@ -20,6 +20,7 @@ export class CapabilityObservationService {
       record:(access,input)=>{try{return memory.capabilities.record(access,input);}finally{flush();}},
       select:(access,input,text)=>{try{return memory.capabilities.select(access,input,text);}finally{flush();}},
       valid:(scope,source,exposedHash)=>memory.capabilities.valid(scope,source,exposedHash),
+      mediaFence:(access,target,roots)=>memory.capabilities.mediaFence(access,target,roots),
     });
   }
   close(){this.unbind();this.unvalidate();}

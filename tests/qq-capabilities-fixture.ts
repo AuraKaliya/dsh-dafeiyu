@@ -31,7 +31,7 @@ export function outcomes(request:GenerateOptions){return request.messages.flatMa
 const browseData=z.object({snapshotId:z.uuid(),nextCursor:z.uuid().nullable(),page:z.record(z.string(),z.json()).and(z.object({messages:z.array(z.object({id:z.string(),text:z.string(),occurredAt:z.string().nullable(),unsupported:z.array(z.string())})),limitations:z.array(z.string())}))});
 export function lastPage(request:GenerateOptions){const pages=outcomes(request).flatMap(outcome=>{const result=browseData.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(pages.length,'model must actually see a QQ page');return pages.at(-1)!;}
 
-export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],deliverResults=false,existingRoot,media=false,audio=false,voiceDirectives=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean;voiceDirectives?:boolean}={}){
+export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],extraTaskResources=[],deliverResults=false,existingRoot,media=false,audio=false,voiceDirectives=false}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];extraTaskResources?:Conversation[];deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean;voiceDirectives?:boolean}={}){
   const scratch=testTempDir();if(existingRoot){const path=relative(resolve(process.env.DAFEIYU_TEST_RUN!),resolve(existingRoot));if(path.startsWith('..')||/^[A-Za-z]:/.test(path))throw new Error('FIXTURE_ROOT_OUTSIDE_MANAGED_RUN');}
   const root=existingRoot??await mkdtemp(join(scratch,'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
@@ -58,7 +58,7 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
   h.core.configureExecution({profileId:'qq-capability-fixture',createStore:true,policies:[
     {id:'conversation',producers:['channel-qq'],actions:[...QQ.QQ_ACTIONS,...(tasks?QQ.QQ_TASK_ACTIONS:[]),...(media?[...QQ.QQ_MEDIA_ACTIONS,...Media.MEDIA_ACTIONS]:[]),...extraConversationActions],allowLocalWrite:true},
     {id:'native',producers:['fixture-native'],actions:[...QQ.QQ_ACTIONS,...(media?[...QQ.QQ_MEDIA_ACTIONS,...Media.MEDIA_ACTIONS]:[])],allowLocalWrite:true,resources:[scene]},
-    ...(tasks?[{id:'qq-task',producers:['qq-tasks'],actions:[...QQ.QQ_ACTIONS,'dafeiyu_task_intent','dafeiyu_task_object',...extraTaskActions],allowLocalWrite:true,resources:[{...scene,id:otherGroup}]}]:[]),
+    ...(tasks?[{id:'qq-task',producers:['qq-tasks'],actions:[...QQ.QQ_ACTIONS,'dafeiyu_task_intent','dafeiyu_task_object',...extraTaskActions],allowLocalWrite:true,resources:[{...scene,id:otherGroup},...extraTaskResources]}]:[]),
   ]});
   let mediaFiber:Awaited<ReturnType<typeof h.ctx.plugin>>|undefined;
   if(media){await mkdir(join(root,'onebot-cache'),{recursive:true});
