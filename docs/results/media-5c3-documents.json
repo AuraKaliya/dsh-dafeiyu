@@ -1,0 +1,18 @@
+{
+  "stage": "media-5C-3",
+  "date": "2026-10-25",
+  "baseline": "0ce5b34",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "9afb4883-8455-4034-86df-1c2e04c99928", "passed": 9, "failed": 0, "scope": ["media-documents", "media-audio-service", "media-vision"]},
+    {"runId": "db3ce384-c5d0-4ddc-975e-bbe7f9a5b9d5", "passed": 3, "failed": 0, "scope": ["media-documents"]}
+  ],
+  "countsOverlap": true,
+  "pythonChecksWithinTargetedTest": 5,
+  "actualLocalExecution": ["bounded Python", "pypdf 6.10.0", "synthetic OOXML and text", "core media actions", "SQLite"],
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false
+}
