@@ -1,0 +1,7 @@
+{
+  "stage":"5-design","date":"2026-10-25","baseline":"be31c0b",
+  "plan":"docs/media-and-qq-plan.md","implementationStarted":false,"testsRun":[],
+  "localDependencyInspection":{"ffmpeg":"8.1-essentials_build-www.gyan.dev","whisperProbeAssetsPresent":true,"yamnetProbeAssetsPresent":true,"pythonProbeRuntimePresent":true},
+  "references":["https://github.com/botuniverse/onebot-11/blob/master/api/public.md","https://napneko.github.io/develop/file","https://napneko.github.io/develop/msg","https://napneko.github.io/onebot/segment"],
+  "historicalProbesOnly":true,"fullRegression":false,"realModel":false,"realPlatform":false,"serverConnected":false
+}
