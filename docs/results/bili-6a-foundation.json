@@ -1,0 +1,1 @@
+{"stage":"bilibili-6A","date":"2026-10-25","baseline":"cda6297","result":"targeted-checks-passed","runId":"593fa28e-793f-447b-a95f-dbde894254c8","passed":5,"failed":0,"scope":["bili-foundation"],"actualLocalExecution":["SQLite","loopback HTTP","cancellation"],"realModel":false,"realPlatform":false,"fullRegression":false,"serverAccess":false,"cleanupBlocked":false}
