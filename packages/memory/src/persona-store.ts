@@ -33,8 +33,15 @@ export class PersonaStore {
     if(personaDigest(value)!==row.body_hash||personaScope(value.scope)!==personaScope(access.view.scope))throw new Error('SCOPE_DENIED');return value;
   }
   private checked(access:PersonaAccess,candidate:PersonaCandidate):PersonaMaterial{
+    this.checkExperienceBasis(access,candidate.experienceBasis??[]);
     access.guard();for(const ref of candidate.dependencies)if(!this.resolve(access,ref))throw new Error('SOURCE_STALE');
     const material=this.resolve(access,candidate.contentRef);if(!material)throw new Error('SOURCE_STALE');return material;
+  }
+  private checkExperienceBasis(access:PersonaAccess,basis:NonNullable<PersonaCandidate['experienceBasis']>){
+    for(const item of basis){const row=this.db.prepare('SELECT r.body FROM experience_items i JOIN experience_revisions r ON r.id=i.id AND r.version=i.version WHERE i.id=? AND i.agent_id=? AND i.scope_key=? AND i.state NOT IN (\'withdrawn\',\'rejected\')')
+      .get(item.id,access.view.scope.agentId,personaScope(access.view.scope));
+      const value=row?z.object({contentRef:z.object({id:z.uuid()}),taskEpoch:z.number()}).parse(JSON.parse(String(row.body))):null;
+      if(!value||value.contentRef.id!==item.sourceId||value.taskEpoch!==item.taskEpoch||access.intentVersion!==item.taskEpoch)throw new Error('SOURCE_STALE');}
   }
   private writeCandidate(candidate:PersonaCandidate){const parsed=PersonaCandidateRevisionSchema.parse(candidate);
     this.db.prepare('UPDATE persona_candidates SET version=?,state=? WHERE id=? AND agent_id=?').run(parsed.version,parsed.state,parsed.id,parsed.agentId);
@@ -52,12 +59,13 @@ export class PersonaStore {
     this.db.prepare('INSERT INTO growth_selections VALUES(?,?,?,?) ON CONFLICT(agent_id,scope_key) DO UPDATE SET version=excluded.version,body=excluded.body').run(access.view.scope.agentId,personaScope(access.view.scope),current.version+1,JSON.stringify(body));
     this.db.prepare('INSERT INTO growth_revisions VALUES(?,?,?,?)').run(access.view.scope.agentId,personaScope(access.view.scope),current.version+1,JSON.stringify(body));return current.version+1;}
   propose(access:PersonaAccess,raw:unknown){const input=PersonaProposalSchema.parse(raw);return this.request(access,input.requestId,{kind:'propose',input},()=>{
+    this.checkExperienceBasis(access,input.experienceBasis??[]);
     const materials=[input.contentRef,...input.supports,...input.counters,...access.admittedSources,...access.inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[])].map(ref=>{const value=this.resolve(access,ref);if(!value)throw new Error('SOURCE_STALE');return {ref,...value};});
     if(['view','relationship','value-application'].includes(input.kind)&&!input.supports.length)throw new Error('INSUFFICIENT_EVIDENCE');
     const dependencies=uniqueSources(materials.flatMap(value=>[value.ref,...value.dependencies]));const id=randomUUID();
     const candidate=PersonaCandidateRevisionSchema.parse({schemaVersion:1,id,agentId:access.view.scope.agentId,version:1,state:'proposed',kind:input.kind,contentRef:input.contentRef,supports:input.supports,counters:input.counters,
       dependencies,rootSources:[...new Set(materials.filter(value=>input.supports.some(ref=>sourceKey(ref)===sourceKey(value.ref))).flatMap(value=>value.rootSources))],scope:access.view.scope,motivation:access.motivation,
-      applicability:input.applicability,reason:input.reason,runId:access.view.runId,producer:access.producer,createdAt:new Date().toISOString(),policyVersion});
+      applicability:input.applicability,reason:input.reason,runId:access.view.runId,producer:access.producer,createdAt:new Date().toISOString(),policyVersion,...(input.experienceBasis?{experienceBasis:input.experienceBasis}:{})});
     this.db.prepare('INSERT INTO persona_candidates VALUES(?,?,?,?)').run(id,candidate.agentId,1,'proposed');this.writeCandidate(candidate);this.event(access,'persona.proposed',{id,version:1});return {id,version:1,state:'proposed'};
   });}
   review(access:PersonaAccess,raw:unknown){const input=reviewSchema.parse(raw);return this.request(access,input.requestId,{kind:'review',input},()=>{

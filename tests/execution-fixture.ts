@@ -7,12 +7,12 @@ import { ScriptedModel,textReply } from './harness.js';
 import type { Response } from './harness.js';
 import type { ExtensionV3 } from '@dafeiyu/contracts';
 
-export async function executionHarness(root:string,response:Response=()=>textReply('内部任务已完成'),extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>,create=true,options:{timelineExecution?:boolean;personaActions?:boolean;executionActions?:boolean;compaction?:Memory.Config['compaction'];sourceTracking?:boolean}={}){
+export async function executionHarness(root:string,response:Response=()=>textReply('内部任务已完成'),extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>,create=true,options:{timelineExecution?:boolean;personaActions?:boolean;executionActions?:boolean;compaction?:Memory.Config['compaction'];sourceTracking?:boolean;maintenance?:Memory.Config['maintenance']}={}){
   const adapter=new ScriptedModel(response),host=await probeHost(root,adapter),{ctx}=host;
   try{
     await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:resolve(root,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:10000});
     await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:options.timelineExecution??false});
-    await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:resolve(root,'memory'),lifecycleMode:'managed',sourceTracking:options.sourceTracking??false,...(options.compaction?{compaction:options.compaction}:{})});
+    await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:resolve(root,'memory'),lifecycleMode:'managed',sourceTracking:options.sourceTracking??false,...(options.compaction?{compaction:options.compaction}:{}),...(options.maintenance?{maintenance:options.maintenance}:{})});
     const extensionHandle=extension?ctx.dafeiyu.registerExtensionV3({...extension,protocolVersion:3,agentId:'dafeiyu'}):undefined;
     const personaActions=options.personaActions?['dafeiyu_persona_status','dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_publish','dafeiyu_persona_select','dafeiyu_persona_withdraw']:[];
     const executionActions=options.executionActions?['dafeiyu_execution_source_open','dafeiyu_execution_contribute','dafeiyu_execution_select','dafeiyu_execution_source_state','dafeiyu_execution_contribution_state','dafeiyu_task_object','dafeiyu_task_intent']:[];

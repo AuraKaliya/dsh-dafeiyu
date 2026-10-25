@@ -25,13 +25,14 @@ import type { TaskExpression } from './expression.js';
 import { taskRepository } from './task-repository-adapter.js';
 import { PersonaService } from './persona-service.js';
 import { CapabilityObservationService } from './capability-service.js';
+import { MaintenanceService,maintenanceConfigSchema } from './maintenance-service.js';
 export type { MemoryView } from './store.js';
 export { initializeMemoryStorage } from './storage-initialization.js';
 export type { Evidence, MutationReceipt, Revision } from './types.js';
 
 export const name = 'dafeiyu-memory';
 export const inject = ['dafeiyu', 'dafeiyuTimeline', 'llm'];
-const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), lifecycleMode:LifecycleModeSchema.default('legacy'), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional(),sourceTracking:z.boolean().default(false) });
+const configSchema = z.strictObject({ agentId: z.string().min(1).max(100), dataDir: z.string().min(1), lifecycleMode:LifecycleModeSchema.default('legacy'), retrieval: retrievalConfigSchema.optional(), analysis:analysisConfigSchema.optional(),context:z.strictObject({}).optional(),feedback:feedbackConfigSchema.optional(),compaction:compactionConfigSchema.optional(),sourceTracking:z.boolean().default(false),maintenance:maintenanceConfigSchema.optional() });
 export const MemoryPluginConfigSchema=configSchema.omit({agentId:true,dataDir:true,lifecycleMode:true});
 export type Config = z.input<typeof configSchema>;
 const contentShape = { kind: kindSchema, claimType: claimSchema, content: z.string().trim().min(1).max(8000),
@@ -67,10 +68,12 @@ export class MemoryService extends Service {
   private unbindNativeExpression:(()=>void)|undefined;
   private nativeExpression:import('./native-expression.js').NativeExpression|undefined;
   readonly persona:PersonaService|undefined;
+  readonly maintenance:MaintenanceService|undefined;
   private readonly capabilityService:CapabilityObservationService|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
     this.config = configSchema.parse(config);
+    if(this.config.maintenance&&(this.config.lifecycleMode!=='managed'||!this.config.sourceTracking&&!this.config.compaction))throw new Error('MAINTENANCE_REQUIRES_TRACKED_NATIVE_EXECUTION');
     this.store = new MemoryStore(resolve(this.config.dataDir, 'memory.sqlite'));
     this.tasks=this.store.taskWorkspace((scope,ref,hash)=>ctx.dafeiyuTimeline.checkArchivedSource(scope,ref,hash),(scope,a,b)=>ctx.dafeiyuTimeline.sameArchivedSource(scope,a,b));
     try { this.retrieval = this.config.retrieval ? new MemoryRetrieval(this.store, this.config.dataDir, this.config.retrieval, dependencies) : null; }
@@ -141,6 +144,7 @@ export class MemoryService extends Service {
     if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
       ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
     if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction);
+    if(this.config.maintenance&&this.persona)this.maintenance=new MaintenanceService(ctx,this.store,this.persona,this.config.dataDir,this.config.maintenance,this.config.agentId,()=>!this.closed&&this.gate.active);
     if(this.config.lifecycleMode==='managed')this.capabilityService=new CapabilityObservationService(ctx,this.store,()=>!this.closed&&this.gate.active,sourcePolicy,()=>{this.flush();this.persona?.flush();});
     if(this.config.lifecycleMode==='managed'){this.nativeExpression=this.store.nativeExpression(ctx,this.expression,()=>!this.closed&&this.gate.active,()=>{this.flush();this.persona?.flush();});this.unbindNativeExpression=ctx.dafeiyu.bindNativeExpression(this.nativeExpression);}
     ctx.effect(()=>ctx.dafeiyu.onReady(()=>{if(this.gate.active)this.analysis?.start();}),'memory.core-ready');
@@ -152,17 +156,17 @@ export class MemoryService extends Service {
     if(this.closed)throw new Error('Memory capability is unregistered');
     if(this.gate.state==='recovered'||this.gate.active)return;
     if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');
-    this.tasks.recover(this.config.agentId);this.expression.recover(this.config.agentId);this.analysis?.recover();this.flush();this.persona?.flush();this.gate.recovered();
+    this.tasks.recover(this.config.agentId);this.expression.recover(this.config.agentId);this.analysis?.recover();this.maintenance?.recover();this.flush();this.persona?.flush();this.gate.recovered();
   }
   activate():void {if(this.closed)throw new Error('Memory capability is unregistered');this.gate.activate();this.analysis?.activate();}
   quiesce():void {this.gate.quiesce();this.analysis?.quiesce();}
   stopBackground():void {this.analysis?.quiesce();}
-  cancelRunning():void {this.analysis?.cancelRunning();this.nativeExpression?.cancel();}
-  async whenIdle():Promise<void>{await this.analysis?.whenIdle();await this.nativeExpression?.whenIdle();}
+  cancelRunning():void {this.analysis?.cancelRunning();this.nativeExpression?.cancel();this.maintenance?.cancel();}
+  async whenIdle():Promise<void>{await this.analysis?.whenIdle();await this.nativeExpression?.whenIdle();await this.maintenance?.whenIdle();}
   close():Promise<void>{
     if(this.closing)return this.closing;
     this.quiesce();this.closed=true;this.unbindNativeExpression?.();this.capabilityService?.close();this.persona?.close();this.handle.dispose();this.unbindRepository?.();
-    this.closing=(async()=>{try{await this.expression.close();await this.nativeExpression?.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
+    this.closing=(async()=>{try{await this.maintenance?.close();await this.expression.close();await this.nativeExpression?.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
     return this.closing;
   }
   private scope(context: ActionContext): OperationScope {

@@ -15,12 +15,14 @@ import type { compactionConfigSchema } from './compaction.js';
 import { evidenceSelectionSchema } from './execution-memory-state.js';
 import type { ExecutionMemoryState } from './execution-memory-state.js';
 import { personaScope,uniqueSources } from './persona-digest.js';
+import type { ExperienceStore } from './experience-store.js';
 
 const auditSchema=z.strictObject({id:z.uuid(),type:z.string(),scope:ExecutionScopeSchema,runId:z.uuid(),origin:RunOriginSchema,operationId:z.string(),causedBy:z.string().nullable(),producer:z.string(),at:z.iso.datetime(),data:z.record(z.string(),z.json())});
 const proposal=z.strictObject({requestId:PersonaRequestIdSchema,kind:PersonaKindSchema,text:z.string().trim().min(1).max(8000),sources:z.array(z.string().max(300)).max(16).default([]),
   counters:z.array(z.string().max(300)).max(16).default([]),applicability:z.string().trim().min(1).max(1000),reason:z.string().trim().min(1).max(1000)});
 const control={requestId:PersonaRequestIdSchema,id:z.uuid(),expectedVersion:z.number().int().positive(),reason:z.string().trim().min(1).max(1000)};
 export class PersonaService {
+  readonly experiences:ExperienceStore;
   private readonly store:PersonaStore;
   private readonly sources:ExecutionSources;
   private readonly resolving=new Set<string>();
@@ -30,6 +32,7 @@ export class PersonaService {
   private readonly executionHandle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly tasks:TaskWorkspace,private readonly agentId:string,private readonly ready:()=>boolean,compaction?:z.input<typeof compactionConfigSchema>){
+    this.experiences=memory.experienceStore((access,ref)=>this.resolve(access,ref));
     this.sources=memory.executionSources((access,ref)=>this.resolve(access,ref));this.store=memory.personaStore((access,ref)=>this.resolve(access,ref));
     this.executionState=memory.executionState(this.sources,(access,ref)=>this.resolve(access,ref));
     const compact=compaction?new MemoryCompaction(ctx,compaction,scope=>({epoch:String(memory.generation(scope)),taskId:null,versions:{memory:memory.generation(scope)}}),{inbound:()=>[],context:()=>[],tool:()=>[],validate:()=>false}):null;
@@ -48,11 +51,11 @@ export class PersonaService {
     catch(error){this.unbind();this.unbindExecution();throw error;}
     this.executionHandle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'memory-execution',version:MEMORY_VERSION,agentId,requires:['memory.execution.v1'],lifecycleReady:ready,actions:this.executionActions()});
   }
-  private resolve(access:PersonaAccess,ref:PersonaSourceRef):PersonaMaterial|null{
+  resolve(access:PersonaAccess,ref:PersonaSourceRef):PersonaMaterial|null{
     access.guard();if(!this.ready()||ref.agentId!==this.agentId||access.view.scope.agentId!==this.agentId)return null;
     const key=`${access.view.runId}:${sourceKey(ref)}`;if(this.resolving.has(key)||this.resolving.size>=64)return null;this.resolving.add(key);
     try{
-      if(ref.kind==='execution-source')return this.memory.capabilities.material(access,ref)??this.sources.open(access,ref);
+      if(ref.kind==='execution-source')return this.experiences.sourceCurrent(access,ref)?this.memory.capabilities.material(access,ref)??this.sources.open(access,ref):null;
       if(access.view.scope.kind==='task'){
         if(ref.scopeKey===access.view.scope.scopeKey)return this.memory.capabilities.memoryMaterial(access,ref)??this.executionState.memoryMaterial(access,ref);
         const input=access.inputs.find(input=>input.sourceRef&&personaDigest(input.sourceRef)===personaDigest(ref));
@@ -67,6 +70,9 @@ export class PersonaService {
     }catch{return null;}finally{this.resolving.delete(key);}
   }
   private access(context:ExecutionContextV3,pluginId:string,write:boolean){if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.ctx.dafeiyu.personaAccess(context,pluginId,write?'local-write':'read');}
+  derive(access:PersonaAccess,requestId:string,text:string,refs:readonly PersonaSourceRef[]){return this.sources.selfReport(access,requestId,text,refs);}
+  expose(access:PersonaAccess,ref:PersonaSourceRef){this.executionState.expose(access,ref);}
+  proposeAnalyzed(access:PersonaAccess,input:unknown){return this.store.propose(access,input);}
   propose(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){
     const access=this.access(context,pluginId,true),input=proposal.parse(raw);
     const resolveKey=(key:string)=>{const ref=access.inputs.find(input=>input.id===key)?.sourceRef??access.admittedSources.find(ref=>key===(ref.kind==='execution-source'?`execution-source:${ref.id}`:`memory:${ref.id}:${ref.revision}`));

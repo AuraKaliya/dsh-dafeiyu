@@ -1,0 +1,16 @@
+{
+  "step": "memory-E2", "date": "2026-10-25", "baseline": "30add2b",
+  "checks": [
+    {"runId":"9c265ebb-2776-4605-93db-5e8ad6b5c168","passed":7,"failed":0},
+    {"runId":"4fdb26ca-5018-45f4-9291-42053aec4d58","passed":37,"failed":1,"correction":"Budget fixture did not exceed the actual byte limit"},
+    {"runId":"e99a215b-a2f4-4112-88a9-ccee0b1c9f82","passed":40,"failed":0},
+    {"runId":"21b66fb7-db50-4c8d-b266-094432973bbe","passed":9,"failed":1,"correction":"Revision fixture must locate citations in actual sources"},
+    {"runId":"5ceaa5e4-3637-49ac-ad0c-f80942308f54","tests":null,"reason":"TEST_FILE_NOT_ALLOWED: runner does not accept name filters"},
+    {"runId":"ab04ff5c-e2ae-4fd1-8d1b-d2f2b48ba58d","passed":10,"failed":0,"limitation":"Revision check was later strengthened to verify reading the new version"},
+    {"runId":"19f2b0ae-5e16-4779-bcc2-0863cd12b19d","passed":9,"failed":1,"correction":"Separate historical derivation validity from current adoption basis"},
+    {"runId":"2f38fa12-5631-497c-94d0-d9e1852885e8","passed":29,"failed":0},
+    {"runId":"e3f9d014-4d0e-4862-bebc-f4cfce427fb2","passed":30,"failed":0},
+    {"runId":"e46a6fd8-fe2d-426c-8eb4-cb461ef24e42","passed":11,"failed":0}
+  ],
+  "fullRegression":false,"realModel":false,"realPlatform":false,"serverConnected":false,"cleanupBlocked":false
+}

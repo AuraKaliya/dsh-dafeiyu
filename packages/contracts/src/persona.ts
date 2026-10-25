@@ -19,15 +19,16 @@ export const MotivationSchema=z.strictObject({kind:z.enum(['explicit-task','self
   basis:z.array(z.string().min(1).max(300)).max(16).default([])});
 export type Motivation=z.infer<typeof MotivationSchema>;
 export const PersonaKindSchema=z.enum(['interest','preference','view','habit','relationship','value-application']);
+export const ExperienceBasisSchema=z.strictObject({id,sourceId:id,taskEpoch:version});
 export const PersonaCandidateStateSchema=z.enum(['proposed','held','trial','adopted','rejected','withdrawn','dormant','superseded']);
 export const PersonaProposalSchema=z.strictObject({requestId:PersonaRequestIdSchema,kind:PersonaKindSchema,contentRef:PersonaSourceRefSchema,
   supports:z.array(PersonaSourceRefSchema).max(32),counters:z.array(PersonaSourceRefSchema).max(32).default([]),
-  applicability:z.string().trim().min(1).max(1000),reason:z.string().trim().min(1).max(1000)});
+  applicability:z.string().trim().min(1).max(1000),reason:z.string().trim().min(1).max(1000),experienceBasis:z.array(ExperienceBasisSchema).max(8).optional()});
 export const PersonaCandidateRevisionSchema=z.strictObject({schemaVersion:z.literal(1),id,agentId:z.string().min(1).max(100),version,state:PersonaCandidateStateSchema,
   kind:PersonaKindSchema,contentRef:PersonaSourceRefSchema,supports:z.array(PersonaSourceRefSchema).max(32),counters:z.array(PersonaSourceRefSchema).max(32),
   dependencies:z.array(PersonaSourceRefSchema).max(64),rootSources:z.array(z.string().min(1).max(2200)).max(64),
   scope:ExecutionScopeSchema,motivation:MotivationSchema,applicability:z.string().min(1).max(1000),reason:z.string().min(1).max(1000),
-  runId:id,producer:z.string().min(1).max(100),createdAt:z.iso.datetime(),policyVersion:hash});
+  runId:id,producer:z.string().min(1).max(100),createdAt:z.iso.datetime(),policyVersion:hash,experienceBasis:z.array(ExperienceBasisSchema).max(8).optional()});
 export type PersonaCandidate=z.infer<typeof PersonaCandidateRevisionSchema>;
 export const PersonaEntryRefSchema=z.strictObject({id,version});
 export const PersonaStageSchema=z.strictObject({schemaVersion:z.literal(1),agentId:z.string().min(1).max(100),revision:z.number().int().nonnegative(),
