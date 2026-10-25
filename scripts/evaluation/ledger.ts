@@ -1,0 +1,59 @@
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync,mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { createHash,randomUUID } from 'node:crypto';
+import { z } from 'zod';
+
+const hash=z.string().regex(/^[a-f0-9]{64}$/),id=z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),integer=z.number().int().nonnegative().safe();
+const money=integer; // Integer micro-CNY. No binary floating-point currency arithmetic.
+export const EvaluationConfigSchema=z.strictObject({schemaVersion:z.literal(1),suiteId:id,suiteHash:hash,manifestHash:hash,foundationHash:hash,codeRevision:z.string().regex(/^[a-f0-9]{40}$/),
+  mode:z.enum(['offline','real']),budget:z.strictObject({authorized:z.boolean(),maximumMicroCny:money,expiresAt:z.iso.datetime(),pricingHash:hash,
+    inputMicroCnyPerMillion:money,outputMicroCnyPerMillion:money}),cases:z.array(z.strictObject({id,reviewId:id})).min(1).max(2000)})
+  .refine(c=>new Set(c.cases.map(i=>i.id)).size===c.cases.length&&new Set(c.cases.map(i=>i.reviewId)).size===c.cases.length,'Duplicate case identity')
+  .refine(c=>c.mode==='offline'?!c.budget.authorized&&c.budget.maximumMicroCny===0:c.budget.authorized&&c.budget.maximumMicroCny>0,'Real execution requires an explicit frozen budget');
+export type EvaluationConfig=z.infer<typeof EvaluationConfigSchema>;
+const outcome=z.strictObject({state:z.enum(['needs-human-review','failed','blocked','interrupted']),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),
+  programChecks:z.array(z.strictObject({id,passed:z.boolean(),evidenceHash:hash})).max(128),answerHash:hash.nullable(),artifacts:z.array(z.strictObject({relative:z.string().max(300).refine(p=>!p.startsWith('/')&&!p.includes('\\')&&!p.split('/').some(s=>s==='..'||!s)&&!p.includes(':')),hash})).max(128)})
+  .refine(o=>o.state!=='needs-human-review'||o.programChecks.length>0&&o.programChecks.every(c=>c.passed),'Failed program checks cannot pass to human review');
+export type EvaluationOutcome=z.infer<typeof outcome>;
+const encoded=(value:unknown)=>JSON.stringify(value),digest=(value:unknown)=>createHash('sha256').update(encoded(value)).digest('hex');
+function fee(tokens:number,rate:number){integer.parse(tokens);money.parse(rate);const value=(BigInt(tokens)*BigInt(rate)+999999n)/1000000n;if(value>BigInt(Number.MAX_SAFE_INTEGER))throw new Error('EVALUATION_COST_OVERFLOW');return Number(value);}
+/** Evaluation evidence only. This class never sends model/platform requests or edits the frozen source suite. */
+export class EvaluationLedger {
+  private readonly db:DatabaseSync;readonly config:EvaluationConfig;
+  constructor(file:string,raw:EvaluationConfig,create=false){this.config=EvaluationConfigSchema.parse(raw);if(!existsSync(file)&&!create)throw new Error('EVALUATION_LEDGER_MISSING');if(create)mkdirSync(dirname(file),{recursive:true});this.db=new DatabaseSync(file);
+    try{this.db.exec('PRAGMA busy_timeout=5000;PRAGMA foreign_keys=ON;');const version=this.db.prepare('PRAGMA user_version').get()?.user_version;
+      if(version===0&&create&&!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get())this.atomic(()=>{this.db.exec(`CREATE TABLE metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL,hash TEXT NOT NULL);
+        CREATE TABLE attempts(id TEXT PRIMARY KEY,case_id TEXT NOT NULL,ordinal INTEGER NOT NULL,started_at TEXT NOT NULL,state TEXT NOT NULL,UNIQUE(case_id,ordinal));
+        CREATE TABLE outcomes(attempt_id TEXT PRIMARY KEY REFERENCES attempts(id),body TEXT NOT NULL,hash TEXT NOT NULL,finished_at TEXT NOT NULL);
+        CREATE TABLE reservations(id TEXT PRIMARY KEY,attempt_id TEXT NOT NULL REFERENCES attempts(id),request_key TEXT NOT NULL UNIQUE,input_bound INTEGER NOT NULL,output_bound INTEGER NOT NULL,reserved INTEGER NOT NULL,state TEXT NOT NULL,actual INTEGER,usage TEXT,created_at TEXT NOT NULL);
+        CREATE TABLE audit(seq INTEGER PRIMARY KEY AUTOINCREMENT,body TEXT NOT NULL,hash TEXT NOT NULL);
+        PRAGMA application_id=1145455927;PRAGMA user_version=1;`);this.db.prepare('INSERT INTO metadata VALUES(1,?,?)').run(encoded(this.config),digest(this.config));
+        for(const table of ['metadata','outcomes','audit'])this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable evaluation evidence');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain evaluation evidence');END;`);});
+      else if(version!==1||this.db.prepare('PRAGMA application_id').get()?.application_id!==1145455927)throw new Error('EVALUATION_SCHEMA_UNSUPPORTED');
+      const saved=this.db.prepare('SELECT body,hash FROM metadata WHERE id=1').get();if(!saved||saved.hash!==digest(this.config)||saved.body!==encoded(this.config))throw new Error('EVALUATION_CONFIG_CHANGED');
+    }catch(e){this.db.close();throw e;}}
+  private atomic<T>(work:()=>T){this.db.exec('BEGIN IMMEDIATE');try{const value=work();this.db.exec('COMMIT');return value;}catch(e){this.db.exec('ROLLBACK');throw e;}}
+  private event(type:string,data:Record<string,string|number|boolean|null>){const body={type,at:new Date().toISOString(),data};this.db.prepare('INSERT INTO audit(body,hash) VALUES(?,?)').run(encoded(body),digest(body));}
+  private attempt(key:string){const row=this.db.prepare('SELECT * FROM attempts WHERE id=?').get(z.uuid().parse(key));if(!row)throw new Error('EVALUATION_ATTEMPT_MISSING');return row;}
+  begin(caseId:string,{retry=false}: {retry?:boolean}={}){if(!this.config.cases.some(c=>c.id===caseId))throw new Error('EVALUATION_CASE_UNKNOWN');return this.atomic(()=>{const last=this.db.prepare('SELECT * FROM attempts WHERE case_id=? ORDER BY ordinal DESC LIMIT 1').get(caseId);
+    if(last&&!retry)throw new Error(last.state==='running'?'EVALUATION_ATTEMPT_RUNNING':'EVALUATION_RETRY_MUST_BE_EXPLICIT');if(last?.state==='running')throw new Error('EVALUATION_ATTEMPT_RUNNING');const key=randomUUID(),ordinal=last?Number(last.ordinal)+1:1;this.db.prepare("INSERT INTO attempts VALUES(?,?,?,?,'running')").run(key,caseId,ordinal,new Date().toISOString());this.event('attempt.started',{attemptId:key,caseId,ordinal});return key;});}
+  reserve(attemptId:string,requestKey:string,inputBound:number,outputBound:number,now=Date.now()){id.parse(requestKey);integer.parse(inputBound);integer.parse(outputBound);return this.atomic(()=>{if(this.config.mode!=='real'||!this.config.budget.authorized)throw new Error('EVALUATION_REAL_NOT_AUTHORIZED');if(Date.parse(this.config.budget.expiresAt)<=now)throw new Error('EVALUATION_BUDGET_EXPIRED');if(this.attempt(attemptId).state!=='running')throw new Error('EVALUATION_ATTEMPT_FINISHED');
+    if(this.db.prepare("SELECT 1 FROM reservations WHERE state='unknown'").get())throw new Error('EVALUATION_UNKNOWN_COST');if(this.db.prepare('SELECT 1 FROM reservations WHERE request_key=?').get(requestKey))throw new Error('EVALUATION_REQUEST_ALREADY_RESERVED');
+    const reserved=fee(inputBound,this.config.budget.inputMicroCnyPerMillion)+fee(outputBound,this.config.budget.outputMicroCnyPerMillion);if(!Number.isSafeInteger(reserved))throw new Error('EVALUATION_COST_OVERFLOW');if(reserved>this.budget.remaining)throw new Error('EVALUATION_BUDGET_EXHAUSTED');
+    const key=randomUUID();this.db.prepare("INSERT INTO reservations VALUES(?,?,?,?,?,?,'reserved',NULL,NULL,?)").run(key,attemptId,requestKey,inputBound,outputBound,reserved,new Date(now).toISOString());this.event('cost.reserved',{reservationId:key,attemptId,reserved});return key;});}
+  settle(reservationId:string,usage:{inputTokens:number;outputTokens:number}|null){return this.atomic(()=>{const row=this.db.prepare('SELECT * FROM reservations WHERE id=?').get(z.uuid().parse(reservationId));if(!row)throw new Error('EVALUATION_RESERVATION_MISSING');
+    if(row.state!=='reserved'){if(row.usage===encoded(usage))return;throw new Error('EVALUATION_COST_CONFLICT');}
+    const parsed=usage===null?null:z.strictObject({inputTokens:integer,outputTokens:integer}).parse(usage),actual=parsed?fee(parsed.inputTokens,this.config.budget.inputMicroCnyPerMillion)+fee(parsed.outputTokens,this.config.budget.outputMicroCnyPerMillion):null;
+    const exceeded=parsed!==null&&(parsed.inputTokens>Number(row.input_bound)||parsed.outputTokens>Number(row.output_bound)||actual!>Number(row.reserved));
+    this.db.prepare('UPDATE reservations SET state=?,actual=?,usage=? WHERE id=?').run(parsed&&!exceeded?'settled':'unknown',actual,encoded(parsed),reservationId);this.event('cost.settled',{reservationId,actual,unknown:!parsed||exceeded});
+    return {actual,unknown:!parsed||exceeded};});}
+  finish(attemptId:string,raw:EvaluationOutcome){const body=outcome.parse(raw);return this.atomic(()=>{const prior=this.db.prepare('SELECT hash FROM outcomes WHERE attempt_id=?').get(attemptId);if(prior){if(prior.hash!==digest(body))throw new Error('EVALUATION_RESULT_CONFLICT');return;}
+    if(this.attempt(attemptId).state!=='running')throw new Error('EVALUATION_ATTEMPT_FINISHED');if(this.db.prepare("SELECT 1 FROM reservations WHERE attempt_id=? AND state='reserved'").get(attemptId))throw new Error('EVALUATION_COST_PENDING');
+    this.db.prepare('INSERT INTO outcomes VALUES(?,?,?,?)').run(attemptId,encoded(body),digest(body),new Date().toISOString());this.db.prepare('UPDATE attempts SET state=? WHERE id=?').run(body.state,attemptId);this.event('attempt.finished',{attemptId,state:body.state});});}
+  recover(){return this.atomic(()=>{const active=this.db.prepare("SELECT id FROM attempts WHERE state='running'").all();this.db.prepare("UPDATE reservations SET state='unknown',usage='null' WHERE state='reserved'").run();for(const row of active){const body:EvaluationOutcome={state:'interrupted',code:'EVALUATION_PROCESS_INTERRUPTED',programChecks:[],answerHash:null,artifacts:[]};this.db.prepare('INSERT INTO outcomes VALUES(?,?,?,?)').run(String(row.id),encoded(body),digest(body),new Date().toISOString());this.db.prepare("UPDATE attempts SET state='interrupted' WHERE id=?").run(row.id!);this.event('attempt.interrupted',{attemptId:String(row.id)});}return active.length;});}
+  get budget(){let held=0,spent=0,unknown=0;for(const row of this.db.prepare('SELECT state,reserved,actual FROM reservations').all()){if(row.state==='settled')spent+=Number(row.actual);else{held+=Math.max(Number(row.reserved),row.actual===null?0:Number(row.actual));if(row.state==='unknown')unknown++;}}return {maximum:this.config.budget.maximumMicroCny,spent,held,unknown,remaining:Math.max(0,this.config.budget.maximumMicroCny-spent-held)};}
+  report(){const attempts=this.db.prepare('SELECT a.*,o.body,o.hash FROM attempts a LEFT JOIN outcomes o ON o.attempt_id=a.id ORDER BY a.rowid').all().map(row=>{const result=row.body===null?null:outcome.parse(JSON.parse(String(row.body)));if(result&&digest(result)!==row.hash)throw new Error('EVALUATION_EVIDENCE_CORRUPT');return {attemptId:String(row.id),caseId:String(row.case_id),ordinal:Number(row.ordinal),state:String(row.state),result};});
+    return {schemaVersion:1,suiteId:this.config.suiteId,mode:this.config.mode,budget:this.budget,cases:this.config.cases.map(c=>({...c,state:attempts.findLast(a=>a.caseId===c.id)?.state??'not-run'})),attempts,realExecutionAuthorized:this.config.mode==='real'&&this.config.budget.authorized,humanAccepted:false};}
+  close(){this.db.close();}
+}
