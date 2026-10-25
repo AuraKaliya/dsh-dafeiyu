@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "stage": "7C-2 initial calibration",
+  "codeRevision": "00f7c56",
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max"
+  },
+  "realModel": true,
+  "realPlatform": false,
+  "serverAccess": false,
+  "cases": [
+    {
+      "caseId": "CAL-route",
+      "attemptId": "8f7744d9-51c7-4bb1-8a97-6ef60198964c",
+      "state": "needs-human-review",
+      "calls": 1,
+      "inputTokens": 948,
+      "outputTokens": 97,
+      "compactionCalls": 0
+    },
+    {
+      "caseId": "CAL-boundary",
+      "attemptId": "ce921f7f-44ec-48f9-960d-4e0a3f809851",
+      "state": "needs-human-review",
+      "calls": 2,
+      "inputTokens": 18394,
+      "outputTokens": 607,
+      "compactionCalls": 0
+    },
+    {
+      "caseId": "CAL-history-full",
+      "attemptId": "a7418f2a-4fac-4668-b520-f901af77b316",
+      "state": "needs-human-review",
+      "calls": 33,
+      "inputTokens": 885439,
+      "outputTokens": 4520,
+      "compactionCalls": 0
+    },
+    {
+      "caseId": "CAL-history-compressed",
+      "attemptId": "7ae488e5-f3db-4483-b197-46294b8013e0",
+      "state": "failed",
+      "calls": 14,
+      "inputTokens": 526665,
+      "outputTokens": 1399,
+      "compactionCalls": 0
+    }
+  ],
+  "dispatches": 50,
+  "budget": {
+    "maximum": 60000000,
+    "spent": 2915876,
+    "held": 0,
+    "unknown": 0,
+    "remaining": 57084124
+  },
+  "execution": {
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 139285,
+    "calibrationMs": 139285,
+    "remainingActiveMs": 21460715,
+    "phase": null,
+    "ownerPid": null,
+    "running": false
+  },
+  "firstCallUtc": "2026-10-25T20:14:30.580Z",
+  "expiresUtc": "2026-10-27T20:14:30.580Z",
+  "firstCallBeijing": "2026/10/26 04:14:30",
+  "expiresBeijing": "2026/10/28 04:14:30",
+  "formalCasesStarted": 0,
+  "humanAccepted": false,
+  "failedCalibration": "CAL-history-compressed",
+  "admissionStop": "EVALUATION_CALIBRATION_BUDGET_EXHAUSTED",
+  "initialCalibrationAllocationMicroCny": 5000000,
+  "nextReservationMicroCny": 2131072,
+  "diagnosis": "All observed history turns used the receipt tool; existing compaction conservatively protects tool call/result turns, leaving no eligible text turns. The next model dispatch was then refused because the calibration allocation could not hold its full-context reservation.",
+  "sourceReport": "reports/9a03d901-0ac7-4440-8df0-cd506cbfc70b/index.json"
+}
