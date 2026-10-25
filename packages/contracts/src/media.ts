@@ -66,6 +66,7 @@ export interface MediaPort {
   readReplyPart?(access:MediaReplyAccess,manifestId:string,position:number):Promise<Uint8Array>;
   validateReply?(access:MediaReplyAccess,manifestId:string):void;
   settleReply?(access:MediaReplyAccess,manifestId:string,state:'sent'|'unknown'|'blocked'):void;
+  releaseReply?(access:MediaReplyAccess):void;
   nativeMaterial?(access:NativeExpressionAccess):NativeMediaMaterial|null;
   observedMaterial?(access:PersonaAccess,source:import('./persona.js').PersonaSourceRef,target:import('./conversation.js').Conversation,view:string):{kind:'reported'|'inference';stamp:string}|null;
 }

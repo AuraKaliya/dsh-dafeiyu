@@ -16,7 +16,7 @@ export function migrateMediaReplies(db:DatabaseSync){const version=Number(db.pre
     PRAGMA user_version=2;`);
 }
 export const mediaDraftContentSchema=z.strictObject({schemaVersion:z.literal(1),runId:z.uuid(),scope:ExecutionScopeSchema,taskEpoch:z.number().int().nonnegative(),parts:z.array(z.discriminatedUnion('kind',[
-  z.strictObject({kind:z.literal('asset'),asset:MediaAssetRefSchema,source:MediaSourceDescriptionSchema,as:z.enum(['image','record','file']).optional()}),z.strictObject({kind:z.literal('final-voice')})])).max(8)});
+  z.strictObject({kind:z.literal('asset'),asset:MediaAssetRefSchema,source:MediaSourceDescriptionSchema,as:z.enum(['image','record','file']).optional()}),z.strictObject({kind:z.literal('final-voice'),voiceHash:z.string().length(64).optional()})])).max(8)});
 export const mediaDraftSchema=mediaDraftContentSchema.extend({id:z.uuid(),version:z.number().int().positive(),requestId:z.string(),operationId:z.uuid(),authority:MediaReplyAuthoritySchema,createdAt:z.iso.datetime()});
 export type MediaDraft=z.infer<typeof mediaDraftSchema>;
 const exportSchema=z.strictObject({manifest:ReplyMediaManifestSchema,leases:z.array(z.strictObject({id:z.uuid(),owner:z.string()})).max(8)});

@@ -146,3 +146,4 @@ QQ用文字分段与媒体独立部件组成固定计划，尤其语音独立发
 - 5E-2b：[准备动作、冻结与受控字节导出](media-5e2b-draft-export.md)完成；继续5E-3原生任务的目标材料与渲染凭据。
 - 5E-3：[原生任务目标材料与媒体凭据](media-5e3-native-material.md)完成；继续5E-4 QQ逐部件传输。
 - 5E-4：[QQ逐部件媒体传输](media-5e4-qq-transport.md)完成回环检查；继续5E-5最终正文TTS。
+- 5E-5：[最终正文TTS](media-5e5-final-speech.md)完成。5E-6与5F统一Host装配、迁移、对账及联合检查继续推进。

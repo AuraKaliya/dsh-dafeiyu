@@ -87,7 +87,7 @@ export class NativeTaskDelivery {
     }catch(error){const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
     }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');}catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
-      finally{mediaAccess?.release();release();this.host.flush();}}
+      finally{if(mediaAccess)media?.releaseReply?.(mediaAccess);mediaAccess?.release();release();this.host.flush();}}
     return this.host.store.nativeDeliveries.status(runId);
   }
 }

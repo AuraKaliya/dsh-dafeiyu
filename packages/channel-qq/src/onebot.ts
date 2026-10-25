@@ -15,7 +15,9 @@ export class OneBot {
   async call(action: 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'send_private_msg' | 'send_group_msg', params: object, signal?: AbortSignal): Promise<unknown> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const response = await fetch(new URL(action, this.base), { method: 'POST', redirect: 'error',
-      headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json' }, body: JSON.stringify(params),
+      // Local processing can outlast an idle socket's server timeout. Avoid reusing that socket;
+      // never repair an ambiguous send by automatically issuing the POST again.
+      headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json',Connection:'close' }, body: JSON.stringify(params),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (!response.ok) throw new Error('ONEBOT_HTTP_FAILURE');
     const reader=response.body?.getReader();if(!reader)throw new Error('ONEBOT_INVALID_RESPONSE');const chunks:Uint8Array[]=[];let bytes=0;

@@ -1,0 +1,18 @@
+{
+  "stage": "media-5E-5",
+  "date": "2026-10-25",
+  "baseline": "438cb08",
+  "result": "targeted-checks-passed",
+  "runId": "88cdcdd3-0312-4911-81a4-1c1922fbdc45",
+  "tests": {"passed": 23, "failed": 0},
+  "scope": ["media-reply-tts", "qq-media-delivery", "qq"],
+  "actualLocalExecution": ["DSH", "SQLite", "PCM/WAV", "loopback media delivery"],
+  "speechEngine": "scripted text-checking backend returning a synthetic tone",
+  "correctedIssue": "idle loopback HTTP connection reset; use independent connections without retrying send POSTs",
+  "realModel": false,
+  "realTtsQuality": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false
+}

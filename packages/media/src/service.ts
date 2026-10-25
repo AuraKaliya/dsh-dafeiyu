@@ -20,10 +20,11 @@ import type { AudioWorker } from './audio.js';
 import { DocumentReader,documentConfigSchema } from './documents.js';
 import { voiceWitness } from './voice.js';
 import { MediaReplies } from './replies.js';
+import { ReplySpeech,replySpeechConfigSchema } from './reply-speech.js';
 
 export const mediaConfigSchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100),dataDir:z.string().min(1),createStore:z.boolean().default(false),
   ffmpeg:z.string().min(1),ffprobe:z.string().min(1),maxBytes:z.number().int().min(1024).max(16*1024**3).default(1024**3),maxAssetBytes:z.number().int().min(1024).max(256*1024**2).default(64*1024**2),
-  timeoutMs:z.number().int().min(1000).max(300000).default(120000),vision:z.strictObject({provider:z.string().min(1),model:z.string().min(1),reasoningEffort:z.string().optional()}).optional(),audio:audioConfigSchema.optional(),documents:documentConfigSchema.optional()});
+  timeoutMs:z.number().int().min(1000).max(300000).default(120000),vision:z.strictObject({provider:z.string().min(1),model:z.string().min(1),reasoningEffort:z.string().optional()}).optional(),audio:audioConfigSchema.optional(),documents:documentConfigSchema.optional(),tts:replySpeechConfigSchema.optional()});
 export type Config=z.input<typeof mediaConfigSchema>;
 export const MEDIA_ACTIONS=['dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_read','dafeiyu_media_select','dafeiyu_media_reply','dafeiyu_media_reply_status'] as const;
 const visionResult=z.strictObject({schemaVersion:z.literal(1),observations:z.array(z.strictObject({image:z.number().int().nonnegative().max(7),description:z.string().min(1).max(3000),visibleText:z.array(z.string().max(500)).max(12),uncertainties:z.array(z.string().max(300)).max(8)})).min(1).max(8),gaps:z.array(z.string().max(300)).max(8)});
@@ -44,6 +45,7 @@ export class MediaService extends Service implements MediaPort {
   private readonly audio:AudioPipeline|undefined;
   private readonly documents:DocumentReader|undefined;
   private readonly replies:MediaReplies;
+  private readonly replySpeech:ReplySpeech|undefined;
   private readonly gate=new ServiceGate();
   private readonly controller=new AbortController();
   private readonly providers=new Map<string,Readonly<MediaSourceProvider>>();
@@ -51,7 +53,7 @@ export class MediaService extends Service implements MediaPort {
   private readonly unbind:()=>void;
   private tail:Promise<unknown>=Promise.resolve();
   private closing:Promise<void>|undefined;
-  constructor(ctx:Context,raw:Config,testBackends?:{audioWorker?:AudioWorker}){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
+  constructor(ctx:Context,raw:Config,testBackends?:{audioWorker?:AudioWorker;ttsWorker?:AudioWorker}){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
     if(ctx.get('attachments'))throw new Error('MEDIA_ATTACHMENTS_CONFLICT');
     this.store=new MediaStore(join(this.config.dataDir,'media.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore);
     this.files=new MediaFiles(join(this.config.dataDir,'media'),this.store,this.config.maxBytes,this.config.maxAssetBytes);
@@ -59,9 +61,11 @@ export class MediaService extends Service implements MediaPort {
     this.images=new ScopedImages(ctx);this.analysis=new MediaAnalysis(ctx,this.images,join(this.config.dataDir,'media-analysis'));
     this.audio=this.config.audio?new AudioPipeline(this.files.work,this.config.audio,testBackends?.audioWorker,this.config.timeoutMs):undefined;
     this.documents=this.config.documents?new DocumentReader(this.files.work,this.files.root,this.config.documents):undefined;
-    this.replies=new MediaReplies({ctx,store:this.store,files:this.files,ready:()=>this.ready(),prepareAsset:(c,a,as,key)=>this.prepareReplyAsset(c,a,as,key),sourceCurrent:source=>this.sourceCurrent(source)});
+    this.replySpeech=this.config.tts?new ReplySpeech(ctx,this.store,this.files,this.config.tts,testBackends?.ttsWorker):undefined;
+    if(this.replySpeech)this.providers.set('media',{id:'media',describe:key=>this.replySpeech!.describe(key),open:async()=>{throw new Error('MEDIA_REPLY_OUTPUT_PRIVATE');}});
+    this.replies=new MediaReplies({ctx,store:this.store,files:this.files,ready:()=>this.ready(),prepareAsset:(c,a,as,key)=>this.prepareReplyAsset(c,a,as,key),sourceCurrent:source=>this.sourceCurrent(source),...(this.replySpeech?{speech:this.replySpeech}:{})});
     try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'media',version:'0.1.0',agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['media.processing.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
-      resourceProofs:{current:proof=>this.ready()&&this.store.validateExposure(proof,source=>this.sourceCurrent(source)),epoch:scope=>this.ready()?mediaHash([this.store.epoch(),[...this.providers.keys()],ctx.dafeiyu.capabilityResourceEpochWithout('media',scope)]):'closed'}});
+      resourceProofs:{current:proof=>this.ready()&&(proof.key.startsWith('reply-text:')?this.replySpeech?.current(proof)===true:this.store.validateExposure(proof,source=>this.sourceCurrent(source))),epoch:scope=>this.ready()?mediaHash([this.store.epoch(),[...this.providers.keys()],ctx.dafeiyu.capabilityResourceEpochWithout('media',scope)]):'closed'}});
       this.unbind=ctx.dafeiyu.bindMedia(this);
     }catch(error){this.images.close();this.store.close();throw error;}
     ctx.effect(()=>()=>this.close(),'media.close');
@@ -147,6 +151,7 @@ export class MediaService extends Service implements MediaPort {
   readReplyPart(access:MediaReplyAccess,id:string,position:number){return this.replies.bytes(access,id,position);}
   validateReply(access:MediaReplyAccess,id:string){return this.replies.validate(access,id);}
   settleReply(access:MediaReplyAccess,id:string,state:'sent'|'unknown'|'blocked'){return this.replies.settle(access,id,state);}
+  releaseReply(access:MediaReplyAccess){this.replySpeech?.release(access);}
   nativeMaterial(access:NativeExpressionAccess){return this.replies.native(access);}
   observedMaterial(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string){try{access.guard();const body=this.store.exposureByObservation(ref);if(!body||body.text!==view||body.scope.kind!=='task'||access.view.scope.kind!=='task'||mediaHash(body.scope)!==mediaHash(access.view.scope)||body.taskEpoch!==access.intentVersion)return null;
     const source=this.store.exposureOrigin(body.id);if(!access.resourceAllowed?.(source.origin.scene)||!this.sourceCurrent(source)||!source.publicContent&&mediaHash(source.origin.scene)!==mediaHash(target))return null;
@@ -182,10 +187,10 @@ export class MediaService extends Service implements MediaPort {
       catch(error){const code=failureCode(error);if(write&&!['INVALID_INPUT','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','SOURCE_STALE','MEDIA_SOURCE_STALE','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT','OBSERVATION_NOT_EXPOSED','HISTORY_UNTRACKED','SOURCE_SUPPRESSED','EMPTY_OBSERVATION','PRIVATE_INPUT_REJECTED','MEDIA_SIZE_LIMIT','MEDIA_CACHE_FULL','MEDIA_TTS_NOT_CONFIGURED','MEDIA_DRAFT_FROZEN','MEDIA_IMAGE_ASSET_REQUIRED','MEDIA_AUDIO_INTERVAL_REQUIRED'].includes(code))throw error;
         return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});
     return [make(MEDIA_ACTIONS[0],MediaAcquireSchema,false,(i,c)=>this.acquire(c,'media',MediaAcquireSchema.parse(i))),make(MEDIA_ACTIONS[1],MediaAssetRefSchema,false,(i,c)=>this.inspect(c,'media',MediaAssetRefSchema.parse(i))),make(MEDIA_ACTIONS[2],MediaReadSchema,false,(i,c)=>this.read(c,'media',MediaReadSchema.parse(i))),make(MEDIA_ACTIONS[3],selectSchema,true,(i,c)=>this.select(c,i)),
-      {...make(MEDIA_ACTIONS[4],MediaReplyDraftInputSchema,true,(i,c)=>this.prepareReply(c,i)),description:'准备当前Run的回复媒体草案，尚未发送。expectedVersion首次0，之后用currentVersion；parts为空取消。图片／语音会归一化，as:file保留原文件字节。目标和最终正文由核心确定。'},
+      {...make(MEDIA_ACTIONS[4],MediaReplyDraftInputSchema,true,(i,c)=>this.prepareReply(c,i)),description:'准备当前Run的回复媒体草案，尚未发送。expectedVersion首次0，之后用currentVersion；parts为空取消。图片／语音会归一化，as:file保留原字节；final-voice仅在配置TTS时将核心批准的最终正文合成语音，不传自由文本。目标和正文由核心确定。'},
       {...make(MEDIA_ACTIONS[5],z.strictObject({}),false,(_i,c)=>this.replies.status(c)),description:'查看当前Run的媒体草案版本、选中数量和冻结状态，不读取其它任务。'}];}
   async recover(){if(this.gate.state!=='registered')return;this.store.recover();await this.files.initialize();await this.files.cleanWork();this.gate.recovered();}
   activate(){this.gate.activate();}
   whenIdle(){return this.tail;}
-  close():Promise<void>{if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.closing=(async()=>{await this.tail;this.unbind();this.handle.dispose();this.images.close();this.store.close();this.gate.close();})();return this.closing;}
+  close():Promise<void>{if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.closing=(async()=>{await this.tail;this.unbind();this.handle.dispose();this.replySpeech?.close();this.images.close();this.store.close();this.gate.close();})();return this.closing;}
 }
