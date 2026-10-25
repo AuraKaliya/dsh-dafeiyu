@@ -38,6 +38,7 @@ export class QqDeliveryLedger {
   prepare(reply:Reply):QqDeliveryPlan|null {
     const plan=qqDeliveryPlan(reply),body=JSON.stringify(plan);
     return this.atomic(()=>{const previous=this.readPlan(reply.id);if(previous){if(JSON.stringify(previous)!==body)throw new Error('DELIVERY_PLAN_CONFLICT');return previous;}
+      if(this.db.prepare('SELECT 1 FROM qq_media_deliveries WHERE reply_id=?').get(reply.id))throw new Error('DELIVERY_PROTOCOL_CONFLICT');
       if(this.db.prepare('SELECT 1 FROM receipts WHERE reply_id=?').get(reply.id))return null;
       this.db.prepare('INSERT INTO qq_delivery_plans VALUES(?,?,?)').run(reply.id,digest(plan),body);
       const insert=this.db.prepare("INSERT INTO qq_delivery_segments VALUES(?,?,'pending',NULL,NULL)");plan.segments.forEach((_,position)=>insert.run(reply.id,position));return plan;

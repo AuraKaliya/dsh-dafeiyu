@@ -11,12 +11,14 @@ import { redactContent } from '@dafeiyu/contracts';
 import type { MediaAttachment } from '@dafeiyu/contracts';
 import { QqDeliveryLedger } from './delivery.js';
 import { QqMediaStore } from './media-store.js';
+import { QqMediaDeliveryLedger } from './media-delivery.js';
 const remembered = z.object({ id: z.string(), sender: z.string(), text: z.string() });
 export class QqStore {
   private readonly db: DatabaseSync;
   readonly cache: QqCache;
   readonly delivery: QqDeliveryLedger;
   readonly media:QqMediaStore;
+  readonly mediaDelivery:QqMediaDeliveryLedger;
   constructor(file: string, options: { migrate?: boolean; cache?: QqCacheOptions } = {}) {
     mkdirSync(dirname(file), { recursive: true }); this.db = new DatabaseSync(file);
     try {
@@ -29,6 +31,7 @@ export class QqStore {
       this.cache = new QqCache(this.db, options.cache);
       this.delivery = new QqDeliveryLedger(this.db);
       this.media=new QqMediaStore(this.db,this.cache);
+      this.mediaDelivery=new QqMediaDeliveryLedger(this.db);
     } catch (error) { this.db.close(); throw error; }
   }
   remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }

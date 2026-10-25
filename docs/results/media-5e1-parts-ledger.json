@@ -1,0 +1,18 @@
+{
+  "stage": "media-5E-1",
+  "date": "2026-10-25",
+  "baseline": "c2ef104",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "16086568-c01f-43c8-8769-957e3486fc8f", "passed": 17, "failed": 0, "scope": ["qq-media-delivery-ledger", "qq-delivery-ledger", "qq-storage"]},
+    {"runId": "4264d722-6151-4ade-a7f4-1e6c72dfbcd6", "passed": 7, "failed": 0, "scope": ["qq-media-delivery-ledger"]}
+  ],
+  "countsOverlap": true,
+  "actualLocalExecution": ["SQLite", "Unicode-safe text splitting"],
+  "fixtures": "synthetic manifests, asset references and receipts; no byte authorization or platform send claimed",
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false
+}

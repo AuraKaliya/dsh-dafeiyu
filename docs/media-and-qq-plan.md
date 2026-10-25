@@ -141,3 +141,4 @@ QQ用文字分段与媒体独立部件组成固定计划，尤其语音独立发
 - 5D-2：[QQ入站、按需读取与记忆选择](media-5d2-qq-ingress.md)完成；继续5D-3直接主人语音任务的来源绑定。
 - 5D-3a：[完整语音证据](media-5d3a-voice-evidence.md)完成；主人任务绑定及runtime v4兼容门槛继续5D-3b。
 - 5D-3b：[主人语音任务与runtime v4](media-5d3b-voice-tasks.md)完成；5D结束，继续5E媒体交付。
+- 5E-1：[回复媒体协议与逐部件账本](media-5e1-parts-ledger.md)完成；授权／字节导出和实际发送仍待5E-2—5E-6。

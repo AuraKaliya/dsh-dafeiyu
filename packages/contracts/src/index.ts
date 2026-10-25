@@ -28,6 +28,7 @@ export * from './native-expression.js';
 export * from './memory-maintenance.js';
 export * from './activity.js';
 export * from './media.js';
+export * from './media-delivery.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
@@ -36,6 +37,7 @@ import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
 import type { FeedbackProvider } from './feedback.js';
 import type { TaskResultAnchor } from './native-expression.js';
+import type { ReplyMediaManifest } from './media-delivery.js';
 
 export const API_VERSION = 2 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -73,6 +75,7 @@ export interface Reply {
   readonly sourceMessageId: string;
   readonly text: string;
   readonly taskResult?:TaskResultAnchor;
+  readonly media?:ReplyMediaManifest;
 }
 export type DeliveryResult =
   | { readonly status: 'sent'; readonly receiptId: string }
