@@ -8,10 +8,10 @@ import type { Response } from './harness.js';
 import type { ExtensionV3,Conversation } from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 
-export async function executionHarness(root:string,response:Response=()=>textReply('内部任务已完成'),extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>,create=true,options:{timelineExecution?:boolean;personaActions?:boolean;executionActions?:boolean;compaction?:Memory.Config['compaction'];context?:Core.Config['context'];sourceTracking?:boolean;maintenance?:Memory.Config['maintenance'];extraActions?:string[];extraProducers?:string[];resources?:Conversation[];maxConcurrentRuns?:number;beforeActivate?:(ctx:Context)=>Promise<void>}={}){
+export async function executionHarness(root:string,response:Response=()=>textReply('内部任务已完成'),extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>,create=true,options:{timelineExecution?:boolean;personaActions?:boolean;executionActions?:boolean;compaction?:Memory.Config['compaction'];context?:Core.Config['context'];sourceTracking?:boolean;maintenance?:Memory.Config['maintenance'];extraActions?:string[];extraProducers?:string[];resources?:Conversation[];maxConcurrentRuns?:number;turnTimeoutMs?:number;beforeActivate?:(ctx:Context)=>Promise<void>}={}){
   const adapter=new ScriptedModel(response),host=await probeHost(root,adapter),{ctx}=host;
   try{
-    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:resolve(root,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:10000,...(options.context?{context:options.context}:{})});
+    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:resolve(root,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:options.turnTimeoutMs??10000,...(options.context?{context:options.context}:{})});
     await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:options.timelineExecution??false});
     await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:resolve(root,'memory'),lifecycleMode:'managed',sourceTracking:options.sourceTracking??false,...(options.compaction?{compaction:options.compaction}:{}),...(options.maintenance?{maintenance:options.maintenance}:{})});
     const extensionHandle=extension?ctx.dafeiyu.registerExtensionV3({...extension,protocolVersion:3,agentId:'dafeiyu'}):undefined;
