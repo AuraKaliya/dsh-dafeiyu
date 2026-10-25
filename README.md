@@ -16,6 +16,8 @@
 
 阶段7已提交[整体验收与发布包方案](docs/integrated-acceptance-plan.md)，完成7A及7B的本地离线工具：冻结样本、运行／费用账本、12类边界场景、6类连续性对照、批次恢复与证据导出，见[使用与检查记录](docs/integrated-7b6-offline-runner.md)。已用脚本后端做定向检查，未执行完整162项真实验收；真实模型／平台、持续运行和发布全量回归尚待7C—7F推进。
 
+7C的[真实模型执行提案](docs/integrated-7c-real-model-plan.md)及[162项完整顺序](docs/integrated-7c-execution-order.md)已整理，结合本机Flash／max配置和当前官方价格估算；模型、总预算与时间额度仍待确认，真实调用尚未开始。
+
 1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
 
 ## 开始使用
