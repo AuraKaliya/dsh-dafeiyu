@@ -73,9 +73,14 @@ function inputsVerified(session:Session,manifestSeq:number,m:FragmentManifest):b
     const expected:SourceDependency[][]=[];
     for(const input of group.inputs){
       const event=events[input.seq],text=eventText(event);
-      if(input.seq>=manifestSeq||text===null||digestSource(text)!==input.hash
-        ||(input.role==='user'?event?.type!=='user/message'||event.data.source.kind!=='user':event?.type!=='assistant/message'))return false;
       const record=records.find(r=>r.data.targetSeq===input.seq);
+      if(input.seq>=manifestSeq||text===null||digestSource(text)!==input.hash)return false;
+      if(input.role==='assistant'){if(event?.type!=='assistant/message')return false;}
+      else{if(event?.type!=='user/message')return false;const nativeScope=group.taskId!==null&&m.route===JSON.stringify(['dafeiyu-scope-v1','task',m.agentId,group.taskId]);
+        if(nativeScope){const source=z.object({kind:z.literal('dafeiyu-execution'),form:z.literal('notice'),taskId:z.uuid(),runId:z.uuid(),inputId:z.uuid()}).safeParse(event.data.source);
+          if(!source.success||source.data.taskId!==group.taskId||record?.data.traceId!==source.data.runId||!record.data.dependencies.some(d=>d.kind==='execution-input'&&d.runId===source.data.runId&&d.agentId===m.agentId&&d.route===m.route))return false;
+        }else if(event.data.source.kind!=='user')return false;
+      }
       if(record){
         if(record.data.agentId!==m.agentId||record.data.route!==m.route||record.data.owner!==m.owner||record.data.hash!==input.hash)return false;
         expected.push(record.data.dependencies);
