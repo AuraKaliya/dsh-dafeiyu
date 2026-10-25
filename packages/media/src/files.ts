@@ -63,7 +63,7 @@ export class MediaFiles {
     finally{await file.close().catch(()=>{});void iterator.return?.().catch(()=>{});try{await contained(this.root,temporary);await unlink(temporary);}catch(error){if(!(error instanceof Error&&'code'in error&&error.code==='ENOENT'))throw error;}}
   }
   async cleanWork(){await this.rootCurrent();for(const entry of await readdir(this.work,{withFileTypes:true})){
-    if(!/^(?:acquire-[a-f0-9-]{36}\.part|process-[a-zA-Z0-9]+)$/.test(entry.name))continue;
+    if(!/^(?:acquire-[a-f0-9-]{36}\.part|(?:process|job)-[a-zA-Z0-9]+)$/.test(entry.name))continue;
     const target=join(this.work,entry.name);await contained(this.root,target);if((await lstat(target)).isSymbolicLink())throw new Error('MEDIA_PATH_ESCAPE');await rm(target,{recursive:entry.isDirectory(),force:true});
   }}
 }

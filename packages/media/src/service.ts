@@ -15,10 +15,12 @@ import type { DecoderInput,DecodedImage } from './decoder.js';
 import { MediaRangeBroker } from './range-broker.js';
 import { ScopedImages } from './images.js';
 import { MediaAnalysis } from './analysis.js';
+import { AudioPipeline,audioConfigSchema } from './audio.js';
+import type { AudioWorker } from './audio.js';
 
 export const mediaConfigSchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100),dataDir:z.string().min(1),createStore:z.boolean().default(false),
   ffmpeg:z.string().min(1),ffprobe:z.string().min(1),maxBytes:z.number().int().min(1024).max(16*1024**3).default(1024**3),maxAssetBytes:z.number().int().min(1024).max(256*1024**2).default(64*1024**2),
-  timeoutMs:z.number().int().min(1000).max(300000).default(120000),vision:z.strictObject({provider:z.string().min(1),model:z.string().min(1),reasoningEffort:z.string().optional()}).optional()});
+  timeoutMs:z.number().int().min(1000).max(300000).default(120000),vision:z.strictObject({provider:z.string().min(1),model:z.string().min(1),reasoningEffort:z.string().optional()}).optional(),audio:audioConfigSchema.optional()});
 export type Config=z.input<typeof mediaConfigSchema>;
 export const MEDIA_ACTIONS=['dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_read','dafeiyu_media_select'] as const;
 const visionResult=z.strictObject({schemaVersion:z.literal(1),observations:z.array(z.strictObject({image:z.number().int().nonnegative().max(7),description:z.string().min(1).max(3000),visibleText:z.array(z.string().max(500)).max(12),uncertainties:z.array(z.string().max(300)).max(8)})).min(1).max(8),gaps:z.array(z.string().max(300)).max(8)});
@@ -36,6 +38,7 @@ export class MediaService extends Service implements MediaPort {
   readonly decoder:MediaDecoder;
   private readonly images:ScopedImages;
   private readonly analysis:MediaAnalysis;
+  private readonly audio:AudioPipeline|undefined;
   private readonly gate=new ServiceGate();
   private readonly controller=new AbortController();
   private readonly providers=new Map<string,Readonly<MediaSourceProvider>>();
@@ -43,12 +46,13 @@ export class MediaService extends Service implements MediaPort {
   private readonly unbind:()=>void;
   private tail:Promise<unknown>=Promise.resolve();
   private closing:Promise<void>|undefined;
-  constructor(ctx:Context,raw:Config){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
+  constructor(ctx:Context,raw:Config,testBackends?:{audioWorker?:AudioWorker}){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
     if(ctx.get('attachments'))throw new Error('MEDIA_ATTACHMENTS_CONFLICT');
     this.store=new MediaStore(join(this.config.dataDir,'media.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore);
     this.files=new MediaFiles(join(this.config.dataDir,'media'),this.store,this.config.maxBytes,this.config.maxAssetBytes);
     this.decoder=new MediaDecoder(new BoundedProcess(this.files.work),this.files.root,{ffmpeg:this.config.ffmpeg,ffprobe:this.config.ffprobe});
     this.images=new ScopedImages(ctx);this.analysis=new MediaAnalysis(ctx,this.images,join(this.config.dataDir,'media-analysis'));
+    this.audio=this.config.audio?new AudioPipeline(this.files.work,this.config.audio,testBackends?.audioWorker,this.config.timeoutMs):undefined;
     try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'media',version:'0.1.0',agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['media.processing.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
       resourceProofs:{current:proof=>this.ready()&&this.store.validateExposure(proof,source=>mediaHash(this.providers.get(source.ref.provider)?.describe(source.ref.key)??null)===mediaHash(source)&&ctx.dafeiyu.capabilityResourceCurrent(source.origin)),epoch:scope=>this.ready()?mediaHash([this.store.epoch(),[...this.providers.keys()],ctx.dafeiyu.capabilityResourceEpochWithout('media',scope)]):'closed'}});
       this.unbind=ctx.dafeiyu.bindMedia(this);
@@ -79,6 +83,7 @@ export class MediaService extends Service implements MediaPort {
   }
   read(context:ExecutionContextV3,owner:string,input:Input){if(owner!=='media')return Promise.reject(new Error('MEDIA_READ_ACTION_REQUIRED'));return this.serial(()=>this.withInput(context,owner,input,async p=>{
     if(input.mode==='inspect'){const metadata=await this.decoder.inspect(p.input,p.signal);p.access.guard();return {metadata,understood:false};}
+    if(input.mode==='audio')return this.readAudio(context,input,p);
     if(input.mode!=='image'&&input.mode!=='frames')throw new Error('MEDIA_MODE_NOT_CONFIGURED');if(!this.config.vision)throw new Error('MEDIA_VISION_NOT_CONFIGURED');
     const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);
     if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
@@ -102,11 +107,28 @@ export class MediaService extends Service implements MediaPort {
       }finally{lease.close();}
     }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}finally{for(const lease of leases)this.store.releaseLease(lease,'analysis');}
   }));}
+  private async readAudio(context:ExecutionContextV3,input:Input,p:Prepared){if(!this.audio)throw new Error('MEDIA_AUDIO_NOT_CONFIGURED');if(!input.interval)throw new Error('MEDIA_AUDIO_INTERVAL_REQUIRED');
+    const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
+    const jobId=randomUUID();this.store.beginJob(p.access,jobId,fingerprint);let lease:string|null=null;
+    try{const decoded=await this.decoder.audio(p.input,input.interval.startMs,input.interval.endMs,p.signal);
+      const asset=await this.files.ingest(p.access,'audio:'+mediaHash(fingerprint),p.source,{bytes:decoded.data.length,mime:decoded.mime,stream:(async function*(){yield decoded.data;})()},p.signal,{kind:'audio',processingHash:mediaHash(['pcm16-mono-16000-v1',input.interval]),...(p.parent?{parent:p.parent}:{})});
+      lease=this.store.lease(p.access,asset,'audio',Date.now()+this.config.timeoutMs+60000);const processed=await this.audio.read(decoded,p.signal,p.access.guard);
+      if(processed.asr.status!=='complete'&&processed.events.status!=='complete')throw new Error('MEDIA_AUDIO_UNPROCESSED');
+      const asr=processed.asr.status==='complete'?processed.asr.segments.map(s=>`[${s.startMs}–${s.endMs}ms] ${s.text}`).join('\n'):processed.asr.code;
+      const windows=processed.events.status==='complete'?processed.events.windows:[],descriptions:string[]=[];
+      for(const window of windows){const top=window.scores[0]!;if(descriptions.length>=24)break;descriptions.push(`[${window.startMs}–${window.endMs}ms] ${top.label}: ${top.score.toFixed(3)}`);}
+      const gaps=[...processed.gaps];if(windows.length>24)gaps.push('仅展示前24个声音窗口，完整处理覆盖另行记录');if(asr.length>4500)gaps.push('本次转写展示截断，需缩短区间继续读取');
+      const text=`音频模型结果（实际音轨，未用字幕；不是已核实事实）：\nASR转写：\n${Array.from(asr).slice(0,4500).join('')}\n声音事件（原始模型分数，不是概率）：\n${descriptions.join('\n')||('code'in processed.events?processed.events.code:'无声音标签')}\n覆盖：${decoded.startMs}–${decoded.endMs}ms\n缺口：${gaps.join('；')}`;
+      const coverage={acquiredBytes:p.broker?.coverage.transferredBytes??p.parent?.bytes??0,processed:[{kind:'audio' as const,unit:'milliseconds' as const,start:decoded.startMs,end:decoded.endMs}],exposed:true,gaps,completeness:'partial' as const};
+      const exposure=this.store.recordExposure(p.access,input.requestId,fingerprint,p.source,{assets:[asset],coverage,text,occurredAt:new Date().toISOString(),detail:z.json().parse(processed)});
+      const observation=this.observed(context,p.access,exposure);this.store.finishJob(p.access,jobId,{exposureId:exposure.id,technicalCompleteness:processed.technicalCompleteness},null);return observation;
+    }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}finally{if(lease)this.store.releaseLease(lease,'audio');}
+  }
   private observed(context:ExecutionContextV3,access:MediaAccess,exposure:MediaExposure){access.guard();const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'media',{requestId:exposure.id,proof:this.store.exposureProof(exposure),text:exposure.text,occurredAt:exposure.occurredAt,coverage:exposure.coverage.gaps,
     counts:{received:exposure.assets.length,processed:exposure.assets.length}});return {exposureId:exposure.id,text:exposure.text,coverage:exposure.coverage,assets:exposure.assets,observation};}
   select(context:ExecutionContextV3,raw:unknown){const input=selectSchema.parse(raw),proof=this.store.exposureOrigin(input.exposureId),{provider,description}=this.describe(proof.ref),access=this.access(context,'media',description,provider),exposure=this.store.exposure(access,input.exposureId);
     const {exposureId,...selection}=input;return this.ctx.dafeiyu.selectCapabilityObservation(context,'media',description.origin.scene,selection,exposure.text);}
-  private actions():ActionCapabilityV3[]{const make=(id:string,inputSchema:z.ZodType,write:boolean,execute:(input:unknown,c:ExecutionContextV3)=>unknown|Promise<unknown>):ActionCapabilityV3=>({id,version:'1',description:({[MEDIA_ACTIONS[0]]:'按需取得已登记媒体源的字节，不表示已经理解。',[MEDIA_ACTIONS[1]]:'检查当前作用域内媒体资产及覆盖。',[MEDIA_ACTIONS[2]]:'读取实际图片或视频指定帧，返回来源和明确未覆盖部分。',[MEDIA_ACTIONS[3]]:'对已经读到的媒体观察选择不保存、原文、片段或摘要。'} as Record<string,string>)[id]!,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(i,c)=>{
+  private actions():ActionCapabilityV3[]{const make=(id:string,inputSchema:z.ZodType,write:boolean,execute:(input:unknown,c:ExecutionContextV3)=>unknown|Promise<unknown>):ActionCapabilityV3=>({id,version:'1',description:({[MEDIA_ACTIONS[0]]:'按需取得已登记媒体源的字节，不表示已经理解。',[MEDIA_ACTIONS[1]]:'检查当前作用域内媒体资产及覆盖。',[MEDIA_ACTIONS[2]]:'读取实际图片、视频指定帧或音轨区间，返回来源和明确未覆盖部分。',[MEDIA_ACTIONS[3]]:'对已经读到的媒体观察选择不保存、原文、片段或摘要。'} as Record<string,string>)[id]!,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(i,c)=>{
       try{const data=z.json().parse(await execute(i,c)),observation=z.object({observation:z.object({source:z.object({id:z.string(),scopeKey:z.string(),version:z.number(),contentHash:z.string()})})}).safeParse(data);
         return {status:'succeeded',effects:write?'confirmed':'none',completeness:id===MEDIA_ACTIONS[2]?'partial':'complete',data,sources:observation.success?[observation.data.observation.source]:[],receipts:[]};}
       catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:failureCode(error)};}}});

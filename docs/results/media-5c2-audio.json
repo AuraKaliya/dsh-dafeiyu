@@ -1,0 +1,19 @@
+{
+  "stage": "media-5C-2",
+  "date": "2026-10-25",
+  "baseline": "4ffe462",
+  "result": "targeted-checks-passed",
+  "checks": [
+    {"runId": "562c73ca-2907-49f9-9ae7-11696043e41a", "passed": 12, "failed": 0, "scope": ["media-audio", "media-files"]},
+    {"runId": "ff8e4187-4fbf-424c-bede-8e555a5a559b", "passed": 12, "failed": 0, "scope": ["media-audio-service", "media-audio", "media-vision"]}
+  ],
+  "countsOverlap": true,
+  "actualLocalExecution": ["DSH", "FFmpeg", "bounded Whisper script with fake binding", "Python PCM/window logic with injected predictions"],
+  "pythonChecksWithinTargetedTest": 3,
+  "tts": "scripted PCM backend; delivery integration reserved for 5E",
+  "realModel": false,
+  "realPlatform": false,
+  "fullRegression": false,
+  "serverAccess": false,
+  "cleanupBlocked": false
+}
