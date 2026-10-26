@@ -152,6 +152,10 @@ ActionOutcome在未派发拒绝时为 failed/effects:none；已派发后按真�
 
 结果进入当前Task合法执行来源，继承原始输入/任务/authority依赖；final和派生摘要不新增独立根。新人格状态仍只能走 R1—R5 的试行、采用评审与发布门槛，executor无写人格表的旁路。
 
+目标交付接线补充：执行器页面使用独立 server-executor scene，不伪装成 QQ 原生观察，不将 final 自述标成 public。资源提供者新增可选 `targetView(proof,view,target,scope)` 程序接口，返回归因种类与授权 stamp；Core 校验当前 proof 和返回结构，Memory 仍要求实际 Task 已获该资源范围、来源当前有效且未撤回/抑制。许可 stamp 计入目标材料 sourceStamp，变化后旧交付材料失效。现有 publicView/same-scene 规则保持，opaque 的原 Task 模型正文仍不能因此混入。
+
+server-executor 的目标许可只允许固定非敏感进程/工具元信息回到原真实主人消息的目标；final 正文仅在原授权确为配置中主人的 QQ 私聊、发送目标也恰好为同一账号/主人私聊时，作为 inference 进入新人格整理。群任务不能借此公开正文，也不自动改发私聊；自主 wake 没有对外收件人。权限来自冻结的程序配置、原消息与 Task/receipt/page 的绑定，模型不能指定或扩大目标。普通凭据脱敏和独立忠实性检查继续生效；这不是对任意管理员脚本的 OS 数据隔离承诺。
+
 QQ结果一律走新 NativeTaskDelivery：原任务完成/等待状态→memory目标范围核验→目标人格DSH会话整理→独立忠实性检查→分段/附件发送及回执。不得调用旧 ServerTasks.deliver()、旧bridge.dispatch()或直接上传文件绕过该链；当前自主wake没有授权目标时保留内部结果，不顺带发送QQ。
 
 独立guard继续保留。CLI更新工具只调用 prepare/submit/status/history，编辑隔离候选，不能直接替换在线代码。bootstrap纳入guard空闲/健康检查；候选检查增加新TS受管验证入口，不能只靠旧validator扫描.test.mjs。守护维护在确认无活动更新后走独立维护流程，正常候选不覆盖guard/maintenance本体。
