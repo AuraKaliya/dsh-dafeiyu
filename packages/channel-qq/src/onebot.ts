@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GroupListSchema, QqAccountIdSchema } from './groups.js';
+import { parseSnowLumaGroups, SNOWLUMA_GROUP_LIST_REQUEST } from './snowluma-groups.js';
 
 /** No remote OneBot endpoints or credential-bearing URLs in this local development connector. */
 export function loopbackURL(value: string, protocol: 'http:' | 'ws:'): string {
@@ -10,9 +10,11 @@ export function loopbackURL(value: string, protocol: 'http:' | 'ws:'): string {
 }
 export const platformId = z.union([z.string().regex(/^-?\d+$/), z.number().int().safe()]).transform(String);
 const responseSchema = z.object({ status: z.string(), retcode: z.number(), data: z.unknown() });
+type OneBotAction = 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'send_private_msg' | 'send_group_msg';
 export class OneBot {
   constructor(private readonly base: string, private readonly token: string, readonly botId: string, private readonly timeoutMs: number) {}
-  async call(action: 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'send_private_msg' | 'send_group_msg', params: object, signal?: AbortSignal): Promise<unknown> {
+  call(action: OneBotAction, params: object, signal?: AbortSignal): Promise<unknown> { return this.request(action, params, signal); }
+  private async request(action: OneBotAction | 'send_packet', params: object, signal?: AbortSignal): Promise<unknown> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const response = await fetch(new URL(action, this.base), { method: 'POST', redirect: 'error',
       // Local processing can outlast an idle socket's server timeout. Avoid reusing that socket;
@@ -36,9 +38,11 @@ export class OneBot {
   }
   async groups(signal: AbortSignal) {
     await this.verify(signal);
-    const response = await this.call('get_group_list', {}, signal);
-    const list = z.array(z.object({ group_id: platformId.pipe(QqAccountIdSchema), group_name: z.string().max(200) })).max(2000).parse(response);
+    let response: unknown;
+    try { response = await this.request('send_packet', SNOWLUMA_GROUP_LIST_REQUEST, signal); }
+    catch (error) { signal.throwIfAborted(); throw new Error('GROUP_SETTINGS_UNAVAILABLE'); }
+    const list = parseSnowLumaGroups(response);
     await this.verify(signal);
-    return GroupListSchema.parse(list.map(group => ({ id: group.group_id, name: group.group_name })));
+    return list;
   }
 }

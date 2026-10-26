@@ -15,7 +15,7 @@ const readResult=z.object({exposureId:z.string(),text:z.string(),observation:z.o
 function last<T>(request:GenerateOptions,schema:z.ZodType<T>):T {const values=outcomes(request).flatMap(outcome=>{const result=schema.safeParse(outcome.data);return result.success?[result.data]:[];});assert.ok(values.length,JSON.stringify(outcomes(request)));return values.at(-1)!;}
 type H=Awaited<ReturnType<typeof qqCapabilityFixture>>;
 async function imageMessage(h:H,id:string,{target=scene,trigger=false,sender=owner}:{target?:Conversation;trigger?:boolean;sender?:string}={}){
-  const count=h.ctx.dafeiyuQQ.getStatus().counters.received;h.emit({post_type:'message',self_id:Number(bot),message_id:Number(id),message_type:target.kind,user_id:Number(sender),...(target.kind==='group'?{group_id:Number(target.id)}:{}),time:1792886400,
+  const count=h.ctx.dafeiyuQQ.getStatus().counters.received;h.emit({post_type:'message',self_id:Number(bot),message_id:Number(id),message_type:target.kind,user_id:Number(sender),...(target.kind==='group'?{group_id:Number(target.id)}:{}),time:Math.ceil(Date.now()/1000),
     message:[...(trigger&&target.kind==='group'?[{type:'at',data:{qq:bot}}]:[]),{type:'image',data:{file:'PRIVATE_PLATFORM_HANDLE_SENTINEL',url:'https://invalid.example/PRIVATE_URL_SENTINEL',name:'fixture.png'}}],sender:{nickname:'虚构参与者'}});
   await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received>count);await h.core.whenIdle();
 }

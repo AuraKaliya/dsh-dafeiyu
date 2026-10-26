@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-27",
+  "feature": "QQ group assistant unified filtering through original SnowLuma send_packet",
+  "scope": {
+    "local": true,
+    "realModel": false,
+    "realPlatform": false,
+    "serverAccess": false,
+    "deployed": false,
+    "realQqMessagesSent": 0
+  },
+  "coverage": {
+    "relatedFiles": 20,
+    "distinctFunctionalCases": 195,
+    "latestPerFilePassed": true,
+    "parallelBatchPassed": false,
+    "concurrencyStabilityAccepted": false,
+    "parallelTimeoutRun": "2b80a010-e1e5-4f11-8378-c294c3703eb8",
+    "isolatedVoicePassedRun": "4a6cab3a-700d-4c7a-bd96-6ead7195102c",
+    "note": "195 is unique case coverage, not the sum of runs. The last parallel batch passed 194/195; the complete voice file then passed 13/13 in isolation without changing timeouts. No concurrent stability acceptance is claimed."
+  },
+  "qqSchemaVersion": 6,
+  "snowLuma": {
+    "modified": false,
+    "sha256": "E23ED3D4AA7E01E7F45400A7FFE6B0C4B67BB6D011F776F2FD04B959510435E6"
+  },
+  "protectedMemoryDocument": {
+    "modified": false,
+    "sha256": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+  },
+  "runs": [
+    {
+      "runId": "124b3f9b-298d-4d9b-b27a-c7dab0d752cb",
+      "reason": null,
+      "counts": {
+        "tests": 50,
+        "failed": 0,
+        "passed": 50,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 50,
+        "suites": 0
+      },
+      "failures": [],
+      "durationMs": 4403.3516,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false,
+      "cleanupBlocked": []
+    },
+    {
+      "runId": "bb54673e-0bfb-4089-a855-06d8651dd296",
+      "reason": "TEST_STAGE_FAILED",
+      "counts": {
+        "tests": 135,
+        "failed": 2,
+        "passed": 133,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 135,
+        "suites": 0
+      },
+      "failures": [
+        {
+          "name": "build-tests/qq-delivery.test.js",
+          "file": "qq-delivery.test.js"
+        },
+        {
+          "name": "non-owner QQ and a Host CLI task cannot impersonate a genuine owner execution source",
+          "file": "host-executor-runtime.test.js"
+        }
+      ],
+      "durationMs": 160822.1651,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false,
+      "cleanupBlocked": []
+    },
+    {
+      "runId": "7f094c49-893e-42d0-8a0c-dde4138d902c",
+      "reason": "TEST_STAGE_FAILED",
+      "counts": {
+        "tests": 193,
+        "failed": 1,
+        "passed": 192,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 193,
+        "suites": 0
+      },
+      "failures": [
+        {
+          "name": "turning voice directives off after a full local restart blocks voice sources without invalidating plain-text tasks",
+          "file": "qq-voice-task.test.js"
+        }
+      ],
+      "durationMs": 120143.6961,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false,
+      "cleanupBlocked": []
+    },
+    {
+      "runId": "2b80a010-e1e5-4f11-8378-c294c3703eb8",
+      "reason": "TEST_STAGE_FAILED",
+      "counts": {
+        "tests": 195,
+        "failed": 1,
+        "passed": 194,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 195,
+        "suites": 0
+      },
+      "failures": [
+        {
+          "name": "voice objection resolution preserves the parent source and binds the new control recording",
+          "file": "qq-voice-task.test.js"
+        }
+      ],
+      "durationMs": 134967.4531,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false,
+      "cleanupBlocked": []
+    },
+    {
+      "runId": "4a6cab3a-700d-4c7a-bd96-6ead7195102c",
+      "reason": null,
+      "counts": {
+        "tests": 13,
+        "failed": 0,
+        "passed": 13,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 13,
+        "suites": 0
+      },
+      "failures": [],
+      "durationMs": 65936.0195,
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false,
+      "cleanupBlocked": []
+    }
+  ]
+}

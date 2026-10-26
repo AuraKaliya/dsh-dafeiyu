@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { z } from 'zod';
 import { conversationKey } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,privateScene,bot,group,otherGroup,lastPage,outcomes,until } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
 
 for(const mode of ['none','original','fragment','summary'] as const)test(`QQ actual page ${mode} selection uses current exposure and retains one decision`,async t=>{
-  const h=await qqCapabilityFixture();t.after(h.close);await h.message('PASSIVE_QQ_SENTINEL：观察到的虚构内容',{media:true});
+  const h=await qqCapabilityFixture();t.after(h.close);const passive=await h.message('PASSIVE_QQ_SENTINEL：观察到的虚构内容',{media:true});
   assert.equal(h.adapter.requests.length,0);assert.equal(h.rows().memories.length,0);assert.equal(h.core.journal.list().length,0);
   let step=0,pageText='';h.setResponse(request=>{switch(++step){case 1:return call('qq_browse',{requestId:'read'});
     case 2:case 3:{const page=lastPage(request);pageText=JSON.stringify(page.page);return call('qq_observe_select',{requestId:'choice',snapshotId:page.snapshotId,mode,reason:'虚构选择',...(mode==='fragment'?{start:0,end:16}:mode==='summary'?{text:'推断：虚构讨论需要进一步核实。'}:{})});}
@@ -13,7 +14,7 @@ for(const mode of ['none','original','fragment','summary'] as const)test(`QQ act
   await h.message('请查看本会话',{trigger:true});const rows=h.rows();assert.equal(rows.decisions.length,1);assert.equal(rows.memories.length,mode==='none'?0:1);
   assert.match(JSON.stringify(outcomes(h.adapter.requests.at(-1)!)),/"duplicate":true/);assert.ok(!JSON.stringify(rows.observations).includes('PASSIVE_QQ_SENTINEL'));
   const page=lastPage(h.adapter.requests.at(-1)!);assert.ok(!JSON.stringify(page).includes('UNBOUND_CACHE_SENTINEL'));
-  assert.equal(page.page.messages.find(m=>m.text.includes('PASSIVE'))?.occurredAt,'2026-10-25T00:00:00.000Z');assert.deepEqual(page.page.messages.find(m=>m.text.includes('PASSIVE'))?.unsupported,['image']);
+  assert.equal(page.page.messages.find(m=>m.text.includes('PASSIVE'))?.occurredAt,new Date(passive.event.time*1000).toISOString());assert.deepEqual(page.page.messages.find(m=>m.text.includes('PASSIVE'))?.unsupported,['image']);
   if(mode!=='none'){const body=JSON.parse(String(rows.memories[0]!.body)),boundary=JSON.parse(String(rows.memories[0]!.boundary));
     assert.equal(body.claimType,mode==='summary'?'inference':'reported_claim');assert.equal(boundary.externalExpression.kind,'conversation');
     assert.equal(boundary.sourceScene.conversation.id,group);if(mode==='original')assert.match(body.content,/PASSIVE_QQ_SENTINEL/);if(mode==='fragment')assert.equal(body.content,Array.from(pageText).slice(0,16).join(''));}
@@ -25,6 +26,16 @@ test('QQ lists only current conversation or native resource whitelist, never all
     const result=outcomes(h.adapter.requests.at(-1)!).at(-1)!;assert.equal(result.status,'succeeded');assert.deepEqual((result.data as {resources:{scene:unknown}[]}).resources.map(r=>r.scene),[target]);}
   let step=0;h.setResponse(()=>++step===1?call('qq_groups',{}):textReply('完成'));const run=await h.native('list');assert.equal(run.status.operations[0]?.status,'succeeded');
   assert.deepEqual((outcomes(h.adapter.requests.at(-1)!).at(-1)!.data as {resources:{scene:unknown}[]}).resources.map(r=>r.scene),[scene]);
+});
+
+test('the same assistant filter removes browse targets and stops observation of their retained cache',async t=>{
+  const h=await qqCapabilityFixture();t.after(h.close);await h.message('ASSISTANT_HIDDEN_CACHE_SENTINEL');
+  h.platform.groups[0]!.msgMask=2;await h.ctx.dafeiyuQQ.refreshGroups();let step=0;
+  h.setResponse(()=>++step===1?call('qq_groups',{}):step===2?call('qq_browse',{requestId:'ignored',target:scene}):textReply('按实际拒绝结果结束'));
+  await h.native('assistant-scope');const seen=outcomes(h.adapter.requests.at(-1)!);
+  assert.deepEqual(z.object({resources:z.array(z.unknown())}).parse(seen.find(value=>value.status==='succeeded')?.data).resources,[]);
+  assert.ok(seen.some(value=>value.status==='failed'&&value.errorCode==='TARGET_NOT_ALLOWED'));
+  assert.ok(!JSON.stringify(h.adapter.requests).includes('ASSISTANT_HIDDEN_CACHE_SENTINEL'));assert.equal(h.rows().memories.length,0);
 });
 
 test('native QQ browsing makes task-only memory without fake inbound messages or QQ sends',async t=>{

@@ -91,6 +91,8 @@ export interface ChannelCapability {
   /** Opt-in for persistent reply source rebinding and checks before every transport part. */
   readonly deliveryValidation?:'per-segment';
   readonly mediaDelivery?:'parts-v1';
+  /** Transport-owned access lease for queued/running work; revocation cancels the turn. */
+  processingSignal?(message: InboundMessage): AbortSignal;
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
   deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
   deliverMedia?(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(mediaPosition:number)=>Promise<Uint8Array>):Promise<DeliveryResult>;

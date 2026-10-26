@@ -209,6 +209,20 @@ test('class-backed channel methods retain their receiver during registration', a
   assert.equal(channel.count, 1); assert.equal(h.core.journal.get(receipt.id).state, 'delivered');
 });
 
+for(const protocol of [2,3] as const)test(`channel v${protocol} processing lease preserves its receiver and cancels a running turn`,{timeout:15000},async t=>{
+  let entered!:()=>void,release!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
+  const h=await harness(await directory(),async()=>{entered();await gate;return textReply('不得交付');});t.after(()=>{release();return h.close();});
+  class Channel {
+    readonly channel='lease-channel';readonly account='fixture';readonly controller=new AbortController();checks=0;sends=0;
+    processingSignal(){this.checks++;return this.controller.signal;}
+    async deliver(){this.sends++;return {status:'sent' as const,receiptId:'fixture-receipt'};}
+  }
+  const channel=new Channel(),base={id:'lease-extension',version:'1',agentId:'dafeiyu',channels:[channel]};
+  const handle=protocol===2?h.core.registerExtension({...base,apiVersion:2}):h.core.registerExtensionV3({...base,protocolVersion:3});
+  assert.ok(handle.ingest);const receipt=handle.ingest({id:'lease',occurredAt:new Date().toISOString(),conversation:{channel:channel.channel,account:channel.account,kind:'local',id:'test'},sender:{id:'user',displayName:'fixture'},text:'开始'});
+  await started;channel.controller.abort();release();await h.core.whenIdle();assert.equal(h.core.journal.get(receipt.id).state,'failed');assert.ok(channel.checks>0);assert.equal(channel.sends,0);
+});
+
 test('configured reasoning effort reaches the DSH provider request', async t => {
   const h = await harness(await directory(), undefined, undefined, 5000, 'max');t.after(h.close);
   h.simulator.send('a','hello',{id:'1'});await h.core.whenIdle();

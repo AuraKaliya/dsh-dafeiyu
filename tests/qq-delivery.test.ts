@@ -32,17 +32,19 @@ test('a definitely unsent reply revalidates persisted evidence on explicit retry
   assert.equal(h.core.journal.get(item.id).state,'delivered');assert.equal(h.adapter.requests.length,calls);assert.equal(h.platform.sent.map(sentText).join(''),text);
 });
 
-test('same QQ reply is sent by one concurrent caller and conflicting content is never merged',async t=>{
-  const h=await qqCapabilityFixture();t.after(h.close);const seed=await h.message('被动来源');const reply:Reply={id:'concurrent',conversation:scene,sourceMessageId:seed.id,text};
+test('same QQ reply is sent by one concurrent caller and conflicting content is never merged',{timeout:15000},async t=>{
+  const h=await qqCapabilityFixture();const seed=await h.message('被动来源');const reply:Reply={id:'concurrent',conversation:scene,sourceMessageId:seed.id,text};
   let release!:()=>void,entered!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});h.platform.afterSend=async count=>{if(count===1){entered();await gate;}};
-  const a=h.ctx.dafeiyuQQ.deliver(reply,signal()),b=h.ctx.dafeiyuQQ.deliver(reply,signal());await ready;
+  t.after(()=>{release();return h.close();});
+  const a=h.ctx.dafeiyuQQ.deliver(reply,signal()),b=h.ctx.dafeiyuQQ.deliver(reply,signal());await Promise.race([ready,a.then(()=>{throw new Error('Expected first segment before delivery settles');})]);
   const conflict=await h.ctx.dafeiyuQQ.deliver({...reply,text:'不同正文'},signal());assert.equal(conflict.status,'unknown');release();assert.deepEqual(await a,await b);
   assert.equal(h.platform.sent.map(sentText).join(''),text);assert.equal(h.adapter.requests.length,0);
 });
 
-test('caller-side mutation cannot change a persisted in-flight QQ target, quote anchor or segment body',async t=>{
-  const h=await qqCapabilityFixture();t.after(h.close);const source=await h.message('真实夹具来源'),mutable={id:'snapshot',conversation:{...scene},sourceMessageId:source.id,text};
+test('caller-side mutation cannot change a persisted in-flight QQ target, quote anchor or segment body',{timeout:15000},async t=>{
+  const h=await qqCapabilityFixture();const source=await h.message('真实夹具来源'),mutable={id:'snapshot',conversation:{...scene},sourceMessageId:source.id,text};
   let release!:()=>void,entered!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<void>(resolve=>{entered=resolve;});h.platform.afterSend=async count=>{if(count===1){entered();await gate;}};
+  t.after(()=>{release();return h.close();});
   const pending=h.ctx.dafeiyuQQ.deliver(mutable,signal());await ready;mutable.conversation.id='22334455';mutable.sourceMessageId='999';mutable.text='不同的正文';release();assert.equal((await pending).status,'sent');
   assert.ok(h.platform.sent.every(sent=>sent.group_id===Number(scene.id)));assert.equal(h.platform.sent.map(sentText).join(''),text);
 });

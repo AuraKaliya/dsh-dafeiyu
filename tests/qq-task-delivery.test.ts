@@ -29,6 +29,32 @@ test('completed QQ tasks automatically render in a clean persisted DSH persona s
   const reader=await h.ctx.sessionPersistence.open(SessionId(String(target.sessionId)),'read');try{const events=(await reader.read()).events;assert.ok(events.some(e=>e.type==='assistant/message'));assert.ok(events.some(e=>e.type==='turn/end'));}finally{await reader.close();}
 });
 
+test('assistant revocation cancels a native task started by that group and prevents automatic result delivery',{timeout:15000},async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});let entered!:()=>void,release!:()=>void,chat=0;
+  const started=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
+  t.after(()=>{release();return h.close();});
+  h.setResponse(async request=>{
+    if(native(request.sessionId)){entered();await gate;return textReply('IGNORED_NATIVE_RESULT_SENTINEL');}
+    if(render(request.sessionId))return textReply('不应生成的群回复');if(verify(request.sessionId))return textReply('{"faithful":true,"issues":[]}');
+    return ++chat===1?call('qq_task_submit',{requestId:'assistant-native'}):textReply('已受理');
+  });
+  const pending=h.message('任务：完成一项虚构工作',{trigger:true});await started;await until(()=>h.core.journal.list()[0]?.state==='delivered');const before=h.platform.sent.length;
+  h.platform.groups[0]!.msgMask=2;await h.ctx.dafeiyuQQ.refreshGroups();release();await pending;await h.core.whenIdle();
+  const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});
+  try{assert.ok(['failed','interrupted'].includes(String(db.prepare('SELECT state FROM runs WHERE id=?').get(runId(h))?.state)));}finally{db.close();}
+  assert.equal(h.platform.sent.length,before);assert.equal(h.adapter.requests.filter(request=>render(request.sessionId)).length,0);
+});
+
+test('assistant revocation also cancels a task result already being formatted for that group',{timeout:15000},async t=>{
+  const h=await qqCapabilityFixture({tasks:true});script(h);await h.message('任务：准备一份虚构结果',{trigger:true});
+  let entered!:()=>void,release!:()=>void,formattingSignal:AbortSignal|undefined;
+  const started=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
+  t.after(()=>{release();return h.close();});const before=h.platform.sent.length;
+  h.setResponse(async request=>{if(render(request.sessionId)){formattingSignal=request.signal;entered();await gate;return textReply('不应交付');}return textReply('{"faithful":true,"issues":[]}');});
+  const pending=h.core.deliverMessageTaskResult(runId(h));await started;h.platform.groups[0]!.msgMask=2;await h.ctx.dafeiyuQQ.refreshGroups();
+  assert.equal(formattingSignal?.aborted,true);release();const status=await pending;assert.ok(status&&status.state!=='sent');assert.equal(h.platform.sent.length,before);
+});
+
 test('mixed private evidence and inherited global prompt content never enter the target rendering request',async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);await h.message('TARGET_PUBLIC_SENTINEL');await h.message('FOREIGN_PRIVATE_SENTINEL',{target:{...scene,id:otherGroup}});script(h,{mixed:true});await h.message('任务：整理当前可公开资料',{trigger:true});
   const context=h.ctx.systemPrompt.context({name:'foreign-global',order:50,text:'GLOBAL_PRIVATE_CONTEXT_SENTINEL'}),section=h.ctx.systemPrompt.section({name:'foreign-global-section',order:50,text:'GLOBAL_PRIVATE_SECTION_SENTINEL'});t.after(context);t.after(section);

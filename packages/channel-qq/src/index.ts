@@ -2,7 +2,7 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { API_VERSION, LifecycleModeSchema, conversationKey,TaskResultAnchorSchema } from '@dafeiyu/contracts';
-import type { Conversation, DeliveryResult, ExtensionHandle, Reply,TaskResultAnchor,ReplyMediaManifest } from '@dafeiyu/contracts';
+import type { Conversation, DeliveryResult, ExtensionHandle, Reply,TaskResultAnchor,ReplyMediaManifest,InboundMessage } from '@dafeiyu/contracts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import WebSocket from 'ws';
@@ -24,6 +24,7 @@ export { QqStore } from './store.js';
 export { QqMediaDeliveryLedger } from './media-delivery.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
+export type { GroupInfo, GroupInput, GroupSnapshot } from './groups.js';
 export { naturallyAddressed } from './trigger.js';
 export { QqBrowseInputSchema, QqCacheProofSchema } from './cache.js';
 export type { QqCacheProof } from './cache.js';
@@ -122,6 +123,7 @@ export class QqChannel extends Service {
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
       this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
         channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',
+          processingSignal: message => this.processingSignal(message),
           description: this.config.media.enabled?'QQ消息包含文字及受控媒体引用。qq_media_list列出媒体，dafeiyu_media_read按需读取；元信息不等于理解。'+(this.config.media.sendEnabled?'dafeiyu_media_reply准备回复附件，最终由核心核验后逐部件交付，准备回执不表示已经发送。':'媒体输出尚未开启，请用文字回复。'):'当前QQ接入只提供文字及同会话引用。图片、语音、视频和文件内容尚未接入；即使模型本身支持看图，也不能通过本渠道读取图像。请事先说明该限制，不要承诺收到图片后能查看。',
           ...(this.config.media.enabled&&this.config.media.sendEnabled?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority)=>this.deliverTaskResult(reply,anchor,signal,authority) }] });
@@ -143,6 +145,12 @@ export class QqChannel extends Service {
   private cacheRoute(scene:Conversation):string {return this.config.capabilities.enabled?qqResourceRoute(scene):JSON.stringify([scene.kind,scene.id]);}
   private allowed(scene:Conversation):boolean {return !this.stopped&&this.state!=='rejected'&&scene.channel==='qq'&&scene.account===this.config.botId&&
     (scene.kind==='private'?scene.id===this.config.ownerId:scene.kind==='group'&&this.groups.effective().includes(scene.id));}
+  private processingSignal(message: InboundMessage): AbortSignal {
+    if (!this.allowed(message.conversation)) throw new Error('GROUP_ACCESS_REVOKED');
+    if (message.conversation.kind === 'group' && this.store.cache.groupAccess(this.cacheRoute(message.conversation), message.id)?.generation !== this.groups.generation(message.conversation.id)) throw new Error('GROUP_ACCESS_REVOKED');
+    return message.conversation.kind === 'group'
+      ? this.groups.processingSignal(message.conversation.id, Date.parse(message.occurredAt)) : this.controller.signal;
+  }
   /** Program-side refresh; no model invocation, privilege expansion or history replay. */
   refreshGroups(): Promise<void> { return this.groups.refresh(); }
   async start(): Promise<void> {
@@ -226,7 +234,7 @@ export class QqChannel extends Service {
     const message = decoded.data; this.counters.received++;
     if (message.self_id !== this.config.botId || message.user_id === this.config.botId) { this.counters.ignored++; return; }
     const allowed = message.message_type === 'private' ? message.user_id === this.config.ownerId
-      : message.group_id !== undefined && this.groups.effective().includes(message.group_id);
+      : message.group_id !== undefined && this.groups.accepts(message.group_id, message.time * 1000);
     if (!allowed) { this.counters.ignored++; return; }
     const conversation: Conversation = { channel: 'qq', account: this.config.botId, kind: message.message_type, id: message.group_id ?? message.user_id };
     // Private messages must never take a supplied group_id as their route.
@@ -240,7 +248,7 @@ export class QqChannel extends Service {
     const triggered = message.message_type === 'private' || mentioned || quote?.sender === this.config.botId || naturallyAddressed(plain, this.config.naturalNames);
     const media=this.media?.remember(conversation,message.message_id,message.user_id,message,message.message);
     const unsupported = [...new Set(message.message.filter((s,index) => !['text','at','reply'].includes(s.type)&&!media?.positions.has(index)).map(s => s.type))];
-    const retained=this.store.remember(route, message.message_id, message.user_id, plain || '[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,...(media?.attachments.length?{media:media.attachments}:{})});
+    const retained=this.store.remember(route, message.message_id, message.user_id, plain || '[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,...(media?.attachments.length?{media:media.attachments}:{}),...(conversation.kind==='group'?{groupGeneration:this.groups.generation(conversation.id)}:{})});
     if(!retained||this.store.handled(route,message.message_id)||this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},message.message_id)){
       this.store.acknowledge(route,message.message_id);this.counters.ignored++;return;
     }
@@ -291,6 +299,13 @@ export class QqChannel extends Service {
     const route = this.cacheRoute(conversation);
     // A pending legacy reply already has an authoritative core inbound. Use its old cache only as a quote ID, never as new browse text.
     const bound=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},reply.sourceMessageId);
+    if (conversation.kind === 'group') {
+      const access = this.store.cache.groupAccess(route, reply.sourceMessageId);
+      try {
+        if (!access || access.generation !== this.groups.generation(conversation.id)) throw new Error('SOURCE_STALE');
+        this.groups.processingSignal(conversation.id, Date.parse(access.occurredAt)).throwIfAborted();
+      } catch { throw new Error('SOURCE_STALE'); }
+    }
     if(reply.taskResult){if(!bound||bound.id!==reply.taskResult.inboundId||conversationKey(this.config.agentId,reply.taskResult.target)!==conversationKey(this.config.agentId,conversation)||Date.parse(reply.taskResult.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');return;}
     const source = this.store.find(route, reply.sourceMessageId)??(bound&&!this.store.cache.known(route,reply.sourceMessageId)?this.store.find(JSON.stringify([conversation.kind,conversation.id]),reply.sourceMessageId):null);
     if (!source) throw new Error('SOURCE_MESSAGE_NOT_FOUND');

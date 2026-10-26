@@ -49,6 +49,7 @@ Node 内置 SQLite 在本次 Node 版本中会输出 ExperimentalWarning；当�
 - [本地统一入口使用说明](docs/host-usage.md)：配置模板、命令、诊断、迁移与数据保护。
 - [1G样本留存与验收延期](docs/phase1g-deferred-samples.md)：162次待执行清单、判定标准、尚未批准的预算和后续统一验收要求。
 - [阶段2：QQ文字能力与流程整合方案](docs/qq-capabilities-plan.md)：2A—2F步骤、依赖、触发／群同步、浏览记忆、任务交付与迁移；真实平台验收延期。
+- [QQ群助手统一过滤](docs/checks/qq-group-assistant-implementation-20261027.md)：原版SnowLuma固定只读群列表、统一过滤、取消与恢复边界、QQ库v6，以及本机检查和并行超时的真实记录。
 - [2C分步实施方案](docs/qq-phase2c-plan.md)、[缓存检查](docs/qq-phase2c1-cache.md)、[通用观察接口检查](docs/qq-phase2c2-observations.md)、[QQ与Host联调检查](docs/qq-phase2c3-integration.md)。
 - [2D分段方案](docs/qq-phase2d-plan.md)、[2E任务方案](docs/qq-phase2e-plan.md)、[2F完整流程与检查点对应](docs/qq-phase2f-integration.md)。
 - [QQ 2A存储基础检查](docs/qq-phase2a-storage.md)：QQ库显式升级、Host备份迁移和旧数据保护，534项本地回归通过。

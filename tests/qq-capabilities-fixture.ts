@@ -21,6 +21,8 @@ import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { harness, textReply } from './harness.js';
 import type { Response } from './harness.js';
 import { testTempDir } from './test-temp.js';
+import { groupPacket, assertGroupQuery } from './qq-group-packet-fixture.js';
+import type { GroupPacketFixture } from './qq-group-packet-fixture.js';
 
 export const bot='12345678', owner='87654321', group='11223344', otherGroup='22334455';
 export const scene:Conversation={channel:'qq',account:bot,kind:'group',id:group};
@@ -35,7 +37,7 @@ export function lastPage(request:GenerateOptions){const pages=outcomes(request).
 export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extraConversationActions=[],extraTaskResources=[],explorationResources,beforeActivate,deliverResults=false,existingRoot,media=false,audio=false,voiceDirectives=false,mediaSend=false,tts=false,turnTimeoutMs}:{tasks?:boolean;extraTaskActions?:string[];extraConversationActions?:string[];extraTaskResources?:Conversation[];explorationResources?:Conversation[];beforeActivate?:(ctx:Context,root:string)=>Promise<void>;deliverResults?:boolean;existingRoot?:string;media?:boolean;audio?:boolean;voiceDirectives?:boolean;mediaSend?:boolean;tts?:boolean;turnTimeoutMs?:number}={}){
   const scratch=testTempDir();if(existingRoot){const path=relative(resolve(process.env.DAFEIYU_TEST_RUN!),resolve(existingRoot));if(path.startsWith('..')||/^[A-Za-z]:/.test(path))throw new Error('FIXTURE_ROOT_OUTSIDE_MANAGED_RUN');}
   const root=existingRoot??await mkdtemp(join(scratch,'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
-  const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}],identity:bot,loseAt:0,
+  const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}] as GroupPacketFixture[],identity:bot,loseAt:0,
     mediaFiles:new Map<string,string>(),mediaCalls:[] as {action:string;params:unknown}[],visionReads:0,
     afterVisionRead:async():Promise<void>=>{},
     transcript:'请整理这段虚构讨论',speechDetected:true,
@@ -46,6 +48,7 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
     if(req.url==='/get_login_info'){await platform.beforeVerify();data={user_id:Number(platform.identity)};}
     else if(req.url==='/get_status')data={online:true};
     else if(req.url==='/get_group_list')data=platform.groups;
+    else if(req.url==='/send_packet'){assertGroupQuery(raw);data=groupPacket(platform.groups);}
     else if(['/get_image','/get_record','/get_file'].includes(req.url??'')){const params=z.object({file:z.string().optional(),file_id:z.string().optional()}).parse(JSON.parse(raw));platform.mediaCalls.push({action:req.url!,params:JSON.parse(raw)});const file=platform.mediaFiles.get(params.file??params.file_id??'');if(!file){res.writeHead(404).end();return;}data={file};}
     else if(req.url==='/send_private_msg'||req.url==='/send_group_msg'){platform.sent.push(z.record(z.string(),z.unknown()).parse(JSON.parse(raw)));data={message_id:-platform.sent.length};await platform.afterSend(platform.sent.length);if(platform.loseAt===platform.sent.length){res.destroy();return;}}
     else{res.writeHead(404).end();return;}
@@ -88,7 +91,8 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
   const emit=(event:object)=>{for(const ws of wss.clients)if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(event));};
   let nextId=1;
   const message=async(text:string,{target=scene,trigger=false,media=false,id=String(nextId++),sender=owner}:{target?:Conversation;trigger?:boolean;media?:boolean;id?:string;sender?:string}={})=>{
-    const event={post_type:'message',self_id:Number(bot),message_id:Number(id),message_type:target.kind,user_id:Number(sender),...(target.kind==='group'?{group_id:Number(target.id)}:{}),time:1792886400,
+    await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&[...wss.clients].some(socket=>socket.readyState===WebSocket.OPEN));
+    const event={post_type:'message',self_id:Number(bot),message_id:Number(id),message_type:target.kind,user_id:Number(sender),...(target.kind==='group'?{group_id:Number(target.id)}:{}),time:Math.ceil(Date.now()/1000),
       message:[...(trigger&&target.kind==='group'?[{type:'at',data:{qq:bot}}]:[]),{type:'text',data:{text}},...(media?[{type:'image',data:{url:'https://invalid.example/fictional-image'}}]:[])],sender:{nickname:'虚构主人'}};
     const count=h.ctx.dafeiyuQQ.getStatus().counters.received;emit(event);await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received>count);await h.core.whenIdle();return {id,event};};
   const rows=()=>{const db=new DatabaseSync(join(root,'memory','memory.sqlite'),{readOnly:true});try{return {

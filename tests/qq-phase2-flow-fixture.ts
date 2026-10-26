@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import assert from 'node:assert/strict';
 import { testTempDir } from './test-temp.js';
+import { groupPacket, assertGroupQuery } from './qq-group-packet-fixture.js';
 const root=await mkdtemp(join(testTempDir(),'dafeiyu-qq-phase2-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
 process.env.DSH_HOME=join(root,'data/core/dsh-home');
 const {ManagedHost,loadHostConfig,initializeProfile,readHostStatus}=await import('@dafeiyu/host');
@@ -16,10 +17,11 @@ let phase='setup',bootstrap=true,chat=0,work=0,mode:'initial'|'peer'|'source'|'c
 const server=createServer(async(req,res)=>{if(req.headers.authorization!=='Bearer '+token){res.writeHead(401).end();return;}let text='';for await(const bytes of req)text+=String(bytes);let data:unknown;
   if(req.url==='/get_login_info')data={user_id:Number(bot)};else if(req.url==='/get_status')data={online:true};
   else if(req.url==='/get_group_list')data=[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(peer),group_name:'虚构二群'}];
+  else if(req.url==='/send_packet'){assertGroupQuery(text);data=groupPacket([{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(peer),group_name:'虚构二群'}]);}
   else if(req.url==='/send_group_msg'){sent.push(JSON.parse(text));data={message_id:-sent.length};}else{res.writeHead(404).end();return;}
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data}));});
 const wss=new WebSocketServer({server});
-const message=(id:number,room:string,text:string)=>({post_type:'message',self_id:Number(bot),message_id:id,message_type:'group',group_id:Number(room),user_id:Number(owner),time:1792886400,message:[{type:'text',data:{text}}]});
+const message=(id:number,room:string,text:string)=>({post_type:'message',self_id:Number(bot),message_id:id,message_type:'group',group_id:Number(room),user_id:Number(owner),time:Math.ceil(Date.now()/1000),message:[{type:'text',data:{text}}]});
 wss.on('connection',ws=>{if(!bootstrap)return;bootstrap=false;ws.send(JSON.stringify(message(1,group,'FLOW_PUBLIC_SENTINEL：海洋资料还需要核验。')));ws.send(JSON.stringify(message(2,peer,'FLOW_PEER_PRIVATE_SENTINEL')));ws.send(JSON.stringify(message(10,group,'大肥鱼，帮我整理本群讨论并保留摘要')));});
 await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();assert.ok(address&&typeof address!=='string');await writeFile(join(root,'token'),token);await writeFile(join(root,'persona.md'),'虚构底色：保持好奇、尊重证据，以自然中文交流。');
 await writeFile(file,JSON.stringify({schemaVersion:1,profileId:'qq-phase-two',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite',channels:{'channel-qq':'./data/qq'}},

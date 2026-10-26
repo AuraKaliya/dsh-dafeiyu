@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import type { HostRuntimeOptions,ManagedHost } from '@dafeiyu/host';
 import { DatabaseSync } from 'node:sqlite';
 import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
+import { groupPacket, assertGroupQuery } from './qq-group-packet-fixture.js';
 
 const scenario=process.argv[2],root=await mkdtemp(join(tmpdir(),'dafeiyu-host-runtime-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
 process.env.DSH_HOME=join(root,'data/core/dsh-home');
@@ -28,6 +29,7 @@ if(['optional','required','qq','qq-groups','single'].includes(scenario??'')||cap
     server=createServer(async(req,res)=>{platformCalls++;if(req.headers.authorization!=='Bearer '+token){res.writeHead(401).end();return;}
       let data:unknown;if(req.url==='/get_login_info')data={user_id:12345678};else if(req.url==='/get_status')data={online:true};
       else if(req.url==='/get_group_list'){if(scenario==='qq-groups'){res.writeHead(503).end();return;}data=[{group_id:11223344,group_name:'虚构群'}];}
+      else if(req.url==='/send_packet'){let raw='';for await(const part of req)raw+=String(part);assertGroupQuery(raw);if(scenario==='qq-groups'){res.writeHead(503).end();return;}data=groupPacket([{group_id:11223344,group_name:'虚构群'}]);}
       else if(req.url==='/send_private_msg'){sent++;data={message_id:100+sent};if(scenario==='qq-partial'&&sent===2){res.destroy();return;}}else{res.writeHead(404).end();return;}
       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data}));});
     wss=new WebSocketServer({server});wss.on('connection',socket=>socket.send(JSON.stringify({post_type:'message',self_id:12345678,message_id:10,message_type:'private',user_id:87654321,time:1792850000,message:[{type:'text',data:{text:taskScenario?'任务：完成一份虚构工作':'虚构QQ输入'}}],sender:{nickname:'虚构主人'}})));

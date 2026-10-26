@@ -38,6 +38,7 @@ interface Dependencies {
   accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
   turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number;maxBytes:number;prepareTimeoutMs:number};signal:AbortSignal;
   projectConversation?:()=>Promise<void>;
+  messageSignal?:(inboundId:string)=>AbortSignal|undefined;
   settled?:(runId:string)=>void;
   media?:()=>import('@dafeiyu/contracts').MediaPort|undefined;
 }
@@ -88,6 +89,7 @@ export class ExecutionCoordinator {
     const provenance=source.data.messageSource,binding=this.messageBindings.get(provenance.bindingId),item=this.d.journal.get(provenance.inboundId);
     return {item,autoDeliver:binding?.active()&&binding.autoDeliver===true,anchor:TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:run.definition.taskId,runId:run.id,inboundId:item.id,target:provenance.conversation,intentVersion:run.definition.intentVersion,authorityVersion:provenance.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})})};}
   private validateMessageSource(source:MessageTaskSource){const binding=this.messageBindings.get(source.bindingId),item=this.d.journal.get(source.inboundId);
+    this.d.messageSignal?.(source.inboundId)?.throwIfAborted();
     if(!binding?.active()||this.messageBindingHash(binding)!==source.authorityVersion||item.extensionId!==binding.channelExtensionId||item.message.conversation.channel!==binding.channel||item.message.conversation.account!==binding.account
       ||runtimeHash(item.message)!==source.messageHash||runtimeHash(item.message.conversation)!==runtimeHash(source.conversation)||source.kind==='explicit-task'&&item.message.sender.id!==binding.ownerId
       ||this.d.journal.messageRecalled({agentId:this.d.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
@@ -460,7 +462,8 @@ export class ExecutionCoordinator {
         const contributors=this.d.registry.contributors(),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
-        const signal=AbortSignal.any([this.d.signal,controller.signal,...actions.map(action=>action.signal),...contributors.map(entry=>entry.signal),AbortSignal.timeout(this.d.turnTimeoutMs)]);
+        const messageSignal=saved.messageSource?this.d.messageSignal?.(saved.messageSource.inboundId):run.definition.origin.kind==='message'?this.d.messageSignal?.(run.definition.origin.inboundId):undefined;
+        const signal=AbortSignal.any([this.d.signal,controller.signal,...(messageSignal?[messageSignal]:[]),...actions.map(action=>action.signal),...contributors.map(entry=>entry.signal),AbortSignal.timeout(this.d.turnTimeoutMs)]);
         const guard=()=>{signal.throwIfAborted();if(!repository.ready()||this.d.repository()!==repository)throw new Error('DEPENDENCY_UNAVAILABLE');
           if(saved.messageSource)this.validateMessageAncestors(run);
           const current=repository.readState(this.d.agentId,task.id);if(current.epoch!==task.epoch||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');

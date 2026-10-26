@@ -53,6 +53,6 @@ for(const change of ['ordinary-chat','source-recall'] as const)test(`${change} r
   h.setResponse(async request=>{if(native(request)){entered();await gate;return textReply('内部结果');}return ++step===1?call('qq_task_submit',{requestId:'work',title:'等待中的任务'}):textReply('正常聊天回复');});
   const initial=h.message('任务：完成虚构检查',{trigger:true});await ready;
   if(change==='source-recall'){h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:1});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);}
-  else{h.emit({post_type:'message',self_id:Number(bot),message_type:'group',group_id:Number(group),user_id:99887766,message_id:99,time:1792886400,message:[{type:'at',data:{qq:bot}},{type:'text',data:{text:'新的普通聊天'}}]});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received===2);}
+  else{h.emit({post_type:'message',self_id:Number(bot),message_type:'group',group_id:Number(group),user_id:99887766,message_id:99,time:Math.ceil(Date.now()/1000),message:[{type:'at',data:{qq:bot}},{type:'text',data:{text:'新的普通聊天'}}]});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received===2);}
   release();await initial;await h.core.whenIdle();const rows=taskRows(h.root);assert.equal(rows.length,1);if(change==='ordinary-chat')assert.equal(rows[0]?.state,'completed');else assert.notEqual(rows[0]?.state,'completed');
 });

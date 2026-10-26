@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { HostRuntimeOptions,ManagedHost } from '@dafeiyu/host';
 import type { ExecutorNodeRunOptions,ExecutorNodeRunResult,ServerExecutorDependencies } from '@dafeiyu/server-executor';
 import { testTempDir } from './test-temp.js';
+import { groupPacket, assertGroupQuery } from './qq-group-packet-fixture.js';
 
 const scenario=process.argv[2];assert.ok(['owner','missing-ports','authority','unknown','drain','cancel'].includes(scenario??''));
 const root=await mkdtemp(join(testTempDir(),'host-executor-runtime-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
@@ -31,6 +32,7 @@ const server=createServer(async(req,res)=>{requests++;if(req.headers.authorizati
   let raw='';for await(const chunk of req)raw+=String(chunk);let data:unknown;
   if(req.url==='/get_login_info')data={user_id:Number(bot)};else if(req.url==='/get_status')data={online:true};
   else if(req.url==='/get_group_list')data=[{group_id:Number(group),group_name:'虚构测试群'}];
+  else if(req.url==='/send_packet'){assertGroupQuery(raw);data=groupPacket([{group_id:Number(group),group_name:'虚构测试群'}]);}
   else if(req.url==='/send_private_msg'||req.url==='/send_group_msg'){sent.push(z.record(z.string(),z.unknown()).parse(JSON.parse(raw)));data={message_id:1000+sent.length};}
   else{res.writeHead(404).end();return;}
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data}));});
@@ -98,7 +100,7 @@ const baseOptions:HostRuntimeOptions={coordination,adapter,mode:'daemon',onPhase
 const options:HostRuntimeOptions={...baseOptions,serverExecutorDependencies:dependencies};
 let host:ManagedHost|undefined;
 async function until(predicate:()=>boolean,message:string){const deadline=Date.now()+7000;while(!predicate()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));assert.ok(predicate(),message);}
-function incoming(nonowner=false){return {post_type:'message',self_id:Number(bot),message_id:100,time:Math.floor(Date.now()/1000),message_type:nonowner?'group':'private',user_id:Number(nonowner?stranger:owner),...(nonowner?{group_id:Number(group)}:{}),
+function incoming(nonowner=false){return {post_type:'message',self_id:Number(bot),message_id:100,time:Math.ceil(Date.now()/1000),message_type:nonowner?'group':'private',user_id:Number(nonowner?stranger:owner),...(nonowner?{group_id:Number(group)}:{}),
   message:[...(nonowner?[{type:'at',data:{qq:bot}}]:[]),{type:'text',data:{text:'任务：核对虚构文件并把结果整理给我'}}],sender:{nickname:nonowner?'虚构群友':'虚构主人'}};}
 const emit=(message:object)=>{for(const socket of wss.clients)if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));};
 async function awaitConversation(){await until(()=>chatCalls>0,'QQ input must reach the real DSH conversation');await host!.core.whenIdle();}

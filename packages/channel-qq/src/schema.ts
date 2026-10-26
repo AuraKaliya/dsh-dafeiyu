@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 export const QQ_APPLICATION_ID = 0x44465131;
-export const QQ_SCHEMA_VERSION = 5;
+// v6 adds receive masks and durable activation boundaries to the versioned group JSON.
+export const QQ_SCHEMA_VERSION = 6;
 
 const tables = {
   messages: 'CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,route TEXT NOT NULL,id TEXT NOT NULL,sender TEXT NOT NULL,text TEXT NOT NULL,UNIQUE(route,id))',
@@ -45,7 +46,7 @@ export function inspectQqSchema(db: DatabaseSync): QqSchemaInspection {
     const found = objects.find(item => item.name === name);
     return found?.type === 'table' && typeof found.sql === 'string' && normalize(found.sql) === normalize(sql);
   });
-  const supported = structure && (version === 0 && applicationId === 0 || [1, 2, 3, 4, 5].includes(version) && applicationId === QQ_APPLICATION_ID);
+  const supported = structure && (version === 0 && applicationId === 0 || [1, 2, 3, 4, 5, 6].includes(version) && applicationId === QQ_APPLICATION_ID);
   return { version, applicationId, fresh, supported };
 }
 

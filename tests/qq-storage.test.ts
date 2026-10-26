@@ -97,3 +97,16 @@ test('QQ v1 upgrades additively and stores account-bound membership without chan
     assert.equal(store.receipt('fictional-reply'), '-456'); assert.ok(store.handled('fictional-room', '-321'));
   } finally { store.close(); }
 });
+
+test('QQ v5 migration preserves real records and marks legacy group settings unknown until freshly read',async()=>{
+  const path=await file(),created=new QqStore(path);created.sent('preserved','receipt');created.remember('room','1','person','保留原文');
+  created.saveGroups('12345678',[{id:'11223344',name:'原群',msgMask:1}],'2026-10-27T00:00:00.000Z');created.close();
+  const old=new DatabaseSync(path);old.prepare('UPDATE qq_group_snapshots SET groups_json=?').run(JSON.stringify([{id:'11223344',name:'原群'}]));old.exec('PRAGMA user_version=5');old.close();
+  const before=await readFile(path);assert.throws(()=>new QqStore(path),/QQ_MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),before);
+  const migrated=new QqStore(path,{migrate:true});try{
+    assert.equal(migrated.receipt('preserved'),'receipt');assert.equal(migrated.find('room','1')?.text,'保留原文');
+    assert.equal(migrated.groupSnapshot('12345678')?.groups[0]?.msgMask,null);assert.equal(migrated.groupSnapshot('12345678')?.groups[0]?.generation,0);
+    const resumed=migrated.saveGroups('12345678',[{id:'11223344',name:'原群',msgMask:1}],'2026-10-27T00:01:00.100Z');
+    assert.equal(resumed.groups[0]?.acceptedAfter,Date.parse('2026-10-27T00:01:01.000Z'));assert.ok(resumed.groups[0]!.generation>0);
+  }finally{migrated.close();}
+});

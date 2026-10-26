@@ -26,7 +26,7 @@ function flow(h:H,submit:(exposureId:string)=>ReturnType<typeof call>,taskRespon
 async function voice(h:H,id:number,options:{kind?:'record'|'file'|'video';sender?:string;text?:string;group?:boolean}={}){const file=join(h.root,'onebot-cache/voice-'+id+'.wav'),handle='record-'+id;await writeFile(file,syntheticPcm(32000));h.platform.mediaFiles.set(handle,file);
   // The synthetic platform only publishes live events; do not inject into the connector's reconnect gap.
   await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online');
-  const count=h.ctx.dafeiyuQQ.getStatus().counters.received;h.emit({post_type:'message',self_id:Number(bot),message_id:id,message_type:options.group?'group':'private',user_id:Number(options.sender??owner),...(options.group?{group_id:Number(scene.id)}:{}),time:1792886400,
+  const count=h.ctx.dafeiyuQQ.getStatus().counters.received;h.emit({post_type:'message',self_id:Number(bot),message_id:id,message_type:options.group?'group':'private',user_id:Number(options.sender??owner),...(options.group?{group_id:Number(scene.id)}:{}),time:Math.ceil(Date.now()/1000),
     message:[...(options.group?[{type:'at',data:{qq:bot}}]:[]),...(options.text?[{type:'text',data:{text:options.text}}]:[]),{type:options.kind??'record',data:{file:handle,name:'voice.wav'}}]});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received>count);await h.core.whenIdle();}
 
 test('current owner record creates a Task from verified transcript, keeps mainText empty and survives connector reload',async()=>{

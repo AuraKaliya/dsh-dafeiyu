@@ -3,8 +3,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { inspectQqSchema, initializeQqSchema, QQ_SCHEMA_VERSION } from './schema.js';
-import { GroupListSchema, GroupSnapshotSchema, QqAccountIdSchema } from './groups.js';
-import type { GroupInfo, GroupSnapshot } from './groups.js';
+import { GroupListSchema, GroupSnapshotSchema, QqAccountIdSchema, groupReceivesMessages } from './groups.js';
+import type { GroupInput, GroupSnapshot } from './groups.js';
 import { QqCache } from './cache.js';
 import type { QqCacheOptions } from './cache.js';
 import { redactContent } from '@dafeiyu/contracts';
@@ -34,7 +34,7 @@ export class QqStore {
       this.mediaDelivery=new QqMediaDeliveryLedger(this.db);
     } catch (error) { this.db.close(); throw error; }
   }
-  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
+  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[];groupGeneration?:number }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
   find(route: string, id: string) { const row = this.db.prepare('SELECT id,sender,text FROM messages WHERE route=? AND id=?').get(route,id); if (!row) return null; const value = remembered.parse(row); return { ...value, text: redactContent(value.text).value }; }
   receipt(id: string): string | null { const row = this.db.prepare('SELECT platform_id FROM receipts WHERE reply_id=?').get(id); return row ? z.string().parse(row.platform_id) : null; }
   handled(route: string, id: string): boolean { return !!this.db.prepare('SELECT 1 FROM handled WHERE route=? AND id=?').get(route,id); }
@@ -44,11 +44,22 @@ export class QqStore {
     const row = this.db.prepare('SELECT at,revision,groups_json FROM qq_group_snapshots WHERE account=?').get(QqAccountIdSchema.parse(account));
     return row ? GroupSnapshotSchema.parse({ account, at: row.at, revision: row.revision, groups: JSON.parse(z.string().parse(row.groups_json)) }) : null;
   }
-  saveGroups(account: string, groups: readonly GroupInfo[], at: string): GroupSnapshot {
-    QqAccountIdSchema.parse(account); z.iso.datetime().parse(at); const body = JSON.stringify(GroupListSchema.parse(groups));
-    this.db.prepare(`INSERT INTO qq_group_snapshots(account,at,revision,groups_json) VALUES(?,?,1,?)
-      ON CONFLICT(account) DO UPDATE SET at=excluded.at,revision=revision+1,groups_json=excluded.groups_json`).run(account, at, body);
-    return this.groupSnapshot(account)!;
+  saveGroups(account: string, groups: readonly GroupInput[], at: string): GroupSnapshot {
+    QqAccountIdSchema.parse(account); z.iso.datetime().parse(at); const incoming = GroupListSchema.parse(groups);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const prior = this.groupSnapshot(account);
+      const previous = new Map(prior?.groups.map(group => [group.id, group]) ?? []);
+      const body = JSON.stringify(incoming.map(group => {
+        const old = previous.get(group.id);
+        const activated = groupReceivesMessages(group) && (!old || !groupReceivesMessages(old));
+        return { ...group, acceptedAfter: activated ? Math.ceil(Date.parse(at) / 1000) * 1000 : old?.acceptedAfter ?? 0,
+          generation: activated ? (prior?.revision ?? 0) + 1 : old?.generation ?? 0 };
+      }));
+      this.db.prepare(`INSERT INTO qq_group_snapshots(account,at,revision,groups_json) VALUES(?,?,1,?)
+        ON CONFLICT(account) DO UPDATE SET at=excluded.at,revision=revision+1,groups_json=excluded.groups_json`).run(account, at, body);
+      const snapshot = this.groupSnapshot(account)!; this.db.exec('COMMIT'); return snapshot;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   close(): void { this.db.close(); }
 }

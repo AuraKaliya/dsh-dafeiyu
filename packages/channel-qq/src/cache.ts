@@ -6,7 +6,7 @@ import type { MediaAttachment } from '@dafeiyu/contracts';
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const key = z.string().min(1).max(120), routeSchema = z.string().min(1).max(2000);
-const metadataSchema = z.strictObject({ occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string().max(80)).max(16), truncated: z.boolean().nullable(), known: z.boolean(),media:z.array(MediaAttachmentSchema).max(8).optional() });
+const metadataSchema = z.strictObject({ occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string().max(80)).max(16), truncated: z.boolean().nullable(), known: z.boolean(),media:z.array(MediaAttachmentSchema).max(8).optional(),groupGeneration:z.number().int().nonnegative().optional() });
 const refSchema = z.strictObject({ id: z.string().min(1).max(80), version: z.number().int().positive(), hash: z.string().length(64) });
 export const QqCacheProofSchema = z.strictObject({ route: routeSchema, parts: z.array(refSchema).max(20), hash: z.string().length(64) });
 export type QqCacheProof = z.infer<typeof QqCacheProofSchema>;
@@ -36,6 +36,12 @@ export class QqCache {
   private epoch(route: string): number { return Number(this.db.prepare('SELECT epoch FROM qq_cache_state WHERE route=?').get(route)?.epoch ?? 0); }
   generation(route?:string):number {return route?this.epoch(route):Number(this.db.prepare('SELECT coalesce(sum(epoch),0) AS n FROM qq_cache_state').get()?.n);}
   known(route:string,id:string):boolean{return !!this.db.prepare('SELECT 1 FROM qq_message_meta WHERE route=? AND id=?').get(route,id)||!!this.db.prepare('SELECT 1 FROM messages WHERE route=? AND id=?').get(route,id);}
+  groupAccess(route:string,id:string):{generation:number;occurredAt:string}|null {
+    const row=this.db.prepare('SELECT body FROM qq_message_meta WHERE route=? AND id=?').get(route,id);
+    if(!row)return null;
+    const metadata=metadataSchema.parse(JSON.parse(String(row.body)));
+    return metadata.groupGeneration===undefined||metadata.occurredAt===null?null:{generation:metadata.groupGeneration,occurredAt:metadata.occurredAt};
+  }
   recalled(route:string,id:string):boolean{return this.db.prepare('SELECT deleted FROM qq_message_meta WHERE route=? AND id=?').get(route,id)?.deleted===1;}
   private bump(route: string): void { this.db.prepare('INSERT INTO qq_cache_state VALUES(?,1) ON CONFLICT(route) DO UPDATE SET epoch=epoch+1').run(route); }
   private meta(route: string, row: CachedRow) {
@@ -45,12 +51,12 @@ export class QqCache {
     this.db.prepare('INSERT INTO qq_message_meta VALUES(?,?,1,?,0,?)').run(route, row.id, hash, JSON.stringify(body));
     return { ...body, version: 1, hash, deleted: false };
   }
-  remember(route: string, id: string, sender: string, raw: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[] }): boolean {
+  remember(route: string, id: string, sender: string, raw: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[];groupGeneration?:number }): boolean {
     routeSchema.parse(route); z.string().min(1).max(80).parse(id);
     const sanitized = redactContent(raw).value;
     let text = sanitized.slice(0, 32000);
     if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
-    const body = metadataSchema.parse({ occurredAt: metadata?.occurredAt ?? null, unsupported: [...new Set(metadata?.unsupported ?? [])].slice(0, 16).map(kind => redactContent(kind).value.slice(0, 80)), truncated: sanitized.length > text.length, known: metadata !== undefined,...(metadata?.media?{media:metadata.media}:{}) });
+    const body = metadataSchema.parse({ occurredAt: metadata?.occurredAt ?? null, unsupported: [...new Set(metadata?.unsupported ?? [])].slice(0, 16).map(kind => redactContent(kind).value.slice(0, 80)), truncated: sanitized.length > text.length, known: metadata !== undefined,...(metadata?.media?{media:metadata.media}:{}),...(metadata?.groupGeneration===undefined?{}:{groupGeneration:metadata.groupGeneration}) });
     const hash = digest({ sender, text, ...body });
     return this.atomic(() => {
       const old = this.db.prepare('SELECT version,hash,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
