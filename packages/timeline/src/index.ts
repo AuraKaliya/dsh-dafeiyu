@@ -2,6 +2,7 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-session-query';
+import type {} from '@deepseek-ai/dsh-agent';
 import type {} from '@dafeiyu/core';
 import type {} from '@deepseek-ai/dsh-compaction';
 import { API_VERSION, TimelineQuerySchema, redactContent, redactJson } from '@dafeiyu/contracts';
@@ -11,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { eventMetadata, projectSession } from './projection.js';
 
 export const name = 'dafeiyu-timeline';
-export const inject = ['dafeiyu', 'sessionQuery'];
+export const inject = ['dafeiyu', 'sessionQuery', 'agents'];
 const settingsSchema = z.strictObject({ agentId: z.string().min(1), maxPageChars: z.number().int().min(100).max(8000).default(2000),
   previewChars: z.number().int().min(50).max(1000).default(300),execution:z.boolean().default(false) });
 export type Config = z.input<typeof settingsSchema>;
@@ -33,6 +34,7 @@ export class TimelineService extends Service {
   private readonly config: z.output<typeof settingsSchema>;
   private readonly handle: ExtensionHandle;
   private closed = false;
+  private readonly validatingSources = new Set<string>();
   private readonly executionHandle:ExtensionHandleV3|undefined;
   constructor(ctx: Context, config: Config) {
     super(ctx, 'dafeiyuTimeline'); this.config = settingsSchema.parse(config);
@@ -71,34 +73,48 @@ export class TimelineService extends Service {
     if (scope.agentId !== this.config.agentId) throw new Error('Wrong timeline agent');
     return scope;
   }
-  private matchesMessage(scope:TimelineScope,ref:string,hash:string):boolean{
-    if(this.closed)return false;
-    const match=sourcePattern.exec(ref);if(!match)return false;
+  private archiveLink(scope:TimelineScope,ref:string):SourceRef|null{
+    if(this.closed)return null;
+    const match=sourcePattern.exec(ref);if(!match)return null;
     const anchor=this.ctx.dafeiyu.journal.scopedEvent(scope,match[1]!);
     const source=anchor?.sources[Number(match[2])];
-    if(!source||source.kind!=='message'||!this.visibleSource(scope,source))return false;
-    const item=this.ctx.dafeiyu.journal.messageFor(scope,source.id);if(!item)return false;
-    const text=redactContent(JSON.stringify(redactJson({sender:item.message.sender,occurredAt:item.message.occurredAt,text:item.message.text}).value,null,2)).value;
-    return createHash('sha256').update(text).digest('hex')===hash;
+    return source&&this.visibleSource(scope,source)?source:null;
   }
-  checkWorkingSource(context:ActionContext,ref:string,hash:string):boolean{return this.matchesMessage(this.scope(context),ref,hash);}
+  checkWorkingSource(context:ActionContext,ref:string,hash:string):boolean{return this.checkArchivedSource(this.scope(context),ref,hash);}
   /** Trusted archive validation; no content is exported through this predicate. */
   checkArchivedSource(scope:TimelineScope,ref:string,hash:string):boolean{
-    return scope.agentId===this.config.agentId&&this.matchesMessage(scope,ref,hash);
+    if(scope.agentId!==this.config.agentId)return false;
+    const key=JSON.stringify([scope.agentId,scope.route,ref,hash]);if(this.validatingSources.has(key))return false;
+    this.validatingSources.add(key);
+    try{
+      const source=this.archiveLink(scope,ref);let text:string;
+      if(source?.kind==='message'){
+        const item=this.ctx.dafeiyu.journal.messageFor(scope,source.id);if(!item)return false;
+        text=redactContent(JSON.stringify(redactJson({sender:item.message.sender,occurredAt:item.message.occurredAt,text:item.message.text}).value,null,2)).value;
+      }else if(source?.kind==='session'&&source.seq!==undefined){
+        const event=this.ctx.agents.get(SessionId(source.id))?.session.snapshotEvents()[source.seq];
+        if(!event||!this.ctx.dafeiyu.historicalSourceCurrent(scope,source.id,source.seq))return false;
+        const projected=projectSession(event);if(!projected||projected.memoryUse!=='primary-candidate')return false;
+        text=redactContent(projected.text).value;
+      }else return false;
+      return createHash('sha256').update(text).digest('hex')===hash;
+    }catch{return false;}finally{this.validatingSources.delete(key);}
   }
+  /** Exact inbound identity, kept separate from session receipt identities. */
+  matchesInboundSource(scope:TimelineScope,ref:string,messageId:string):boolean{const source=this.archiveLink(scope,ref);return scope.agentId===this.config.agentId&&source?.kind==='message'&&source.id===messageId;}
   archivedSourceIdentity(scope:TimelineScope,ref:string):string|null {
     if(this.closed||scope.agentId!==this.config.agentId)return null;
-    const match=sourcePattern.exec(ref);if(!match)return null;
-    const source=this.ctx.dafeiyu.journal.scopedEvent(scope,match[1]!)?.sources[Number(match[2])];
-    return source?.kind==='message'&&this.visibleSource(scope,source)?source.id:null;
+    const source=this.archiveLink(scope,ref);
+    return source?.kind==='message'?source.id:source?.kind==='session'&&source.seq!==undefined?JSON.stringify(['session',source.id,source.seq]):null;
   }
   sameArchivedSource(scope:TimelineScope,left:string,right:string):boolean{
-    const identity=this.archivedSourceIdentity(scope,left);return identity!==null&&identity===this.archivedSourceIdentity(scope,right);
+    const a=this.archiveLink(scope,left),b=this.archiveLink(scope,right);
+    return scope.agentId===this.config.agentId&&a!==null&&b!==null&&a.kind===b.kind&&a.kind!=='event'&&a.id===b.id&&(a.kind!=='session'||a.seq===b.seq);
   }
   checkContextSource(context:ContextRequest,ref:string,hash:string):boolean{
     const scope=this.ctx.dafeiyu.scopeForContext(context);
     if(scope.agentId!==this.config.agentId)return false;
-    return this.matchesMessage(scope,ref,hash);
+    return this.checkArchivedSource(scope,ref,hash);
   }
   private visibleSource(scope: TimelineScope, source: SourceRef): boolean {
     if (source.route !== undefined && source.route !== scope.route) return false;
@@ -176,7 +192,7 @@ export class TimelineService extends Service {
     let source: SourceRef = { kind:'event',id:anchor.id };
     if (eventMatch) {
       const data = { ...eventMetadata(anchor), causedBy:this.cause(scope,anchor), sources:this.links(scope,anchor) };
-      content = { text:JSON.stringify(data,null,2),kind:'event-metadata',redacted:data.redacted,omittedBlocks:0,interrupted:false };
+      content = { text:JSON.stringify(data,null,2),kind:'event-metadata',redacted:data.redacted,omittedBlocks:0,interrupted:false,memoryUse:'derived-only' };
     } else {
       const candidate = anchor.sources[Number(sourceMatch?.[2])];
       if (!candidate || !this.visibleSource(scope,candidate)) return { status:'not_found' as const };

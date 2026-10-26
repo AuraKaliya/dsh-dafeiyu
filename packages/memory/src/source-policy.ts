@@ -16,17 +16,18 @@ export class MemorySourcePolicy implements SourcePolicy {
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly working:WorkingMemory|null,
     private readonly feedback:ToolFeedbackArchive|null,private readonly epoch:(scope:CompactionScope)=>string){}
   private missing(scope:CompactionScope):SourceDependency[]{return [{...scoped(scope),kind:'unavailable',reason:'source-unavailable'}];}
-  private match(scope:CompactionScope,id:string){return (ref:string)=>this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope,ref)===id;}
+  private match(scope:CompactionScope,sourceRef:string){return (ref:string)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,sourceRef,ref);}
+  private inboundMatch(scope:CompactionScope,id:string){return (ref:string)=>this.ctx.dafeiyuTimeline.matchesInboundSource(scope,ref,id);}
   private message(scope:CompactionScope,id:string):string|null {
     const item=this.ctx.dafeiyu.journal.messageFor(scope,id);if(!item||this.ctx.dafeiyu.journal.messageRecalled(scope,id))return null;
     return redactContent(JSON.stringify(redactJson({sender:item.message.sender,occurredAt:item.message.occurredAt,text:item.message.text}).value,null,2)).value;
   }
   inbound(scope:CompactionScope,id:string):SourceDependency[]{
     const text=this.message(scope,id);if(text===null)return this.missing(scope);const hash=digest(text);
-    return [{...scoped(scope),kind:'inbound',id,hash,fence:this.memory.sourceFence(scope,hash,this.match(scope,id))}];
+    return [{...scoped(scope),kind:'inbound',id,hash,fence:this.memory.sourceFence(scope,hash,this.inboundMatch(scope,id))}];
   }
   private timeline(scope:CompactionScope,ref:string,hash:string):SourceDependency {
-    return {...scoped(scope),kind:'timeline',ref,hash,fence:this.memory.sourceFence(scope,hash,this.match(scope,this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope,ref)??''))};
+    return {...scoped(scope),kind:'timeline',ref,hash,fence:this.memory.sourceFence(scope,hash,this.match(scope,ref))};
   }
   private roots(scope:CompactionScope,id:string,revision:number):SourceDependency[]{
     return this.memory.provenance(scope,id,revision).flatMap(item=>[
@@ -109,8 +110,8 @@ export class MemorySourcePolicy implements SourcePolicy {
     try{switch(dep.kind){
       case 'capability':return this.ctx.dafeiyu.capabilityObservationCurrent(scope,dep.ref);
       case 'memory':{const item=this.memory.read(scope,dep.id,'normal',dep.revision);return !!item&&item.version===dep.version&&item.contentHash===dep.hash;}
-      case 'inbound':{const text=this.message(scope,dep.id),match=this.match(scope,dep.id);return text!==null&&digest(text)===dep.hash&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
-      case 'timeline':{const match=this.match(scope,this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope,dep.ref)??'');return this.ctx.dafeiyuTimeline.checkArchivedSource(scope,dep.ref,dep.hash)&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
+      case 'inbound':{const text=this.message(scope,dep.id),match=this.inboundMatch(scope,dep.id);return text!==null&&digest(text)===dep.hash&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
+      case 'timeline':{const match=this.match(scope,dep.ref);return this.ctx.dafeiyuTimeline.checkArchivedSource(scope,dep.ref,dep.hash)&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
       case 'working':{const item=this.working?.sourceItem(scope,dep.id);return !!item&&item.taskId===dep.taskId&&item.revision===dep.revision&&item.hash===dep.hash;}
       case 'feedback':{const item=this.feedback?.sourceRecord(scope,dep.id);return !!item&&item.version===dep.version&&item.archive.hash===dep.hash;}
       case 'ephemeral':return dep.traceId===scope.traceId;

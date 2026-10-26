@@ -18,7 +18,7 @@ DSH的 `tool/result.message.isError` 是SDK产生的结构字段，与正文中�
 
 本首版采用保守边界：`dafeiyu:event:<id>`可读作操作索引，返回derived-only，不能再被memory当作primary来源写入。要记忆实际消息内容，调用者必须沿已核验事件的source链接读取 `dafeiyu:source:<eventId>:<index>`，且该链接实际指向当前合法的normalized-inbound消息。
 
-timeline的primary资格与 `checkArchivedSource` 的支持范围保持一致：只有可验证的当前message-source可成为此路径的primary依据；session派生输出、event元数据及诊断仍可依法读取，但不能借别的引用类型绕过正文来源校验。保留scope、消息撤回、来源hash、删除／恢复fence和别名来源一致性检查。不会把event直接映射成任意正文，也不扩张checkArchivedSource为“存在事件就有效”。
+实施前兼容核对补充：既有产品明确允许独立真实工具回执作primary依据（`tests/memory.test.ts`），不能把全部session来源降级。timeline的primary资格与 `checkArchivedSource` 统一支持当前合法message-source，以及同一会话中可导出为primary的独立session/tool-result；后者核对实际session事件、投影类型、当前来源依赖和投影hash。session派生输出、event元数据及诊断仍可依法读取，但不能借别的引用类型绕过正文来源校验。保留scope、消息撤回、来源hash、删除／恢复fence和别名来源一致性检查。不会把event直接映射成任意正文，也不扩张checkArchivedSource为“存在事件就有效”。
 
 memory写入继续拒绝非primary来源；已有合法message-source写入后必须能正常检索且不被立即退役。旧event来源记录保留，不改写hash、补造来源或恢复旧派生事实；新规则不让旧不完整来源重新生效。
 
@@ -65,7 +65,7 @@ B05专用工具是核心消息任务submit／status／control接口的薄适配�
 
 预计相关文件：`tests/provenance.test.ts`或新增专用诊断测试、timeline／memory来源专项测试、`tests/tooling/evaluation-b05.test.ts`、`tests/tooling/evaluation-real-drivers.test.ts`；保留QQ任务受理／控制已有测试作为共享核心回归。最终具体命令由主代理依据实际变更一次汇总，通过受管入口单次构建并行运行。
 
-provenance和timeline来源契约属于公共路径，真实影响不只B05：应核对使用记忆／时间线工具的B类及全部相关H类。与R1—R5合并后由主代理冻结最终candidate／协议和校准计划；不得复用旧H01／H05窄范围证书。原60元、6小时、48小时及唯一账本不变，剩余金额不是保证跑完的承诺。
+provenance和timeline来源契约属于公共路径，真实影响不只B05：应核对使用记忆／时间线工具的B类及全部相关H类。与R1—R5合并后由主代理冻结最终candidate／协议和校准计划；不得复用旧H01／H05窄范围证书。原config的60元保留，按本轮新增剩余50元授权记录的effective累计上限为97.894922元；原累计6小时、首次调用48小时及唯一账本不变，剩余金额不是保证跑完的承诺。
 
 ## 7. 实施顺序
 

@@ -99,8 +99,10 @@ export class SourceTracker {
           &&e.data.message.content.some(block=>block.type==='tool-call'&&block.id===event.data.message.toolCallId));
         const call=events.find(e=>e.type==='tool/call'&&e.data.callId===event.data.message.toolCallId);
         const inherited=caller?this.get(caller.seq)?.dependencies:undefined;
-        this.write(event,unionDependencies(inherited??[{agentId:this.agentId,route:this.item!.route,kind:'unavailable',reason:'missing-call-source'}],
-          b.provider.sources.tool(this.scope(),call?.type==='tool/call'?call.data.name:'',eventText(event)??'',event.data.meta)),caller?[caller.seq]:[]);
+        // SDK error receipts are diagnostics, not newly observed world evidence. Keep
+        // their caller's dependencies so later withdrawal still retires the pair.
+        const observed=event.data.message.isError===true?[]:b.provider.sources.tool(this.scope(),call?.type==='tool/call'?call.data.name:'',eventText(event)??'',event.data.meta);
+        this.write(event,unionDependencies(inherited??[{agentId:this.agentId,route:this.item!.route,kind:'unavailable',reason:'missing-call-source'}],observed),caller?[caller.seq]:[]);
       }
     }
   }
