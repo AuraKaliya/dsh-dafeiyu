@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "7c-20261026-bounded-cost",
+  "parentAuthorizationId": "7c-20261026-flash-max-60cny",
+  "approvedBy": "human-user-in-this-thread",
+  "policy": "full-reservation-permanent-charge-actual-fee-unknown",
+  "scope": "current-and-subsequent-eligible-unknown-calls-in-this-campaign",
+  "maximumMicroCny": 60000000,
+  "maximumActiveMs": 21600000,
+  "originalFirstCallAt": 1792959270580,
+  "originalExpiresAt": 1793132070580,
+  "automaticBudgetIncrease": false,
+  "originalReservationId": "e79387b8-e750-4270-ae5d-fd5465545a81",
+  "originalChargeMicroCny": 2131072
+}

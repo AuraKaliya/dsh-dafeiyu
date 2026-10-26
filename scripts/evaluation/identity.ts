@@ -27,7 +27,7 @@ export async function captureRuntimeIdentity(repository:string,options:{real?:bo
     files.push({path:local(path),bytes:info.size,hash:hash.digest('hex')});
   }
   for(const path of ['package.json','package-lock.json','scripts/evaluation','scripts/prepare-integrated-acceptance.mjs','scripts/run-integrated-offline.mjs'])await walk(join(root,path));
-  if(options.real)for(const path of ['scripts/run-integrated-real.mjs','evaluation/phase7c/authorization.json'])await walk(join(root,path));
+  if(options.real)for(const path of ['scripts/run-integrated-real.mjs','evaluation/phase7c/authorization.json','evaluation/phase7c/bounded-cost-authorization.v1.json'])await walk(join(root,path));
   for(const entry of await readdir(root))if(/^tsconfig.*\.json$/.test(entry))await walk(join(root,entry));
   for(const entry of await readdir(join(root,'packages'),{withFileTypes:true})){
     if(!entry.isDirectory()||entry.isSymbolicLink())throw new Error('EVALUATION_RUNTIME_LINK_DENIED');

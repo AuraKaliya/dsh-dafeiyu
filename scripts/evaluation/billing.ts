@@ -22,14 +22,18 @@ export function installEvaluationBilling(ctx:Context,ledger:EvaluationLedger,raw
     const body=JSON.stringify({provider:options.provider,model:options.model,system:options.system??null,messages:options.messages,tools:options.tools??[],maxTokens:output,purpose:options.purpose??null,reasoningEffort:effort,temperature:options.temperature??null,stop:options.stop??null});if(Buffer.byteLength(body)>route.maxRequestBytes)throw new Error('EVALUATION_REQUEST_TOO_LARGE');
     const attempt=attemptId(),id=randomUUID(),started=Date.now(),reservationId=ledger.config.mode==='real'?ledger.reserve(attempt,'call:'+id,route.contextWindow,output):null;
     const base:EvaluationCall={id,attemptId:attempt,phase:'started',provider:route.provider,model:route.model,purpose:options.purpose??'task',requestHash:sha256(body),sessionHash:sha256(String(options.sessionId??'')),at:new Date(started).toISOString(),durationMs:null,reservationId,inputTokens:null,outputTokens:null,finish:null,error:null,reasoningEffort:effort,outputBound:output};
-    ledger.recordCall(base);let usage:ReturnType<typeof totalUsage>|null=null,finish:string|null=null,error:string|null=null,complete=false,invalidUsage=false;
+    ledger.recordCall(base);let usage:ReturnType<typeof totalUsage>|null=null,finish:string|null=null,error:string|null=null,complete=false,invalidUsage=false,modelFailure:EvaluationCall['modelFailure'];
     try{for await(const chunk of next()){
       if(chunk.type==='usage'){try{usage=totalUsage(chunk.usage);}catch{usage=null;invalidUsage=true;error='EVALUATION_USAGE_INVALID';}}
-      if(chunk.type==='finish'){finish=chunk.reason.kind;complete=true;if(['error','aborted'].includes(finish))error??='EVALUATION_MODEL_FAILED';}
+      if(chunk.type==='finish'){finish=chunk.reason.kind;complete=true;if(chunk.reason.kind==='error'||chunk.reason.kind==='aborted'){
+        const failure=chunk.reason.failure,code=failure&&/^[A-Z][A-Z0-9_]{0,63}$/.test(failure.code)?failure.code:'MODEL_FAILED';
+        modelFailure={code,...(failure?.status!==undefined&&Number.isInteger(failure.status)&&failure.status>=100&&failure.status<=599?{status:failure.status}:{}),...(failure?.requestId?{requestIdHash:sha256(String(failure.requestId))}:{})};
+        error??='EVALUATION_MODEL_'+code;onRejected?.(error);
+      }}
       yield chunk;
     }}catch(caught){error??=caught instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(caught.message)?caught.message:'EVALUATION_STREAM_FAILED';throw new Error(error);}
     finally{if(!complete||invalidUsage||finish==='error'||finish==='aborted'){usage=null;error??='EVALUATION_STREAM_INTERRUPTED';}if(reservationId)ledger.settle(reservationId,usage?{inputTokens:usage.inputTokens,outputTokens:usage.outputTokens}:null);
-      ledger.recordCall({...base,phase:'finished',at:new Date().toISOString(),durationMs:Math.max(0,Date.now()-started),inputTokens:usage?.inputTokens??null,outputTokens:usage?.outputTokens??null,finish,error,usageBreakdown:usage?.breakdown??null});}
+      ledger.recordCall({...base,phase:'finished',at:new Date().toISOString(),durationMs:Math.max(0,Date.now()-started),inputTokens:usage?.inputTokens??null,outputTokens:usage?.outputTokens??null,finish,error,usageBreakdown:usage?.breakdown??null,...(modelFailure?{modelFailure}:{})});}
     }catch(rejected){onRejected?.(rejected instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(rejected.message)?rejected.message:'EVALUATION_CALL_REJECTED');throw rejected;}
   });
 }
