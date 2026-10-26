@@ -38,6 +38,8 @@ Binding 固定：`id=pluginId='bili-owner-tasks'`，`channelExtensionId='channel
 
 Task policy 固定 producers=`['bili-owner-tasks']`，不写 `externalActions`；资源仅当前 owner scene 与 `BILI_SCENE` 公共材料，不含 QQ、其它私信或 server-executor scene。动作白名单为 `bili_discover`、`bili_search_sources`、`bili_search`、`bili_video`、`bili_comments`、`bili_subtitles`、`bili_danmaku`、`bili_media`、`bili_observe_select`、`dafeiyu_media_acquire`、`dafeiyu_media_inspect`、`dafeiyu_media_read`、`dafeiyu_media_select`、`dafeiyu_task_intent`、`dafeiyu_task_object`。这里“只读”指没有平台发布或服务器执行；观察选择所需本地写单独由 `allowLocalWrite` 授权。不开 `dafeiyu_media_reply`、QQ工具、任意网络工具、旧 publish 工具或 server-executor。
 
+为长任务和压缩后的合法接续，同一白名单还包含既有 `dafeiyu_execution_source_open`、`dafeiyu_execution_contribute`、`dafeiyu_execution_select`、`dafeiyu_execution_source_state`。它们只操作当前Task合法来源／工作区，沿用真实来源hash/version及曝光检查，不授予其它scene、平台发布或服务器执行权限。
+
 `explorationResources` 也只列同一公共 Bili资源，不能因自主兴趣扩大平台范围。若以后增加 Activity wake，需另立真实 wake 来源；本方案不伪造一次主人消息作为定时任务授权。
 
 现 Core 只有一个 id=`conversation` 的 policy，QQ 与 Bili producer共用时可能看到彼此 submit/status/control 名称。首版依 [messageAuthority](<D:/DSH/DSH workspace/dafeiyu/packages/core/src/execution-coordinator.ts:99>) 的真实 extension/channel/account/binding 检查硬拒 cross-origin，并用独立动作名说明所属渠道；不能依据模型传入 owner 参数判断。可另做 producer 展示过滤，但不能用隐藏工具替代执行检查。B站消息即使自称主人或调用 QQ 动作，也不能获得 QQ binding；Core 外部执行来源目前还明确要求 QQ，保持不变。
@@ -110,9 +112,9 @@ auth.session/cookieHeader 只在服务器端使用现有账号文件；新Host�
 
 ## 7. Host、唯一消费者与切换／回滚
 
-Host固定枚举新增 `channel-bili-owner`，`paths.channels`仅额外接受这个固定key，不能开放任意模块导入。声明 Core registration、Memory源跟踪／native-expression、execution.message-task、delivery.task-result；视频探索还要求现有Bili/Media服务及具体模态就绪。config验证固定账号、typed policy、资源和无externalActions；不能因allowLocalWrite获得网络发布。
+Host固定枚举新增 `channel-bili-owner`，不能开放任意模块导入。实施时收敛为 `coreDir/bili-owner.sqlite`，与公开读取 bilibili.sqlite、executor.sqlite 并列；不扩展 paths.channels，不改原资源布局绑定，渠道仍有独立 schema/identity/账本。声明 Core registration、Memory源跟踪／native-expression、execution.message-task、delivery.task-result；视频探索还要求现有Bili/Media服务及具体模态就绪。config验证固定账号、typed policy、资源和无externalActions；不能因allowLocalWrite获得网络发布。
 
-`init` 只显式建立新空渠道库，添加manifest.requiredStores/schema/状态检查；已有profile通过带备份增量migration添加，不隐式建库。迁移计划包含旧状态hash、import记录、新库与必要回执；关闭插件仍保留既有库、unknown与水位。日常启动/recover不读取旧worker重新初始化，也不调用模型／平台写接口。
+`init` 只显式建立新空渠道 schema，添加 manifest.requiredStores=`bili-owner` 和状态检查；已有 profile 通过带备份增量 migration 添加，不隐式建库。schema 迁移完成后先绑定 manifest，再单独做服务器内旧状态 handover；缺 handover 时仍拒绝启动，不自动补 since。迁移备份和 handover 各自保存原行/旧状态 hash、import 记录与必要回执；关闭插件仍保留既有库、unknown与水位。日常启动/recover不读取旧worker重新初始化，也不调用模型／平台写接口。
 
 现Host协调按数据路径占用，**不足以阻止两个不同dataDir消费同一账号**。新渠道必须另取得固定公共资源键 `bilibili-owner:170759822:13461350` 的受信机器级consumer lease；对应共同anchor／coordination位置由部署绑定，不能由各profile任选路径躲开冲突。lease含owner instance、进程身份、nonce、generation与绑定hash，每次poll/派发复验。旧worker不认识新lease，故首次切换还必须验证旧入口确已暂停／停用。
 
@@ -142,3 +144,9 @@ Guard按当前归属读真实新渠道/Host状态，不伪造旧heartbeat；old/
 | Host/guard | 显式init／现有profile migration／关闭后保留；缺依赖释放占用；两个不同profile同账号抢占失败；guard暂停、切换失败及有新数据后的回滚不回退事实。 |
 
 正式放行前仍须服务器侧核实完整transport依赖pins、被遮住的幂等实现、旧state/在途计数、实际账号登录、旧全部发送入口停用和唯一归属。无网络fixture通过不等于真实Bili验收；真实入站／回复核验使用现有唯一主人对象，不向第三人或公开区发测试内容。此设计未完成上述动作。
+
+## 10. 2026-10-26 transport 范围收敛
+
+主代理后续核对：管理中心 `调用限制解除开发/程序/bili-lite/auth.mjs` 的原始hash与线上 U 完全相同，构造器仅赋 root/fetch/clock/固定配置凭据路径，没有IO，静态imports仅Node内建模块。正式factory改为**只pin复用BiliAuth**，不import BiliAccount、HistoryStore或被遮住的publish实现。
+
+固定read/send请求规范从本次已观察的account函数实现到新窄transport；新调用幂等统一由 `bili-owner.sqlite` 负责。通过BiliAuth的fetch注入合并取消signal、限定真实endpoint/双方身份及响应上限，不导出凭据。这样新调用不再依赖旧HistoryStore闭包；旧claimed仍保留legacy-unknown，如需核对旧receipt，另走仅打开既有归档的精确程序查询，不能为查状态初始化或迁移旧历史库。这个收敛不改变以上渠道、来源、迁移、未知不重放和验收要求；真实factory仍待后续实现。

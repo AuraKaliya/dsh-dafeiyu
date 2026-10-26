@@ -1,0 +1,145 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { Context } from '@deepseek-ai/cordis';
+import { BILI_OWNER_SCENE,BILI_OWNER_TASK_ACTIONS,BiliOwnerPluginConfigSchema,openBiliOwnerChannel } from '@dafeiyu/channel-bili-owner';
+import { ActionOutcomeSchema } from '@dafeiyu/contracts';
+import { biliOwnerChannelFixture,biliOwnerBackend,incomingBili,fixedNow } from './bili-owner-channel-fixture.js';
+import { call,textReply } from './harness.js';
+import { outcomes } from './qq-capabilities-fixture.js';
+import { testTempDir } from './test-temp.js';
+
+type Fixture=Awaited<ReturnType<typeof biliOwnerChannelFixture>>;
+const native=(id:unknown)=>String(id).startsWith('dafeiyu-task-'),render=(id:unknown)=>String(id).startsWith('dafeiyu-delivery-v3-'),verify=(id:unknown)=>String(id).startsWith('memory-expression-verify-delivery-');
+function tasks(h:Fixture){const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{return db.prepare("SELECT r.id,r.state,q.producer,q.body AS payload FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE q.producer IN ('bili-owner-tasks','qq-tasks') ORDER BY r.rowid").all();}finally{db.close();}}
+function operationOutcomes(h:Fixture){const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{return db.prepare('SELECT action,outcome FROM run_operations WHERE outcome IS NOT NULL ORDER BY ordinal').all().map(row=>({action:row.action,outcome:ActionOutcomeSchema.parse(JSON.parse(String(row.outcome)))}));}finally{db.close();}}
+
+test('Bili owner ingress binds real fixed scene and exact IDs, ignores self messages and deduplicates without another model turn',async()=>{
+  const h=await biliOwnerChannelFixture();try{const original=incomingBili();h.backend.state.messages=[original,{...incomingBili('9007199254740993124'),senderUid:'170759822',receiverUid:'13461350'}];await h.poll();
+    assert.equal(h.adapter.requests.length,1);assert.equal(h.backend.state.sent.length,1);const item=h.core.journal.list()[0]!;assert.deepEqual(item.message.conversation,BILI_OWNER_SCENE);assert.equal(item.message.id,original.id);assert.equal(item.message.mainText,original.text);assert.equal(item.message.sender.id,'13461350');assert.equal(item.state,'delivered');
+    h.advance();await h.poll();assert.equal(h.adapter.requests.length,1);assert.equal(h.backend.state.attempts.length,1);assert.equal(h.channel.getStatus().counts.inbound.accepted,1);assert.equal(h.channel.getStatus().transport,'program-injected');
+    h.backend.state.messages.push({...incomingBili('9007199254740993125'),senderUid:'123456'});h.advance();await h.poll();assert.equal(h.adapter.requests.length,1);assert.ok(h.channel.getStatus().error);assert.equal(h.channel.store.source('9007199254740993125'),null);
+  }finally{await h.close();}
+});
+
+test('legacy unclaimed queue remains held until the transport returns the exact authenticated message',async()=>{
+  const message=incomingBili(),h=await biliOwnerChannelFixture({legacy:{seen:[],queue:[{...message,claimed:false}],since:fixedNow-60000,idPrecisionVersion:2}});
+  try{await h.poll();assert.equal(h.adapter.requests.length,0);assert.equal(h.channel.store.source(message.id)?.state,'held');
+    h.backend.state.messages=[message];h.advance();await h.poll();assert.equal(h.adapter.requests.length,1);assert.equal(h.channel.store.source(message.id)?.state,'accepted');assert.equal(h.backend.state.sent.length,1);
+  }finally{await h.close();}
+});
+
+test('pending capacity one drains persisted ingress after Core admission resumes and preserves its page cursor',async()=>{
+  const h=await biliOwnerChannelFixture({maxPending:1,deferWork:true});try{h.backend.state.messages=[incomingBili('11'),incomingBili('10')];await h.poll();
+    assert.equal(h.core.journal.list().length,0);assert.equal(h.channel.store.pending().length,1);assert.equal(h.channel.store.cursor().before,'11');assert.equal(h.channel.getStatus().error,'BILI_OWNER_CAPACITY');assert.deepEqual(h.backend.state.reads.map(value=>value.limit),[1]);
+    h.core.activate();h.advance();await h.poll();assert.equal(h.channel.store.pending().length,0);assert.equal(h.channel.getStatus().counts.inbound.accepted,2);assert.equal(h.channel.store.cursor().before,null);assert.deepEqual(h.backend.state.reads.map(value=>value.limit),[1,1]);assert.equal(h.adapter.requests.length,2);assert.equal(h.backend.state.sent.length,2);
+  }finally{await h.close();}
+});
+
+test('oversize text is persistently blocked without truncation, model replay, or transport on restart',async()=>{
+  let h=await biliOwnerChannelFixture();const root=h.root,backend=h.backend;
+  try{h.setResponse(()=>textReply('🐟'.repeat(1001)));await h.message('请给我虚构回复');assert.equal(h.backend.state.attempts.length,0);assert.equal(h.core.journal.list()[0]?.state,'reply-ready');
+    const record=h.channel.store.delivery(h.core.journal.list()[0]!.reply!.id)!;assert.equal(record.state,'blocked');assert.equal(record.code,'BILI_OWNER_TEXT_LIMIT');assert.equal(Array.from(record.plan.text).length,1001);
+  }finally{await h.close();}
+  h=await biliOwnerChannelFixture({root,backend,create:false});try{await h.core.whenIdle();await h.poll();assert.equal(h.adapter.requests.length,0);assert.equal(backend.state.attempts.length,0);assert.equal(h.channel.getStatus().counts.deliveries.blocked,1);}finally{await h.close();}
+});
+
+test('an uncertain private-message send is not retried or regenerated by duplicate ingress and restart',async()=>{
+  let h=await biliOwnerChannelFixture();const root=h.root,backend=h.backend;
+  try{backend.state.sendMode='unknown';await h.message('虚构网络失败');assert.equal(backend.state.attempts.length,1);assert.equal(h.core.journal.list()[0]?.state,'uncertain');assert.equal(h.channel.getStatus().counts.deliveries.unknown,1);
+    h.advance();await h.poll();assert.equal(backend.state.attempts.length,1);assert.equal(h.adapter.requests.length,1);
+    assert.throws(()=>h.core.retryDelivery(h.core.journal.list()[0]!.id),/definitely unsent/);
+  }finally{await h.close();}
+  h=await biliOwnerChannelFixture({root,backend,create:false});try{await h.core.whenIdle();h.advance();await h.poll();assert.equal(h.adapter.requests.length,0);assert.equal(backend.state.attempts.length,1);assert.equal(h.channel.getStatus().counts.deliveries.unknown,1);}finally{await h.close();}
+});
+
+test('a lease revoked during the final account check prevents transport while retaining an unsent reply',async()=>{
+  const h=await biliOwnerChannelFixture();try{h.backend.state.beforeVerify=async()=>{if(h.backend.state.verifications>=2)h.backend.state.leaseValid=false;};await h.message('核验前撤销虚构租约');
+    assert.equal(h.backend.state.attempts.length,0);assert.equal(h.core.journal.list()[0]?.state,'reply-ready');assert.equal(h.channel.getStatus().verified,false);assert.equal(h.channel.getStatus().counts.deliveries.prepared,1);
+  }finally{await h.close();}
+});
+
+test('recovery projects a locally committed recall into Core once without re-running a model or sender',async()=>{
+  let h=await biliOwnerChannelFixture();const root=h.root,backend=h.backend,id=incomingBili().id;
+  try{await h.message('虚构可撤回消息',id);h.channel.store.recall(id,backend.state.now);assert.equal(h.core.journal.messageRecalled(h.scope,id),false);}finally{await h.close();}
+  h=await biliOwnerChannelFixture({root,backend,create:false});try{assert.equal(h.core.journal.messageRecalled(h.scope,id),true);assert.equal(h.adapter.requests.length,0);assert.equal(backend.state.attempts.length,1);
+    const count=()=>h.core.journal.events(h.scope.route).filter(event=>event.type==='message.recalled'&&event.data.messageId===id).length;assert.equal(count(),1);h.channel.recall(id);assert.equal(count(),1);
+  }finally{await h.close();}
+});
+
+test('Bili exploration uses its own generic Task binding and delivers verified persona text to the original scene',async()=>{
+  const h=await biliOwnerChannelFixture({tasks:true});try{let chat=0,work=0;const answer='BILI_PERSONA_RESULT：这是有范围的虚构视频资料，不代表观看了画面。';
+    h.setResponse(request=>{if(render(request.sessionId)){const input=JSON.stringify(request.messages);assert.match(input,/PUBLIC_BILI_EVIDENCE/);assert.ok(!input.includes('RAW_BILI_TASK_REPORT'));return textReply(answer);}
+      if(verify(request.sessionId))return textReply('{"faithful":true,"issues":[]}');
+      if(native(request.sessionId)){assert.ok(!request.tools?.some(tool=>['qq_task_submit','dafeiyu_server_execute_owner','bili_comment_send','bili_danmaku_send'].includes(tool.name)));return ++work===1?call('bili_fixture_read',{}):textReply('RAW_BILI_TASK_REPORT');}
+      return ++chat===1?call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'bili-work'}):textReply('已受理B站只读任务');});
+    await h.message('任务：核对虚构视频中的实际可见资料');const rows=tasks(h);assert.equal(rows.length,1);assert.equal(rows[0]!.producer,'bili-owner-tasks');assert.equal(rows[0]!.state,'completed');assert.equal(h.publicReads,1);
+    const saved=JSON.parse(String(rows[0]!.payload));assert.equal(saved.motivation.kind,'explicit-task');assert.equal(saved.messageSource.conversation.channel,'bilibili');assert.equal(saved.messageSource.bindingId,'bili-owner-tasks');
+    assert.equal(h.core.messageTaskDeliveryStatus(String(rows[0]!.id))?.state,'sent');assert.equal(h.backend.state.sent.length,2);assert.equal(h.backend.state.sent[1]?.text,answer);assert.ok(h.backend.state.sent.every(value=>!value.text.includes('RAW_BILI_TASK_REPORT')));
+    assert.equal(h.adapter.requests.filter(request=>render(request.sessionId)).length,1);assert.equal(h.adapter.requests.filter(request=>verify(request.sessionId)).length,1);
+  }finally{await h.close();}
+});
+
+test('self-exploration keeps its own goal and motivation rather than relabelling it as an owner instruction',async()=>{
+  const h=await biliOwnerChannelFixture({tasks:true});try{let chat=0;h.setResponse(request=>native(request.sessionId)?textReply('虚构兴趣探索已结束'):render(request.sessionId)?textReply('只说明当前探索范围'):verify(request.sessionId)?textReply('{"faithful":true,"issues":[]}'):++chat===1?call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'interest',kind:'self-exploration',goal:'自主了解虚构视频结构'}):textReply('这是我的兴趣探索'));
+    await h.message('随便聊聊虚构视频');const rows=tasks(h);assert.equal(rows.length,1);const saved=JSON.parse(String(rows[0]!.payload));assert.equal(saved.motivation.kind,'self-exploration');assert.equal(saved.input.goal,'自主了解虚构视频结构');assert.equal(saved.messageSource.kind,'self-exploration');
+  }finally{await h.close();}
+});
+
+test('shared conversation policy cannot make Bili and QQ task bindings authorize each other',async()=>{
+  const h=await biliOwnerChannelFixture({tasks:true,otherChannel:true});try{let step=0;h.setResponse(request=>++step===1?call('qq_task_submit',{requestId:'wrong-channel'}):textReply(String(outcomes(request).at(-1)?.errorCode)));
+    await h.message('任务：来自B站的真实虚构文字');assert.equal(tasks(h).length,0);assert.equal(operationOutcomes(h).at(-1)?.outcome.errorCode,'SCOPE_DENIED');
+    step=0;h.setResponse(request=>++step===1?call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'wrong-bili-binding'}):textReply(String(outcomes(request).at(-1)?.errorCode)));
+    await h.otherMessage('任务：来自QQ的真实虚构文字');assert.equal(tasks(h).length,0);assert.equal(operationOutcomes(h).at(-1)?.outcome.errorCode,'SCOPE_DENIED');
+  }finally{await h.close();}
+});
+
+test('quiescing preserves old source checks but rejects a new Task from an already running conversation',async()=>{
+  const h=await biliOwnerChannelFixture({tasks:true});try{let step=0;h.setResponse(request=>{if(++step===1){h.channel.quiesce();return call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'too-late'});}assert.equal(outcomes(request).at(-1)?.errorCode,'BILI_OWNER_TASK_ADMISSION_CLOSED');return textReply('正在排空，没有新增任务');});
+    await h.message('任务：排空时不能新增工作');assert.equal(tasks(h).length,0);assert.equal(h.backend.state.attempts.length,0);assert.equal(h.channel.getStatus().lifecycle,'quiescing');assert.equal(h.core.journal.messageRecalled(h.scope,incomingBili().id),false);
+  }finally{await h.close();}
+});
+
+test('restart validates old Task sources before online verification and only resumes the accepted Run after admission opens',async()=>{
+  let h=await biliOwnerChannelFixture({tasks:true,deliverResults:false,maxConcurrentRuns:1});const root=h.root,backend=h.backend;let completed='',pending='';
+  try{let chat=0;h.setResponse(request=>native(request.sessionId)?textReply('STORED_BILI_TASK_RESULT'):++chat===1?call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'before-restart'}):textReply('已受理第一项'));
+    await h.message('任务：核对第一项虚构资料','101');const first=tasks(h);assert.equal(first.length,1);assert.equal(first[0]!.state,'completed');completed=String(first[0]!.id);
+    chat=0;h.setResponse(request=>{assert.equal(native(request.sessionId),false,'the conversation owns the only scheduler slot until quiesce');if(++chat===1)return call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'waiting-for-restart'});h.core.quiesce();return textReply('已受理，等待恢复');});
+    await h.message('任务：核对第二项虚构资料','102');const rows=tasks(h);assert.equal(rows.length,2);assert.equal(rows[0]!.state,'completed');assert.equal(rows[1]!.state,'accepted');pending=String(rows[1]!.id);
+    assert.equal(h.adapter.requests.filter(request=>native(request.sessionId)).length,1);
+  }finally{await h.close();}
+  const verifiedBefore=backend.state.verifications;
+  h=await biliOwnerChannelFixture({root,backend,create:false,tasks:true,deliverResults:false,maxConcurrentRuns:1,deferWork:true,beforeStart:async(ctx,channel,adapter)=>{
+    assert.equal(channel.getStatus().verified,false);assert.equal(channel.getStatus().bindingReady,true);assert.equal(backend.state.verifications,verifiedBefore);assert.equal(adapter.requests.length,0);assert.equal(ctx.dafeiyu.accepting,false);
+    const port=ctx.dafeiyu.executionProducer('bili-owner-tasks');assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(port.status(port.restoreRun(pending)).state,'accepted');assert.equal(adapter.requests.length,0);
+  }});
+  try{assert.equal(h.adapter.requests.length,0);assert.equal(tasks(h)[1]!.state,'accepted');h.setResponse(request=>{assert.equal(native(request.sessionId),true);return textReply('RESUMED_BILI_TASK_RESULT');});
+    h.core.activate();await h.core.whenIdle();assert.deepEqual(tasks(h).map(row=>row.state),['completed','completed']);assert.equal(h.adapter.requests.length,1);
+    const port=h.core.executionProducer('bili-owner-tasks');assert.equal(await port.readResult(port.restoreRun(pending)),'RESUMED_BILI_TASK_RESULT');assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');
+    backend.state.beforeVerify=async()=>{throw new Error('BILI_OWNER_NETWORK_UNAVAILABLE');};h.advance();await h.poll();assert.equal(h.channel.getStatus().verified,false);assert.equal(h.channel.getStatus().bindingFault,null);
+    assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(h.adapter.requests.length,1);assert.equal(h.channel.store.source('101')?.state,'accepted');
+  }finally{await h.close();}
+});
+
+test('an actual account change persists source invalidation across restart instead of becoming a transient login failure',async()=>{
+  const h=await biliOwnerChannelFixture({tasks:true,deliverResults:false});const root=h.root,backend=h.backend;
+  try{let chat=0;h.setResponse(request=>native(request.sessionId)?textReply('ACCOUNT_BOUND_RESULT'):++chat===1?call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'bound-account'}):textReply('已受理'));
+    await h.message('任务：核对账号绑定的虚构资料');const id=String(tasks(h)[0]!.id),port=h.core.executionProducer('bili-owner-tasks');assert.equal(await port.readResult(port.restoreRun(id)),'ACCOUNT_BOUND_RESULT');
+    backend.state.account='123456';h.advance();await h.poll();assert.equal(h.channel.getStatus().bindingFault,'BILI_OWNER_ACCOUNT_MISMATCH');assert.equal(h.channel.getStatus().bindingReady,false);assert.equal(h.channel.getStatus().verified,false);
+    await assert.rejects(()=>port.readResult(port.restoreRun(id)),/SOURCE_STALE/);
+  }finally{await h.close();}
+  backend.state.account='170759822';const checked=backend.state.verifications;
+  await assert.rejects(()=>biliOwnerChannelFixture({root,backend,create:false,tasks:true,deliverResults:false}),/BILI_OWNER_BINDING_REJECTED/);assert.equal(backend.state.verifications,checked);assert.equal(backend.state.closes,2);assert.equal(backend.state.releases,2);
+});
+
+test('constructor and identity-check failures release the transferred ports exactly once and cannot accept injected config authority',async()=>{
+  for(const settings of [{accountUid:'123456'},{ownerUid:'123456'},{mode:'production'},{transport:{send:'fake'}}])assert.throws(()=>BiliOwnerPluginConfigSchema.parse(settings));
+  const missing=biliOwnerBackend(),ctx=new Context();try{await assert.rejects(()=>openBiliOwnerChannel(ctx,{agentId:'dafeiyu',profileId:'missing-core',dataDir:testTempDir()},missing.createPorts()),/BILI_OWNER_CORE_REQUIRED/);assert.equal(missing.state.closes,1);assert.equal(missing.state.releases,1);assert.equal(missing.state.verifications,0);}finally{await ctx.fiber.dispose();}
+  const construction=biliOwnerBackend();await assert.rejects(()=>biliOwnerChannelFixture({tasks:true,omitTaskPolicy:true,backend:construction}),/SCOPE_DENIED|CONSTRUCTION/);assert.equal(construction.state.closes,1);assert.equal(construction.state.releases,1);assert.equal(construction.state.verifications,0);
+  const wrongAccount=biliOwnerBackend();wrongAccount.state.account='123456';await assert.rejects(()=>biliOwnerChannelFixture({backend:wrongAccount}));assert.equal(wrongAccount.state.closes,1);assert.equal(wrongAccount.state.releases,1);assert.equal(wrongAccount.state.attempts.length,0);
+  const h=await biliOwnerChannelFixture();try{const journal=h.core.journal;await h.channel.close();await h.channel.close();assert.equal(h.backend.state.closes,1);assert.equal(h.backend.state.releases,1);assert.equal(h.ctx.get('dafeiyuBiliOwner'),undefined);
+    // Cordis returns a fresh context-tracing proxy on each service read; its public journal is the stable owned resource.
+    assert.equal(h.ctx.dafeiyu.journal,journal);assert.equal(h.core.journal,journal);assert.equal(h.ctx.dafeiyu.lifecycleState,'active');assert.equal(h.core.lifecycleState,'active');assert.equal(h.ctx.dafeiyu.accepting,true);
+  }finally{await h.close();}
+});
