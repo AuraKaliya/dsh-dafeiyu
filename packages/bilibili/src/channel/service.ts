@@ -105,7 +105,7 @@ export class BiliOwnerChannel extends Service {
     const guard=()=>{this.guard();signal.throwIfAborted();authority();this.checkSource(value.plan);};
     try{guard();await this.verify(signal);guard();this.store.begin(value.plan.replyId,this.now());guard();invoked=true;
       const response=BiliOwnerSendResultSchema.parse(await this.ports.transport.sendOwnerText({requestId:value.plan.requestId,text:value.plan.text,wireHash:value.plan.wireHash},signal,guard));
-      if(response.status==='sent'){this.checkIdentity({...response,loggedIn:true});if(response.requestId!==value.plan.requestId||response.wireHash!==value.plan.wireHash)throw new Error('BILI_OWNER_RECEIPT_MISMATCH');this.store.confirm(value.plan.replyId,response.receiptId,this.now());}
+      if(response.status==='sent'){if(response.accountUid!==this.config.settings.accountUid||response.ownerUid!==this.config.settings.ownerUid||response.requestId!==value.plan.requestId||response.wireHash!==value.plan.wireHash)throw new Error('BILI_OWNER_RECEIPT_MISMATCH');this.store.confirm(value.plan.replyId,response.receiptId,this.now());}
       else if(response.status==='not-dispatched')this.store.notDispatched(value.plan.replyId,response.code,this.now());else this.store.unknown(value.plan.replyId,response.code,this.now());
     }catch(error){const latest=this.store.delivery(value.plan.replyId)!;if(latest.state==='sending'){if(invoked)this.store.unknown(value.plan.replyId,biliOwnerCode(error,'BILI_OWNER_DELIVERY_UNKNOWN'),this.now());else this.store.notDispatched(value.plan.replyId,biliOwnerCode(error,'BILI_OWNER_PRECHECK_FAILED'),this.now());}
       else if(latest.state==='prepared')return {status:'not-sent',code:biliOwnerCode(error,'BILI_OWNER_PRECHECK_FAILED')};}

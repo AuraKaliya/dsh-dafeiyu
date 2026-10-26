@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync,statSync } from 'node:fs';
 import { dirname,resolve } from 'node:path';
 import { z } from 'zod';
 
@@ -27,6 +27,16 @@ export const InstallationSettingsSchema=z.strictObject({
 export type InstallationSettings=z.infer<typeof InstallationSettingsSchema>;
 export class SettingsError extends Error {
   constructor(readonly fields:readonly string[]){super('INSTALL_CONFIGURATION_REQUIRED');}
+}
+export function checkInstallationFiles(settings:InstallationSettings,scripted=false):void {
+  const missing:string[]=[];
+  const file=(path:string)=>{try{const info=statSync(path);return info.isFile()&&info.size>0&&info.size<=262144;}catch{return false;}};
+  if(!scripted&&!file(settings.model.credentialStore))missing.push('model.credentialStore');
+  if(!file(settings.qq.tokenFile))missing.push('qq.tokenFile');
+  else if(readFileSync(settings.qq.tokenFile,'utf8').trim().length<32)missing.push('qq.tokenFile');
+  if(settings.bilibili?.channel&&!file(settings.bilibili.channel.sessionFile))missing.push('bilibili.channel.sessionFile');
+  if(settings.bilibili?.session&&!file(settings.bilibili.session.file))missing.push('bilibili.session.file');
+  if(missing.length)throw new SettingsError(missing);
 }
 /** Returns field paths only on failure. Never includes credentials or user values. */
 export function readInstallationSettings(file:string):InstallationSettings {

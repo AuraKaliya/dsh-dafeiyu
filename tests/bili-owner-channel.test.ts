@@ -137,3 +137,12 @@ test('constructor and identity-check failures release the transferred ports exac
     assert.equal(h.ctx.dafeiyu.journal,journal);assert.equal(h.core.journal,journal);assert.equal(h.ctx.dafeiyu.lifecycleState,'active');assert.equal(h.core.lifecycleState,'active');assert.equal(h.ctx.dafeiyu.accepting,true);
   }finally{await h.close();}
 });
+
+
+test('a receipt for a different configured account or owner remains unknown and cannot trigger a resend',async()=>{
+  for(const field of ['receiptAccount','receiptOwner'] as const){const backend=biliOwnerBackend();backend.state[field]='20000099';const h=await biliOwnerChannelFixture({backend});
+    try{await h.message('虚构回执身份检查');const reply=h.core.journal.list()[0]!.reply!;const delivery=h.channel.store.delivery(reply.id)!;
+      assert.equal(delivery.state,'unknown');assert.equal(delivery.code,'BILI_OWNER_RECEIPT_MISMATCH');assert.equal(backend.state.attempts.length,1);
+      h.advance();await h.poll();assert.equal(backend.state.attempts.length,1);
+    }finally{await h.close();}}
+});

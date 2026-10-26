@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {existsSync,readFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
-import {readInstallationSettings,SettingsError} from '../lib/settings.js';
+import {readInstallationSettings,checkInstallationFiles,SettingsError} from '../lib/settings.js';
 
 const args=process.argv.slice(2),mode=args[0];
 const report=value=>{console.log(JSON.stringify(value));if(process.connected)process.send(value);};
@@ -13,8 +13,7 @@ if(!mode||['--help','-h'].includes(mode)){
     const major=Number(process.versions.node.split('.')[0]),minor=Number(process.versions.node.split('.')[1]);if(major!==24||minor<13)throw new Error('INSTALL_NODE_24_REQUIRED');
     const file=resolve(args[2]),settings=readInstallationSettings(file);
     if(mode==='check'){
-      const missing=[['model.credentialStore',settings.model.credentialStore],['qq.tokenFile',settings.qq.tokenFile],...(settings.bilibili?.channel?[['bilibili.channel.sessionFile',settings.bilibili.channel.sessionFile]]:[])].filter(([,path])=>!existsSync(path)).map(([field])=>field);
-      if(missing.length)throw new SettingsError(missing);report({code:'INSTALL_CONFIGURATION_VALID',connectivity:'not-tested',modelCalls:0});
+      checkInstallationFiles(settings);report({code:'INSTALL_CONFIGURATION_VALID',connectivity:'not-tested',modelCalls:0});
     }else{
       process.env.DSH_HOME=join(settings.dataDir,'core','dsh-home');
       if(mode==='status'){

@@ -19,7 +19,7 @@ import { testTempDir } from './test-temp.js';
 export const fixedNow=1793000000000,fixtureHash='a'.repeat(64),fixtureStamp='b'.repeat(64);
 export const incomingBili=(id='9007199254740993123',text='虚构主人文字'):BiliOwnerMessage=>({id,seqno:id,senderUid:BILI_OWNER_UID,receiverUid:BILI_OWNER_ACCOUNT,type:1,timestamp:fixedNow/1000,text});
 export function biliOwnerBackend(){const state={messages:[] as BiliOwnerMessage[],reads:[] as {beforeSeqno?:string;limit:number}[],attempts:[] as {requestId:string;text:string;wireHash:string}[],sent:[] as {requestId:string;text:string;wireHash:string}[],
-    verifications:0,closes:0,releases:0,pinsValid:true,leaseValid:true,account:BILI_OWNER_ACCOUNT as string,stamp:fixtureStamp,sendMode:'sent' as 'sent'|'unknown'|'throw'|'not-dispatched',now:fixedNow,
+    verifications:0,closes:0,releases:0,pinsValid:true,leaseValid:true,account:BILI_OWNER_ACCOUNT as string,receiptAccount:BILI_OWNER_ACCOUNT as string,receiptOwner:BILI_OWNER_UID as string,stamp:fixtureStamp,sendMode:'sent' as 'sent'|'unknown'|'throw'|'not-dispatched',now:fixedNow,
     beforeVerify:async()=>{},beforeSend:async(_guard:()=>void)=>{}};
   const createPorts=():BiliOwnerPorts=>{let released=false,closed=false;const guard=()=>{if(closed)throw new Error('BILI_OWNER_TRANSPORT_CLOSED');if(!state.pinsValid)throw new Error('BILI_OWNER_PIN_CHANGED');};
     return {now:()=>state.now,lease:{key:BILI_OWNER_CONSUMER_KEY,epoch:1,guard:()=>{if(released||!state.leaseValid)throw new Error('BILI_OWNER_LEASE_REVOKED');},release:()=>{if(released)throw new Error('LEASE_RELEASED_TWICE');released=true;state.releases++;}},
@@ -30,7 +30,7 @@ export function biliOwnerBackend(){const state={messages:[] as BiliOwnerMessage[
         sendOwnerText:async(input,signal,check)=>{check();signal.throwIfAborted();await state.beforeSend(check);check();signal.throwIfAborted();
           if(state.sendMode==='not-dispatched')return {status:'not-dispatched',code:'BILI_OWNER_PRECHECK_STOPPED'};state.attempts.push({...input});
           if(state.sendMode==='throw')throw new Error('BILI_OWNER_NETWORK_UNKNOWN');if(state.sendMode==='unknown')return {status:'unknown',code:'BILI_OWNER_NETWORK_UNKNOWN'};
-          state.sent.push({...input});return {status:'sent',receiptId:String(1000+state.sent.length),accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID,requestId:input.requestId,wireHash:input.wireHash};},
+          state.sent.push({...input});return {status:'sent',receiptId:String(1000+state.sent.length),accountUid:state.receiptAccount,ownerUid:state.receiptOwner,requestId:input.requestId,wireHash:input.wireHash};},
         close:()=>{if(closed)throw new Error('TRANSPORT_CLOSED_TWICE');closed=true;state.closes++;}}};};
   return {state,createPorts};
 }

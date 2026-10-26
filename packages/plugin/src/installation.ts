@@ -12,7 +12,7 @@ import { BiliOwnerStore,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE,biliOwnerScene
 import { BILI_OWNER_AUTH_HASH } from '@dafeiyu/bilibili/channel/production-config';
 import { ACTIVITY_ACTIONS } from '@dafeiyu/activity';
 import { MEDIA_ACTIONS } from '@dafeiyu/media';
-import { readInstallationSettings } from './settings.js';
+import { readInstallationSettings,checkInstallationFiles } from './settings.js';
 import type { InstallationSettings } from './settings.js';
 
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -57,6 +57,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
 
 export function prepareInstallation(settingsFile:string,options:InstallationOptions={}) {
   const settings=readInstallationSettings(settingsFile),root=settings.dataDir,metaFile=join(root,'installation.json');
+  checkInstallationFiles(settings,options.scripted);
   let meta:InstallationMetadata;
   if(existsSync(metaFile)){
     meta=metadataSchema.parse(JSON.parse(readFileSync(metaFile,'utf8')));
