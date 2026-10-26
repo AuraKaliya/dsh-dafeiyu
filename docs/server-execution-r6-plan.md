@@ -1,6 +1,6 @@
-# R6 服务器执行与 DSH 装配方案（待实施）
+# R6 服务器执行与 DSH 装配方案
 
-2026-10-26。本方案依据本项目源码、已安装的本地 DSH 包及管理中心历史镜像编制。当前校准继续完成；源码、脚本、测试保持冻结，本轮只修改本文。R6 完成后重新冻结候选并校准，正式 162 项不先运行。未连接服务器、读取凭据内容或实施部署，线上 ABI、账户、进程权限、任务、Git 差异及真实新增记忆均待核验。
+2026-10-26，实施中。R5 的五项真实校准已完成并单独记录；R6 完成后重新冻结候选并校准，正式 162 项不提前运行。服务器已完成一轮公开元数据只读核对，记录见 `server-readonly-inventory-check.md`；未修改在线部署或读取账号凭据内容。实际管理员 token、平台实时状态、完整依赖来源及新增数据迁移仍待核验。
 
 用户最新澄清优先于此前“清空其它插件”的宽泛理解：只清理后来从市场额外下载／配置的插件；**DSH自身架构中的官方基础功能插件绝对不能动**。按实际inventory、来源与依赖闭包分类保留／替换／移除，不能按包名前缀猜测。独立SYSTEM update-guard属于运维保护，继续保留并适配，不作为普通市场插件清除。新大肥鱼插件按单独固定清单装配。
 
@@ -18,7 +18,7 @@
 | ManagedHost 没有生产扩展 factory 清单 | 它自行 new Context；onPhase 可在 binding 时同步注册，但没有完整异步装配、健康与释放契约，CLI JSON 也不能提供函数。 |
 | 依赖版本需核实 | Core 等 peerDependencies 使用 Cordis 4.0.5、DSH 0.2.1-rc.2；当前服务器是否兼容未知，不能用旧镜像推定。 |
 
-主路径为“现有 DSH 服务 → server-bootstrap → 新 Core/Memory/渠道/活动 + server-executor → 专用 headless 子进程”。bootstrap 是显式受信插件，注册固定能力，不加载用户／模型给出的任意模块。ManagedHost 留作现有本地运行及验收入口；若需要独立部署，再为同一 executor 增加固定 Host 插件枚举和装配，不作为 R6 主路径的前置重构。
+主路径修订为“独立 ManagedHost 进程中的官方 DSH 组件 → 新 Core/Memory/渠道/活动 + 固定 server-executor → 专用 headless 子进程”。复用既有统一入口的显式预检、初始化、生命周期和诊断，为同一 executor 增加固定插件枚举，不加载用户／模型给出的任意模块。服务器桌面 DSH 官方基础功能、UI 和独立 guard 保留，不把产品强行嵌入已有全局钩子的上下文。决策依据与失败试验记录见 [内嵌装配核对](reviews/r6-embedded-dsh-stop.md)。
 
 ## 2. R6a：最小 Core 契约与旧数据兼容
 
@@ -52,15 +52,15 @@ extensionId/actionId 沿现有命名 Schema，数组去重、有限容量、无�
 
 ## 3. R6b：受信 bootstrap 与独立 standing authority
 
-新增 packages/server-bootstrap 与 packages/server-executor。bootstrap 采用现有 DSH 运行底座，不装配第二套全局凭据服务或默认模型，不在旧 DSH 进程内启动 ManagedHost 自建 Context。装配细节按下述本地 ABI 核对修订；父级官方基础组件保留。
+`packages/server-bootstrap` 已交付长期自主授权读取器；实际装配沿既有 ManagedHost 独立进程，不在桌面进程重复注册 Agent 工厂或 Prompt。官方 AgentLoop 仍拥有模型循环，本项目不另写循环。固定 executor 配置由 Host 校验依赖、授权名单、数据目录、受信 Node/CLI/profile 指纹和预算端口；缺任何前提就关闭该能力并报告具体原因。
 
-2026-10-26 实施前核对：DSH 0.2.1-rc.2 的 AgentLoop 实际 Agent scope 来自 loop 自身的 runtime ctx，不能仅在调用方隔离 attachments/compaction 就假设实际 Agent 已隔离；而 Media 与 Core 的来源跟踪明确拒绝其它附件/压缩服务。另一个官方 AgentLoop 实例会在 systemPrompt 中注册相同变量。最小候选方案是在产品子作用域隔离 agents、agentLoop、systemPrompt、attachments、compaction，装配独立的**官方** AgentRegistry/AgentLoop/Prompt 实例，复用父级 sessions/sessionPersistence/sessionQuery/tools/llm；不是重写模型循环，也不卸载或覆盖父级基础组件。先用实际 Cordis/DSH 组件与虚构样本验证实际 Agent 的服务继承及父实例保留，再接完整 bootstrap；不以构造未报错代替验证。
+该选择保留基础组件原样。静态核对确认了父 factory 的作用域绑定、Prompt/typert 重复注册和部分父级全局钩子的跨 Agent 处理机制；但未证明这些钩子当前在线全部启用。此次不为内嵌修改官方钩子、读取私有字段或绕过来源检查。未通过的内嵌 prototype 已撤回，检查记录保留。
 
-共享存储单独核验：通过公开 registry/fiber.config 和 sessionPersistence.identity 绑定唯一活动 JSONL provider 及其配置，不读取私有 root 字段或猜测路径。项目只独占 core/memory/channel/executor 等自己的数据，不能声称独占整个 DSH sessions/query 根，也不初始化、迁移或整根清理这些借用存储。新增明确的 provided-DSH 预检/初始化路径，旧 standalone 行为保持不变，manifest 仍记录真实完整布局。bootstrap 自有状态不冒用 standalone 的独占资源状态报告。
+ManagedHost 使用程序树之外、明确归属于本项目的新运行目录；不宣称拥有旧桌面 DSH 的整个 sessions/query 根，不清空或迁移无关会话。既有真实记忆和关系按明确导入/保留方案处理，不用空数据库覆盖；每个实际运行目录、身份和 schema 都纳入既有 manifest、占用、备份和恢复检查。独立 Host 与 child CLI 各自生命周期明确，停止项目实例不停止父桌面基础服务。
 
 启动顺序沿现有公开接口：独立路径预检及占用 → Core(managed) → Timeline → Memory(managed) → configureExecution → executor/Activity/Media/Bili/QQ(managed) → 暂缓 QQ 入站 → Memory 就绪 → recoverExecutions（含 TrialOutcome 补齐）→ core.recover → activate(deferWork) → 渠道就绪 → 开放准入 → Activity.start。关闭先停新唤醒/新子任务/新入站，再排空或取消，最后逆序释放。失败不能遗留第二个消费者或删除其它实例占用。
 
-bootstrap 必须具有自己可观测的 ready/degraded/draining/stopped 状态，纳入 guard 的空闲与健康判定。包通过固定 DSH bundle/patch 安装；兼容现有 ABI 失败就停止该候选，不自动替换服务器整个 DSH 或强行安装另一套重复 peer 服务。
+统一入口继续使用既有 ready/degraded/draining/stopped 状态，新增 executor 在途/未知计数，纳入 guard 的空闲与健康判定。固定运行包与专用 CLI profile 纳入发布指纹；ABI 不兼容就停止该候选，不自动替换服务器整个 DSH。正式启动器不允许任意导入脚本，正式测试之外也不装载脚本模型替代真实服务。
 
 standing authority 是部署维护者写入的版本化授权文件/记录，不由模型生成。建议最少字段：
 
