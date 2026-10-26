@@ -42,6 +42,25 @@
         "relative": "cases/f667d966-fcb9-4e97-b1bf-bedda2aaa39d/program.json",
         "hash": "a2b5b917bcb73eb9d0feccb56e13110755490b7c5323230e477bfdd1c73d6672"
       }
+    },
+    {
+      "caseId": "B07-neutral-1",
+      "attemptId": "35d22913-984d-4550-b58a-7a581be81e20",
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "reviewer": "codex-under-user-delegated-autonomy",
+      "reviewedAt": "2026-10-26T08:04:14.908Z",
+      "failedCheckIds": ["missing-total-blocked-specifically"],
+      "continueIndependentCases": true,
+      "releaseBlocked": true,
+      "rationale": "再次复现B07持久任务阻断缺失：模型准确区分已知小计20与三月缺失，fixture_total返回FIXTURE_MARCH_MISSING且effects为none，无完整总量写入。其余程序检查及三笔实际请求记账均通过。保留本次独立样本失败及发布阻断，不改评分或重抽到通过，仅继续其它隔离场景。",
+      "program": {
+        "relative": "cases/35d22913-984d-4550-b58a-7a581be81e20/program.json",
+        "hash": "005d1ba5ec002ef932571446ba276d8083d6fb8404751765acaf324b76a031f1"
+      }
     }
   ]
 }
