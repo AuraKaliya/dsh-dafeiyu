@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/AuraKaliya/dsh-dafeiyu",
+  "commit": "88825174fecd1eb80809da9f225b31b7bca8593a",
+  "tree": "ba385388cf9ab159a59a02878bb4178a65240052",
+  "tag": "v0.20.0",
+  "files": 789,
+  "authorPrivacy": "github-noreply",
+  "privateHistoryPublished": false,
+  "refsVerified": true,
+  "release": {
+    "url": "https://github.com/AuraKaliya/dsh-dafeiyu/releases/tag/v0.20.0",
+    "prerelease": true,
+    "draft": false,
+    "asset": "https://github.com/AuraKaliya/dsh-dafeiyu/releases/download/v0.20.0/dsh-dafeiyu-0.20.0.tgz",
+    "size": 689059,
+    "sha256": "8c9701e7a8f8780ad194629f98a8d4c8bd2faeb1fd80eaec4b14a7c50f991ea4",
+    "downloadVerified": true
+  },
+  "privacy": {
+    "passed": true,
+    "files": 789,
+    "bytes": 5796127,
+    "findings": []
+  },
+  "localRegression": {
+    "files": 167,
+    "tests": 1300,
+    "passed": true,
+    "realModel": false,
+    "realPlatform": false,
+    "serverAccess": false
+  },
+  "originalRepositoryHistoryPublished": false,
+  "originalUncommittedFilePreserved": true,
+  "obsoleteBuildCleanup": {
+    "status": "blocked-by-automatic-approval",
+    "reason": "blocked by policy",
+    "retainedCopies": 4
+  }
+}

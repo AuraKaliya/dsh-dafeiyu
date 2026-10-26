@@ -112,8 +112,8 @@ Core维护journal、runtime和delivery状态；Memory使用memory/analysis/worki
 
 ## 11. 验证状态与未完成项
 
-本轮记忆与成长、平台整合、安装与分发检查见 `docs/checks/plugin-integration-*.md`。实际运行本机DSH/SQLite/Windows/回环网络，模型与平台为模拟；已完成从tarball安装及拒绝回退开发目录的启动/重启检查。发布全量回归单独记录。此前R5真实校准属于旧候选，不自动覆盖新版本。
+本轮记忆与成长、平台整合、安装与分发检查见 `docs/checks/plugin-integration-*.md`。实际运行本机DSH/SQLite/Windows/回环网络，模型与平台为模拟；已完成从tarball安装及拒绝回退开发目录的启动/重启检查。发布本机全量回归已完成：167文件、1300项通过，记录见 `checks/plugin-integration-8-final.md`；开源发布见 `checks/plugin-integration-9-github-publication.md`。此前R5真实校准属于旧候选，不自动覆盖新版本。
 
-尚未完成：新候选162项真实模型验收、本机真实QQ/B站和音画质量验收、本机持续运行/恢复、本机发布全量回归及最终生产启动配置。没有声称已上线、真实平台全部通过或长期人格稳定已被证明。
+尚未完成：新候选162项真实模型验收、本机真实QQ/B站和音画质量验收、本机持续运行/恢复，以及用户机器的实际连接配置和管理员执行高级装配。没有声称已上线、真实平台全部通过或长期人格稳定已被证明。
 
 旧系统接管、旧夜间自动Git和旧更新守护、完整运营资金授权系统不再作为待开发项。详见 `current-scope-and-cleanup.md` 和 `integrated-acceptance-plan.md`。
