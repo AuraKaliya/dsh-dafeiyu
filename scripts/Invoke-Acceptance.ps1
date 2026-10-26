@@ -1,5 +1,5 @@
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('main','retry')][string]$Entry,
+  [Parameter(Mandatory=$true)][ValidateSet('main','retry','matrix')][string]$Entry,
   [Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments
 )
 $ErrorActionPreference='Stop'
@@ -20,7 +20,7 @@ try{
   $env:NODE_USE_ENV_PROXY='1'
   $env:NO_PROXY='127.0.0.1,localhost,::1'
   $env:NODE_DISABLE_COMPILE_CACHE='1'
-  $target=if($Entry -eq 'main'){'scripts/run-integrated-real.mjs'}else{'scripts/retry-integrated-case.mjs'}
+  $target=if($Entry -eq 'main'){'scripts/run-integrated-real.mjs'}elseif($Entry -eq 'retry'){'scripts/retry-integrated-case.mjs'}else{'scripts/continue-integrated-matrix.mjs'}
   & node --import ./scripts/acceptance-network-preload.mjs $target @Arguments
   $resultCode=$LASTEXITCODE
 }finally{
