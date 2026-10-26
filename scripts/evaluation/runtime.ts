@@ -20,7 +20,7 @@ import type { EvaluationLedger } from './ledger.ts';
 import { installEvaluationBilling } from './billing.ts';
 export const evaluationText=(text:string):StreamChunk[]=>[{type:'block-start',index:0,blockType:'text'},{type:'text-delta',index:0,text},{type:'block-end',index:0,block:{type:'text',text}},{type:'finish',reason:{kind:'stop'}}];
 export function evaluationCall(name:string,args:object):StreamChunk[]{const id=ToolCallId('evaluation-'+randomUUID());return [{type:'block-start',index:0,blockType:'tool-call'},{type:'tool-call-delta',index:0,id,name,argumentsDelta:JSON.stringify(args)},{type:'block-end',index:0,block:{type:'tool-call',id,name,arguments:JSON.stringify(args)}},{type:'finish',reason:{kind:'tool-calls'}}];}
-export const PERSONA_ACTIONS=['dafeiyu_persona_status','dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_publish','dafeiyu_persona_select','dafeiyu_persona_withdraw'];
+export const PERSONA_ACTIONS=['dafeiyu_persona_status','dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_trial_select','dafeiyu_persona_adoption_review','dafeiyu_persona_publish','dafeiyu_persona_select','dafeiyu_persona_withdraw'];
 export const EXECUTION_ACTIONS=['dafeiyu_execution_source_open','dafeiyu_execution_contribute','dafeiyu_execution_select','dafeiyu_execution_source_state','dafeiyu_task_object','dafeiyu_task_intent'];
 export type EvaluationResponse=(options:GenerateOptions)=>StreamChunk[]|Promise<StreamChunk[]>;
 export const PRIVATE_STREAM_SENTINEL='EVALUATION_SYNTHETIC_REASONING_MUST_NOT_PERSIST';
