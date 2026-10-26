@@ -7,12 +7,12 @@ import type { EvaluationWorkspace } from './workspace.ts';
 import { RuntimeIdentitySchema,runtimeIdentityHash } from './identity.ts';
 import type { RuntimeIdentity } from './identity.ts';
 import { CandidateSchema } from './real-support.ts';
-import { REAL_COMPACTION,REAL_HISTORY_GOAL } from './real-continuity.ts';
+import { REAL_COMPACTION,REAL_HISTORY_GOAL,REAL_H06_COMPACTION } from './real-continuity.ts';
 import { CALIBRATION_CASES } from './authorization.ts';
 import { verifyCaseEvidence } from './evidence.ts';
 
 const candidateFileSchema=z.strictObject({schemaVersion:z.literal(1),candidate:CandidateSchema,identity:RuntimeIdentitySchema,createdAt:z.iso.datetime()});
-export function realProtocolHash(workspace:EvaluationWorkspace){return sha256(JSON.stringify({version:'7c-real-1',suite:workspace.config.suiteHash,manifest:workspace.config.manifestHash,foundation:workspace.config.foundationHash,authorization:workspace.config.executionBounds?.authorizationHash,compaction:REAL_COMPACTION,h06:{maxSummaryChars:1600,semanticEnabled:true,semanticMaxConsecutive:2,semanticMaxOutputTokens:16384},historyGoal:REAL_HISTORY_GOAL,continuations:8,restartAfter:4,scriptedDuplicates:false,preparation:'separate-epoch-fixture-ledger'}));}
+export function realProtocolHash(workspace:EvaluationWorkspace){return sha256(JSON.stringify({version:'7c-real-1',suite:workspace.config.suiteHash,manifest:workspace.config.manifestHash,foundation:workspace.config.foundationHash,authorization:workspace.config.executionBounds?.authorizationHash,compaction:REAL_COMPACTION,h06:REAL_H06_COMPACTION,historyGoal:REAL_HISTORY_GOAL,continuations:8,restartAfter:4,scriptedDuplicates:false,preparation:'separate-epoch-fixture-ledger'}));}
 /** Documentation-only commits reuse the same candidate and paired baselines when actual runtime/source bytes match. */
 export async function freezeRealCandidate(workspace:EvaluationWorkspace,revision:string,identity:RuntimeIdentity){
   if(identity.scope!=='real-evaluation-runtime-v1')throw new Error('EVALUATION_REAL_IDENTITY_REQUIRED');const runtimeHash=runtimeIdentityHash(identity),protocolHash=realProtocolHash(workspace),directory=join(workspace.root,'candidates');

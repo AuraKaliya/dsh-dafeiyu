@@ -52,6 +52,9 @@ export interface CompactionPolicy {
   readonly maxSummaryChars: number;
   readonly maxFragmentGroups?:number;
   readonly maxFragments?:number;
+  /** Initial work batches may be smaller than the total active composition capacity. */
+  readonly initialMaxGroups?:number;
+  readonly initialMaxFragments?:number;
   readonly semanticEnabled?:boolean;
   readonly semanticMaxConsecutive?:number;
   readonly semanticMaxOutputTokens?:number;

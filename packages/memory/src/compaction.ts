@@ -22,11 +22,15 @@ export const compactionConfigSchema = z.strictObject({
   summaryMaxOutputTokens:z.number().int().min(1024).max(32768).default(8192),
   maxFragmentGroups:z.number().int().min(1).max(8).default(8),
   maxFragments:z.number().int().min(1).max(32).default(16),
+  initialMaxGroups:z.number().int().min(1).max(8).optional(),
+  initialMaxFragments:z.number().int().min(1).max(32).optional(),
   semanticEnabled:z.boolean().default(false),
   semanticMaxConsecutive:z.number().int().min(1).max(4).default(2),
   semanticMaxOutputTokens:z.number().int().min(2048).max(32768).default(8192),
   timeoutMs: z.number().int().min(100).max(300000).default(30000),
-}).refine(p => p.targetRatio < p.thresholdRatio, 'Target must be below trigger');
+}).refine(p => p.targetRatio < p.thresholdRatio, 'Target must be below trigger')
+  .refine(p=>(p.initialMaxGroups??p.maxFragmentGroups)<=p.maxFragmentGroups&&(p.initialMaxFragments??p.maxFragments)<=p.maxFragments,'Initial summary limits must fit total capacity')
+  .transform(p=>({...p,initialMaxGroups:p.initialMaxGroups??p.maxFragmentGroups,initialMaxFragments:p.initialMaxFragments??p.maxFragments}));
 
 /** A purpose-specific, tool-free auxiliary call through DSH's LLM seam, like its compactor.
  * It uses a fresh non-chat request identity. No bypass of the main session's context guards. */

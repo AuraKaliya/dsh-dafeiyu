@@ -321,7 +321,7 @@ export class CompactionRuntime {
             this.clean();this.record(status,pressure,target,saved);
             if(!await this.ctx.sessions.flush(session))throw new Error('Semantic summary checkpoint unavailable');
           }
-          if(sourceCapacity)continue;
+          if(sourceCapacity||status==='rewrite-no-benefit')continue;
           return;
         }
       }
@@ -358,7 +358,7 @@ export class CompactionRuntime {
     const grouped:{sources:CompactionSource[];dependencies:SourceDependency[];taskId:string|null}[]=[];
     const fragmented=!!binding.provider.sources&&!!binding.provider.summarizeFragments;
     if(fragmented){
-      const limit=Math.min(p.maxFragmentGroups??8,p.maxFragments??16,Math.max(1,Math.floor(p.maxSummaryChars/64)));
+      const limit=Math.min(p.initialMaxGroups??p.maxFragmentGroups??8,p.maxFragmentGroups??8,p.initialMaxFragments??p.maxFragments??16,p.maxFragments??16,Math.max(1,Math.floor(p.maxSummaryChars/64)));
       let count=0;
       for(const source of sources){
         const dependencies=unionDependencies(this.provenance.dependenciesFor(source.seq,this.legacyEpoch(source.seq))),last=grouped.at(-1);
@@ -390,7 +390,7 @@ export class CompactionRuntime {
           checkSources();
           const usedChars=fragments.reduce((sum,fragment)=>sum+Array.from(fragment.text).length,0);
           const budget=Math.floor((p.maxSummaryChars-usedChars)/(grouped.length-index));
-          const fragmentBudget=Math.max(1,Math.floor(((p.maxFragments??16)-fragments.length)/(grouped.length-index)));
+          const fragmentBudget=Math.max(1,Math.floor((Math.min(p.initialMaxFragments??p.maxFragments??16,p.maxFragments??16)-fragments.length)/(grouped.length-index)));
           const results=await binding.provider.summarizeFragments!(this.scope(),group.sources,signal,checkSources,budget,fragmentBudget);
           if(results.length>fragmentBudget)throw new Error('Fragment budget exceeded');
           const id=`G${index+1}`;
