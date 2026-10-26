@@ -14,6 +14,7 @@ import { ActivityStore,ACTIVITY_SCHEMA_VERSION } from '@dafeiyu/activity/store';
 import { MediaStore,MEDIA_SCHEMA_VERSION } from '@dafeiyu/media';
 import { BiliStore,BILI_SCHEMA_VERSION } from '@dafeiyu/bilibili';
 import { ExecutorStore,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor/store';
+import { BiliOwnerStore,BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_ACCOUNT,BILI_OWNER_UID } from '@dafeiyu/channel-bili-owner';
 import { ExecutorFileSnapshotSchema,executorFilesSnapshot,executorSnapshotPath,copyExecutorSnapshot,verifyExecutorBackup } from './executor-snapshot.js';
 import type { ExecutorFileSnapshot } from './executor-snapshot.js';
 import { MediaFileSnapshotSchema,mediaFilesSnapshot,mediaSnapshotPath,copyMediaSnapshot,verifyMediaBackup } from './media-snapshot.js';
@@ -21,16 +22,16 @@ import type { MediaFileSnapshot } from './media-snapshot.js';
 import { inspectStorage } from './storage-inspection.js';
 import type { StorageKind, StorageInspection } from './storage-inspection.js';
 
-export interface MigrationBundle { coreDir:string; memoryDir:string; sessionsDir:string; backupDir:string; identity:RuntimeIdentity; qqFiles?:readonly string[]|undefined;activity?:boolean|undefined;media?:boolean|undefined;bilibili?:boolean|undefined;executor?:boolean|undefined;
+export interface MigrationBundle { coreDir:string; memoryDir:string; sessionsDir:string; backupDir:string; identity:RuntimeIdentity; qqFiles?:readonly string[]|undefined;activity?:boolean|undefined;media?:boolean|undefined;bilibili?:boolean|undefined;executor?:boolean|undefined;biliOwner?:boolean|undefined;
   provenance?:{sourceRevision:string;dirty:boolean;configHash:string}|undefined }
 interface RowsSnapshot {table:string;hash:string;rows:number}
 interface FilePlan {kind:StorageKind;file:string;before:StorageInspection;rows:RowsSnapshot[];targetVersion:number}
 export interface MigrationPlan {schemaVersion:1;id:string;createdAt:string;engineHash:string;bundle:MigrationBundle;files:FilePlan[];sessions:{relative:string;hash:string}[];mediaFiles?:MediaFileSnapshot[]|undefined;executorFiles?:ExecutorFileSnapshot[]|undefined}
 interface Manifest {plan:MigrationPlan;phase:'backed-up'|'applying'|'complete'|'failed';completed:string[];error:string|null}
-const kindSchema=z.enum(['journal','memory','runtime','delivery','analysis','working','feedback','retrieval','qq','activity','media','bilibili','executor']);
+const kindSchema=z.enum(['journal','memory','runtime','delivery','analysis','working','feedback','retrieval','qq','activity','media','bilibili','executor','bili-owner']);
 const inspectionSchema=z.strictObject({kind:kindSchema,exists:z.boolean(),version:z.number().int().nonnegative(),applicationId:z.number().int().nonnegative(),supported:z.boolean(),activeOwner:z.boolean(),integrity:z.boolean(),identityMatches:z.boolean()});
 const rowsSchema=z.strictObject({table:z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/),hash:z.string().regex(/^[a-f0-9]{64}$/),rows:z.number().int().nonnegative()});
-const bundleSchema=z.strictObject({coreDir:z.string().min(1),memoryDir:z.string().min(1),sessionsDir:z.string().min(1),backupDir:z.string().min(1),identity:RuntimeIdentitySchema,qqFiles:z.array(z.string().min(1)).max(20).optional(),activity:z.boolean().optional(),media:z.boolean().optional(),bilibili:z.boolean().optional(),executor:z.boolean().optional(),
+const bundleSchema=z.strictObject({coreDir:z.string().min(1),memoryDir:z.string().min(1),sessionsDir:z.string().min(1),backupDir:z.string().min(1),identity:RuntimeIdentitySchema,qqFiles:z.array(z.string().min(1)).max(20).optional(),activity:z.boolean().optional(),media:z.boolean().optional(),bilibili:z.boolean().optional(),executor:z.boolean().optional(),biliOwner:z.boolean().optional(),
   provenance:z.strictObject({sourceRevision:z.string().min(1).max(80),dirty:z.boolean(),configHash:z.string().regex(/^[a-f0-9]{64}$/)}).optional()});
 export const MigrationPlanSchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),createdAt:z.iso.datetime(),engineHash:z.string().regex(/^[a-f0-9]{64}$/),bundle:bundleSchema,
   files:z.array(z.strictObject({kind:kindSchema,file:z.string().min(1),before:inspectionSchema,rows:z.array(rowsSchema),targetVersion:z.number().int().nonnegative()})),
@@ -45,8 +46,9 @@ function currentEngineHash():string {
   const media=fileURLToPath(import.meta.resolve('@dafeiyu/media/store'));
   const bili=fileURLToPath(import.meta.resolve('@dafeiyu/bilibili/store'));
   const executor=fileURLToPath(import.meta.resolve('@dafeiyu/server-executor/store'));
+  const biliOwner=fileURLToPath(import.meta.resolve('@dafeiyu/channel-bili-owner'));
   const files=[fileURLToPath(import.meta.url),
-    ...[dirname(core),dirname(journal),dirname(memory),dirname(contracts),dirname(qq),dirname(activity),dirname(media),dirname(bili),dirname(executor),dirname(fileURLToPath(import.meta.url))].flatMap(directory=>readdirSync(directory).filter(name=>name.endsWith('.js')).sort().map(name=>join(directory,name)))];
+    ...[dirname(core),dirname(journal),dirname(memory),dirname(contracts),dirname(qq),dirname(activity),dirname(media),dirname(bili),dirname(executor),dirname(biliOwner),dirname(fileURLToPath(import.meta.url))].flatMap(directory=>readdirSync(directory).filter(name=>name.endsWith('.js')).sort().map(name=>join(directory,name)))];
   const hash=createHash('sha256');hash.update(JSON.stringify({node:process.versions.node,sqlite:process.versions.sqlite}));
   for(const file of files)hash.update(readFileSync(file));return hash.digest('hex');
 }
@@ -88,7 +90,7 @@ async function sessionsSnapshot(directory:string):Promise<{relative:string;hash:
 /** Plan captures metadata and row digests only; it neither constructs services nor changes source schemas. */
 export async function planMigration(input:MigrationBundle):Promise<MigrationPlan>{
   const bundle:MigrationBundle={coreDir:concretePath(input.coreDir),memoryDir:concretePath(input.memoryDir),sessionsDir:concretePath(input.sessionsDir),backupDir:concretePath(input.backupDir),identity:RuntimeIdentitySchema.parse(input.identity),
-    ...(input.qqFiles?{qqFiles:input.qqFiles.map(concretePath)}:{}),...(input.activity!==undefined?{activity:z.boolean().parse(input.activity)}:{}),...(input.media!==undefined?{media:z.boolean().parse(input.media)}:{}),...(input.bilibili!==undefined?{bilibili:z.boolean().parse(input.bilibili)}:{}),...(input.executor!==undefined?{executor:z.boolean().parse(input.executor)}:{}),...(input.provenance?{provenance:bundleSchema.shape.provenance.parse(input.provenance)}:{})};
+    ...(input.qqFiles?{qqFiles:input.qqFiles.map(concretePath)}:{}),...(input.activity!==undefined?{activity:z.boolean().parse(input.activity)}:{}),...(input.media!==undefined?{media:z.boolean().parse(input.media)}:{}),...(input.bilibili!==undefined?{bilibili:z.boolean().parse(input.bilibili)}:{}),...(input.executor!==undefined?{executor:z.boolean().parse(input.executor)}:{}),...(input.biliOwner!==undefined?{biliOwner:z.boolean().parse(input.biliOwner)}:{}),...(input.provenance?{provenance:bundleSchema.shape.provenance.parse(input.provenance)}:{})};
   if(isWithin(bundle.backupDir,bundle.sessionsDir))throw new Error('BACKUP_INSIDE_SESSION_SOURCE');
   const items:{kind:StorageKind;file:string;target?:number}[]=[{kind:'journal',file:join(bundle.coreDir,'journal.sqlite'),target:2},{kind:'memory',file:join(bundle.memoryDir,'memory.sqlite'),target:MEMORY_SCHEMA_VERSION},
     {kind:'runtime',file:join(bundle.coreDir,'runtime.sqlite'),target:RUNTIME_SCHEMA_VERSION},{kind:'delivery',file:join(bundle.coreDir,'delivery.sqlite')},
@@ -97,6 +99,7 @@ export async function planMigration(input:MigrationBundle):Promise<MigrationPlan
   if(bundle.media||existsSync(join(bundle.coreDir,'media.sqlite')))items.push({kind:'media',file:join(bundle.coreDir,'media.sqlite'),target:MEDIA_SCHEMA_VERSION});
   if(bundle.bilibili||existsSync(join(bundle.coreDir,'bilibili.sqlite')))items.push({kind:'bilibili',file:join(bundle.coreDir,'bilibili.sqlite'),target:BILI_SCHEMA_VERSION});
   if(bundle.executor||existsSync(join(bundle.coreDir,'executor.sqlite')))items.push({kind:'executor',file:join(bundle.coreDir,'executor.sqlite'),target:EXECUTOR_SCHEMA_VERSION});
+  if(bundle.biliOwner||existsSync(join(bundle.coreDir,'bili-owner.sqlite')))items.push({kind:'bili-owner',file:join(bundle.coreDir,'bili-owner.sqlite'),target:BILI_OWNER_SCHEMA_VERSION});
   if(items.some(item=>item.kind==='executor')&&isWithin(bundle.backupDir,join(bundle.coreDir,'results')))throw new Error('BACKUP_INSIDE_EXECUTOR_SOURCE');
   if(items.some(item=>item.kind==='media')&&(isWithin(bundle.backupDir,join(bundle.coreDir,'media'))||isWithin(bundle.backupDir,join(bundle.coreDir,'media-analysis'))))throw new Error('BACKUP_INSIDE_MEDIA_SOURCE');
   if(new Set(items.map(item=>pathKey(item.file))).size!==items.length)throw new Error('ALIASED_DATABASE_PATH');
@@ -121,10 +124,11 @@ function checkPlan(plan:MigrationPlan):void {
   if(plan.bundle.media||existsSync(join(plan.bundle.coreDir,'media.sqlite')))expected.set(pathKey(join(plan.bundle.coreDir,'media.sqlite')),'media');
   if(plan.bundle.bilibili||existsSync(join(plan.bundle.coreDir,'bilibili.sqlite')))expected.set(pathKey(join(plan.bundle.coreDir,'bilibili.sqlite')),'bilibili');
   if(plan.bundle.executor||existsSync(join(plan.bundle.coreDir,'executor.sqlite')))expected.set(pathKey(join(plan.bundle.coreDir,'executor.sqlite')),'executor');
+  if(plan.bundle.biliOwner||existsSync(join(plan.bundle.coreDir,'bili-owner.sqlite')))expected.set(pathKey(join(plan.bundle.coreDir,'bili-owner.sqlite')),'bili-owner');
   if(plan.files.length!==expected.size||plan.files.some(file=>expected.get(pathKey(file.file))!==file.kind))throw new Error('MIGRATION_PLAN_PATH_MISMATCH');
   if(!plan.files.find(file=>file.kind==='journal')?.before.exists||!plan.files.find(file=>file.kind==='memory')?.before.exists)throw new Error('LEGACY_BUNDLE_REQUIRED_USE_INIT_FOR_NEW_PROFILE');
   if(new Set(plan.files.map(file=>pathKey(file.file))).size!==plan.files.length)throw new Error('ALIASED_DATABASE_PATH');
-  for(const file of plan.files){const target=file.kind==='journal'?2:file.kind==='memory'?MEMORY_SCHEMA_VERSION:file.kind==='runtime'?RUNTIME_SCHEMA_VERSION:file.kind==='qq'?QQ_SCHEMA_VERSION:file.kind==='activity'?ACTIVITY_SCHEMA_VERSION:file.kind==='media'?MEDIA_SCHEMA_VERSION:file.kind==='bilibili'?BILI_SCHEMA_VERSION:file.kind==='executor'?EXECUTOR_SCHEMA_VERSION:file.before.version;
+  for(const file of plan.files){const target=file.kind==='journal'?2:file.kind==='memory'?MEMORY_SCHEMA_VERSION:file.kind==='runtime'?RUNTIME_SCHEMA_VERSION:file.kind==='qq'?QQ_SCHEMA_VERSION:file.kind==='activity'?ACTIVITY_SCHEMA_VERSION:file.kind==='media'?MEDIA_SCHEMA_VERSION:file.kind==='bilibili'?BILI_SCHEMA_VERSION:file.kind==='executor'?EXECUTOR_SCHEMA_VERSION:file.kind==='bili-owner'?BILI_OWNER_SCHEMA_VERSION:file.before.version;
     if(file.before.kind!==file.kind||file.targetVersion!==target||new Set(file.rows.map(row=>row.table)).size!==file.rows.length)throw new Error('MIGRATION_PLAN_SCHEMA_MISMATCH');assertInspection(file.before);}
   if(plan.sessions.some(item=>isAbsolute(item.relative)||!isWithin(join(plan.bundle.sessionsDir,item.relative),plan.bundle.sessionsDir)))throw new Error('MIGRATION_SESSION_PATH_ESCAPE');
   if(plan.files.some(file=>file.kind==='media')&&plan.mediaFiles===undefined)throw new Error('MIGRATION_MEDIA_SNAPSHOT_REQUIRED');
@@ -160,7 +164,8 @@ async function applyLocked(plan:MigrationPlan,options:{afterStep?:(kind:StorageK
       (item.kind==='activity'&&current.version===ACTIVITY_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['activity_metadata','activity_clock'].includes(row.table)).every(row=>row.rows===0))||
       (item.kind==='media'&&current.version===MEDIA_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>row.table!=='media_metadata').every(row=>row.rows===0))||
       (item.kind==='bilibili'&&current.version===BILI_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['bili_metadata','bili_clock'].includes(row.table)).every(row=>row.rows===0))||
-      (item.kind==='executor'&&current.version===EXECUTOR_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['executor_metadata','executor_clock'].includes(row.table)).every(row=>row.rows===0)))))throw new Error('MIGRATION_SOURCE_APPEARED');}
+      (item.kind==='executor'&&current.version===EXECUTOR_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['executor_metadata','executor_clock'].includes(row.table)).every(row=>row.rows===0))||
+      (item.kind==='bili-owner'&&current.version===BILI_OWNER_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['bili_owner_binding','bili_owner_poll'].includes(row.table)).every(row=>row.rows===0)))))throw new Error('MIGRATION_SOURCE_APPEARED');}
   const sessions=await sessionsSnapshot(plan.bundle.sessionsDir);if(JSON.stringify(sessions)!==JSON.stringify(plan.sessions))throw new Error('MIGRATION_SESSION_CHANGED');
   if(plan.mediaFiles&&JSON.stringify(await mediaFilesSnapshot(plan.bundle.coreDir))!==JSON.stringify(plan.mediaFiles))throw new Error('MIGRATION_MEDIA_CHANGED');
   if(plan.executorFiles&&JSON.stringify(executorFilesSnapshot(plan.bundle.coreDir))!==JSON.stringify(plan.executorFiles))throw new Error('MIGRATION_EXECUTOR_CHANGED');
@@ -193,8 +198,10 @@ async function applyLocked(plan:MigrationPlan,options:{afterStep?:(kind:StorageK
       else if(item.kind==='bilibili'){new BiliStore(item.file,plan.bundle.identity,true).close();}
       // Existing v1 executor evidence is already current; no configureSqlite or recovery writes are needed.
       else if(item.kind==='executor'&&!current.exists){new ExecutorStore(item.file,plan.bundle.identity,true).close();}
+      // Schema only. Handover/import is a separate trusted operation after the migration manifest is bound.
+      else if(item.kind==='bili-owner'&&!current.exists){new BiliOwnerStore(item.file,{...plan.bundle.identity,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID},true).close();}
       const after=inspectStorage(item.file,item.kind,plan.bundle.identity);assertInspection(after);
-      if((item.before.exists||item.kind==='runtime'||item.kind==='activity'||item.kind==='media'||item.kind==='bilibili'||item.kind==='executor')&&after.version!==item.targetVersion)throw new Error('MIGRATION_TARGET_VERSION');
+      if((item.before.exists||item.kind==='runtime'||item.kind==='activity'||item.kind==='media'||item.kind==='bilibili'||item.kind==='executor'||item.kind==='bili-owner')&&after.version!==item.targetVersion)throw new Error('MIGRATION_TARGET_VERSION');
       if(item.before.exists)assertRows(item);
       manifest.completed.push(item.file);await saveManifest(file,manifest);options.afterStep?.(item.kind);
     }
@@ -206,7 +213,7 @@ async function applyLocked(plan:MigrationPlan,options:{afterStep?:(kind:StorageK
   }catch{manifest.phase='failed';manifest.error='MIGRATION_APPLY_FAILED';await saveManifest(file,manifest);throw new Error('MIGRATION_APPLY_FAILED_BACKUP_RETAINED');}
 }
 
-export function verifyMigration(plan:MigrationPlan):{passed:boolean;stores:StorageInspection[];executorEvidencePreserved?:boolean} {
+export function verifyMigration(plan:MigrationPlan):{passed:boolean;stores:StorageInspection[];executorEvidencePreserved?:boolean;biliOwnerEvidencePreserved?:boolean} {
   plan=MigrationPlanSchema.parse(plan);checkPlan(plan);const stores=plan.files.map(item=>inspectStorage(item.file,item.kind,plan.bundle.identity));
   let executorPreserved=true;
   if(plan.executorFiles){try{
@@ -215,7 +222,12 @@ export function verifyMigration(plan:MigrationPlan):{passed:boolean;stores:Stora
     for(const [index,item]of plan.files.entries())if(item.kind==='executor'&&item.before.exists){assertRows(item);const stored=join(destination,`${index}-executor.sqlite`);
       assertInspection(inspectStorage(stored,'executor',plan.bundle.identity));if(!existsSync(stored)||JSON.stringify(rowsSnapshot(stored))!==JSON.stringify(item.rows))throw new Error('MIGRATION_EXECUTOR_BACKUP_INVALID');}
   }catch{executorPreserved=false;}}
-  const passed=executorPreserved&&stores.every((value,index)=>value.supported&&value.integrity&&value.identityMatches&&!value.activeOwner
-    &&(plan.files[index]!.before.exists||value.kind==='runtime'||value.kind==='activity'||value.kind==='media'||value.kind==='bilibili'||value.kind==='executor'?value.exists&&value.version===plan.files[index]!.targetVersion:true));
-  return {passed,stores,...(plan.executorFiles?{executorEvidencePreserved:executorPreserved}:{})};
+  const hasBiliOwner=plan.files.some(item=>item.kind==='bili-owner');let biliOwnerPreserved=true;
+  if(hasBiliOwner){try{const destination=join(plan.bundle.backupDir,plan.id);
+    for(const [index,item]of plan.files.entries())if(item.before.exists){assertRows(item);const stored=join(destination,`${index}-${item.kind}.sqlite`),inspection=inspectStorage(stored,item.kind,plan.bundle.identity);
+      if(!inspection.exists||!inspection.supported||!inspection.integrity||!inspection.identityMatches||JSON.stringify(rowsSnapshot(stored))!==JSON.stringify(item.rows))throw new Error('MIGRATION_BILI_OWNER_BACKUP_INVALID');}
+  }catch{biliOwnerPreserved=false;}}
+  const passed=executorPreserved&&biliOwnerPreserved&&stores.every((value,index)=>value.supported&&value.integrity&&value.identityMatches&&!value.activeOwner
+    &&(plan.files[index]!.before.exists||value.kind==='runtime'||value.kind==='activity'||value.kind==='media'||value.kind==='bilibili'||value.kind==='executor'||value.kind==='bili-owner'?value.exists&&value.version===plan.files[index]!.targetVersion:true));
+  return {passed,stores,...(plan.executorFiles?{executorEvidencePreserved:executorPreserved}:{}),...(hasBiliOwner?{biliOwnerEvidencePreserved:biliOwnerPreserved}:{})};
 }

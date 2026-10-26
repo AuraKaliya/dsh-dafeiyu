@@ -2,5 +2,5 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "lib", "composite": true },
   "include": ["src/**/*.ts"],
-  "references": [{"path":"../contracts"},{"path":"../core"},{"path":"../journal"},{"path":"../memory"},{"path":"../activity"},{"path":"../media"},{"path":"../bilibili"},{"path":"../channel-qq"},{"path":"../channel-simulator"},{"path":"../timeline"},{"path":"../server-executor"}]
+  "references": [{"path":"../contracts"},{"path":"../core"},{"path":"../journal"},{"path":"../memory"},{"path":"../activity"},{"path":"../media"},{"path":"../bilibili"},{"path":"../channel-qq"},{"path":"../channel-bili-owner"},{"path":"../channel-simulator"},{"path":"../timeline"},{"path":"../server-executor"}]
 }

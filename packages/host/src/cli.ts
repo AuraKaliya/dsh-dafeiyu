@@ -7,7 +7,7 @@ import { runtimeHash } from '@dafeiyu/core/runtime-store';
 import { ExecutionRequestSchema } from '@dafeiyu/contracts';
 import { loadHostConfig,pluginConfig } from './configuration.js';
 import type { PreparedHostConfig } from './configuration.js';
-import { inspectHost,initializeProfile } from './profile.js';
+import { inspectHost,initializeProfile,bindMigratedProfile } from './profile.js';
 import { readHostStatus } from './status.js';
 import { planMigration,applyMigration,verifyMigration,MigrationPlanSchema } from './migration.js';
 import type { MigrationPlan } from './migration.js';
@@ -27,7 +27,7 @@ export function parseHostCommand(args:readonly string[]):HostCommand{
 function jsonFile(file:string,max=262144){const bytes=readFileSync(file);if(bytes.length>max)throw new Error('HOST_INPUT_TOO_LARGE');return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes)) as unknown;}
 function matchingPlan(plan:MigrationPlan,config:PreparedHostConfig){const b=plan.bundle,hash=b.provenance?.configHash;
   if(!hash||hash!==config.hash&&hash!==runtimeHash(config.config)||b.identity.profileId!==config.config.profileId||b.identity.agentId!==config.config.agent.id||pathIdentity(b.coreDir)!==pathIdentity(config.paths.core)||pathIdentity(b.memoryDir)!==pathIdentity(config.paths.memory)||pathIdentity(b.sessionsDir)!==pathIdentity(config.paths.sessions)
-    ||!!b.activity!==config.plugins.some(p=>p.id==='activity'&&p.enabled)||!!b.media!==config.plugins.some(p=>p.id==='media'&&p.enabled)||!!b.bilibili!==config.plugins.some(p=>p.id==='bilibili'&&p.enabled)||!!b.executor!==!!pluginConfig(config,'server-executor')||JSON.stringify((b.qqFiles??[]).map(pathIdentity).sort())!==JSON.stringify(Object.values(config.paths.channels).map(dir=>pathIdentity(join(dir,'qq.sqlite'))).sort()))throw new Error('HOST_MIGRATION_CONFIG_MISMATCH');}
+    ||!!b.activity!==config.plugins.some(p=>p.id==='activity'&&p.enabled)||!!b.media!==config.plugins.some(p=>p.id==='media'&&p.enabled)||!!b.bilibili!==config.plugins.some(p=>p.id==='bilibili'&&p.enabled)||!!b.executor!==!!pluginConfig(config,'server-executor')||!!b.biliOwner!==!!pluginConfig(config,'channel-bili-owner')||JSON.stringify((b.qqFiles??[]).map(pathIdentity).sort())!==JSON.stringify(Object.values(config.paths.channels).map(dir=>pathIdentity(join(dir,'qq.sqlite'))).sort()))throw new Error('HOST_MIGRATION_CONFIG_MISMATCH');}
 export async function runHostCommand(command:HostCommand,write:(value:unknown)=>void=console.log):Promise<number>{
   const config=loadHostConfig(command.config);
   if(command.mode==='inspect'){const result=inspectHost(config);write({kind:'offline-inspection',networkChecked:false,...result});return result.ready?0:2;}
@@ -37,12 +37,13 @@ export async function runHostCommand(command:HostCommand,write:(value:unknown)=>
     if(conflict(config.resources))throw new Error('HOST_ALREADY_OWNED');
     if(command.migration==='plan'){
       let sourceRevision='unavailable',dirty=true;try{const cwd=fileURLToPath(new URL('../../../',import.meta.url));sourceRevision=execFileSync('git',['rev-parse','HEAD'],{cwd,encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();dirty=!!execFileSync('git',['status','--porcelain'],{cwd,encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();}catch{/* Installed packages may not carry repository metadata. */}
-      const plan=await planMigration({coreDir:config.paths.core,memoryDir:config.paths.memory,sessionsDir:config.paths.sessions,backupDir:command.backup!,identity:{agentId:config.config.agent.id,profileId:config.config.profileId},qqFiles:Object.values(config.paths.channels).map(dir=>join(dir,'qq.sqlite')),activity:config.plugins.some(p=>p.id==='activity'&&p.enabled),media:config.plugins.some(p=>p.id==='media'&&p.enabled),bilibili:config.plugins.some(p=>p.id==='bilibili'&&p.enabled),...(pluginConfig(config,'server-executor')?{executor:true}:{}),provenance:{sourceRevision,dirty,configHash:config.hash}});
+      const plan=await planMigration({coreDir:config.paths.core,memoryDir:config.paths.memory,sessionsDir:config.paths.sessions,backupDir:command.backup!,identity:{agentId:config.config.agent.id,profileId:config.config.profileId},qqFiles:Object.values(config.paths.channels).map(dir=>join(dir,'qq.sqlite')),activity:config.plugins.some(p=>p.id==='activity'&&p.enabled),media:config.plugins.some(p=>p.id==='media'&&p.enabled),bilibili:config.plugins.some(p=>p.id==='bilibili'&&p.enabled),...(pluginConfig(config,'server-executor')?{executor:true}:{}),...(pluginConfig(config,'channel-bili-owner')?{biliOwner:true}:{}),provenance:{sourceRevision,dirty,configHash:config.hash}});
       mkdirSync(dirname(command.out!),{recursive:true});writeFileSync(command.out!,JSON.stringify(plan,null,2)+'\n',{flag:'wx'});write({status:'planned',id:plan.id,plan:command.out});return 0;
     }
     const plan=MigrationPlanSchema.parse(jsonFile(command.plan!,8*1024*1024));matchingPlan(plan,config);
     if(command.migration==='verify'){const result=verifyMigration(plan);write(result);return result.passed?0:2;}
-    const lease=claim(config.resources,{profileId:config.config.profileId,agentId:config.config.agent.id});try{write(await applyMigration(plan));return 0;}finally{lease.release();}
+    const lease=claim(config.resources,{profileId:config.config.profileId,agentId:config.config.agent.id});try{const result=await applyMigration(plan);
+      if(pluginConfig(config,'channel-bili-owner'))bindMigratedProfile(config);write(result);return 0;}finally{lease.release();}
   }
   const abort=new AbortController();let host:ManagedHost|undefined;
   const stop=()=>{abort.abort();if(host)void host.close('signal').catch(()=>{});};process.on('SIGINT',stop);process.on('SIGTERM',stop);

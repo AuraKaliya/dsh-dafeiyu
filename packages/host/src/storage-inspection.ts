@@ -10,8 +10,9 @@ import { MEDIA_APPLICATION_ID,MEDIA_TABLES } from '@dafeiyu/media';
 import { BILI_APPLICATION_ID,BILI_TABLES } from '@dafeiyu/bilibili';
 import { EXECUTOR_APPLICATION_ID,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor/store';
 import { ExecutorIdentitySchema,executorHash } from '@dafeiyu/server-executor/types';
+import { BILI_OWNER_APPLICATION_ID,BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_TABLES,BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BiliOwnerIdentitySchema,inspectBiliOwnerStorage } from '@dafeiyu/channel-bili-owner';
 
-export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity'|'media'|'bilibili'|'executor';
+export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity'|'media'|'bilibili'|'executor'|'bili-owner';
 const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
   query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
   memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8,9,10,11,12],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
@@ -24,6 +25,7 @@ const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;version
   media:{app:MEDIA_APPLICATION_ID,versions:[1,2],tables:MEDIA_TABLES.filter(t=>!t.startsWith('media_reply_'))},
   bilibili:{app:BILI_APPLICATION_ID,versions:[1],tables:BILI_TABLES},
   executor:{app:EXECUTOR_APPLICATION_ID,versions:[EXECUTOR_SCHEMA_VERSION],tables:['executor_metadata','executor_clock','executor_jobs','executor_job_operations','executor_events','executor_receipts','executor_budget_links']},
+  'bili-owner':{app:BILI_OWNER_APPLICATION_ID,versions:[BILI_OWNER_SCHEMA_VERSION],tables:BILI_OWNER_TABLES},
   retrieval:{app:0x44465232,versions:[1,2],tables:['chunks','snapshots','vector_cache']},
 };
 export interface StorageInspection {kind:StorageKind;exists:boolean;version:number;applicationId:number;supported:boolean;activeOwner:boolean;integrity:boolean;identityMatches:boolean}
@@ -52,6 +54,9 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
       identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='media'&&supported&&identity){const row=db.prepare('SELECT body FROM media_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='bilibili'&&supported&&identity){const row=db.prepare('SELECT body FROM bili_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
+    if(kind==='bili-owner'&&supported){const row=db.prepare('SELECT body FROM bili_owner_binding WHERE id=1').get(),stored=BiliOwnerIdentitySchema.parse(JSON.parse(String(row?.body)));
+      const inspection=inspectBiliOwnerStorage(file,identity?{...identity,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}:stored);
+      supported=inspection.supported;identityMatches=inspection.identityMatches;}
     if(kind==='executor'&&supported){
       const row=db.prepare('SELECT body,body_hash FROM executor_metadata WHERE id=1').get(),stored=ExecutorIdentitySchema.safeParse(JSON.parse(String(row?.body)));
       identityMatches=stored.success&&executorHash(stored.data)===row?.body_hash&&(!identity||stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId);
