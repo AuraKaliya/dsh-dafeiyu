@@ -83,9 +83,9 @@ test('voice objection resolution preserves the parent source and binds the new c
 });
 
 test('turning voice directives off after a full local restart blocks voice sources without invalidating plain-text tasks',async()=>{
-  let h=await qqCapabilityFixture({media:true,audio:true,tasks:true,voiceDirectives:true});let closed=false;
+  let h=await qqCapabilityFixture({media:true,audio:true,tasks:true,turnTimeoutMs:30000,voiceDirectives:true});let closed=false;
   try{flow(h,id=>call('qq_task_submit',{requestId:'voice',voiceExposureId:id}));await voice(h,830);const voiced=runs(h)[0]!;
     let step=0;h.setResponse(request=>native(request)?textReply('文字任务结果'):++step===1?call('qq_task_submit',{requestId:'text'}):textReply('已受理'));await h.message('请完成文字任务',{target:privateScene,id:'831'});const written=runs(h).at(-1)!,root=h.root;await h.close();closed=true;
-    h=await qqCapabilityFixture({existingRoot:root,media:true,audio:true,tasks:true,voiceDirectives:false});closed=false;const port=h.core.executionProducer('qq-tasks');await assert.rejects(port.readResult(port.restoreRun(voiced.id)),/SOURCE_STALE/);assert.equal(await port.readResult(port.restoreRun(written.id)),'文字任务结果');
+    h=await qqCapabilityFixture({existingRoot:root,media:true,audio:true,tasks:true,turnTimeoutMs:30000,voiceDirectives:false});closed=false;const port=h.core.executionProducer('qq-tasks');await assert.rejects(port.readResult(port.restoreRun(voiced.id)),/SOURCE_STALE/);assert.equal(await port.readResult(port.restoreRun(written.id)),'文字任务结果');
   }finally{if(!closed)await h.close();}
 });

@@ -13,6 +13,7 @@ test('runtime identity binds actual builds and dependency files while clean-code
   const parent=await mkdtemp(join(tmpdir(),'eval-identity-')),root=join(parent,'fixture');
   for(const path of ['scripts/evaluation','packages/core/lib','node_modules/@dafeiyu','node_modules/typescript','node_modules/example-dependency','docs'])await mkdir(join(root,path),{recursive:true});
   for(const path of ['package.json','package-lock.json','node_modules/typescript/package.json'])await writeFile(join(root,path),'{}');
+  await writeFile(join(root,'packages/core/package.json'),JSON.stringify({name:'@dafeiyu/core'}));
   for(const path of ['scripts/evaluation/example.ts','scripts/prepare-integrated-acceptance.mjs','scripts/run-integrated-offline.mjs','packages/core/lib/index.js','node_modules/example-dependency/index.js'])await writeFile(join(root,path),'export const fixture=1;');
   await writeFile(join(root,'.gitignore'),'node_modules/\npackages/*/lib/\n');
   await symlink(join(root,'packages/core'),join(root,'node_modules/@dafeiyu/core'),'junction');

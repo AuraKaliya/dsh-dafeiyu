@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createReadStream,existsSync } from 'node:fs';
-import { readdir,lstat,realpath } from 'node:fs/promises';
+import { readdir,lstat,realpath,readFile } from 'node:fs/promises';
 import { join,relative,sep,resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -29,16 +29,20 @@ export async function captureRuntimeIdentity(repository:string,options:{real?:bo
   for(const path of ['package.json','package-lock.json','scripts/evaluation','scripts/prepare-integrated-acceptance.mjs','scripts/run-integrated-offline.mjs'])await walk(join(root,path));
   if(options.real)for(const path of ['scripts/run-integrated-real.mjs','evaluation/phase7c/authorization.json','evaluation/phase7c/bounded-cost-authorization.v1.json'])await walk(join(root,path));
   for(const entry of await readdir(root))if(/^tsconfig.*\.json$/.test(entry))await walk(join(root,entry));
+  const workspacePackages=new Map<string,string>();
   for(const entry of await readdir(join(root,'packages'),{withFileTypes:true})){
     if(!entry.isDirectory()||entry.isSymbolicLink())throw new Error('EVALUATION_RUNTIME_LINK_DENIED');
+    const directory=join(root,'packages',entry.name),manifest=z.object({name:z.string().regex(/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/)}).parse(JSON.parse(await readFile(join(directory,'package.json'),'utf8')));
+    if(workspacePackages.has(manifest.name))throw new Error('EVALUATION_WORKSPACE_DUPLICATE');workspacePackages.set(manifest.name,directory);
     const lib=join(root,'packages',entry.name,'lib');if(!existsSync(lib))throw new Error('EVALUATION_BUILD_MISSING');await walk(lib);
     if(options.real){await walk(join(root,'packages',entry.name,'src'));await walk(join(root,'packages',entry.name,'package.json'));await walk(join(root,'packages',entry.name,'tsconfig.json'));}
   }
   const excluded=new Set(['.bin','@dafeiyu','@types','typescript','undici-types']);
-  for(const entry of await readdir(join(root,'node_modules'),{withFileTypes:true}))if(!excluded.has(entry.name))await walk(join(root,'node_modules',entry.name));
+  for(const entry of await readdir(join(root,'node_modules'),{withFileTypes:true}))if(!excluded.has(entry.name)&&!workspacePackages.has(entry.name))await walk(join(root,'node_modules',entry.name));
   await walk(join(root,'node_modules/typescript/package.json'));
-  for(const entry of await readdir(join(root,'node_modules/@dafeiyu'))){
-    const path=join(root,'node_modules/@dafeiyu',entry),expected=join(root,'packages',entry);
+  for(const entry of await readdir(join(root,'node_modules/@dafeiyu')))if(!workspacePackages.has('@dafeiyu/'+entry))throw new Error('EVALUATION_RUNTIME_LINK_DENIED');
+  for(const [name,expected]of workspacePackages){
+    const path=join(root,'node_modules',name);
     if(await realpath(path)!==await realpath(expected))throw new Error('EVALUATION_RUNTIME_LINK_DENIED');workspaceLinks.push({path:local(path),target:local(expected)});
   }
   files.sort((a,b)=>a.path.localeCompare(b.path));workspaceLinks.sort((a,b)=>a.path.localeCompare(b.path));

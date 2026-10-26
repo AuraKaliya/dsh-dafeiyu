@@ -33,3 +33,7 @@ B站 API适配代码随插件放在 `packages/channel-bili-owner/vendor/bili-aut
 原未提交 `docs/memory-phase-1.md` 保持原字节，SHA256 `CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730`。没有重写历史Git提交、正式验收记录或服务器数据。
 
 当前规范以 [架构](architecture.md)、[本机测试方案](integrated-acceptance-plan.md)、[部署调通范围](runtime-deployment-plan.md) 为准。旧阶段检查描述当时结果，不能代替清理后候选的发布验收。
+
+## 后续插件整合（2026-10-27）
+
+用户已授权本轮重构、安装入口和GitHub开源。当前实现以 `plugin-integration-release-plan.md` 与 `checks/plugin-integration-*.md` 为准。B站独立渠道包已并入bilibili，账号/主人ID改为主动配置；Memory增长状态统一入口不另建库。普通DSH安装现在有独立启动进程和CLI，前文关于管理员执行高级装配的限制仍保留。公开仓库使用审查后的新快照，原开发Git历史不推送。

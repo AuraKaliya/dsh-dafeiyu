@@ -16,12 +16,12 @@ import { testTempDir } from './test-temp.js';
 type H=Awaited<ReturnType<typeof executionHarness>>;
 const memoryActions=['dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_execution_select'];
 const request={requestId:'plan',title:'虚构探索安排',goal:'决定一次自主探索',policyId:'test-policy'};
-async function fixture(response:Response,options:{settings?:z.input<typeof ActivityConfigSchema>;extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>;directory?:string;now?:number;maxConcurrentRuns?:number;context?:NonNullable<Parameters<typeof executionHarness>[4]>['context']}={}){
+async function fixture(response:Response,options:{settings?:z.input<typeof ActivityConfigSchema>;extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>;directory?:string;now?:number;maxConcurrentRuns?:number;turnTimeoutMs?:number;context?:NonNullable<Parameters<typeof executionHarness>[4]>['context']}={}){
   const directory=options.directory??await mkdtemp(join(testTempDir(),'activity-scheduler-')),dataDir=join(directory,'activity'),settings={explorationPolicy:'test-policy',maintenancePolicy:'test-policy',...options.settings};
   if(!options.directory)new ActivityStore(join(dataDir,'activity.sqlite'),{agentId:'dafeiyu',profileId:'test'},settings,true).close();let now=options.now??Date.now(),monotonic=0,activity!:ActivityService;
   const configure=async(ctx:Context)=>{activity=new ActivityService(ctx,{agentId:'dafeiyu',profileId:'test',dataDir,settings},()=>now,()=>monotonic);
     if(settings.maintenance)activity.bindMaintenance(ctx.dafeiyuMemory.maintenance!.schedulingPort());activity.recover();activity.activate();};
-  const h=await executionHarness(directory,response,options.extension,!options.directory,{sourceTracking:true,...(settings.maintenance?{maintenance:{}}:{}),...(options.context?{context:options.context}:{}),...(options.maxConcurrentRuns?{maxConcurrentRuns:options.maxConcurrentRuns}:{}),extraActions:[...ACTIVITY_ACTIONS,...memoryActions],extraProducers:['activity'],beforeActivate:configure});
+  const h=await executionHarness(directory,response,options.extension,!options.directory,{sourceTracking:true,...(settings.maintenance?{maintenance:{}}:{}),...(options.turnTimeoutMs?{turnTimeoutMs:options.turnTimeoutMs}:{}),...(options.context?{context:options.context}:{}),...(options.maxConcurrentRuns?{maxConcurrentRuns:options.maxConcurrentRuns}:{}),extraActions:[...ACTIVITY_ACTIONS,...memoryActions],extraProducers:['activity'],beforeActivate:configure});
   return {h,activity,directory,now:()=>now,advance:(ms:number)=>{now+=ms;monotonic+=Math.max(0,ms);},start:()=>activity.start(false),tick:()=>activity.tick(),close:h.close};
 }
 function read(directory:string,sql:string,which='activity'){const file=which==='activity'?'activity/activity.sqlite':which==='memory'?'memory/memory.sqlite':'core/runtime.sqlite';const db=new DatabaseSync(join(directory,file),{readOnly:true});try{return db.prepare(sql).all();}finally{db.close();}}
@@ -58,7 +58,9 @@ test('task completion with selected evidence is scheduled for maintenance while 
     step++;if(!maintenance)return step===1?call('fixture_observe',{}):step===2?call('dafeiyu_execution_select',{requestId:'select',expectedVersion:0,entries:[source],reason:'选择观察'}):textReply('观察结束');
     const id=String(read(f.directory,"SELECT id FROM maintenance_requests WHERE state='waiting-scheduler' ORDER BY rowid DESC LIMIT 1",'memory')[0]?.id);
     return step===1?call('dafeiyu_memory_consolidate',{id}):textReply('整理完成');
-  },{extension,settings:{maintenance:true}});
+  // Includes an independent analysis turn and durable source sealing. This checks state,
+  // not a 10-second latency guarantee while other regression workers contend for IO.
+  },{extension,settings:{maintenance:true},turnTimeoutMs:30000});
   try{f.h.port.submitTask(request);await f.h.core.whenIdle();assert.equal(read(f.directory,'SELECT * FROM maintenance_requests','memory').length,2);f.start();await f.tick();
     assert.equal(read(f.directory,"SELECT count(*) AS n FROM maintenance_requests WHERE error='COALESCED_REQUEST'",'memory')[0]?.n,1);assert.equal(read(f.directory,'SELECT * FROM activity_schedules').length,1);
     maintenance=true;step=0;f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.equal(f.activity.health.error,null);
