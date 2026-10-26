@@ -1,6 +1,7 @@
 import { randomUUID,createHash } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-llm';
+import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { ParentMessageSchema,ExecutorCallSchema,ExecutorSettlementSchema,ExecutorToolCallSchema,ExecutorToolReceiptSchema,normalizeExecutorUsage,executorError,EXECUTOR_IPC_VERSION } from './protocol.js';
 import type { ParentMessage,ExecutorCall,ExecutorPermit,ExecutorSettlement,ExecutorIpcEndpoint,ExecutorRoute,ExecutorUsage,ExecutorToolCall,ExecutorToolReceipt } from './protocol.js';
 import { ExecutorHashSchema } from './types.js';
@@ -60,11 +61,12 @@ export class ExecutorChildBudgetClient {
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
 
 /** Mount globally in the dedicated child profile; no call count limit and no credentials in telemetry. */
-export function installExecutorChildBilling(ctx:Context,client:ExecutorChildBudgetClient,cancelActive:()=>void):()=>void{
+export function installExecutorChildBilling(ctx:Context,client:ExecutorChildBudgetClient,cancelActive:()=>void,admitInput?:(options:GenerateOptions)=>void):()=>void{
   const cancelled=()=>cancelActive();client.signal.addEventListener('abort',cancelled,{once:true});
   const dispose=ctx.on('llm/stream',async function*(options,next){
     const {route}=await client.ready();client.signal.throwIfAborted();options.signal?.throwIfAborted();
     if(options.provider!==route.provider||options.model!==route.model)throw new Error('EXECUTOR_ROUTE_CHANGED');
+    admitInput?.(options);
     const info=await ctx.llm.resolveModelInfo(options.provider,options.model,options.signal),output=options.maxTokens??info.defaultMaxTokens??route.contextWindow,
       effort=options.reasoningEffort??info.reasoning?.defaultEffort??null;
     if(info.context?.contextWindow!==route.contextWindow||effort!==route.reasoningEffort||!Number.isSafeInteger(output)||output<1||output>route.maxOutputTokens)throw new Error('EXECUTOR_ROUTE_CHANGED');

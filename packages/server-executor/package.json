@@ -2,6 +2,6 @@
   "name":"@dafeiyu/server-executor","version":"0.1.0","private":true,"type":"module",
   "main":"./lib/index.js","types":"./lib/index.d.ts",
   "exports":{".":{"types":"./lib/index.d.ts","default":"./lib/index.js"},"./store":{"types":"./lib/store.d.ts","default":"./lib/store.js"},"./types":{"types":"./lib/types.d.ts","default":"./lib/types.js"},"./child":{"types":"./lib/child.d.ts","default":"./lib/child.js"},"./ipc":{"types":"./lib/ipc.d.ts","default":"./lib/ipc.js"}},
-  "dependencies":{"@dafeiyu/contracts":"0.15.0","@dafeiyu/journal":"0.4.0","@dafeiyu/core":"0.15.0","@dafeiyu/memory":"0.15.0","@dafeiyu/server-bootstrap":"0.1.0","zod":"4.4.3"},
+  "dependencies":{"@dafeiyu/contracts":"0.15.0","@dafeiyu/journal":"0.4.0","@dafeiyu/core":"0.15.0","@dafeiyu/memory":"0.15.0","@dafeiyu/server-bootstrap":"0.1.0","zod":"4.4.3","yaml":"2.9.0"},
   "peerDependencies":{"@deepseek-ai/cordis":"4.0.5","@deepseek-ai/dsh-llm":"0.2.1-rc.2","@deepseek-ai/dsh-agent":"0.2.1-rc.2","@deepseek-ai/dsh-tools":"0.2.1-rc.2"}
 }

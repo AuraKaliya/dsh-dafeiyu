@@ -4,10 +4,15 @@ import { readFile,writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Context } from '@deepseek-ai/cordis';
+import LlmRuntime,{LlmAdapter,createUserMessage} from '@deepseek-ai/dsh-llm';
+import type { StreamChunk,LlmResolvedModelInfo,ContentBlock } from '@deepseek-ai/dsh-llm';
+import { AttachmentId } from '@deepseek-ai/dsh-attachment';
 import { runExecutorNode } from '../packages/server-executor/lib/runner.js';
 import { loadPinnedHeadlessManifest } from '../packages/server-executor/lib/headless-manifest.js';
 import { ExecutorParentTransport } from '../packages/server-executor/lib/transport.js';
-import { ExecutorChildBudgetClient } from '../packages/server-executor/lib/child.js';
+import { ExecutorChildBudgetClient,installExecutorChildBilling } from '../packages/server-executor/lib/child.js';
+import { assertHeadlessTextRequest } from '../packages/server-executor/lib/headless-input.js';
 import { ScriptedExecutorBudget,executorIpcPair,executorRoute,executorProfileHash } from './server-executor-fixture.js';
 import { headlessFixture,publicFixtureFiles } from './server-executor-headless-fixture.js';
 
@@ -45,4 +50,17 @@ test('tool receipts stay metadata-only and idempotent, and lost tool completion 
     await client.finishTool({callId:call.callId,permitId,state:'completed'});const next={...call,callId:randomUUID()};await client.authorizeTool(next);client.close();await parent.close();assert.equal(parent.toolSnapshot()[1]?.state,'unknown');assert.equal(port.admitted.length,0);
     assert.deepEqual(Object.keys(parent.toolSnapshot()[0]!.call).sort(),['argumentsHash','callId','name','sessionHash','sourceCallHash']);
   }finally{client.close();await parent.close();}
+});
+test('dedicated headless rejects structured media before reservation while ordinary text still dispatches through DSH',async()=>{
+  const pair=executorIpcPair(),port=new ScriptedExecutorBudget(),parent=new ExecutorParentTransport({endpoint:pair.parent,port,jobId:randomUUID(),nonce:'d'.repeat(64),profileHash:executorProfileHash,route:executorRoute,authorizationId:'fixture',deadline:Date.now()+30000,guard:()=>{}}),
+    client=new ExecutorChildBudgetClient(pair.child,executorProfileHash),ctx=new Context();let dispatched=0,resolved=0;
+  class Backend extends LlmAdapter{override async resolveModel(provider:string,id:string):Promise<LlmResolvedModelInfo>{resolved++;return {provider,id,name:id,context:{contextWindow:1024},defaultMaxTokens:100};}
+    override async *stream():AsyncIterable<StreamChunk>{dispatched++;yield {type:'usage',usage:{inputTokens:1,outputTokens:1}};yield {type:'finish',reason:{kind:'stop'}};}}
+  await ctx.plugin(LlmRuntime);ctx.llm.registerAdapter([executorRoute.provider],new Backend());const dispose=installExecutorChildBilling(ctx,client,()=>{},assertHeadlessTextRequest);
+  const run=async(block:ContentBlock)=>{for await(const _ of ctx.llm.stream({provider:executorRoute.provider,model:executorRoute.model,maxTokens:100,messages:[createUserMessage({source:{kind:'user'},content:[block]})]})){};};
+  try{await client.ready();for(const block of [{type:'image',attachment:{attachmentId:AttachmentId('a'.repeat(64)),mediaType:'image/png',width:1,height:1,bytes:1}},
+      {type:'file',attachment:{attachmentId:AttachmentId('b'.repeat(64)),name:'synthetic.txt',bytes:1}}] satisfies ContentBlock[])await assert.rejects(run(block),/NON_TEXT_INPUT_DENIED/);
+    assert.throws(()=>assertHeadlessTextRequest({messages:[{content:[{type:'audio'}]}]}),/NON_TEXT_INPUT_DENIED/);assert.equal(port.admitted.length,0);assert.equal(resolved,0);assert.equal(dispatched,0);
+    await run({type:'text',text:'synthetic text remains allowed'});assert.equal(port.admitted.length,1);assert.equal(dispatched,1);assert.equal(port.settled.length,1);await client.finish();
+  }finally{dispose();client.close();await parent.close();await ctx.fiber.dispose();}
 });
