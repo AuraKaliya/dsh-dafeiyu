@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "from": {
+    "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+    "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+    "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+  },
+  "toRuntimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+  "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614",
+  "changedFile": {
+    "path": "scripts/evaluation/history-fixture.ts",
+    "beforeHash": "3b378881960e29dfdc674a2a39dc68fb82975f0d629fd00e5bbc83cc92dc7407",
+    "afterHash": "cd17232845b19830f7639fa7c9bed4f51696f249e01787f5894a6de98c3e7b67"
+  },
+  "affectedSamples": [
+    "H01",
+    "H05"
+  ],
+  "reviewer": "codex-under-user-delegated-autonomy",
+  "reviewedAt": "2026-10-26T05:48:26.875Z",
+  "rationale": "逐文件核对仅历史夹具的动作说明和history_remaining已知未执行结果改变；核心、依赖、模型接线、计费、公共场景驱动、原样本及辅助协议保持原字节。H01/H05真实阶段开放这些动作，需全部重验；B类使用另一夹具，H02/H03/H04/H06真实阶段不开放这些动作且准备不执行history_remaining，复用未受影响证据时保留原候选及历史来源，不冒称重跑。",
+  "checks": {
+    "relative": "docs/results/integrated-7c3-history-scope-check.json",
+    "hash": "6d9a900cb49fcfcb312a7fc70b5dc2720afb867cb7276af1f765c940bda3b718"
+  }
+}
