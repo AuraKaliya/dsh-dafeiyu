@@ -21,7 +21,8 @@ const auditSchema=z.strictObject({id:z.uuid(),type:z.string(),scope:ExecutionSco
 const proposal=z.strictObject({requestId:PersonaRequestIdSchema,kind:PersonaKindSchema,text:z.string().trim().min(1).max(8000),sources:z.array(z.string().max(300)).max(16).default([]),
   counters:z.array(z.string().max(300)).max(16).default([]),applicability:z.string().trim().min(1).max(1000),reason:z.string().trim().min(1).max(1000)});
 const control={requestId:PersonaRequestIdSchema,id:z.uuid(),expectedVersion:z.number().int().positive(),reason:z.string().trim().min(1).max(1000)};
-export class PersonaService {
+/** Sole owner of stage-personality proposals, preferences and relationship state. */
+export class GrowthService {
   readonly experiences:ExperienceStore;
   private readonly store:PersonaStore;
   private readonly sources:ExecutionSources;
@@ -47,7 +48,7 @@ export class PersonaService {
       resolveIntent:(access,input)=>{try{return this.executionState.resolveIntent(access,input);}finally{this.flush();}},
       ...(compact?{compactionPolicy:compact.policy,summarize:compact.summarize.bind(compact),summarizeFragments:compact.summarizeFragments.bind(compact),rewrite:compact.rewrite.bind(compact)}:{summarize:async()=>{throw new Error('COMPACTION_NOT_CONFIGURED');}})};
     this.unbindExecution=ctx.dafeiyu.bindExecutionMemory(port);
-    this.unbind=ctx.dafeiyu.bindPersonaProvider({ready,prepare:access=>this.store.prepare(access),validate:(access,entry)=>this.ready()&&this.store.validate(access,entry),
+    this.unbind=ctx.dafeiyu.bindGrowthProvider({ready,prepare:access=>this.store.prepare(access),validate:(access,entry)=>this.ready()&&this.store.validate(access,entry),
       validateHistoricalTrial:(access,dependency)=>this.ready()&&this.store.validateHistoricalTrial(access,dependency),
       trialAdmitted:(input,authority)=>{try{return this.store.admitTrial(ctx.dafeiyu.personaTrialAccess(authority,input),input);}finally{this.flush();}},
       completeTrial:(input,authority)=>{try{return this.store.completeTrial(ctx.dafeiyu.personaTrialAccess(authority,input),input);}finally{this.flush();}}});
@@ -160,3 +161,6 @@ export class PersonaService {
   }
   close(){this.executionHandle.dispose();this.handle.dispose();this.unbind();this.unbindExecution();}
 }
+
+/** @deprecated Use GrowthService. This is the same constructor, not a second store. */
+export { GrowthService as PersonaService };

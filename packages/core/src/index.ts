@@ -40,7 +40,7 @@ export type { PersonaTrialCompletionStatus } from './persona-runtime.js';
 export { readFoundation } from './foundation.js';
 export { initializeCoreStorage } from './storage-initialization.js';
 import type { StoredRun } from './runtime-store.js';
-import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider,PersonaProvider,ExecutionMemoryPort } from '@dafeiyu/contracts';
+import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider,MemoryGrowthProvider,PersonaProvider,ExecutionMemoryPort } from '@dafeiyu/contracts';
 import { ResourceProofSchema,CapabilityObservationSchema,CapabilitySelectionSchema,ConversationSchema,ExecutionScopeSchema } from '@dafeiyu/contracts';
 import type { CapabilityObservationPort,PersonaAccess,PersonaSourceRef,SourceDependency,TimelineScope } from '@dafeiyu/contracts';
 export type { ExecutionOptions } from './execution-coordinator.js';
@@ -248,7 +248,9 @@ export class DafeiyuService extends Service {
       readState:port.readState.bind(port),readSelectedInputs:port.readSelectedInputs.bind(port),update:port.update.bind(port)});this.repositoryPort=bound;
     return ()=>{if(this.repositoryPort===bound)this.repositoryPort=undefined;};
   }
-  bindPersonaProvider(provider:PersonaProvider):()=>void{this.assertOpen();const unbind=this.personas.bind(provider),unpin=this.contexts.pinRegion('memory:growth');return ()=>{unbind();unpin();};}
+  bindGrowthProvider(provider:MemoryGrowthProvider):()=>void{this.assertOpen();const unbind=this.personas.bind(provider),unpin=this.contexts.pinRegion('memory:growth');return ()=>{unbind();unpin();};}
+  /** @deprecated Compatibility alias; both names bind the same single provider. */
+  bindPersonaProvider(provider:PersonaProvider):()=>void{return this.bindGrowthProvider(provider);}
   assertPersonaTrialAuthority(authority:unknown,input:unknown):void{this.personas.assertTrialAuthority(authority,input);}
   personaTrialAccess(authority:unknown,input:unknown):PersonaAccess{const access=this.personas.trialAccess(authority,input);if(access.view.scope.kind==='task')return access;
     const scope={agentId:access.view.scope.agentId,route:access.view.scope.route},session=this.journal.sessionFor(scope),history=session?this.runtime.exposedDependencies(session):null,origin=access.view.origin;

@@ -220,7 +220,9 @@ export interface PreparedPersona {readonly stageRevision:number;readonly selecti
   readonly trialEntries?:readonly PreparedPersonaTrialEntry[];readonly trialSelectionVersion?:number;readonly omittedTrials?:number}
 /** Core authenticates this live callback object and the exact plain input before memory may use it. */
 export interface PersonaTrialAuthority {readonly guard:()=>void}
-export interface PersonaProvider {
+/** Memory & Growth owns mutable personality, preferences and relationships.
+ * Core consumes scoped projections and reports actual use; it owns no second state store. */
+export interface MemoryGrowthProvider {
   ready():boolean;
   prepare(access:PersonaAccess):PreparedPersona;
   validate(access:PersonaAccess,entry:PreparedPersonaEntry):boolean;
@@ -228,3 +230,5 @@ export interface PersonaProvider {
   trialAdmitted?(input:PersonaTrialAdmissionInput,authority:PersonaTrialAuthority):readonly PersonaTrialAdmissionRef[];
   completeTrial?(input:PersonaTrialCompletionInput,authority:PersonaTrialAuthority):readonly PersonaTrialOutcomeRef[];
 }
+/** @deprecated Use MemoryGrowthProvider. Kept for existing extensions. */
+export type PersonaProvider = MemoryGrowthProvider;

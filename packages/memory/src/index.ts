@@ -23,7 +23,8 @@ import type { CompactionScope } from '@dafeiyu/contracts';
 import type { TaskWorkspace } from './task-workspace.js';
 import type { TaskExpression } from './expression.js';
 import { taskRepository } from './task-repository-adapter.js';
-import { PersonaService } from './persona-service.js';
+import { GrowthService } from './persona-service.js';
+export { GrowthService } from './persona-service.js';
 import { CapabilityObservationService } from './capability-service.js';
 import { MaintenanceService,maintenanceConfigSchema } from './maintenance-service.js';
 export type { MemoryView } from './store.js';
@@ -67,7 +68,9 @@ export class MemoryService extends Service {
   private unbindRepository:(()=>void)|undefined;
   private unbindNativeExpression:(()=>void)|undefined;
   private nativeExpression:import('./native-expression.js').NativeExpression|undefined;
-  readonly persona:PersonaService|undefined;
+  readonly growth:GrowthService|undefined;
+  /** @deprecated Same instance; retained for existing internal callers. */
+  get persona():GrowthService|undefined{return this.growth;}
   readonly maintenance:MaintenanceService|undefined;
   private readonly emptyMaintenanceCounts:Record<string,number>={};
   private readonly capabilityService:CapabilityObservationService|undefined;
@@ -144,7 +147,7 @@ export class MemoryService extends Service {
     ctx.effect(() => () => this.close(), 'memory.close');
     if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
       ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
-    if(this.config.lifecycleMode==='managed')this.persona=new PersonaService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction,!!this.config.maintenance);
+    if(this.config.lifecycleMode==='managed')this.growth=new GrowthService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction,!!this.config.maintenance);
     if(this.config.maintenance&&this.persona)this.maintenance=new MaintenanceService(ctx,this.store,this.persona,this.config.dataDir,this.config.maintenance,this.config.agentId,()=>!this.closed&&this.gate.active);
     if(this.config.lifecycleMode==='managed')this.capabilityService=new CapabilityObservationService(ctx,this.store,()=>!this.closed&&this.gate.active,sourcePolicy,()=>{this.flush();this.persona?.flush();});
     if(this.config.lifecycleMode==='managed'){this.nativeExpression=this.store.nativeExpression(ctx,this.expression,()=>!this.closed&&this.gate.active,()=>{this.flush();this.persona?.flush();});this.unbindNativeExpression=ctx.dafeiyu.bindNativeExpression(this.nativeExpression);}
