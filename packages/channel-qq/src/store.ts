@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { inspectQqSchema, initializeQqSchema, QQ_SCHEMA_VERSION } from './schema.js';
 import { GroupListSchema, GroupSnapshotSchema, QqAccountIdSchema, groupReceivesMessages } from './groups.js';
 import type { GroupInput, GroupSnapshot } from './groups.js';
-import { QqCache } from './cache.js';
+import { QqCache,QqCacheProofSchema } from './cache.js';
 import type { QqCacheOptions } from './cache.js';
 import { redactContent } from '@dafeiyu/contracts';
 import type { MediaAttachment } from '@dafeiyu/contracts';
@@ -13,6 +13,7 @@ import { QqDeliveryLedger } from './delivery.js';
 import { QqMediaStore } from './media-store.js';
 import { QqMediaDeliveryLedger } from './media-delivery.js';
 const remembered = z.object({ id: z.string(), sender: z.string(), text: z.string() });
+const quoteSchema=z.strictObject({route:z.string(),messageId:z.string().max(80),observedAt:z.iso.datetime(),occurredAt:z.iso.datetime(),expiresAt:z.iso.datetime(),proof:QqCacheProofSchema});
 export class QqStore {
   private readonly db: DatabaseSync;
   readonly cache: QqCache;
@@ -34,7 +35,17 @@ export class QqStore {
       this.mediaDelivery=new QqMediaDeliveryLedger(this.db);
     } catch (error) { this.db.close(); throw error; }
   }
-  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[];groupGeneration?:number }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
+  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[];groupGeneration?:number;forwardIds?:readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
+  selectReplyQuote(replyId:string,value:z.infer<typeof quoteSchema>){const next=quoteSchema.parse(value),old=this.db.prepare('SELECT body FROM qq_reply_quotes WHERE reply_id=?').get(replyId);
+    if(old){if(quoteSchema.parse(JSON.parse(String(old.body))).messageId!==next.messageId)throw new Error('IDEMPOTENCY_CONFLICT');return;}
+    this.db.prepare('INSERT INTO qq_reply_quotes VALUES(?,?)').run(replyId,JSON.stringify(next));}
+  replyQuote(replyId:string,route:string){const row=this.db.prepare('SELECT body FROM qq_reply_quotes WHERE reply_id=?').get(replyId);if(!row)return null;const quote=quoteSchema.parse(JSON.parse(String(row.body)));
+    if(quote.route!==route||Date.parse(quote.expiresAt)<=Date.now()||Date.parse(quote.occurredAt)<Date.parse(quote.observedAt)-86400000||Date.parse(quote.occurredAt)>Date.parse(quote.observedAt)||!this.cache.proofCurrent(quote.proof))throw new Error('SOURCE_STALE');return quote.messageId;}
+  appendHistory(route: string, id: string, sender: string, text: string, metadata: { occurredAt: string; unsupported: readonly string[];media?:readonly MediaAttachment[];forwardIds?:readonly string[] }): boolean {
+    if(this.cache.known(route,id)){this.cache.completeHistoryMetadata(route,id,metadata.occurredAt,metadata.forwardIds);return false;}
+    if (Number(this.db.prepare('SELECT count(*) AS n FROM messages WHERE route=?').get(route)?.n) >= 200) return false;
+    return this.cache.remember(route, id, sender, text, { ...metadata, history: true });
+  }
   find(route: string, id: string) { const row = this.db.prepare('SELECT id,sender,text FROM messages WHERE route=? AND id=?').get(route,id); if (!row) return null; const value = remembered.parse(row); return { ...value, text: redactContent(value.text).value }; }
   receipt(id: string): string | null { const row = this.db.prepare('SELECT platform_id FROM receipts WHERE reply_id=?').get(id); return row ? z.string().parse(row.platform_id) : null; }
   handled(route: string, id: string): boolean { return !!this.db.prepare('SELECT 1 FROM handled WHERE route=? AND id=?').get(route,id); }

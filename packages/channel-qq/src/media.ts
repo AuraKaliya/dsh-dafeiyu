@@ -33,8 +33,8 @@ export class QqMedia {
       if(!detail.success||proof.version!==1||proof.key!=='list:'+digest(proof.detail)||proof.hash!==digest(proof.detail)||digest(proof.roots)!==digest([`qq:${proof.scene.account}:${proof.scene.kind}:${proof.scene.id}:message:${detail.data.messageId}`]))return false;
       return digest(this.host.store.media.list(proof.scene,detail.data.messageId).map(d=>d.origin))===digest(detail.data.parts)&&detail.data.parts.every(p=>this.host.store.media.current(p));}
     return this.host.store.media.current(proof);}
-  remember(scene:Conversation,messageId:string,sender:string,envelope:unknown,parts:readonly {type:string;data:Record<string,unknown>}[]):{attachments:MediaAttachment[];positions:Set<number>}{
-    if(!this.host.allowed(scene)||!this.host.available())throw new Error('TARGET_NOT_ALLOWED');const ids=this.host.store.media.remember(scene,messageId,sender,createHash('sha256').update(JSON.stringify(envelope)).digest('hex'),parts),descriptions=ids.map(id=>this.host.store.media.describe(id));this.host.store.media.prune();
+  remember(scene:Conversation,messageId:string,sender:string,envelope:unknown,parts:readonly {type:string;data:Record<string,unknown>}[],positionOffset=0):{attachments:MediaAttachment[];positions:Set<number>}{
+    if(!this.host.allowed(scene)||!this.host.available())throw new Error('TARGET_NOT_ALLOWED');const ids=this.host.store.media.remember(scene,messageId,sender,createHash('sha256').update(JSON.stringify(envelope)).digest('hex'),parts,positionOffset),descriptions=ids.map(id=>this.host.store.media.describe(id));this.host.store.media.prune();
     return {attachments:descriptions.map(d=>MediaAttachmentSchema.parse({schemaVersion:1,source:d.ref,kind:d.kind,name:d.name})),positions:new Set(descriptions.map(d=>z.object({position:z.number()}).parse(d.origin.detail).position))};
   }
   private list(context:ExecutionContextV3,raw:unknown){this.ctx.dafeiyu.executionAuthority(context,QQ_MEDIA_PROVIDER);const input=listSchema.parse(raw);

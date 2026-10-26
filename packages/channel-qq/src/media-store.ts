@@ -13,10 +13,10 @@ const bodySchema=z.strictObject({scene:ConversationSchema,messageId:z.string().m
   name:z.string().max(200).nullable(),bytesHint:z.number().int().nonnegative().safe().nullable(),envelopeHash:z.string().length(64),locatorHash:z.string().length(64)});
 export class QqMediaStore {
   constructor(private readonly db:DatabaseSync,private readonly cache:QqCache){}
-  remember(scene:Conversation,messageId:string,sender:string,envelopeHash:string,parts:readonly {type:string;data:Record<string,unknown>}[]){const route=JSON.stringify([scene.account,scene.kind,scene.id]);
+  remember(scene:Conversation,messageId:string,sender:string,envelopeHash:string,parts:readonly {type:string;data:Record<string,unknown>}[],positionOffset=0){const route=JSON.stringify([scene.account,scene.kind,scene.id]);
     if(this.cache.recalled(route,messageId))return [];
     this.db.exec('BEGIN IMMEDIATE');try{const ids:string[]=[];
-      for(const [position,part] of parts.entries()){if(!['image','record','video','file'].includes(part.type)||ids.length>=8)continue;
+      for(const [index,part] of parts.entries()){const position=positionOffset+index;if(!['image','record','video','file'].includes(part.type)||ids.length>=8)continue;
         const locator=locatorSchema.safeParse({...(typeof part.data.file==='string'?{file:part.data.file}:{}),...(typeof part.data.file_id==='string'?{fileId:part.data.file_id}:{}),...(typeof part.data.url==='string'?{url:part.data.url}:{})});if(!locator.success||!Object.keys(locator.data).length)continue;
         const rawName=typeof part.data.name==='string'?part.data.name:typeof part.data.file_name==='string'?part.data.file_name:null;
         const body=bodySchema.parse({scene,messageId,sender,position,kind:part.type==='record'?'audio':part.type==='file'?'document':part.type,name:rawName?redactContent(rawName).value.replace(/[\\/\x00-\x1f]/g,'_').slice(0,200):null,

@@ -1,0 +1,270 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-27",
+  "scope": {
+    "localFormal": true,
+    "serverAccess": false,
+    "snowLumaModified": false,
+    "newGithubRelease": false,
+    "qqTestMessagesSent": 0,
+    "original7cLedgerModified": false
+  },
+  "rootCause": {
+    "qqBrowseWasRegistered": true,
+    "originalQuestionWasCapabilityInquiry": true,
+    "forwardReadWasMissing": true,
+    "formalMediaWasUnconfigured": true
+  },
+  "features": {
+    "modalities": {
+      "vision": true,
+      "asr": true,
+      "events": true,
+      "documents": true,
+      "tts": false
+    },
+    "historyWindowHours": 24,
+    "relativeTo": "observation-start",
+    "appliesToExistingCache": true,
+    "platformPageLimit": 5,
+    "platformPageSize": 20,
+    "cacheMessageLimit": 200,
+    "forwardNodeLimit": 20,
+    "historyAutoReplay": false,
+    "ordinaryAndMessageTaskQuote": true,
+    "replyDelay": {
+      "enabled": true,
+      "minMs": 2000,
+      "maxMs": 10000,
+      "msPerUnicodeCharacter": 20,
+      "nonTextCount": 0,
+      "oncePerLogicalReply": true,
+      "emptyObservedMs": 2014
+    }
+  },
+  "migration": {
+    "id": "58ad4d05-8058-41d0-b025-5f58c3c48b09",
+    "verified": true,
+    "qq": 7,
+    "media": 2,
+    "preservation": {
+      "at": "2026-10-26T23:19:13.993Z",
+      "originalQqTextPreserved": true,
+      "installationUnchanged": true,
+      "foundationUnchanged": true
+    }
+  },
+  "verification": {
+    "realModelStreams": 9,
+    "realCoreOperations": [
+      {
+        "action": "qq_browse",
+        "status": "succeeded"
+      },
+      {
+        "action": "qq_media_list",
+        "status": "succeeded"
+      },
+      {
+        "action": "dafeiyu_media_acquire",
+        "status": "succeeded"
+      },
+      {
+        "action": "dafeiyu_media_inspect",
+        "status": "succeeded"
+      },
+      {
+        "action": "dafeiyu_media_read",
+        "status": "succeeded"
+      }
+    ],
+    "realQqImageRead": true,
+    "realQqVoiceSample": false,
+    "realQqFileSample": false,
+    "realQqForwardSample": false,
+    "actualLocalAsrAndSoundProcessing": true,
+    "actualDocumentProcessing": true,
+    "quoteDelivery": "actual-DSH-simulated-OneBot"
+  },
+  "tests": {
+    "relatedFiles": 16,
+    "distinctCases": 106,
+    "allLatestFilesPassed": true,
+    "singleCombinedGreenBatch": false,
+    "runs": [
+      {
+        "id": "efe3868f-fe29-4864-87f7-bd7aa984b488",
+        "passed": false,
+        "counts": {
+          "tests": 54,
+          "failed": 2,
+          "passed": 52,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 54,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "2ec4dcb7-0ac6-454d-ba12-4b1c30c053ff",
+        "passed": false,
+        "counts": {
+          "tests": 25,
+          "failed": 3,
+          "passed": 22,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 25,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "b0ce5ebd-c716-488a-b282-5e9382e2289a",
+        "passed": false,
+        "counts": {
+          "tests": 10,
+          "failed": 1,
+          "passed": 9,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 10,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "a01fc0de-c0ca-46f7-a4b7-740973e9217e",
+        "passed": false,
+        "counts": {
+          "tests": 1,
+          "failed": 1,
+          "passed": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 1,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "ba5c2a1c-94b9-464e-b22e-0f8d202f7407",
+        "passed": false,
+        "counts": {
+          "tests": 30,
+          "failed": 1,
+          "passed": 29,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 30,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "8cddd7ad-2e71-4a77-90b0-5a2c9fccc7da",
+        "passed": false,
+        "counts": {
+          "tests": 18,
+          "failed": 1,
+          "passed": 17,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 18,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "80db1e79-5fe3-402f-9d0d-d64373e72947",
+        "passed": true,
+        "counts": {
+          "tests": 1,
+          "failed": 0,
+          "passed": 1,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 1,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "6db73b79-5ab0-4dc9-86a9-41450c6c1425",
+        "passed": true,
+        "counts": {
+          "tests": 39,
+          "failed": 0,
+          "passed": 39,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 39,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "c80f91cd-6fb5-4246-9d62-db998a68099f",
+        "passed": false,
+        "counts": {
+          "tests": 22,
+          "failed": 1,
+          "passed": 21,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 22,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "42703d0f-53e5-44e6-99fb-9b4b44f2aef8",
+        "passed": true,
+        "counts": {
+          "tests": 8,
+          "failed": 0,
+          "passed": 8,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 8,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      },
+      {
+        "id": "407e2dbc-5f0b-4127-908c-d962b735aa7a",
+        "passed": true,
+        "counts": {
+          "tests": 3,
+          "failed": 0,
+          "passed": 3,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 3,
+          "suites": 0
+        },
+        "cleanupBlocked": []
+      }
+    ]
+  },
+  "final": {
+    "phase": "ready",
+    "qq": "online",
+    "groups": "current",
+    "effectiveGroups": 3,
+    "error": null
+  },
+  "protectedMemoryDocumentSha256": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+}

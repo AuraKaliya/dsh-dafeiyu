@@ -38,7 +38,7 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
   const scratch=testTempDir();if(existingRoot){const path=relative(resolve(process.env.DAFEIYU_TEST_RUN!),resolve(existingRoot));if(path.startsWith('..')||/^[A-Za-z]:/.test(path))throw new Error('FIXTURE_ROOT_OUTSIDE_MANAGED_RUN');}
   const root=existingRoot??await mkdtemp(join(scratch,'dafeiyu-qq-capabilities-')),tokenFile=join(root,'token'),token='fictional-capability-test-token-no-real-login';await writeFile(tokenFile,token);
   const platform={sent:[] as Record<string,unknown>[],groups:[{group_id:Number(group),group_name:'虚构一群'},{group_id:Number(otherGroup),group_name:'虚构二群'}] as GroupPacketFixture[],identity:bot,loseAt:0,
-    mediaFiles:new Map<string,string>(),mediaCalls:[] as {action:string;params:unknown}[],visionReads:0,
+    mediaFiles:new Map<string,string>(),mediaCalls:[] as {action:string;params:unknown}[],visionReads:0,history:new Array<unknown>(),historyCalls:new Array<unknown>(),forwards:new Map<string,unknown>(),
     afterVisionRead:async():Promise<void>=>{},
     transcript:'请整理这段虚构讨论',speechDetected:true,
     ttsInputs:[] as string[],ttsFail:false,
@@ -49,6 +49,8 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
     else if(req.url==='/get_status')data={online:true};
     else if(req.url==='/get_group_list')data=platform.groups;
     else if(req.url==='/send_packet'){assertGroupQuery(raw);data=groupPacket(platform.groups);}
+    else if(req.url==='/get_group_msg_history'||req.url==='/get_friend_msg_history'){platform.historyCalls.push(JSON.parse(raw));data={messages:platform.history};}
+    else if(req.url==='/get_forward_msg'){const input=z.object({id:z.string()}).parse(JSON.parse(raw));data=platform.forwards.get(input.id)??{messages:[]};}
     else if(['/get_image','/get_record','/get_file'].includes(req.url??'')){const params=z.object({file:z.string().optional(),file_id:z.string().optional()}).parse(JSON.parse(raw));platform.mediaCalls.push({action:req.url!,params:JSON.parse(raw)});const file=platform.mediaFiles.get(params.file??params.file_id??'');if(!file){res.writeHead(404).end();return;}data={file};}
     else if(req.url==='/send_private_msg'||req.url==='/send_group_msg'){platform.sent.push(z.record(z.string(),z.unknown()).parse(JSON.parse(raw)));data={message_id:-platform.sent.length};await platform.afterSend(platform.sent.length);if(platform.loseAt===platform.sent.length){res.destroy();return;}}
     else{res.writeHead(404).end();return;}
@@ -90,10 +92,10 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
   const ready=async()=>{await h.ctx.dafeiyuQQ.start();await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&wss.clients.size>0);};await ready();h.core.activate();
   const emit=(event:object)=>{for(const ws of wss.clients)if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(event));};
   let nextId=1;
-  const message=async(text:string,{target=scene,trigger=false,media=false,id=String(nextId++),sender=owner}:{target?:Conversation;trigger?:boolean;media?:boolean;id?:string;sender?:string}={})=>{
+  const message=async(text:string,{target=scene,trigger=false,media=false,id=String(nextId++),sender=owner,parts=[]}:{target?:Conversation;trigger?:boolean;media?:boolean;id?:string;sender?:string;parts?:{type:string;data:Record<string,unknown>}[]}={})=>{
     await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&[...wss.clients].some(socket=>socket.readyState===WebSocket.OPEN));
     const event={post_type:'message',self_id:Number(bot),message_id:Number(id),message_type:target.kind,user_id:Number(sender),...(target.kind==='group'?{group_id:Number(target.id)}:{}),time:Math.ceil(Date.now()/1000),
-      message:[...(trigger&&target.kind==='group'?[{type:'at',data:{qq:bot}}]:[]),{type:'text',data:{text}},...(media?[{type:'image',data:{url:'https://invalid.example/fictional-image'}}]:[])],sender:{nickname:'虚构主人'}};
+      message:[...(trigger&&target.kind==='group'?[{type:'at',data:{qq:bot}}]:[]),{type:'text',data:{text}},...(media?[{type:'image',data:{url:'https://invalid.example/fictional-image'}}]:[]),...parts],sender:{nickname:'虚构主人'}};
     const count=h.ctx.dafeiyuQQ.getStatus().counters.received;emit(event);await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received>count);await h.core.whenIdle();return {id,event};};
   const rows=()=>{const db=new DatabaseSync(join(root,'memory','memory.sqlite'),{readOnly:true});try{return {
     memories:db.prepare('SELECT r.body,b.body AS boundary FROM memory_items i JOIN memory_revisions r ON r.id=i.id JOIN memory_boundaries b ON b.id=i.id').all(),

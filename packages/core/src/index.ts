@@ -275,6 +275,7 @@ export class DafeiyuService extends Service {
     return ()=>{if(this.capabilityObservationPort===bound)this.capabilityObservationPort=undefined;};
   }
   capabilityResources(context:ExecutionContextV3,pluginId:string):readonly Conversation[]{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.resources(context,pluginId);}
+  quoteReplySource(context:ExecutionContextV3,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.quoteReplySource(context,pluginId);}
   authorizeCapabilityResource(context:ExecutionContextV3,pluginId:string,raw:unknown):Conversation {
     if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const scene=ConversationSchema.parse(raw);this.executions.authorizeResource(context,pluginId,scene);return scene;
   }

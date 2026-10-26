@@ -47,7 +47,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   if(bili)plugins.push({id:'bilibili',required:true,config:{...(bili.capabilities?{capabilities:{...(bili.session?{session:bili.session}:{})}}:{}),...(bili.channel?{channel:{accountUid:bili.channel.accountUid,ownerUid:bili.channel.ownerUid,tasks:{enabled:bili.capabilities}}}:{})}});
   const policies:unknown[]=[{id:'conversation',producers:['channel-qq',...(bili?.channel?['channel-bili-owner']:[])],actions:conversation,allowLocalWrite:true},
     {id:'qq-task',producers:['qq-tasks'],actions,allowLocalWrite:true,resources},
-    {id:'local-task',producers:['host-cli'],actions,allowLocalWrite:true,resources}];
+    {id:'local-task',producers:['host-cli'],actions,allowLocalWrite:true,resources:[...resources,{channel:'qq',account:settings.qq.botId,kind:'private',id:settings.qq.ownerId}]}];
   if(activity)policies.push({id:'activity-explore',producers:['activity'],actions,allowLocalWrite:true,resources},{id:'activity-maintenance',producers:['activity'],actions:[...maintenanceActions,...growthActions],allowLocalWrite:true,resources});
   if(bili?.channel&&bili.capabilities)policies.push({id:'bili-owner-task',producers:['bili-owner-tasks'],actions:[...BILI_OWNER_NATIVE_ACTIONS],allowLocalWrite:true,resources:[BILI_PUBLIC_SCENE,biliOwnerScene(bili.channel)]});
   return HostConfigSchema.parse(JSON.parse(JSON.stringify({schemaVersion:1,profileId:meta.profileId,agent:{id:meta.agentId},paths:{core:join(root,'core'),memory:join(root,'memory'),sessions:join(root,'sessions'),query:join(root,'query.sqlite'),channels:{qq:join(root,'qq')}},

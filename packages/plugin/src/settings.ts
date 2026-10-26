@@ -9,7 +9,7 @@ export const InstallationSettingsSchema=z.strictObject({
   model:z.strictObject({model:z.string().trim().min(1).max(160),reasoningEffort:z.string().trim().min(1).max(40).optional(),
     credentialStore:path,baseURL:z.url().optional(),inlineTransport:z.record(z.string(),z.json()).optional()}),
   qq:z.strictObject({botId:qq,ownerId:qq,tokenFile:path,httpURL:z.url(),wsURL:z.url(),
-    groupIds:z.array(qq).max(10).default([]),joinedGroups:z.boolean().default(false),naturalNames:z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
+    groupIds:z.array(qq).max(10).default([]),joinedGroups:z.boolean().default(false),replyDelay:z.boolean().default(true),naturalNames:z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
     media:z.strictObject({cacheRoots:z.array(path).max(8).default([]),httpsHosts:z.array(z.string()).max(16).default([]),sendEnabled:z.boolean().default(false),voiceDirectives:z.boolean().default(false)}).optional()}).refine(value=>value.botId!==value.ownerId,'Bot and owner must differ'),
   bilibili:z.strictObject({capabilities:z.boolean().default(true),
     session:z.strictObject({file:path,expectedUid:uid}).optional(),

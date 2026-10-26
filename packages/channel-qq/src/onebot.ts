@@ -10,7 +10,7 @@ export function loopbackURL(value: string, protocol: 'http:' | 'ws:'): string {
 }
 export const platformId = z.union([z.string().regex(/^-?\d+$/), z.number().int().safe()]).transform(String);
 const responseSchema = z.object({ status: z.string(), retcode: z.number(), data: z.unknown() });
-type OneBotAction = 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'send_private_msg' | 'send_group_msg';
+type OneBotAction = 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'get_forward_msg' | 'get_group_msg_history' | 'get_friend_msg_history' | 'send_private_msg' | 'send_group_msg';
 export class OneBot {
   constructor(private readonly base: string, private readonly token: string, readonly botId: string, private readonly timeoutMs: number) {}
   call(action: OneBotAction, params: object, signal?: AbortSignal): Promise<unknown> { return this.request(action, params, signal); }
@@ -23,7 +23,8 @@ export class OneBot {
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (!response.ok) throw new Error('ONEBOT_HTTP_FAILURE');
     const reader=response.body?.getReader();if(!reader)throw new Error('ONEBOT_INVALID_RESPONSE');const chunks:Uint8Array[]=[];let bytes=0;
-    try{while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.byteLength;if(bytes>2*1024**2){await reader.cancel();throw new Error('ONEBOT_RESPONSE_LIMIT');}chunks.push(part.value);}}
+    const maxResponse=action==='get_record'?32*1024**2:2*1024**2;
+    try{while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.byteLength;if(bytes>maxResponse){await reader.cancel();throw new Error('ONEBOT_RESPONSE_LIMIT');}chunks.push(part.value);}}
     finally{reader.releaseLock();}
     let raw:unknown;try{raw=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw new Error('ONEBOT_INVALID_RESPONSE');}
     const body = responseSchema.parse(raw);
@@ -44,5 +45,13 @@ export class OneBot {
     const list = parseSnowLumaGroups(response);
     await this.verify(signal);
     return list;
+  }
+  async history(scene: { account: string; kind: string; id: string }, anchor: string | null, signal: AbortSignal): Promise<unknown> {
+    if (scene.account !== this.botId || !['private', 'group'].includes(scene.kind) || !/^[1-9]\d{4,14}$/.test(scene.id)) throw new Error('TARGET_NOT_ALLOWED');
+    const messageId = anchor === null ? 0 : Number(anchor); if (!Number.isSafeInteger(messageId)) throw new Error('HISTORY_INVALID_ANCHOR');
+    await this.verify(signal);
+    const data = await this.request(scene.kind === 'group' ? 'get_group_msg_history' : 'get_friend_msg_history',
+      { [scene.kind === 'group' ? 'group_id' : 'user_id']: Number(scene.id), message_id: messageId, count: 20, reverse_order: true }, signal);
+    await this.verify(signal); return data;
   }
 }

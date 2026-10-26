@@ -75,6 +75,10 @@ export class ExecutionCoordinator {
     if(run.definition.origin.kind==='message')return [this.d.journal.get(run.definition.origin.inboundId).message.conversation];
     const request=this.d.store.request(run.requestKey),source=savedSchema.parse(request.payload).messageSource;if(source)this.validateMessageSource(source);
     return (source?.resources??this.policy(request.producer,run.definition.policyId).resources).map(scene=>({...scene}));}
+  quoteReplySource(context:ExecutionContextV3,pluginId:string){this.authority(context,pluginId);const run=this.d.store.get(context.runId);
+    if(run.definition.origin.kind==='message'){const item=this.d.journal.get(run.definition.origin.inboundId);return {key:item.id+':reply',target:item.message.conversation};}
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;if(!source)throw new Error('MESSAGE_REQUIRED');this.validateMessageSource(source);
+    return {key:'task:'+run.id,target:source.conversation};}
   bindMessageTasks(binding:MessageTaskBinding):()=>void{if(this.messageBindings.has(binding.id))throw new Error('DUPLICATE_PROVIDER');const policy=this.policy(binding.id,binding.policyId);
     if(binding.explorationResources?.some(scene=>!policy.resources.some(allowed=>runtimeHash(allowed)===runtimeHash(scene))))throw new Error('EXPLORATION_RESOURCE_DENIED');
     const captured=Object.freeze({...binding,classify:binding.classify.bind(binding),active:binding.active.bind(binding),...(binding.voice?{voice:Object.freeze({version:binding.voice.version,resolve:binding.voice.resolve.bind(binding.voice),current:binding.voice.current.bind(binding.voice)})}:{})});this.messageBindings.set(binding.id,captured);return ()=>{if(this.messageBindings.get(binding.id)===captured)this.messageBindings.delete(binding.id);};}
@@ -138,8 +142,8 @@ export class ExecutionCoordinator {
         const media=z.object({text:z.string(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
         if(media.success&&operation.plugin==='media'&&operation.action==='dafeiyu_media_read'){const key=runtimeHash(media.data.observation.source);views.set(key,media.data.text);add(media.data.observation.source);}
         else if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
-          if(operation.plugin!=='qq-capabilities'||operation.action!=='qq_browse')opaque=true;}
-        else if(!(operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select')&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action))){opaque=true;derivedInputComplete=false;}
+          if(operation.plugin!=='qq-capabilities'||!['qq_browse','qq_forward_read'].includes(operation.action))opaque=true;}
+        else if(!(operation.plugin==='qq-capabilities'&&['qq_observe_select','qq_reply_quote'].includes(operation.action))&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action))){opaque=true;derivedInputComplete=false;}
         if(!outcome||outcome.effects==='unknown'||outcome.status==='unknown'){opaque=true;derivedInputComplete=false;}
         if(operation.plugin==='memory-execution'&&operation.action==='dafeiyu_task_object'){const refs=z.object({evidence:z.array(PersonaSourceRefSchema)}).safeParse(outcome?.data);if(refs.success)refs.data.evidence.forEach(add);}
       }else if(dependency.kind==='context'){

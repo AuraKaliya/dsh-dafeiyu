@@ -29,12 +29,17 @@
 | `qq.tokenFile` | 是 | OneBot令牌文件，至少32字符 |
 | `qq.httpURL` / `qq.wsURL` | 是 | 本机OneBot回环地址 |
 | `qq.groupIds` / `qq.joinedGroups` | 否 | 指定群 / 开放实际加入的群，默认不开放群 |
+| `qq.replyDelay` | 否 | 普通安装默认true；生成后按文本量延迟2—10秒，非文本不增加时间 |
 | `foundationFile` | 否 | 自选底色文件；默认使用随包提供的通用大肥鱼底色 |
 | `activity.enabled` | 否 | 默认启用调度能力，计划由核心决定 |
 
 启用媒体时，`media` 接受公共媒体接口配置：`ffmpeg`、`ffprobe` 必填；视觉使用 `vision: {provider,model,reasoningEffort?}`，provider与聊天路由一致。视觉还需配置 `model.inlineTransport: {contextWindow,maxOutputTokens}` 和模型支持的 `reasoningEffort`，上下文/输出上限按所用模型填写。音频语音识别使用 `audio.whisper`（node、moduleDirectory、moduleVersion为1.1.3、model），声音理解使用 `audio.events`（python、model、labels、onnxruntimeVersion、numpyVersion）；模型与标签对象为 `{path,sha256}`。准确字段以 `source/packages/media/src/audio.ts` 导出的配置schema为准；使用时会校验文件及哈希。
 
 QQ附件的本机目录和HTTPS来源分别在 `qq.media.cacheRoots`、`httpsHosts` 主动配置；默认不读取任意目录或地址。发送媒体需 `qq.media.sendEnabled: true`，语音任务触发需 `voiceDirectives: true`。语义检索和其它高级Host接线可使用 `runtime/host/bin/dafeiyu-host.mjs` 配合已有Host配置。后续给已有实例增加新的存储模块时，按Host迁移流程先备份并升级，不能用重新初始化代替。
+
+原版SnowLuma的 `get_record(out_format: wav)` 返回原始地址及转换后的base64，本插件优先使用转换后的WAV。音频后端分别受Windows Job内存上限约束；`audio.whisper.memoryBytes`、`audio.events.memoryBytes` 默认512MiB，可配置128MiB—2GiB。本机实际Whisper及YAMNet使用1GiB上限验证通过，不应把仅配置路径视为已完成后端验收。
+
+QQ历史工具 `qq_browse` 首轮使用 `includeRecentHistory:true` 按需补取观察前24小时内的记录；分页使用 `cursor`，不重复补取。不覆盖已有文字或复活撤回消息，只能用已核验平台记录补齐缺失时间与转发定位信息。`qq_forward_read` 读取实际收到的合并转发，`qq_reply_quote` 选择本轮观察到的历史引用；选择不会立即发送，交付仍通过核心人格、原QQ来源及群助手核验。当前会话授权边界保持不变。
 
 启用B站公开能力时配置：
 
