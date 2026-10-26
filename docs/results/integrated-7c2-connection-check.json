@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "runId": "d5d7f8a1-ea99-4687-b7e6-62cda6de7a85",
+  "startedAt": "2026-10-26T02:57:54.118Z",
+  "finishedAt": "2026-10-26T02:57:58.792Z",
+  "stages": [
+    {
+      "name": "build",
+      "code": 0,
+      "signal": null,
+      "durationMs": 128
+    },
+    {
+      "name": "test-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 2463
+    },
+    {
+      "name": "tooling-types",
+      "code": 0,
+      "signal": null,
+      "durationMs": 1295
+    },
+    {
+      "name": "tests",
+      "code": 0,
+      "signal": null,
+      "durationMs": 739
+    }
+  ],
+  "summary": {
+    "success": true,
+    "counts": {
+      "tests": 7,
+      "failed": 0,
+      "passed": 7,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 7,
+      "suites": 0
+    },
+    "durationMs": 667.3444,
+    "failures": []
+  },
+  "reason": null,
+  "cleanup": {
+    "removed": [
+      "d5d7f8a1-ea99-4687-b7e6-62cda6de7a85"
+    ],
+    "retained": [
+      {
+        "id": "c89d5e5e-5f53-4888-91d1-a0517336d75b",
+        "bytes": 1358188
+      },
+      {
+        "id": "d7b9f317-6dfc-4a05-a5a7-769922ded792",
+        "bytes": 4073982
+      },
+      {
+        "id": "fb2a23ab-4d17-4bc5-bed2-6f7b3888f85c",
+        "bytes": 2716145
+      }
+    ],
+    "blocked": []
+  },
+  "freeBytes": 218025766912,
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false
+}
