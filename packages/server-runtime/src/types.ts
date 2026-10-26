@@ -21,6 +21,8 @@ export interface ModelBudgetAuthority {
   /** Revalidate the original authorization and unresolved reservations, without starting a clock. */
   guard():void;
   remainingMs():number;
+  /** Optional durable authority stop source, including an idle window's deadline. Never a second clock. */
+  onStop?(listener:(code:string)=>void):()=>void;
   reserve(input:ModelBudgetRequest,signal:AbortSignal):Promise<ExecutorPermit>;
   /** Must accept accounting after execution cancellation or revocation. */
   settle(input:ModelBudgetSettlement):Promise<{unknown:boolean}>;

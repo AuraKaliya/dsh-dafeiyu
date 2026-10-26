@@ -33,6 +33,7 @@ export class SharedModelBudget {
     this.authority=authority;this.authorizationId=RuntimeIdentitySchema.parse(authority.authorizationId);
     this.route=Object.freeze(ExecutorRouteSchema.parse(authority.route));
     if(!['acceptance','operations','offline-test'].includes(authority.kind)||typeof authority.guard!=='function'||typeof authority.remainingMs!=='function'||typeof authority.reserve!=='function'||typeof authority.settle!=='function')throw new Error('RUNTIME_BUDGET_AUTHORITY_REQUIRED');
+    authority.onStop?.(code=>this.cancel(code));
   }
   assertReady():void {if(this.gate.stopped)throw new Error(this.gate.stopped);this.authority.guard();this.remainingMs();}
   remainingMs():number {const value=this.authority.remainingMs();if(!Number.isFinite(value)||value<=0||value>Number.MAX_SAFE_INTEGER)throw new Error('RUNTIME_AUTHORIZATION_EXPIRED');return Math.floor(value);}
@@ -92,7 +93,7 @@ export class SharedModelBudget {
     const input=ModelBudgetSettlementSchema.parse(raw),record=this.calls.get(input.callId);
     if(!record||input.authorizationId!==this.authorizationId||input.reservationId!==record.permit.reservationId||digest(input.owner)!==digest(record.request.owner))return Promise.reject(new Error('RUNTIME_RESERVATION_MISMATCH'));
     // Equality is based on the caller's receipt, before cancellation normalization.
-    const hash=digest({...input,usage:['error','aborted','interrupted'].includes(input.finish)?null:input.usage});
+    const hash=digest(input);
     if(record.completed){if(record.completed.hash!==hash)return Promise.reject(new Error('RUNTIME_SETTLEMENT_CONFLICT'));return record.completed.promise;}
     const promise=this.complete(record,input);record.completed={hash,promise};return promise;
   }

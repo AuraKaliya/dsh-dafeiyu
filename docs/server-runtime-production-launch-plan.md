@@ -31,7 +31,9 @@ Host 现有 `init/migrate` 继续由原入口执行，沿用空库初始化/显�
 
 ### Launch manifest v1
 
-必须显式包含：schemaVersion、profileId、agentId、Host 配置绝对路径和 prepared config hash、固定资金库路径、fundingID、初始授权 hash、价格文件路径/hash、模型 route、maximumCallMs、drainTimeoutMs、Windows proof 配置及允许的 SDK/launcher/profile 文件 pins。没有金额、期限或路径的隐式默认值。
+必须显式包含：schemaVersion、profileId、agentId、Host 配置绝对路径和当前版本的 prepared config hash、固定资金 scopeHash、固定资金库路径、fundingID、初始授权 hash、价格文件路径/hash、模型 route、maximumCallMs、drainTimeoutMs、Windows proof 配置及允许的 SDK/launcher/profile 文件 pins。没有金额、期限或路径的隐式默认值。
+
+2026-10-27 接线修订：资金 `scopeHash` 绑定固定 profile/agent 及持久数据资源范围；当前版本 `host.preparedHash` 和代码 pins 另由启动程序、更新守护逐版验证。资金 schema 不接受旧含糊字段 `hostHash`。正常插件更新若未改变资金范围、模型、计价或 Node/SID 约束，不需新增资金批准；不能因旧 entry/profile pin 变动而把同一余额作废重领。改变作用域、运行 Node/SID、金额或期限仍不是普通代码升级。此时尚无真实运营库，不涉及真实账目迁移。
 
 沿用现有 Windows 配置：Node 路径/hash、固定 PowerShell 路径/hash、固定 probe hash、expectedOwnerSid、受管临时目录。Node pin 必须与 executor command 相同；child profile、entry、args、DSH_HOME、credential binding、tools 白名单仍由现有 manifest reader 独立验证。
 
@@ -41,7 +43,7 @@ Host chat route、父模型默认输出/有效 effort/contextWindow、executor r
 
 ### Funding authorization v1
 
-建议字段：fundingID、profileId/agentId、Host binding hash、currency=`CNY`、maximumMicroCny、notBefore、expiresAt、priceHash、routeHash、批准来源引用及其 hash、批准时间、授权用途、明确的未知停止规则。
+建议字段：fundingID、profileId/agentId、资金 scopeHash、currency=`CNY`、maximumMicroCny、notBefore、expiresAt、priceHash、routeHash、批准来源引用及其 hash、批准时间、授权用途、明确的未知停止规则。
 
 金额是显式正整数 micro-CNY，期限是绝对 UTC 时间；当前文档不给任何真实数值。批准来源须来自实际用户/操作员授权材料。仅填写 `approvedBy: human`、复制测试文件或模型自述不构成人类授权；可信 operator-init 是消费已有授权的操作，不是自动申请/生成授权。
 

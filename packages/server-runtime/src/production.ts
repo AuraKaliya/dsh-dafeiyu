@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
+import type {} from '@dafeiyu/channel-qq';
 import type { HostRuntimeOptions,PreparedHostConfig } from '@dafeiyu/host';
 import type { WindowsProcessControlOptions,WindowsHostProof } from '@dafeiyu/server-executor/windows-process';
 import { ExecutorRouteSchema } from '@dafeiyu/server-executor/protocol';
@@ -25,6 +26,11 @@ export interface ProductionRuntimeResources {
 /** Uses current services even during Host.start(), before an outer host variable exists. */
 export function cancelManagedModelWork(ctx:Context,code:string):void {
   const actions=[
+    ()=>{if(ctx.get('dafeiyu'))ctx.dafeiyu.quiesce();},
+    ()=>{if(ctx.get('dafeiyuQQ'))ctx.dafeiyuQQ.quiesce();},
+    // Stop ingress without cancelling a send which may already have reached the platform.
+    // Host's normal drain/timeout path retains the delivery's actual receipt or unknown state.
+    ()=>{if(ctx.get('dafeiyuBiliOwner'))ctx.dafeiyuBiliOwner.quiesce();},
     ()=>{if(ctx.get('dafeiyuActivity'))ctx.dafeiyuActivity.stopBackground();},
     ()=>{if(ctx.get('dafeiyuMemory'))ctx.dafeiyuMemory.stopBackground();},
     ()=>{if(ctx.get('dafeiyu'))ctx.dafeiyu.cancelRunning();},

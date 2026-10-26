@@ -2,5 +2,5 @@
   "extends":"../../tsconfig.base.json",
   "compilerOptions":{"composite":true,"rootDir":"src","outDir":"lib","tsBuildInfoFile":"lib/.tsbuildinfo"},
   "include":["src/**/*.ts"],
-  "references":[{"path":"../host"},{"path":"../server-executor"}]
+  "references":[{"path":"../host"},{"path":"../server-executor"},{"path":"../channel-qq"}]
 }
