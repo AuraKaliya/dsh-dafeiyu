@@ -1,0 +1,38 @@
+import { createServer } from 'node:net';
+import { biliOwnerConsumerKey } from './types.js';
+import { assertPinnedBiliOwnerProductionBinding } from './production-config.js';
+export const biliOwnerConsumerPipe = (identity) => ['', '', '.', 'pipe', 'DaFeiYu-BiliOwner-' + identity.accountUid + '-' + identity.ownerUid].join(String.fromCharCode(92));
+const leases = new WeakMap();
+export function assertBiliOwnerProductionLease(lease, binding) { if (leases.get(lease) !== binding)
+    throw new Error('BILI_OWNER_PRODUCTION_LEASE_REQUIRED'); lease.guard(); }
+/** The fixed OS pipe excludes this implementation across profiles, not legacy consumers which do not acquire it. */
+export async function acquireBiliOwnerConsumerLease(binding) {
+    assertPinnedBiliOwnerProductionBinding(binding);
+    if (process.platform !== 'win32')
+        throw new Error('BILI_OWNER_WINDOWS_REQUIRED');
+    let closed = false, alive = false, releasing;
+    const server = createServer(socket => socket.destroy());
+    server.on('error', () => { alive = false; });
+    try {
+        await new Promise((resolve, reject) => {
+            const failed = () => { server.off('listening', ready); reject(new Error('BILI_OWNER_CONSUMER_BUSY')); }, ready = () => { server.off('error', failed); alive = true; resolve(); };
+            server.once('error', failed);
+            server.once('listening', ready);
+            server.listen({ path: biliOwnerConsumerPipe(binding.manifest), exclusive: true, readableAll: false, writableAll: false });
+        });
+        server.unref();
+        binding.guard();
+    }
+    catch (error) {
+        if (server.listening)
+            await new Promise(resolve => server.close(() => resolve()));
+        throw error;
+    }
+    const lease = Object.freeze({ key: biliOwnerConsumerKey(binding.manifest), epoch: binding.manifest.generation, guard: () => { if (closed || !alive || !server.listening)
+            throw new Error('BILI_OWNER_LEASE_REVOKED'); binding.guard(); },
+        release: () => { if (releasing)
+            return releasing; closed = true; alive = false; releasing = new Promise((resolve, reject) => { if (!server.listening)
+            return resolve(); server.close(error => error ? reject(new Error('BILI_OWNER_LEASE_CLOSE_FAILED')) : resolve()); }); return releasing; } });
+    leases.set(lease, binding);
+    return lease;
+}

@@ -1,0 +1,5 @@
+DaFeiYu is an independent plugin for DeepSeek Harness.
+DeepSeek Harness and its SDK packages are maintained by DeepSeek and their contributors.
+SDK dependencies are installed separately and retain their own licenses.
+The bundled Bilibili transport uses platform APIs and does not include an account or login session.
+This project is not an official QQ or Bilibili product.

@@ -1,0 +1,135 @@
+{
+  "name": "dsh-dafeiyu",
+  "version": "0.20.0",
+  "type": "module",
+  "description": "大肥鱼：可成长的自主智能体，整合记忆与成长、QQ、B站、多媒体与自主活动。",
+  "license": "MIT",
+  "main": "./runtime/plugin/lib/index.js",
+  "types": "./runtime/plugin/lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./runtime/plugin/lib/index.d.ts",
+      "default": "./runtime/plugin/lib/index.js"
+    },
+    "./settings": "./runtime/plugin/lib/settings.js",
+    "./installation": "./runtime/plugin/lib/installation.js"
+  },
+  "bin": {
+    "dafeiyu": "./bin/dafeiyu.mjs"
+  },
+  "files": [
+    "runtime",
+    "bin",
+    "examples",
+    "docs",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=24.13.0 <25",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AuraKaliya/dsh-dafeiyu.git"
+  },
+  "homepage": "https://github.com/AuraKaliya/dsh-dafeiyu#readme",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "agent",
+    "memory",
+    "qq",
+    "bilibili"
+  ],
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "zod": "4.4.3",
+    "ws": "8.22.0",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-query-sqlite": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials-local": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-anonymous-user-id": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm-deepseek": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm-deepseek-api-key": "0.2.1-rc.2",
+    "yaml": "2.9.0",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.5",
+    "@deepseek-ai/dsh-session-query": "0.2.1-rc.2"
+  },
+  "imports": {
+    "#dafeiyu/activity": "./runtime/activity/lib/index.js",
+    "#dafeiyu/activity/store": "./runtime/activity/lib/store.js",
+    "#dafeiyu/bilibili": "./runtime/bilibili/lib/index.js",
+    "#dafeiyu/bilibili/store": "./runtime/bilibili/lib/store.js",
+    "#dafeiyu/bilibili/channel": "./runtime/bilibili/lib/channel/index.js",
+    "#dafeiyu/bilibili/channel/store": "./runtime/bilibili/lib/channel/store.js",
+    "#dafeiyu/bilibili/channel/production-config": "./runtime/bilibili/lib/channel/production-config.js",
+    "#dafeiyu/qq": "./runtime/channel-qq/lib/index.js",
+    "#dafeiyu/qq/channel": "./runtime/channel-qq/lib/index.js",
+    "#dafeiyu/qq/capabilities": "./runtime/channel-qq/lib/capabilities.js",
+    "#dafeiyu/channel-simulator": "./runtime/channel-simulator/lib/index.js",
+    "#dafeiyu/contracts": "./runtime/contracts/lib/index.js",
+    "#dafeiyu/contracts/v3": "./runtime/contracts/lib/v3.js",
+    "#dafeiyu/core": "./runtime/core/lib/index.js",
+    "#dafeiyu/core/runtime-store": "./runtime/core/lib/runtime-store.js",
+    "#dafeiyu/host": "./runtime/host/lib/index.js",
+    "#dafeiyu/journal": "./runtime/journal/lib/index.js",
+    "#dafeiyu/media": "./runtime/media/lib/index.js",
+    "#dafeiyu/media/store": "./runtime/media/lib/store.js",
+    "#dafeiyu/memory": "./runtime/memory/lib/index.js",
+    "#dafeiyu/memory/store": "./runtime/memory/lib/store.js",
+    "#dafeiyu/memory/retrieval": "./runtime/memory/lib/retrieval.js",
+    "#dafeiyu/memory/retrieval-profile": "./runtime/memory/lib/retrieval-profile.js",
+    "#dafeiyu/memory/retrieval-clients": "./runtime/memory/lib/retrieval-clients.js",
+    "#dafeiyu/memory/retrieval-index": "./runtime/memory/lib/retrieval-index.js",
+    "#dafeiyu/server-bootstrap": "./runtime/server-bootstrap/lib/index.js",
+    "#dafeiyu/server-bootstrap/standing-authority": "./runtime/server-bootstrap/lib/standing-authority.js",
+    "#dafeiyu/server-executor": "./runtime/server-executor/lib/index.js",
+    "#dafeiyu/server-executor/store": "./runtime/server-executor/lib/store.js",
+    "#dafeiyu/server-executor/types": "./runtime/server-executor/lib/types.js",
+    "#dafeiyu/server-executor/child": "./runtime/server-executor/lib/child.js",
+    "#dafeiyu/server-executor/ipc": "./runtime/server-executor/lib/ipc.js",
+    "#dafeiyu/server-executor/protocol": "./runtime/server-executor/lib/protocol.js",
+    "#dafeiyu/server-executor/budget": "./runtime/server-executor/lib/budget.js",
+    "#dafeiyu/server-executor/windows-process": "./runtime/server-executor/lib/windows-process.js",
+    "#dafeiyu/server-runtime": "./runtime/server-runtime/lib/index.js",
+    "#dafeiyu/server-runtime/launch-config": "./runtime/server-runtime/lib/launch-config.js",
+    "#dafeiyu/server-runtime/cli": "./runtime/server-runtime/lib/cli.js",
+    "#dafeiyu/timeline": "./runtime/timeline/lib/index.js"
+  },
+  "dafeiyuPackages": {
+    "#dafeiyu/activity": "0.1.0",
+    "#dafeiyu/bilibili": "0.1.0",
+    "#dafeiyu/qq": "0.3.0",
+    "#dafeiyu/channel-simulator": "0.4.0",
+    "#dafeiyu/contracts": "0.15.0",
+    "#dafeiyu/core": "0.15.0",
+    "#dafeiyu/host": "0.1.0",
+    "#dafeiyu/journal": "0.4.0",
+    "#dafeiyu/media": "0.1.0",
+    "#dafeiyu/memory": "0.15.0",
+    "#dafeiyu/server-bootstrap": "0.1.0",
+    "#dafeiyu/server-executor": "0.1.0",
+    "#dafeiyu/server-runtime": "0.1.0",
+    "#dafeiyu/timeline": "0.8.0"
+  }
+}

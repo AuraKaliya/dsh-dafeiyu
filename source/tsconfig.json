@@ -1,0 +1,50 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/journal"
+    },
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/channel-simulator"
+    },
+    {
+      "path": "packages/channel-qq"
+    },
+    {
+      "path": "packages/timeline"
+    },
+    {
+      "path": "packages/memory"
+    },
+    {
+      "path": "packages/activity"
+    },
+    {
+      "path": "packages/media"
+    },
+    {
+      "path": "packages/bilibili"
+    },
+    {
+      "path": "packages/host"
+    },
+    {
+      "path": "packages/server-executor"
+    },
+    {
+      "path": "packages/server-bootstrap"
+    },
+    {
+      "path": "packages/server-runtime"
+    },
+    {
+      "path": "packages/plugin"
+    }
+  ]
+}

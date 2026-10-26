@@ -1,0 +1,21 @@
+{
+  "version": "0.15.0",
+  "private": true,
+  "types": "./lib/index.d.ts",
+  "name": "@dafeiyu/contracts",
+  "type": "module",
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./v3": {
+      "types": "./lib/v3.d.ts",
+      "default": "./lib/v3.js"
+    }
+  },
+  "main": "./lib/index.js"
+}

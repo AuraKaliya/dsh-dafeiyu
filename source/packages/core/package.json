@@ -1,0 +1,34 @@
+{
+  "version": "0.15.0",
+  "private": true,
+  "types": "./lib/index.d.ts",
+  "name": "@dafeiyu/core",
+  "type": "module",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.2.1-rc.2"
+  },
+  "dependencies": {
+    "@dafeiyu/contracts": "0.15.0",
+    "@dafeiyu/journal": "0.4.0",
+    "zod": "4.4.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./runtime-store": {
+      "types": "./lib/runtime-store.d.ts",
+      "default": "./lib/runtime-store.js"
+    }
+  },
+  "main": "./lib/index.js"
+}

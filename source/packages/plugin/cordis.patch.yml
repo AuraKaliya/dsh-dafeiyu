@@ -1,0 +1,5 @@
+- insert:
+    - id: dsh-dafeiyu
+      name: dsh-dafeiyu
+      config:
+        settingsFile: ''

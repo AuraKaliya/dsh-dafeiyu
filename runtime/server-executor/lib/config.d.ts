@@ -1,0 +1,109 @@
+import { z } from 'zod';
+export declare const ServerExecutorPluginConfigSchema: z.ZodObject<{
+    command: z.ZodObject<{
+        nodePath: z.ZodString;
+        entryPath: z.ZodString;
+        cwd: z.ZodString;
+        args: z.ZodArray<z.ZodString>;
+        nodeHash: z.ZodString;
+        entryHash: z.ZodString;
+        profilePath: z.ZodString;
+        profileHash: z.ZodString;
+        env: z.ZodObject<{
+            SystemRoot: z.ZodOptional<z.ZodString>;
+            WINDIR: z.ZodOptional<z.ZodString>;
+            PATH: z.ZodOptional<z.ZodString>;
+            TEMP: z.ZodOptional<z.ZodString>;
+            TMP: z.ZodOptional<z.ZodString>;
+            DSH_PERMISSION_MODE: z.ZodOptional<z.ZodLiteral<"danger-full-access">>;
+            DSH_HOME: z.ZodOptional<z.ZodString>;
+            DSH_TELEMETRY_DISABLED: z.ZodOptional<z.ZodLiteral<"1">>;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
+    route: z.ZodObject<{
+        provider: z.ZodString;
+        model: z.ZodString;
+        reasoningEffort: z.ZodNullable<z.ZodString>;
+        contextWindow: z.ZodNumber;
+        maxOutputTokens: z.ZodNumber;
+        maxRequestBytes: z.ZodNumber;
+    }, z.core.$strict>;
+    budgetAuthorizationId: z.ZodString;
+    resultOwner: z.ZodObject<{
+        account: z.ZodString;
+        ownerId: z.ZodString;
+    }, z.core.$strict>;
+    standingAuthority: z.ZodOptional<z.ZodObject<{
+        path: z.ZodString;
+        configurationRoot: z.ZodString;
+        id: z.ZodString;
+        version: z.ZodNumber;
+        hash: z.ZodString;
+    }, z.core.$strict>>;
+    maxExecutionMs: z.ZodDefault<z.ZodNumber>;
+    handshakeTimeoutMs: z.ZodDefault<z.ZodNumber>;
+    cancelGraceMs: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strict>;
+export type ServerExecutorPluginConfig = z.input<typeof ServerExecutorPluginConfigSchema>;
+export declare const ServerExecutorConfigSchema: z.ZodObject<{
+    agentId: z.ZodString;
+    profileId: z.ZodString;
+    dataDir: z.ZodString;
+    createStore: z.ZodDefault<z.ZodBoolean>;
+    mode: z.ZodDefault<z.ZodEnum<{
+        production: "production";
+        offline: "offline";
+    }>>;
+    settings: z.ZodObject<{
+        command: z.ZodObject<{
+            nodePath: z.ZodString;
+            entryPath: z.ZodString;
+            cwd: z.ZodString;
+            args: z.ZodArray<z.ZodString>;
+            nodeHash: z.ZodString;
+            entryHash: z.ZodString;
+            profilePath: z.ZodString;
+            profileHash: z.ZodString;
+            env: z.ZodObject<{
+                SystemRoot: z.ZodOptional<z.ZodString>;
+                WINDIR: z.ZodOptional<z.ZodString>;
+                PATH: z.ZodOptional<z.ZodString>;
+                TEMP: z.ZodOptional<z.ZodString>;
+                TMP: z.ZodOptional<z.ZodString>;
+                DSH_PERMISSION_MODE: z.ZodOptional<z.ZodLiteral<"danger-full-access">>;
+                DSH_HOME: z.ZodOptional<z.ZodString>;
+                DSH_TELEMETRY_DISABLED: z.ZodOptional<z.ZodLiteral<"1">>;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+        route: z.ZodObject<{
+            provider: z.ZodString;
+            model: z.ZodString;
+            reasoningEffort: z.ZodNullable<z.ZodString>;
+            contextWindow: z.ZodNumber;
+            maxOutputTokens: z.ZodNumber;
+            maxRequestBytes: z.ZodNumber;
+        }, z.core.$strict>;
+        budgetAuthorizationId: z.ZodString;
+        resultOwner: z.ZodObject<{
+            account: z.ZodString;
+            ownerId: z.ZodString;
+        }, z.core.$strict>;
+        standingAuthority: z.ZodOptional<z.ZodObject<{
+            path: z.ZodString;
+            configurationRoot: z.ZodString;
+            id: z.ZodString;
+            version: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>>;
+        maxExecutionMs: z.ZodDefault<z.ZodNumber>;
+        handshakeTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        cancelGraceMs: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type ServerExecutorConfig = z.input<typeof ServerExecutorConfigSchema>;
+export declare const serverExecutorScene: (profileId: string) => {
+    channel: string;
+    account: string;
+    kind: "local";
+    id: string;
+};

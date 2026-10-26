@@ -1,0 +1,68 @@
+import type { SessionEvent } from '@deepseek-ai/dsh-session';
+import { redactContent, redactJson } from '@dafeiyu/contracts';
+import type { Json } from '@dafeiyu/contracts';
+
+/** Derived tool envelopes must be traced to their originals, never promoted as fresh evidence. */
+function derivedToolEnvelope(text: string): boolean {
+  if (text.length > 500_000) return true;
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return false; }
+  const queue: unknown[] = [value];
+  for (let visited = 0; queue.length; visited++) {
+    if (visited > 10_000) return true;
+    const item = queue.pop();
+    if (item && typeof item === 'object') {
+      if (('untrustedEvidence' in item && item.untrustedEvidence === true)
+        || ('useRestriction' in item && item.useRestriction === 'deleted_lookup_only')) return true;
+      const values = Object.values(item);
+      if (queue.length + values.length > 10_000) return true;
+      queue.push(...values);
+    }
+  }
+  return false;
+}
+
+/** An explicit export projection. Never serialize a DSH event wholesale. */
+export function projectSession(event: SessionEvent) {
+  let text: string;
+  let kind: string;
+  let omittedBlocks = 0;
+  let interrupted = false;
+  switch (event.type) {
+    case 'user/message': {
+      const parts = event.data.content.filter(block => block.type === 'text');
+      omittedBlocks = event.data.content.length - parts.length;
+      text = parts.map(block => block.text).join('\n');
+      kind = event.data.source.kind === 'user' ? 'user-text' : 'derived-context';
+      break;
+    }
+    case 'assistant/message': {
+      const parts = event.data.message.content.filter(block => block.type === 'text');
+      omittedBlocks = event.data.message.content.length - parts.length;
+      text = parts.map(block => block.text).join('\n'); kind = 'assistant-text'; interrupted = event.data.interrupted === true;
+      break;
+    }
+    case 'tool/result': {
+      const parts = event.data.message.content.filter(block => block.type === 'text');
+      omittedBlocks = event.data.message.content.length - parts.length;
+      text = parts.map(block => block.text).join('\n'); kind = event.data.message.isError ? 'tool-error-text' : 'tool-result-text';
+      break;
+    }
+    case 'turn/end': text = JSON.stringify({ turn: event.data.turn, outcome: event.data.reason.kind }); kind = 'turn-outcome'; break;
+    default: return null;
+  }
+  const clean = redactContent(text);
+  const memoryUse = kind === 'assistant-text' || kind === 'derived-context' || kind === 'tool-error-text'
+    || (kind === 'tool-result-text' && derivedToolEnvelope(text)) ? 'derived-only' as const : 'primary-candidate' as const;
+  return { kind, text: clean.value, redacted: clean.redacted, omittedBlocks, interrupted, seq: event.seq, time: event.time, memoryUse };
+}
+
+export function eventMetadata(input: {
+  seq: number; type: string; plugin: string; pluginVersion: string; occurredAt: string; recordedAt: string;
+  traceId: string; operationId: string; data: Readonly<Record<string, Json>>;
+}) {
+  const data = redactJson(input.data);
+  return { seq: input.seq, type: input.type, plugin: input.plugin, pluginVersion: input.pluginVersion,
+    occurredAt: input.occurredAt, recordedAt: input.recordedAt, traceId: input.traceId, operationId: input.operationId,
+    data: data.value, redacted: data.redacted };
+}
