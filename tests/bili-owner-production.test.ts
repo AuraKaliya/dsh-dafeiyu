@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { readFile,writeFile,symlink,rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,biliOwnerTextHash,createBiliOwnerProductionPorts } from '@dafeiyu/channel-bili-owner';
+import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,biliOwnerTextHash,createBiliOwnerProductionPorts,BiliOwnerProductionManifestSchema } from '@dafeiyu/channel-bili-owner';
 import { loadBiliOwnerProductionBinding,BiliOwnerProductionConfigSchema } from '../packages/channel-bili-owner/lib/production-config.js';
 import { acquireBiliOwnerConsumerLease } from '../packages/channel-bili-owner/lib/production-lease.js';
 import { productionFixture,NAV,READ,SEND,noNetwork,nav,json } from './bili-owner-production-fixture.js';
@@ -15,10 +15,12 @@ const sent=(text='虚构私信')=>({requestId:'bili1_fictional_request',text,wir
 // The machine-wide pipe is intentionally shared by all profiles. Keep every production acquisition serial in this one file.
 test('production pinning rejects path aliases and changed source before any default fetch or credential read',{concurrency:false},async()=>{
   const f=await productionFixture(),original=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('DEFAULT_FETCH_MUST_NOT_RUN');};
+  assert.equal(BiliOwnerProductionManifestSchema.safeParse({...f.manifest,handover:{oldConsumersStopped:true}}).success,false);
   try{assert.throws(()=>BiliOwnerProductionConfigSchema.parse({...f.config,installationRoot:'\\\\server\\share'}));assert.throws(()=>loadBiliOwnerProductionBinding({...f.config,manifestPath:f.publicPath}),/BILI_OWNER_MANIFEST_PATH/);
     await rename(f.credentialPath,join(f.root,'unopened-fictional-credential.json'));
     const binding=loadBiliOwnerProductionBinding(f.config);assert.equal(binding.manifest.generation,7);assert.equal(calls,0);
-    await writeFile(f.authPath,(await readFile(f.authPath,'utf8'))+'\n');assert.throws(()=>loadBiliOwnerProductionBinding(f.config),/BILI_OWNER_AUTH_CHANGED/);assert.equal(calls,0);
+    const original=await readFile(f.manifestPath,'utf8');await writeFile(f.manifestPath,original+'\n');assert.throws(()=>loadBiliOwnerProductionBinding(f.config),/BILI_OWNER_MANIFEST_CHANGED/);await writeFile(f.manifestPath,original);assert.equal(calls,0);
+    assert.equal(binding.authSource.includes('export class BiliAuth'),true);
     const alias=join(f.root,'linked-configuration');await symlink(join(f.root,'配置文件'),alias,'junction');assert.throws(()=>loadBiliOwnerProductionBinding({...f.config,manifestPath:join(alias,'bili-owner-channel.json')}),/BILI_OWNER_MANIFEST_PATH/);
   }finally{globalThis.fetch=original;}
 });

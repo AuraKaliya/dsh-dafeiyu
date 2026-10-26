@@ -41,9 +41,6 @@
       "path": "packages/server-bootstrap"
     },
     {
-      "path": "packages/server-compat"
-    },
-    {
       "path": "packages/server-runtime"
     },
     {

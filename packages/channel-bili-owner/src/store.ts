@@ -4,11 +4,11 @@ import { dirname,join } from 'node:path';
 import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
 import type { Reply } from '@dafeiyu/contracts';
-import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE,BiliOwnerIdentitySchema,BiliOwnerHashSchema,BiliOwnerIdSchema,BiliOwnerCodeSchema,BiliOwnerImportSchema,
+import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE,BiliOwnerIdentitySchema,BiliOwnerHashSchema,BiliOwnerIdSchema,BiliOwnerCodeSchema,
   BiliOwnerMessageSchema,BiliOwnerPageSchema,BiliOwnerReplySchema,BiliOwnerRequestSchema,BiliOwnerInboundStateSchema,BiliOwnerDeliveryPlanSchema,BiliOwnerDeliveryStateSchema,biliOwnerHash,biliOwnerTextHash } from './types.js';
 import type { BiliOwnerIdentity,BiliOwnerMessage,BiliOwnerDelivery,BiliOwnerDeliveryPlan } from './types.js';
 
-export const BILI_OWNER_SCHEMA_VERSION=1;
+export const BILI_OWNER_SCHEMA_VERSION=2;
 export const BILI_OWNER_APPLICATION_ID=0x4446424f;
 export const BILI_OWNER_TABLES=['bili_owner_binding','bili_owner_handover','bili_owner_inbound','bili_owner_deliveries','bili_owner_poll','bili_owner_events'] as const;
 const immutable=['bili_owner_binding','bili_owner_handover','bili_owner_events'] as const;
@@ -20,7 +20,6 @@ const cursorSchema=z.object({since:tickSchema.nullable(),frontier:BiliOwnerIdSch
 export type BiliOwnerCursor=z.infer<typeof cursorSchema>;
 function handoverReady(db:DatabaseSync){const poll=db.prepare('SELECT since FROM bili_owner_poll WHERE id=1').get(),row=db.prepare('SELECT kind,body,body_hash,source_hash FROM bili_owner_handover WHERE id=1').get();if(!poll||!row)return false;
   const body:unknown=JSON.parse(String(row.body));check(biliOwnerHash(body)===row.body_hash,'BILI_OWNER_EVIDENCE_CHANGED');
-  if(row.kind==='legacy'){const input=BiliOwnerImportSchema.parse(body);check(input.sourceHash===row.source_hash&&(input.state.since??null)===poll.since,'BILI_OWNER_EVIDENCE_CHANGED');return poll.since!==null&&input.state.idPrecisionVersion===2;}
   check(row.kind==='fresh','BILI_OWNER_EVIDENCE_CHANGED');const input=z.strictObject({requestId:BiliOwnerRequestSchema,since:tickSchema,cutoverHash:BiliOwnerHashSchema}).parse(body);
   check(input.cutoverHash===row.source_hash&&input.since===poll.since,'BILI_OWNER_EVIDENCE_CHANGED');return true;
 }
@@ -42,7 +41,7 @@ export function inspectBiliOwnerStorage(file:string,rawIdentity:BiliOwnerIdentit
     const fault=currentBindingFault(db);return {exists:true,supported:true,identityMatches:true,bindingReady:ready&&!fault,version,codes:fault?['BILI_OWNER_BINDING_REJECTED']:ready?[]:['BILI_OWNER_HANDOVER_REQUIRED']};
   }catch(error){const code=error instanceof Error&&/^BILI_OWNER_/.test(error.message)?error.message:'BILI_OWNER_STORAGE_INVALID';return {exists:true,supported:false,identityMatches:code!=='BILI_OWNER_IDENTITY_MISMATCH',bindingReady:false,version:Number(db.prepare('PRAGMA user_version').get()?.user_version),codes:[code]};}finally{db.close();}}
 
-/** Authoritative local facts only. Opening existing storage never initializes a cursor, imports old state, or dispatches work. */
+/** Authoritative local facts only. Opening existing storage never initializes a cursor, dispatches work. */
 export class BiliOwnerStore {
   private readonly db:DatabaseSync;private closed=false;readonly identity:BiliOwnerIdentity;
   constructor(file:string,rawIdentity:BiliOwnerIdentity,create=false){this.identity=Object.freeze(BiliOwnerIdentitySchema.parse(rawIdentity));
@@ -81,18 +80,12 @@ export class BiliOwnerStore {
   bindVerified(stamp:string,now=Date.now()){BiliOwnerHashSchema.parse(stamp);return this.atomic(()=>{check(!this.bindingFault(),'BILI_OWNER_BINDING_REJECTED');const previous=this.verifiedBinding();
     if(previous!==null){check(previous===stamp,'BILI_OWNER_BINDING_CHANGED');return false;}this.event('binding-verified',1,'binding.verified',{stamp},now);return true;});}
   rejectBinding(code:string,now=Date.now()){BiliOwnerCodeSchema.parse(code);this.atomic(()=>{if(this.bindingFault()===code)return;const version=Number(this.db.prepare("SELECT coalesce(max(version),0) AS n FROM bili_owner_events WHERE object_id='binding-fault'").get()?.n)+1;this.event('binding-fault',version,'binding.rejected',{code},now);});}
-  private handover(kind:'fresh'|'legacy',requestId:string,sourceHash:string,body:unknown):boolean{const old=this.db.prepare('SELECT kind,body_hash,body FROM bili_owner_handover WHERE id=1').get();
+  private handover(kind:'fresh',requestId:string,sourceHash:string,body:unknown):boolean{const old=this.db.prepare('SELECT kind,body_hash,body FROM bili_owner_handover WHERE id=1').get();
     if(old){check(old.kind===kind&&old.body_hash===biliOwnerHash(body)&&biliOwnerHash(JSON.parse(String(old.body)))===old.body_hash,'BILI_OWNER_HANDOVER_CONFLICT');return false;}
     check(!this.db.prepare('SELECT 1 FROM bili_owner_inbound LIMIT 1').get()&&!this.db.prepare('SELECT 1 FROM bili_owner_deliveries LIMIT 1').get()&&this.cursor().since===null,'BILI_OWNER_HANDOVER_CONFLICT');
     this.db.prepare('INSERT INTO bili_owner_handover VALUES(1,?,?,?,?,?)').run(kind,requestId,sourceHash,JSON.stringify(body),biliOwnerHash(body));return true;}
   initializeFresh(raw:unknown,now=Date.now()){const input=z.strictObject({requestId:BiliOwnerRequestSchema,since:tickSchema,cutoverHash:BiliOwnerHashSchema}).parse(raw);return this.atomic(()=>{
     const changed=this.handover('fresh',input.requestId,input.cutoverHash,input);if(changed){this.db.prepare('UPDATE bili_owner_poll SET since=? WHERE id=1').run(input.since);this.event('handover',1,'fresh',input,now);}return {duplicate:!changed,bindingReady:this.bindingReady()};});}
-  importLegacy(raw:unknown,now=Date.now()){const input=BiliOwnerImportSchema.parse(raw);return this.atomic(()=>{const changed=this.handover('legacy',input.requestId,input.sourceHash,input);
-    if(changed){const seen=new Set(input.state.seen.map(String)),queued=new Set<string>();for(const id of seen)this.insertSource(id,null,'legacy-seen',null,now);
-      for(const entry of input.state.queue){check(!seen.has(entry.id)&&!queued.has(entry.id),'BILI_OWNER_LEGACY_CONFLICT');queued.add(entry.id);const {claimed,...message}=entry;
-        this.insertSource(entry.id,BiliOwnerMessageSchema.parse(message),claimed?'legacy-unknown':'held',null,now);}
-      if(input.state.since!==undefined)this.db.prepare('UPDATE bili_owner_poll SET since=? WHERE id=1').run(input.state.since);this.event('handover',1,'legacy-import',{sourceHash:input.sourceHash,stateHash:biliOwnerHash(input.state),seen:seen.size,queued:queued.size},now);}
-    return {duplicate:!changed,bindingReady:this.bindingReady(),...this.counts()};});}
   private sourceBody(source:BiliOwnerInbound){return {id:source.id,state:source.state,version:source.version,coreInboundId:source.coreInboundId,hash:source.hash,bindingStamp:source.bindingStamp};}
   private insertSource(id:string,message:BiliOwnerMessage|null,state:BiliOwnerInbound['state'],bindingStamp:string|null,now:number){BiliOwnerIdSchema.parse(id);const hash=message?biliOwnerHash(message):null;
     this.db.prepare('INSERT INTO bili_owner_inbound VALUES(?,?,?,?,?,1,NULL)').run(id,message?JSON.stringify(message):null,hash,bindingStamp,state);this.event('in:'+id,1,'inbound.'+state,{id,state,version:1,coreInboundId:null,hash,bindingStamp},now);}
@@ -105,17 +98,8 @@ export class BiliOwnerStore {
     this.event('in:'+value.id,next.version,'inbound.'+state,this.sourceBody(next),now);return next;}
   private observe(message:BiliOwnerMessage,stamp:string,maxPending:number,now:number){const current=this.source(message.id),since=this.cursor().since;check(since!==null,'BILI_OWNER_HANDOVER_REQUIRED');
     if(message.senderUid!==BILI_OWNER_UID)return;
-    if(current){if(current.message)check(current.hash===biliOwnerHash(message),'BILI_OWNER_MESSAGE_CONFLICT');
-      if(current.state!=='held'||message.timestamp*1000<since)return;check(current.message,'BILI_OWNER_EVIDENCE_CHANGED');
-      const state=message.type===1&&message.text.trim()?'pending':'unsupported';if(state==='pending')check(this.pending().length<maxPending,'BILI_OWNER_CAPACITY');this.updateSource(current,state,null,stamp,now);return;}
-    const handover=this.db.prepare("SELECT body FROM bili_owner_handover WHERE id=1 AND kind='legacy'").get();
-    if(handover){const legacy=BiliOwnerImportSchema.parse(JSON.parse(String(handover.body))).state;
-      // Number is used only to detect the old lossy ID representation. Never replace the new exact ID or call this proof of prior delivery.
-      const oldWindow=legacy.legacyIdUntil===undefined||message.timestamp<=legacy.legacyIdUntil;
-      const sameLossyClass=(left:string,right:string)=>left!==right&&!Number.isSafeInteger(Number(left))&&String(Number(left))===String(Number(right));
-      const queueAmbiguous=oldWindow&&legacy.queue.some(entry=>(legacy.legacyIdUntil===undefined||entry.timestamp<=legacy.legacyIdUntil)&&(sameLossyClass(entry.id,message.id)||sameLossyClass(entry.seqno,message.seqno)));
-      if(queueAmbiguous||oldWindow&&legacy.legacySeen?.some(id=>String(id)===String(Number(message.id)))){this.insertSource(message.id,message,'legacy-unknown',stamp,now);return;}}
-    const state=message.timestamp*1000<since?'legacy-seen':message.type===1&&message.text.trim()?'pending':'unsupported';if(state==='pending')check(this.pending().length<maxPending,'BILI_OWNER_CAPACITY');this.insertSource(message.id,state==='legacy-seen'?null:message,state,stamp,now);}
+    if(current){if(current.message)check(current.hash===biliOwnerHash(message),'BILI_OWNER_MESSAGE_CONFLICT');return;}
+    const state=message.timestamp*1000<since?'before-start':message.type===1&&message.text.trim()?'pending':'unsupported';if(state==='pending')check(this.pending().length<maxPending,'BILI_OWNER_CAPACITY');this.insertSource(message.id,state==='before-start'?null:message,state,stamp,now);}
   acceptPage(raw:unknown,expectedVersion:number,maxPending=1000,now=Date.now()){const page=BiliOwnerPageSchema.parse(raw);z.number().int().min(1).max(10000).parse(maxPending);return this.atomic(()=>{const cursor=this.cursor();check(this.bindingReady(),'BILI_OWNER_HANDOVER_REQUIRED');check(cursor.version===expectedVersion,'BILI_OWNER_CURSOR_CONFLICT');
     const sorted=[...page.messages].sort((a,b)=>BigInt(a.seqno)<BigInt(b.seqno)?1:BigInt(a.seqno)>BigInt(b.seqno)?-1:0),smallest=sorted.at(-1)?.seqno??null,largest=sorted[0]?.seqno??null;
     if(page.hasMore)check(smallest===page.nextBeforeSeqno&&(!cursor.before||BigInt(smallest!)<BigInt(cursor.before)),'BILI_OWNER_CURSOR_INVALID');
@@ -157,5 +141,5 @@ export class BiliOwnerStore {
   close(){if(this.closed)return;this.closed=true;this.db.close();}
 }
 
-/** Explicit schema creation only. A fresh boundary or validated legacy handover is a separate program step. */
+/** Explicit schema creation only. A fresh start boundary is a separate program step. */
 export function initializeBiliOwnerStorage(dataDir:string,identity:BiliOwnerIdentity){const file=join(dataDir,'bili-owner.sqlite'),store=new BiliOwnerStore(file,identity,true);store.close();return inspectBiliOwnerStorage(file,identity);}

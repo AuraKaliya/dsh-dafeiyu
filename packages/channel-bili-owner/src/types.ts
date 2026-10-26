@@ -43,15 +43,8 @@ export interface BiliOwnerTransport {
 export interface BiliOwnerConsumerLease {readonly key:typeof BILI_OWNER_CONSUMER_KEY;readonly epoch:number;guard():void;release():void|Promise<void>}
 export interface BiliOwnerPorts {readonly transport:BiliOwnerTransport;readonly lease:BiliOwnerConsumerLease;readonly now?:()=>number}
 
-const legacyId=z.union([BiliOwnerIdSchema,z.number().int().positive().safe()]);
-export const BiliOwnerLegacyStateSchema=z.strictObject({seen:z.array(legacyId).max(10000),queue:z.array(BiliOwnerMessageSchema.safeExtend({claimed:z.boolean().optional()})).max(1000),
-  sessionId:z.string().min(1).max(300).optional(),created:z.boolean().optional(),accountUid:z.union([z.literal(BILI_OWNER_ACCOUNT),z.literal(170759822)]).optional(),
-  since:z.number().int().nonnegative().max(8640000000000000).optional(),idPrecisionVersion:z.union([z.literal(1),z.literal(2)]).optional(),legacySeen:z.array(legacyId).max(10000).optional(),
-  legacyIdUntil:z.number().int().nonnegative().max(253402300799).optional(),lastPollAt:z.iso.datetime({offset:true}).optional(),lastReplyAt:z.iso.datetime({offset:true}).optional()});
-export type BiliOwnerLegacyState=z.infer<typeof BiliOwnerLegacyStateSchema>;
-export const BiliOwnerImportSchema=z.strictObject({requestId:BiliOwnerRequestSchema,sourceHash:BiliOwnerHashSchema,state:BiliOwnerLegacyStateSchema});
 export const BiliOwnerReplySchema=z.strictObject({id:z.string().min(1).max(200),conversation:ConversationSchema,sourceMessageId:BiliOwnerIdSchema,text:z.string().max(32000),taskResult:TaskResultAnchorSchema.optional()});
-export const BiliOwnerInboundStateSchema=z.enum(['legacy-seen','held','legacy-unknown','pending','accepted','unsupported','recalled']);
+export const BiliOwnerInboundStateSchema=z.enum(['before-start','pending','accepted','unsupported','recalled']);
 export const BiliOwnerDeliveryStateSchema=z.enum(['prepared','blocked','sending','sent','unknown']);
 export const BiliOwnerDeliveryPlanSchema=z.strictObject({schemaVersion:z.literal(1),replyId:z.string().min(1).max(200),requestId:z.string().regex(/^[A-Za-z0-9_-]{8,100}$/),
   scene:ConversationSchema,sourceMessageId:BiliOwnerIdSchema,sourceHash:BiliOwnerHashSchema,coreInboundId:z.uuid(),anchor:TaskResultAnchorSchema.nullable(),bodyHash:BiliOwnerHashSchema,wireHash:BiliOwnerHashSchema,text:z.string().max(32000)});

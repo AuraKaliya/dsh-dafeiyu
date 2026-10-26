@@ -14,6 +14,8 @@ export interface ProductionRuntimeOptions {
   readonly windows:WindowsProcessControlOptions;
   readonly maximumCallMs:number;
   readonly drainTimeoutMs:number;
+  /** Fixed launcher release pins, separate from the immutable financial scope. */
+  readonly guard?:()=>void;
 }
 export interface ProductionRuntimeResources {
   readonly budget:SharedModelBudget;
@@ -56,7 +58,7 @@ export async function createProductionRuntime(config:PreparedHostConfig,options:
   if(settings.budgetAuthorizationId!==budget.authorizationId||route.provider!==budget.route.provider||route.model!==budget.route.model||(route.reasoningEffort??null)!==budget.route.reasoningEffort||JSON.stringify(ExecutorRouteSchema.parse(settings.route))!==JSON.stringify(budget.route))throw new Error('RUNTIME_PROFILE_BUDGET_MISMATCH');
   if(resolve(settings.command.nodePath).toLowerCase()!==resolve(options.windows.nodePath).toLowerCase()||settings.command.nodeHash!==options.windows.nodeHash)throw new Error('RUNTIME_PROCESS_PROGRAM_MISMATCH');
   if(!Number.isSafeInteger(options.maximumCallMs)||options.maximumCallMs<1||options.maximumCallMs>3600000||!Number.isSafeInteger(options.drainTimeoutMs)||options.drainTimeoutMs<1||options.drainTimeoutMs>3600000)throw new Error('RUNTIME_TIMEOUT_INVALID');
-  const guard=()=>{if(loadHostConfig(config.file).hash!==config.hash)throw new Error('RUNTIME_CONFIG_CHANGED');};guard();budget.assertReady();
+  const guard=()=>{options.guard?.();if(loadHostConfig(config.file).hash!==config.hash)throw new Error('RUNTIME_CONFIG_CHANGED');};guard();budget.assertReady();
   const {WindowsProcessControl}=await import('@dafeiyu/server-executor/windows-process');
   const processControl=await WindowsProcessControl.create(options.windows);
   let mounted=false,disposed=true;

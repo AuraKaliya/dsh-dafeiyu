@@ -18,6 +18,18 @@ async function fixture(fresh=true){const root=await mkdtemp(join(testTempDir(),'
   if(fresh)store.initializeFresh({requestId:'explicit-cutover',since:now-100000,cutoverHash:pin},now);return {root,file,store};}
 function accept(store:BiliOwnerStore,value=message()){store.acceptPage(page([value]),store.cursor().version,1000,now);return store.accepted(value.id,randomUUID(),now);}
 
+test('fresh reception ignores pre-start messages without importing an old queue and preserves exact new IDs',async()=>{
+  const f=await fixture();try{
+    assert.equal('importLegacy' in f.store,false);
+    const old={...message('9007199254740993122'),timestamp:now/1000-101},current=message();
+    f.store.acceptPage(page([old,current]),f.store.cursor().version,1000,now);
+    assert.equal(f.store.source(old.id)?.state,'before-start');assert.equal(f.store.source(old.id)?.message,null);
+    assert.deepEqual(f.store.pending().map(item=>item.id),[current.id]);
+    f.store.acceptPage(page([old,current]),f.store.cursor().version,1000,now);
+    assert.deepEqual(f.store.pending().map(item=>item.id),[current.id]);
+  }finally{f.store.close();}
+});
+
 test('Bili owner schema creation is explicit and cannot invent a handover boundary on startup',async()=>{
   const root=await mkdtemp(join(testTempDir(),'bili-owner-init-')),file=join(root,'bili-owner.sqlite');
   assert.throws(()=>new BiliOwnerStore(file,identity),/BILI_OWNER_INITIALIZATION_REQUIRED/);assert.equal(existsSync(file),false);
@@ -32,47 +44,12 @@ test('Bili owner schema creation is explicit and cannot invent a handover bounda
   const db=new DatabaseSync(file,{readOnly:true});try{assert.equal(db.prepare('PRAGMA application_id').get()?.application_id,BILI_OWNER_APPLICATION_ID);}finally{db.close();}
 });
 
-test('legacy seen, claimed uncertainty, since and precision survive import; only an exactly reobserved held message can enter Core',async()=>{
-  const f=await fixture(false),held=message('9007199254740993123'),claimed=message('9007199254740993124');
-  const state={seen:['9007199254740993000'],queue:[{...held,claimed:false},{...claimed,claimed:true}],since:now-100000,idPrecisionVersion:2 as const,legacySeen:['9007199254740992000'],legacyIdUntil:now/1000-200,accountUid:BILI_OWNER_ACCOUNT,sessionId:'legacy-session-reference',created:true};
-  const input={requestId:'legacy-import',sourceHash:pin,state};
-  try{assert.equal(f.store.importLegacy(input,now).duplicate,false);assert.equal(f.store.importLegacy(input,now).duplicate,true);assert.equal(f.store.source(state.seen[0]!)?.state,'legacy-seen');
-    assert.equal(f.store.source(held.id)?.state,'held');assert.equal(f.store.source(claimed.id)?.state,'legacy-unknown');assert.equal(f.store.pending().length,0);assert.equal(f.store.cursor().since,state.since);
-    assert.throws(()=>f.store.accepted(held.id,randomUUID(),now),/BILI_OWNER_SOURCE_NOT_READY/);
-    f.store.acceptPage(page([held,claimed]),f.store.cursor().version,1000,now);assert.deepEqual(f.store.pending().map(row=>row.id),[held.id]);assert.equal(f.store.source(claimed.id)?.state,'legacy-unknown');
-    const bound=f.store.accepted(held.id,randomUUID(),now);assert.equal(bound.message?.id,held.id);assert.equal(bound.state,'accepted');
-    const db=new DatabaseSync(f.file,{readOnly:true});try{assert.deepEqual(JSON.parse(String(db.prepare('SELECT body FROM bili_owner_handover').get()?.body)).state,state);}finally{db.close();}
-  }finally{f.store.close();}
-});
-
 test('the first authenticated binding stamp and a confirmed binding fault survive restarts without replacing prior evidence',async()=>{
   const f=await fixture();assert.equal(f.store.verifiedBinding(),null);assert.equal(f.store.bindVerified(stamp,now),true);assert.equal(f.store.bindVerified(stamp,now),false);f.store.close();
   const reopened=new BiliOwnerStore(f.file,identity);try{assert.equal(reopened.verifiedBinding(),stamp);assert.throws(()=>reopened.bindVerified(pin,now),/BILI_OWNER_BINDING_CHANGED/);assert.equal(reopened.verifiedBinding(),stamp);
     reopened.rejectBinding('BILI_OWNER_BINDING_CHANGED',now);reopened.rejectBinding('BILI_OWNER_BINDING_CHANGED',now);assert.throws(()=>reopened.bindVerified(stamp,now),/BILI_OWNER_BINDING_REJECTED/);assert.deepEqual(inspectBiliOwnerStorage(f.file,identity).codes,['BILI_OWNER_BINDING_REJECTED']);
     const db=new DatabaseSync(f.file,{readOnly:true});try{assert.equal(db.prepare("SELECT count(*) AS n FROM bili_owner_events WHERE object_id='binding-fault'").get()?.n,1);}finally{db.close();}
   }finally{reopened.close();}
-});
-
-test('legacy import is atomic on conflicts and an unresolved old precision version remains unready',async()=>{
-  const f=await fixture(false);try{const entry=message();assert.throws(()=>f.store.importLegacy({requestId:'bad',sourceHash:pin,state:{seen:[entry.id],queue:[entry],since:0,idPrecisionVersion:2}},now),/BILI_OWNER_LEGACY_CONFLICT/);
-    assert.deepEqual(f.store.counts(),{inbound:{},deliveries:{}});assert.equal(f.store.cursor().since,null);
-    f.store.importLegacy({requestId:'old',sourceHash:pin,state:{seen:[42],queue:[],since:0,idPrecisionVersion:1}},now);assert.equal(f.store.bindingReady(),false);assert.equal(f.store.source('42')?.state,'legacy-seen');
-    assert.deepEqual(inspectBiliOwnerStorage(f.file,identity).codes,['BILI_OWNER_HANDOVER_REQUIRED']);
-  }finally{f.store.close();}
-});
-
-test('old rounded-ID matches stay uncertain without replacing a new exact ID or replaying its model work',async()=>{
-  const f=await fixture(false),entry=message(),rounded=String(Number(entry.id));assert.notEqual(rounded,entry.id);
-  try{f.store.importLegacy({requestId:'precision',sourceHash:pin,state:{seen:[],queue:[],since:0,idPrecisionVersion:2,legacySeen:[rounded],legacyIdUntil:entry.timestamp}},now);
-    f.store.acceptPage(page([entry]),f.store.cursor().version,1000,now);assert.equal(f.store.source(entry.id)?.id,entry.id);assert.equal(f.store.source(entry.id)?.state,'legacy-unknown');assert.equal(f.store.pending().length,0);assert.equal(f.store.source(rounded),null);
-  }finally{f.store.close();}
-});
-
-test('upgrading the legacy precision flag does not make a rounded queued ID safe to replay',async()=>{
-  for(const claimed of [false,true]){const f=await fixture(false),old=message('9007199254740992','9007199254740992'),exact=message('9007199254740993','9007199254740993');
-    try{f.store.importLegacy({requestId:'old-queue',sourceHash:pin,state:{seen:[],queue:[{...old,claimed}],since:0,idPrecisionVersion:2,legacySeen:[],legacyIdUntil:old.timestamp}},now);
-      f.store.acceptPage(page([exact]),f.store.cursor().version,1000,now);assert.equal(f.store.source(exact.id)?.state,'legacy-unknown');assert.equal(f.store.source(old.id)?.state,claimed?'legacy-unknown':'held');assert.equal(f.store.pending().length,0);
-    }finally{f.store.close();}}
 });
 
 test('inbound deduplication verifies immutable bytes and refuses third parties without partially admitting a page',async()=>{

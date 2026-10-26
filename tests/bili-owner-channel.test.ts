@@ -23,13 +23,6 @@ test('Bili owner ingress binds real fixed scene and exact IDs, ignores self mess
   }finally{await h.close();}
 });
 
-test('legacy unclaimed queue remains held until the transport returns the exact authenticated message',async()=>{
-  const message=incomingBili(),h=await biliOwnerChannelFixture({legacy:{seen:[],queue:[{...message,claimed:false}],since:fixedNow-60000,idPrecisionVersion:2}});
-  try{await h.poll();assert.equal(h.adapter.requests.length,0);assert.equal(h.channel.store.source(message.id)?.state,'held');
-    h.backend.state.messages=[message];h.advance();await h.poll();assert.equal(h.adapter.requests.length,1);assert.equal(h.channel.store.source(message.id)?.state,'accepted');assert.equal(h.backend.state.sent.length,1);
-  }finally{await h.close();}
-});
-
 test('pending capacity one drains persisted ingress after Core admission resumes and preserves its page cursor',async()=>{
   const h=await biliOwnerChannelFixture({maxPending:1,deferWork:true});try{h.backend.state.messages=[incomingBili('11'),incomingBili('10')];await h.poll();
     assert.equal(h.core.journal.list().length,0);assert.equal(h.channel.store.pending().length,1);assert.equal(h.channel.store.cursor().before,'11');assert.equal(h.channel.getStatus().error,'BILI_OWNER_CAPACITY');assert.deepEqual(h.backend.state.reads.map(value=>value.limit),[1]);

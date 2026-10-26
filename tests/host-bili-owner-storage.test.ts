@@ -31,18 +31,16 @@ function rows(file:string,tables?:readonly string[]){const db=new DatabaseSync(f
 function handover(file:string){const store=new BiliOwnerStore(file,binding);try{return store.initializeFresh({requestId:'explicit-fictional-handover',since:now,cutoverHash:pin},now);}finally{store.close();}}
 const message=(id:string):BiliOwnerMessage=>({id,seqno:id,senderUid:BILI_OWNER_UID,receiverUid:BILI_OWNER_ACCOUNT,type:1,timestamp:now/1000,text:'虚构的主人私信'});
 const page=(messages:BiliOwnerMessage[]):BiliOwnerPage=>({accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID,loggedIn:true,bindingStamp:stamp,messages,hasMore:false,nextBeforeSeqno:null});
-function seedLegacy(file:string){const store=new BiliOwnerStore(file,binding,true),held=message('9007199254740993123'),claimed=message('9007199254740993124');
-  const state={seen:['9007199254740993000'],queue:[{...held,claimed:false},{...claimed,claimed:true}],since:now-100000,idPrecisionVersion:2 as const,
-    legacySeen:['9007199254740992000'],legacyIdUntil:now/1000-200,accountUid:BILI_OWNER_ACCOUNT,sessionId:'fixture-legacy-session',created:true};
-  try{store.importLegacy({requestId:'fixture-legacy-import',sourceHash:pin,state},now);
+function seedCurrent(file:string){const store=new BiliOwnerStore(file,binding,true);const initial={requestId:'fixture-fresh-start',since:now-100000,cutoverHash:pin};
+  try{store.initializeFresh(initial,now);
     for(const [id,terminal]of [['9007199254740993133','unknown'],['9007199254740993134','sending']] as const){const incoming=message(id);store.acceptPage(page([incoming]),store.cursor().version,1000,now);store.accepted(id,randomUUID(),now);
       const reply={id:'fixture-reply-'+id,conversation:BILI_OWNER_SCENE,sourceMessageId:id,text:'虚构交付记录，没有真实出网'};store.prepareReply(reply,now);store.begin(reply.id,now);if(terminal==='unknown')store.unknown(reply.id,'FIXTURE_UNKNOWN',now);}
-    return state;
+    return initial;
   }finally{store.close();}}
 
 test('Host init creates only Bili owner schema in core and requires a separate explicit handover',async()=>{
   const f=await fixture(true);assert.equal(f.initial.ready,false);assert.ok(f.initial.codes.includes('HOST_BILI_OWNER_HANDOVER_REQUIRED'));
-  assert.equal(inspectStorage(f.database,'bili-owner',identity).version,1);assert.equal(inspectBiliOwnerStorage(f.database,binding).bindingReady,false);
+  assert.equal(inspectStorage(f.database,'bili-owner',identity).version,2);assert.equal(inspectBiliOwnerStorage(f.database,binding).bindingReady,false);
   const state=rows(f.database,BILI_OWNER_TABLES);assert.equal(state.bili_owner_handover?.length,0);assert.equal(state.bili_owner_inbound?.length,0);assert.equal(state.bili_owner_events?.length,0);assert.equal(state.bili_owner_poll?.[0]?.since,null);
   const manifest=readManifest(f.old)!;assert.ok(manifest.requiredStores.includes('bili-owner'));assert.deepEqual(f.old.paths.channels,{});assert.deepEqual(manifest.paths,layoutPaths(f.old));
   handover(f.database);assert.equal(inspectHost(f.old,f.coordination).ready,true);assert.deepEqual(readManifest(f.old),manifest);
@@ -61,7 +59,7 @@ test('incremental enable backs up old stores, resumes failed schema creation, th
   assert.equal(inspectHost(enabled,f.coordination).ready,true);assert.deepEqual(rows(join(f.old.paths.memory,'memory.sqlite')),before);assert.equal(existsSync(join(f.root,'backups',plan.id,'1-memory.sqlite')),true);
 });
 
-test('an existing empty v1 is bound before handover without weakening frozen source-row verification',async()=>{
+test('an existing empty v2 is bound before handover without weakening frozen source-row verification',async()=>{
   const f=await fixture();new BiliOwnerStore(f.database,binding,true).close();const before=await readFile(f.database),enabled=await f.enable(),plan=await planMigration({...bundle(f),biliOwner:true});
   assert.equal(plan.files.find(value=>value.kind==='bili-owner')?.before.exists,true);await applyMigration(plan);assert.deepEqual(await readFile(f.database),before);assert.equal(verifyMigration(plan).passed,true);
   bindMigratedProfile(enabled);const manifest=await readFile(join(enabled.paths.core,'host-profile.json'));handover(f.database);
@@ -69,11 +67,11 @@ test('an existing empty v1 is bound before handover without weakening frozen sou
   bindMigratedProfile(enabled);assert.deepEqual(await readFile(join(enabled.paths.core,'host-profile.json')),manifest);
 });
 
-test('existing imported queue, unknown and sending rows are backed up unchanged and retained after disabling the plugin',async()=>{
-  const f=await fixture(),legacy=seedLegacy(f.database),enabled=await f.enable(),before=rows(f.database,BILI_OWNER_TABLES),bytes=await readFile(f.database),plan=await planMigration({...bundle(f),biliOwner:true});
+test('existing fresh channel, unknown and sending rows are backed up unchanged and retained after disabling the plugin',async()=>{
+  const f=await fixture(),initial=seedCurrent(f.database),enabled=await f.enable(),before=rows(f.database,BILI_OWNER_TABLES),bytes=await readFile(f.database),plan=await planMigration({...bundle(f),biliOwner:true});
   await applyMigration(plan);assert.equal(verifyMigration(plan).passed,true);assert.deepEqual(rows(f.database,BILI_OWNER_TABLES),before);assert.deepEqual(await readFile(f.database),bytes);
   const index=plan.files.findIndex(value=>value.kind==='bili-owner'),backup=join(f.root,'backups',plan.id,`${index}-bili-owner.sqlite`);assert.deepEqual(rows(backup,BILI_OWNER_TABLES),before);
-  const imported=JSON.parse(String(before.bili_owner_handover?.[0]?.body)) as {state:unknown};assert.deepEqual(imported.state,legacy);assert.deepEqual(before.bili_owner_deliveries?.map(row=>row.state),['unknown','sending']);
+  const imported=JSON.parse(String(before.bili_owner_handover?.[0]?.body)) as unknown;assert.deepEqual(imported,initial);assert.deepEqual(before.bili_owner_deliveries?.map(row=>row.state),['unknown','sending']);
   bindMigratedProfile(enabled);assert.equal(inspectHost(enabled,f.coordination).ready,true);await applyMigration(plan);assert.deepEqual(rows(f.database,BILI_OWNER_TABLES),before);
   f.config.plugins=f.config.plugins.filter(value=>value.id!=='channel-bili-owner');await writeFile(f.file,JSON.stringify(f.config));const disabled=loadHostConfig(f.file);
   assert.ok(readManifest(disabled)?.requiredStores.includes('bili-owner'));assert.equal(inspectHost(disabled,f.coordination).ready,true);

@@ -1,17 +1,17 @@
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { lstatSync,readFileSync,realpathSync,statSync } from 'node:fs';
 import { dirname,isAbsolute,join,parse,resolve } from 'node:path';
 import { z } from 'zod';
 import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BiliOwnerHashSchema,biliOwnerHash } from './types.js';
 
-export const BILI_OWNER_AUTH_HASH='ae81e655b9f264de109ee3bc3377e8d722c89589c3e41d3cf218d712feab952c';
+export const BILI_OWNER_AUTH_HASH='a94680e8026939dd6c02ad3a00bc2165d6026be4985c81da531c3e58e79c0374';
 export const BILI_OWNER_PRODUCTION_PROTOCOL='bili-owner-production.v1';
 const absolute=z.string().min(1).max(1000).refine(value=>isAbsolute(value)&&!/^[/\\]{2}/.test(value));
 export const BiliOwnerProductionConfigSchema=z.strictObject({installationRoot:absolute,manifestPath:absolute,manifestHash:BiliOwnerHashSchema});
 export type BiliOwnerProductionConfig=z.infer<typeof BiliOwnerProductionConfigSchema>;
 export const BiliOwnerProductionManifestSchema=z.strictObject({schemaVersion:z.literal(1),kind:z.literal('bili-owner-channel'),enabled:z.literal(true),
-  accountUid:z.literal(BILI_OWNER_ACCOUNT),ownerUid:z.literal(BILI_OWNER_UID),generation:z.number().int().positive().safe(),authModuleHash:z.literal(BILI_OWNER_AUTH_HASH),publicConfigHash:BiliOwnerHashSchema,
-  handover:z.strictObject({id:z.uuid(),oldConsumersStopped:z.literal(true),evidenceHash:BiliOwnerHashSchema})});
+  accountUid:z.literal(BILI_OWNER_ACCOUNT),ownerUid:z.literal(BILI_OWNER_UID),generation:z.number().int().positive().safe(),authModuleHash:z.literal(BILI_OWNER_AUTH_HASH),publicConfigHash:BiliOwnerHashSchema});
 export type BiliOwnerProductionManifest=z.infer<typeof BiliOwnerProductionManifestSchema>;
 export interface PinnedBiliOwnerProductionBinding {readonly config:Readonly<BiliOwnerProductionConfig>;readonly manifest:Readonly<BiliOwnerProductionManifest>;readonly authSource:string;
   readonly identityHash:string;readonly bindingStamp:string;guard():void;credentialPathGuard():void}
@@ -33,11 +33,11 @@ export function assertPinnedBiliOwnerProductionBinding(value:PinnedBiliOwnerProd
 /** Reads only public deployment/source bytes. This does not open a credential file or perform platform IO. */
 export function loadBiliOwnerProductionBinding(raw:unknown):PinnedBiliOwnerProductionBinding {
   const config=Object.freeze(BiliOwnerProductionConfigSchema.parse(raw));if(process.platform!=='win32'||!parse(config.installationRoot).root)fail('BILI_OWNER_WINDOWS_REQUIRED');
-  const root=config.installationRoot,manifestPath=join(root,'配置文件','bili-owner-channel.json'),configPath=join(root,'配置文件','bilibili.json'),authPath=join(root,'程序','bili-lite','auth.mjs');
+  const root=config.installationRoot,manifestPath=join(root,'配置文件','bili-owner-channel.json'),configPath=join(root,'配置文件','bilibili.json'),authPath=fileURLToPath(new URL('../vendor/bili-auth.mjs',import.meta.url));
   if(!samePath(config.manifestPath,manifestPath))fail('BILI_OWNER_MANIFEST_PATH');physical(root,true,'BILI_OWNER_INSTALLATION_CHANGED');
   const manifestBytes=publicBytes(manifestPath,65536,'BILI_OWNER_MANIFEST_CHANGED');if(hash(manifestBytes)!==config.manifestHash)fail('BILI_OWNER_MANIFEST_CHANGED');
   let manifest:BiliOwnerProductionManifest;try{manifest=BiliOwnerProductionManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8').replace(/^\uFEFF/,'')));}catch{fail('BILI_OWNER_MANIFEST_INVALID');}
-  Object.freeze(manifest.handover);Object.freeze(manifest);
+  Object.freeze(manifest);
   const sourceBytes=publicBytes(authPath,65536,'BILI_OWNER_AUTH_CHANGED');if(hash(sourceBytes)!==BILI_OWNER_AUTH_HASH)fail('BILI_OWNER_AUTH_CHANGED');const authSource=sourceBytes.toString('utf8');
   const imports=[...authSource.matchAll(/^import\s+[^;]+?\s+from\s+['"]([^'"]+)['"];?\s*$/gm)].map(match=>match[1]);
   if(JSON.stringify(imports)!==JSON.stringify(['node:fs','node:path','node:crypto'])||/\b(?:import|require)\s*\(/.test(authSource))fail('BILI_OWNER_AUTH_DEPENDENCY');

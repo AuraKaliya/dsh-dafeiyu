@@ -1,7 +1,8 @@
 {
   "name":"@dafeiyu/server-runtime","version":"0.1.0","private":true,"type":"module",
   "main":"./lib/index.js","types":"./lib/index.d.ts",
-  "exports":{".":{"types":"./lib/index.d.ts","default":"./lib/index.js"}},
-  "dependencies":{"@dafeiyu/host":"0.1.0","@dafeiyu/server-executor":"0.1.0","@dafeiyu/channel-qq":"0.3.0","zod":"4.4.3"},
+  "exports":{".":{"types":"./lib/index.d.ts","default":"./lib/index.js"},"./launch-config":{"types":"./lib/launch-config.d.ts","default":"./lib/launch-config.js"},"./cli":{"types":"./lib/cli.d.ts","default":"./lib/cli.js"}},
+  "bin":{"dafeiyu-server":"./bin/dafeiyu-server.mjs"},
+  "dependencies":{"@dafeiyu/host":"0.1.0","@dafeiyu/server-executor":"0.1.0","@dafeiyu/channel-qq":"0.3.0","@dafeiyu/contracts":"0.15.0","@dafeiyu/channel-bili-owner":"0.1.0","zod":"4.4.3"},
   "peerDependencies":{"@deepseek-ai/cordis":"4.0.5","@deepseek-ai/dsh-llm":"0.2.1-rc.2"}
 }

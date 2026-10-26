@@ -9,7 +9,7 @@ import type { ResourceProof } from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE,BILI_PUBLIC_SCENE,BILI_OWNER_CONSUMER_KEY,BILI_OWNER_TASK_ACTIONS,
   BiliOwnerStore,openBiliOwnerChannel,biliOwnerHash } from '@dafeiyu/channel-bili-owner';
-import type { BiliOwnerPorts,BiliOwnerTransport,BiliOwnerChannel,BiliOwnerMessage,BiliOwnerLegacyState,BiliOwnerIdentity } from '@dafeiyu/channel-bili-owner';
+import type { BiliOwnerPorts,BiliOwnerTransport,BiliOwnerChannel,BiliOwnerMessage,BiliOwnerIdentity } from '@dafeiyu/channel-bili-owner';
 import { QqTaskCapabilities,QQ_TASK_ACTIONS } from '../packages/channel-qq/lib/tasks.js';
 import { probeHost } from './phase1-probe-fixture.js';
 import { ScriptedModel,textReply } from './harness.js';
@@ -38,7 +38,7 @@ export type BiliOwnerBackend=ReturnType<typeof biliOwnerBackend>;
 
 /** Real Core/Memory/official DSH. All Bili, consumer-lease and model transport facts are fictional test ports. */
 export async function biliOwnerChannelFixture(options:{root?:string;create?:boolean;tasks?:boolean;deliverResults?:boolean;deferWork?:boolean;maxPending?:number;backend?:BiliOwnerBackend;
-  legacy?:BiliOwnerLegacyState;omitTaskPolicy?:boolean;otherChannel?:boolean;maxConcurrentRuns?:number;beforeStart?:(ctx:Context,channel:BiliOwnerChannel,adapter:ScriptedModel)=>void|Promise<void>}={}){
+  omitTaskPolicy?:boolean;otherChannel?:boolean;maxConcurrentRuns?:number;beforeStart?:(ctx:Context,channel:BiliOwnerChannel,adapter:ScriptedModel)=>void|Promise<void>}={}){
   const root=options.root??await mkdtemp(join(testTempDir(),'bili-owner-channel-')),backend=options.backend??biliOwnerBackend(),create=options.create??true;
   let response:Response=()=>textReply('虚构人格回复'),channel:BiliOwnerChannel|undefined;
   const adapter=new ScriptedModel(request=>response(request)),host=await probeHost(root,adapter),ctx=host.ctx,ports=backend.createPorts();
@@ -61,7 +61,7 @@ export async function biliOwnerChannelFixture(options:{root?:string;create?:bool
     ]});
     if(options.otherChannel){qqHandle=ctx.dafeiyu.registerExtension({id:'channel-qq',version:'fixture',apiVersion:API_VERSION,agentId:'dafeiyu',channels:[{channel:'qq',account:'12345678',deliver:async()=>({status:'sent',receiptId:'fictional-qq'})}]});
       qqTasks=new QqTaskCapabilities(ctx,{agentId:'dafeiyu',botId:'12345678',ownerId:'87654321',policyId:'qq-task',naturalNames:[],deliverResults:false});}
-    if(create){const store=new BiliOwnerStore(join(directory,'bili-owner.sqlite'),identity,true);try{if(options.legacy)store.importLegacy({requestId:'legacy',sourceHash:fixtureHash,state:options.legacy},backend.state.now);else store.initializeFresh({requestId:'fresh',since:backend.state.now-60000,cutoverHash:fixtureHash},backend.state.now);}finally{store.close();}}
+    if(create){const store=new BiliOwnerStore(join(directory,'bili-owner.sqlite'),identity,true);try{store.initializeFresh({requestId:'fresh',since:backend.state.now-60000,cutoverHash:fixtureHash},backend.state.now);}finally{store.close();}}
     channel=await openBiliOwnerChannel(ctx,{agentId:identity.agentId,profileId:identity.profileId,dataDir:directory,settings:{tasks:{enabled:options.tasks??false,deliverResults:options.deliverResults??true},...(options.maxPending?{maxPending:options.maxPending}:{})}},ports);
     ctx.dafeiyuMemory.recover();ctx.dafeiyuMemory.activate();channel.recover();channel.activate();await ctx.dafeiyu.recoverExecutions();ctx.dafeiyu.recover();
     await options.beforeStart?.(ctx,channel,adapter);ctx.dafeiyu.activate({deferWork:options.deferWork??false});await channel.start(false);channel.releaseIngress();

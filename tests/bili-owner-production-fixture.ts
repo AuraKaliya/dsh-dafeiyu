@@ -1,6 +1,5 @@
 import { mkdtemp,mkdir,readFile,writeFile } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,biliOwnerTextHash } from '@dafeiyu/channel-bili-owner';
 import { BILI_OWNER_AUTH_HASH,BiliOwnerProductionManifestSchema } from '../packages/channel-bili-owner/lib/production-config.js';
 import type { BiliOwnerProductionConfig } from '../packages/channel-bili-owner/lib/production-config.js';
@@ -11,13 +10,11 @@ export const noNetwork:typeof globalThis.fetch=async()=>{throw new Error('UNEXPE
 export const nav=(uid=BILI_OWNER_ACCOUNT)=>({code:0,data:{isLogin:true,mid:uid,uname:'FICTIONAL_ACCOUNT',wbi_img:{img_url:'https://i0.hdslb.com/bfs/wbi/1234567890abcdef1234567890abcdef.png',sub_url:'https://i0.hdslb.com/bfs/wbi/fedcba0987654321fedcba0987654321.png'}}});
 export const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
 /** Copies only the publicly audited source file. Credentials below are invented in this managed test directory. */
-export async function productionFixture(){const root=await mkdtemp(join(testTempDir(),'bili-owner-production-')),configuration=join(root,'配置文件'),authPath=join(root,'程序','bili-lite','auth.mjs'),publicPath=join(configuration,'bilibili.json'),credentialPath=join(configuration,'凭据','bilibili.session.json'),manifestPath=join(configuration,'bili-owner-channel.json');
-  await mkdir(join(root,'程序','bili-lite'),{recursive:true});await mkdir(join(configuration,'凭据'),{recursive:true});
-  const source=await readFile(resolve('tests/fixtures/bili-auth-audited.mjs'));
-  if(biliOwnerTextHash(source.toString('utf8'))!==BILI_OWNER_AUTH_HASH)throw new Error('PUBLIC_AUTH_FIXTURE_CHANGED');await writeFile(authPath,source);
+export async function productionFixture(){const root=await mkdtemp(join(testTempDir(),'bili-owner-production-')),configuration=join(root,'配置文件'),publicPath=join(configuration,'bilibili.json'),credentialPath=join(configuration,'凭据','bilibili.session.json'),manifestPath=join(configuration,'bili-owner-channel.json');
+  await mkdir(join(configuration,'凭据'),{recursive:true});
   const publicValue={accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID,enabled:true,privateMessages:{autoReply:true,pollMs:30000}};await writeFile(publicPath,JSON.stringify(publicValue));
   const credentials=(account=BILI_OWNER_ACCOUNT,token='FICTIONAL_SESSION')=>writeFile(credentialPath,JSON.stringify({mid:account,cookies:{DedeUserID:account,SESSDATA:token,bili_jct:'FICTIONAL_CSRF'},createdAt:'2026-10-27T00:00:00.000Z'}));await credentials();
-  let manifest=BiliOwnerProductionManifestSchema.parse({schemaVersion:1,kind:'bili-owner-channel',enabled:true,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID,generation:7,authModuleHash:BILI_OWNER_AUTH_HASH,publicConfigHash:biliOwnerTextHash(JSON.stringify(publicValue)),handover:{id:randomUUID(),oldConsumersStopped:true,evidenceHash:'a'.repeat(64)}}),config:BiliOwnerProductionConfig;
+  let manifest=BiliOwnerProductionManifestSchema.parse({schemaVersion:1,kind:'bili-owner-channel',enabled:true,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID,generation:7,authModuleHash:BILI_OWNER_AUTH_HASH,publicConfigHash:biliOwnerTextHash(JSON.stringify(publicValue))}),config:BiliOwnerProductionConfig;
   const repin=async(generation=manifest.generation)=>{manifest={...manifest,generation,publicConfigHash:biliOwnerTextHash(await readFile(publicPath,'utf8'))};const bytes=JSON.stringify(manifest);await writeFile(manifestPath,bytes);config={installationRoot:root,manifestPath,manifestHash:biliOwnerTextHash(bytes)};return config;};await repin();
-  return {root,authPath,publicPath,credentialPath,manifestPath,get config(){return config;},get manifest(){return manifest;},credentials,repin};
+  return {root,publicPath,credentialPath,manifestPath,get config(){return config;},get manifest(){return manifest;},credentials,repin};
 }

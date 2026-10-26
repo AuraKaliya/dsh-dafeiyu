@@ -66,15 +66,6 @@ export class MemorySourcePolicy implements SourcePolicy {
         if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,ref,digest(JSON.stringify(view.page))))return this.missing(scope);
         return [{...scoped(scope),kind:'capability',ref}];
       }
-      if(name==='dafeiyu_legacy_memory_read'){
-        const outcome=ActionOutcomeSchema.parse(data);if(outcome.status!=='succeeded'||outcome.data===null)return [];
-        const view=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema}).nullable()}).parse(outcome.data);
-        const page=z.object({kind:z.literal('legacy-memory-page'),items:z.array(z.unknown())}).parse(view.page);
-        if(view.observation===null)return page.items.length===0?[]:this.missing(scope);
-        const ref=view.observation.source;
-        if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,ref,digest(JSON.stringify(view.page))))return this.missing(scope);
-        return [{...scoped(scope),kind:'capability',ref}];
-      }
       if(name==='dafeiyu_media_read'||name==='qq_media_list'){
         const outcome=ActionOutcomeSchema.parse(data);if(outcome.status!=='succeeded'||outcome.data===null)return [];
         const value=z.record(z.string(),z.json()).parse(outcome.data);if(value.observation===undefined)return [];

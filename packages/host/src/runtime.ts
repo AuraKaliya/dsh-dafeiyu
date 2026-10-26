@@ -180,7 +180,7 @@ export class ManagedHost {
     try{return !!db.prepare("SELECT 1 FROM runs r JOIN execution_requests q ON q.id=r.request_key LEFT JOIN native_deliveries d ON d.run_id=r.id WHERE q.producer='bili-owner-tasks' AND (r.state IN ('accepted','queued','running','cancelling') OR d.state IN ('accepted','rendering','verifying','ready','sending') OR (r.state IN ('completed','waiting') AND d.id IS NULL AND ?=1)) LIMIT 1").get(pluginConfig(this.config,'channel-bili-owner')?.tasks.deliverResults?1:0);}
     finally{db.close();}
   }
-  private biliOwnerHealth(){if(!this.biliOwnerValue)return;const status=this.biliOwnerValue.getStatus(),unknown=(status.counts.deliveries.unknown??0)+(status.counts.inbound['legacy-unknown']??0);
+  private biliOwnerHealth(){if(!this.biliOwnerValue)return;const status=this.biliOwnerValue.getStatus(),unknown=(status.counts.deliveries.unknown??0);
     const code=!status.bindingReady?'HOST_BILI_OWNER_HANDOVER_REQUIRED':status.bindingFault??(!status.verified?'HOST_BILI_OWNER_UNAVAILABLE':status.error??(unknown?'HOST_BILI_OWNER_UNCERTAIN':status.backoffUntil>Date.now()?'HOST_BILI_OWNER_BACKOFF':null));
     this.plugin('channel-bili-owner',code?'degraded':'ready',code);}
   private executorHealth(){if(this.executorValue){const unknown=(this.executorValue.health.counts.unknown??0)>0;this.plugin('server-executor',unknown?'degraded':'ready',unknown?'HOST_EXECUTOR_UNCERTAIN':null);}}

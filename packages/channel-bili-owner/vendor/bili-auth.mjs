@@ -3,7 +3,6 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 
 export const OWNER_UID='13461350';
-export const ROOT=process.env.DSH_QQ_BRIDGE_ROOT||'C:/DSH/DaFeiYu';
 export const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 export const API='https://api.bilibili.com';
 export const HEADERS={'User-Agent':UA,Referer:'https://www.bilibili.com/',Origin:'https://www.bilibili.com',Accept:'application/json'};
@@ -13,7 +12,6 @@ const MIXIN=[46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,
 export function fail(code,message){const error=new Error(code+'：'+message);error.code=code;return error;}
 export function parseApiJson(text){return JSON.parse(text.replace(/("(?:\\.|[^"\\])*")|(-?\d{16,})(?=[,\]}\s])/g,(whole,quoted,number)=>quoted||(!Number.isSafeInteger(Number(number))?JSON.stringify(number):number)));}
 export function readJson(file,fallback){try{return JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));}catch(error){if(error.code==='ENOENT')return fallback;throw fail('BILI_STATE_INVALID','本地状态无法读取');}}
-export function writeJson(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.'+process.pid+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2)+'\n',{mode:0o600});fs.renameSync(temp,file);}
 export function signWbi(params,img,sub,seconds=Math.floor(Date.now()/1000)){
   const stem=value=>new URL(value).pathname.split('/').at(-1).split('.')[0];
   const raw=stem(img)+stem(sub),key=MIXIN.map(i=>raw[i]).join('').slice(0,32);
@@ -22,7 +20,7 @@ export function signWbi(params,img,sub,seconds=Math.floor(Date.now()/1000)){
   return {...sorted,w_rid:createHash('md5').update(query+key).digest('hex')};
 }
 export class BiliAuth {
-  constructor({root=ROOT,fetchImpl=globalThis.fetch,clock=Date.now}={}){Object.assign(this,{root,fetchImpl,clock});this.credentialFile=path.join(root,'配置文件','凭据','bilibili.session.json');this.loginFile=path.join(root,'配置文件','凭据','bilibili.login.json');this.configFile=path.join(root,'配置文件','bilibili.json');this.keys=null;}
+  constructor({root,fetchImpl=globalThis.fetch,clock=Date.now}={}){Object.assign(this,{root,fetchImpl,clock});this.credentialFile=path.join(root,'配置文件','凭据','bilibili.session.json');this.configFile=path.join(root,'配置文件','bilibili.json');this.keys=null;}
   config(){const cfg=readJson(this.configFile,{});if(cfg.ownerUid&&String(cfg.ownerUid)!==OWNER_UID)throw fail('BILI_OWNER_MISMATCH','私信对象配置与维护者指定UID不一致');return cfg;}
   session(required=true){
     const s=readJson(this.credentialFile,null);if(!s){if(required)throw fail('BILI_LOGIN_REQUIRED','请维护者扫码登录大肥鱼独立账号');return null;}
@@ -54,28 +52,4 @@ export class BiliAuth {
     if(!j.data?.isLogin||String(j.data.mid)!==String(session.mid))throw fail('BILI_LOGIN_EXPIRED','登录态失效或账号发生变化');
     return {loggedIn:true,uid:String(j.data.mid),name:j.data.uname,level:j.data.level_info?.current_level,ownerUid:OWNER_UID,dmMode:'owner_only'};
   }
-  async loginStart(){
-    if(this.session(false))throw fail('BILI_ALREADY_CONFIGURED','已经配置账号；更换账号须由维护者处理');
-    const j=await this.request('https://passport.bilibili.com/x/passport-login/web/qrcode/generate',{auth:false,params:{source:'main-fe-header'}});
-    if(!j.data?.qrcode_key||!j.data?.url)throw fail('BILI_QR_INVALID','二维码接口缺少必要字段');
-    writeJson(this.loginFile,{key:j.data.qrcode_key,createdAt:this.clock()});
-    return {url:j.data.url,expiresInSeconds:180,ownerUid:OWNER_UID};
-  }
-  async loginPoll(){
-    if(this.session(false))return this.status();
-    const pending=readJson(this.loginFile,null);if(!pending)throw fail('BILI_QR_MISSING','请先生成二维码');
-    const url=new URL('https://passport.bilibili.com/x/passport-login/web/qrcode/poll');url.searchParams.set('qrcode_key',pending.key);url.searchParams.set('source','main-fe-header');
-    const response=await this.fetchImpl(url,{headers:HEADERS,redirect:'error',signal:AbortSignal.timeout(20000)});
-    const json=parseApiJson(await response.text());if(Number(json.code)!==0)throw fail('BILI_LOGIN_ERROR','二维码状态读取失败');
-    const d=json.data;if(d.code!==0)return {loggedIn:false,state:({86101:'waiting_scan',86090:'waiting_confirmation',86038:'expired'})[d.code]||'pending',code:d.code};
-    const cookies={};for(const header of response.headers.getSetCookie()){const pair=header.split(';')[0],i=pair.indexOf('=');const k=pair.slice(0,i);if(COOKIE_NAMES.has(k))cookies[k]=pair.slice(i+1);}
-    if(d.url){const callback=new URL(d.url);for(const [k,v]of callback.searchParams)if(COOKIE_NAMES.has(k)&&!cookies[k])cookies[k]=k==='SESSDATA'?encodeURIComponent(v):v;}
-    const mid=String(cookies.DedeUserID||'');
-    if(mid===OWNER_UID)throw fail('BILI_INDEPENDENT_ACCOUNT_REQUIRED','扫到了主人的账号，请切换为大肥鱼的独立账号后重新扫码');
-    if(!mid||!cookies.SESSDATA||!cookies.bili_jct)throw fail('BILI_LOGIN_INCOMPLETE','平台未提供完整登录态');
-    writeJson(this.credentialFile,{mid,cookies,createdAt:new Date(this.clock()).toISOString()});
-    try{const status=await this.status();writeJson(this.configFile,{...this.config(),ownerUid:OWNER_UID,accountUid:mid,accountName:status.name});return status;}
-    catch(error){fs.unlinkSync(this.credentialFile);throw error;}
-  }
 }
-export const accountAuth=new BiliAuth();

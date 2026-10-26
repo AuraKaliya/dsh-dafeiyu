@@ -74,7 +74,7 @@ try{
     if(task){assert.equal(publicRequests,1);assert.equal(nativeCalls,2);assert.equal(chatCalls,2);assert.equal(rendered,1);assert.equal(verified,1);assert.equal(backend.state.sent.length,2);
       assert.equal(backend.state.sent.filter(item=>item.text===persona).length,1);assert.equal(JSON.stringify(backend.state.sent).includes(opaque),false);assert.equal(host.snapshot().services.taskDelivery?.sent,1);}
     else{assert.equal(calls,1);assert.equal(backend.state.sent[0]?.text,normal);}
-    host.publish();const status=readHostStatus(prepared,coordination).snapshot;assert.equal(status?.schemas.biliOwner,1);assert.equal(status?.services.biliOwner?.counts.deliveries.sent,task?2:1);assert.equal(JSON.stringify(status).includes(normal),false);
+    host.publish();const status=readHostStatus(prepared,coordination).snapshot;assert.equal(status?.schemas.biliOwner,2);assert.equal(status?.services.biliOwner?.counts.deliveries.sent,task?2:1);assert.equal(JSON.stringify(status).includes(normal),false);
     const before={calls,publicRequests,sent:backend.state.sent.length};await host.close();const opened=factories;assert.equal(backend.state.closes,opened);assert.equal(backend.state.releases,opened);
     host=await Host.start(prepared,options);await host.ctx.dafeiyuBiliOwner.whenIdle();await host.core.whenIdle();assert.deepEqual({calls,publicRequests,sent:backend.state.sent.length},before);await host.close();assert.equal(backend.state.closes,factories);assert.equal(backend.state.releases,factories);
   }
