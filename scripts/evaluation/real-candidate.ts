@@ -10,9 +10,19 @@ import { CandidateSchema } from './real-support.ts';
 import { REAL_COMPACTION,REAL_HISTORY_GOAL,REAL_H06_COMPACTION } from './real-continuity.ts';
 import { CALIBRATION_CASES } from './authorization.ts';
 import { verifyCaseEvidence } from './evidence.ts';
+import { PERSONA_ADOPTION_POLICY_VERSION } from '../../packages/memory/lib/persona-adoption-policy.js';
+import { PERSONA_ADOPTION_POLICY } from '../../packages/memory/lib/persona-evidence.js';
+import { B05_PROTOCOL,B05_MATERIAL } from './b05.ts';
 
 const candidateFileSchema=z.strictObject({schemaVersion:z.literal(1),candidate:CandidateSchema,identity:RuntimeIdentitySchema,createdAt:z.iso.datetime()});
-export function realProtocolHash(workspace:EvaluationWorkspace){return sha256(JSON.stringify({version:'7c-real-1',suite:workspace.config.suiteHash,manifest:workspace.config.manifestHash,foundation:workspace.config.foundationHash,authorization:workspace.config.executionBounds?.authorizationHash,compaction:REAL_COMPACTION,h06:REAL_H06_COMPACTION,historyGoal:REAL_HISTORY_GOAL,continuations:8,restartAfter:4,scriptedDuplicates:false,preparation:'separate-epoch-fixture-ledger'}));}
+/** Semantic protocol identity is separate from runtime bytes and never upgrades old evidence. */
+export function realProtocolDescriptor(workspace:EvaluationWorkspace){return {
+  version:'7c-real-2',suite:workspace.config.suiteHash,manifest:workspace.config.manifestHash,foundation:workspace.config.foundationHash,authorization:workspace.config.executionBounds?.authorizationHash,
+  compaction:{...REAL_COMPACTION},h06:{...REAL_H06_COMPACTION},historyGoal:REAL_HISTORY_GOAL,continuations:8,restartAfter:4,scriptedDuplicates:false,preparation:'separate-epoch-fixture-ledger',
+  adoptionPolicy:PERSONA_ADOPTION_POLICY_VERSION,trialProtocol:PERSONA_ADOPTION_POLICY,personaProof:'closed-native-chain-v1',legacyFixture:'closed-profile-synthetic-legacy-v1',
+  b07:'current-task-epoch-unresolved-target-v1',b05:{protocol:B05_PROTOCOL,materialHash:sha256(B05_MATERIAL)},
+} as const;}
+export function realProtocolHash(workspace:EvaluationWorkspace){return sha256(JSON.stringify(realProtocolDescriptor(workspace)));}
 /** Documentation-only commits reuse the same candidate and paired baselines when actual runtime/source bytes match. */
 export async function freezeRealCandidate(workspace:EvaluationWorkspace,revision:string,identity:RuntimeIdentity){
   if(identity.scope!=='real-evaluation-runtime-v1')throw new Error('EVALUATION_REAL_IDENTITY_REQUIRED');const runtimeHash=runtimeIdentityHash(identity),protocolHash=realProtocolHash(workspace),directory=join(workspace.root,'candidates');
