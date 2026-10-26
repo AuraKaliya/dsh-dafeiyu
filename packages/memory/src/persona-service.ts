@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { PersonaAccess,PersonaSourceRef,ActionCapabilityV3,ExecutionContextV3 } from '@dafeiyu/contracts';
-import { PersonaSourceRefSchema,PersonaKindSchema,PersonaRequestIdSchema,ExecutionScopeSchema,RunOriginSchema,ExecutionContributionSchema,TaskObjectionSchema,PersonaTrialSelectInputSchema } from '@dafeiyu/contracts';
+import type { PersonaAccess,PersonaSourceRef,PersonaCounterCheck,ActionCapabilityV3,ExecutionContextV3 } from '@dafeiyu/contracts';
+import { PersonaSourceRefSchema,PersonaKindSchema,PersonaRequestIdSchema,ExecutionScopeSchema,RunOriginSchema,ExecutionContributionSchema,TaskObjectionSchema,PersonaTrialSelectInputSchema,PersonaAdoptionReviewInputSchema,PersonaPublishInputSchema } from '@dafeiyu/contracts';
 import type { ExecutionMemoryPort } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import type { MemoryStore } from './store.js';
@@ -74,14 +74,17 @@ export class PersonaService {
     }catch{return null;}finally{this.resolving.delete(key);}
   }
   private access(context:ExecutionContextV3,pluginId:string,write:boolean){if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.ctx.dafeiyu.personaAccess(context,pluginId,write?'local-write':'read');}
+  /** A source key selects only a reference already exposed in this live execution access. */
+  private resolveExposedSource(access:PersonaAccess,key:string):PersonaSourceRef {
+    const ref=access.inputs.find(input=>input.id===key)?.sourceRef??access.admittedSources.find(source=>key===(source.kind==='execution-source'?`execution-source:${source.id}`:`memory:${source.id}:${source.revision}`));
+    if(!ref||!this.resolve(access,ref))throw new Error('SOURCE_NOT_EXPOSED');return ref;
+  }
   derive(access:PersonaAccess,requestId:string,text:string,refs:readonly PersonaSourceRef[]){return this.sources.selfReport(access,requestId,text,refs);}
   expose(access:PersonaAccess,ref:PersonaSourceRef){this.executionState.expose(access,ref);}
   proposeAnalyzed(access:PersonaAccess,input:unknown){return this.store.propose(access,input);}
   propose(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){
     const access=this.access(context,pluginId,true),input=proposal.parse(raw);
-    const resolveKey=(key:string)=>{const ref=access.inputs.find(input=>input.id===key)?.sourceRef??access.admittedSources.find(ref=>key===(ref.kind==='execution-source'?`execution-source:${ref.id}`:`memory:${ref.id}:${ref.revision}`));
-      if(!ref||!this.resolve(access,ref))throw new Error('SOURCE_NOT_EXPOSED');return ref;};
-    const supports=input.sources.map(resolveKey),counters=input.counters.map(resolveKey);
+    const supports=input.sources.map(key=>this.resolveExposedSource(access,key)),counters=input.counters.map(key=>this.resolveExposedSource(access,key));
     try{return this.memory.atomic(()=>{const contentRef=this.sources.selfReport(access,`persona:${personaDigest(input.requestId)}`,input.text,[...supports,...counters]);
       return this.store.propose(access,{requestId:input.requestId,kind:input.kind,contentRef,supports,counters,applicability:input.applicability,reason:input.reason});});}finally{this.flush();}
   }
@@ -89,7 +92,14 @@ export class PersonaService {
   proposeReference(context:ExecutionContextV3,raw:unknown,pluginId:string){try{return this.store.propose(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   review(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.review(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   selectTrial(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.selectTrial(this.access(context,pluginId,true),raw);}finally{this.flush();}}
-  publish(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.publish(this.access(context,pluginId,true),raw);}finally{this.flush();}}
+  reviewAdoption(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){
+    const access=this.access(context,pluginId,true),input=PersonaAdoptionReviewInputSchema.parse(raw);
+    const supports=input.supports.map(key=>this.resolveExposedSource(access,key)),counters=input.counters.map(key=>this.resolveExposedSource(access,key));
+    const counterCheck:PersonaCounterCheck=input.counterCheck.status==='checked-none'
+      ?{...input.counterCheck,checkedSources:input.counterCheck.checkedSources.map(key=>this.resolveExposedSource(access,key))}:input.counterCheck;
+    try{return this.store.reviewAdoption(access,{...input,supports,counters,counterCheck});}finally{this.flush();}
+  }
+  publish(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.publish(this.access(context,pluginId,true),PersonaPublishInputSchema.parse(raw));}finally{this.flush();}}
   select(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.select(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   withdraw(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.withdraw(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   status(context:ExecutionContextV3,pluginId='memory-persona'){return this.store.status(this.access(context,pluginId,false));}
@@ -127,16 +137,17 @@ export class PersonaService {
     const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,execute:(context:ExecutionContextV3,input:unknown)=>unknown,requiresTask=false):ActionCapabilityV3=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',requiresTask,
       execute:async(input,context)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(execute(context,input)),sources:[],receipts:[]};}
         catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error?error.message:'';
-          if(!['INVALID_INPUT','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT','SOURCE_STALE','SCOPE_DENIED','SOURCE_NOT_EXPOSED','INSUFFICIENT_EVIDENCE','PRIVATE_INPUT_REJECTED','PERSONA_TRANSITION_FORBIDDEN','PERSONA_REVIEW_REQUIRED','TASK_REQUIRED','TASK_NOT_ACTIVE','DEPENDENCY_UNAVAILABLE'].includes(code))throw error;
+          if(!['INVALID_INPUT','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT','SOURCE_STALE','SOURCE_STATE_CONFLICT','SCOPE_DENIED','SOURCE_NOT_EXPOSED','INSUFFICIENT_EVIDENCE','PRIVATE_INPUT_REJECTED','PERSONA_TRANSITION_FORBIDDEN','PERSONA_REVIEW_REQUIRED','PERSONA_TRIAL_EVIDENCE_REQUIRED','PERSONA_ADOPTION_REVIEW_REQUIRED','PERSONA_ADOPTION_HELD','TASK_REQUIRED','TASK_NOT_ACTIVE','DEPENDENCY_UNAVAILABLE'].includes(code))throw error;
           return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});
     return [
-      make('dafeiyu_persona_propose','提出暂定认识。text是自述，不是世界事实。sources/counters只接受已曝光的task-link输入、execution-source:来源ID或memory:记忆ID:修订号。不会直接改变底色或稳定偏好。',proposal,true,(context,input)=>this.propose(context,input),true),
-      make('dafeiyu_persona_review','明确复核自己的候选。trial表示试行，held表示仍需比较，rejected表示不采用；不能靠评分直接证明成长。',z.strictObject({...control,state:z.enum(['held','trial','rejected'])}),true,(context,input)=>this.review(context,input)),
+      make('dafeiyu_persona_propose','提出暂定候选。text是自述，不是世界事实，也不证明已经试行。sources/counters只接受当前已曝光的task-link输入、execution-source:来源ID或memory:记忆ID:修订号。不改底色或直接形成稳定偏好。',proposal,true,(context,input)=>this.propose(context,input),true),
+      make('dafeiyu_persona_review','复核候选并选择held、trial或rejected。设为trial只是准备试行；之后须trial_select，由真实后续Run装入并闭合，再作采用评审。状态切换、评分和自述都不能代替实际使用结果。',z.strictObject({...control,state:z.enum(['held','trial','rejected'])}),true,(context,input)=>this.review(context,input)),
       make('dafeiyu_persona_trial_select','选择下一轮实际使用的精确trial候选及适用、退出条件。它仍是暂定认识，不会成为已采用人格；空数组撤下本范围试行选择。实际使用和闭合结果由核心记录，不可自行声明完成试行。',PersonaTrialSelectInputSchema,true,(context,input)=>this.selectTrial(context,input)),
-      make('dafeiyu_persona_publish','采用已试行的精确候选版本，并保留证据与反证。只修改本范围阶段选择，不改底色、任务或平台权限。',z.strictObject({requestId:PersonaRequestIdSchema,expectedStageVersion:z.number().int().nonnegative(),entries:z.array(z.strictObject({id:z.uuid(),version:z.number().int().positive()})).min(1).max(32)}),true,(context,input)=>this.publish(context,input)),
+      make('dafeiyu_persona_adoption_review','在真实后续Run已装入trial并闭合后，引用核心记录的试行结果作采用评审；不能自报完成。supports/counters及checked-none.checkedSources仅用当前已曝光来源键。反证未取得或未知须保留；checked-none只说明在已查资料覆盖内未发现。默认先以targetMaturity=tentative评审，established须有充分可核依据。返回review、decision及allowed/held资格，不发布、不证明语义真理；conclusionScope须与原applicability完全一致。',PersonaAdoptionReviewInputSchema,true,(context,input)=>this.reviewAdoption(context,input)),
+      make('dafeiyu_persona_publish','提交精确trial候选及合格review引用，发布前重新核验资格、来源和版本；缺评审或held不得采用。通常先采用仍暂定的tentative认识，只按review获准成熟度发布，不自动提升为established。保留原内容、范围和动机，不改底色、任务或平台权限。',PersonaPublishInputSchema,true,(context,input)=>this.publish(context,input)),
       make('dafeiyu_persona_select','选择当前场景中已经采用且仍有效的阶段条目；空数组明确撤下该场景的全部选择。',z.strictObject({requestId:PersonaRequestIdSchema,expectedSelectionVersion:z.number().int().nonnegative(),entries:z.array(z.strictObject({id:z.uuid(),version:z.number().int().positive()})).max(32)}),true,(context,input)=>this.select(context,input)),
       make('dafeiyu_persona_withdraw','撤下有版本的阶段认识，保留历史。后续不会通过恢复旧快照自动重新采用。',z.strictObject(control),true,(context,input)=>this.withdraw(context,input)),
-      make('dafeiyu_persona_status','查看当前场景候选版本、可用性和选择版本；不读取其它场景正文。',z.strictObject({}),false,context=>this.status(context)),
+      make('dafeiyu_persona_status','查看当前场景候选版本、可用性、已采用/试行选择版本及核心记录的闭合试行结果引用；不读取其它场景正文，不据自述补造完成结果。',z.strictObject({}),false,context=>this.status(context)),
     ];
   }
   flush(){const append=(raw:unknown,id:string)=>{const event=auditSchema.parse(raw),scope=event.scope;

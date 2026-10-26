@@ -92,3 +92,15 @@ root把结果连同策略hash、review引用和当前版本写入Decision；allo
 除主代理明确追加授权的CounterCheck小范围扩展外，仅新模块与专属测试。Contracts增加PersonaCounterCheckInputSchema，将checked-none的公开键与持久精确引用分开；同步R1契约专项测试及文档，不新增宽泛开关，不进行DB状态修复。策略版本用稳定规则声明的personaDigest确定，规则变化显式升级。
 专属测试覆盖：单根合格暂定采用；无工具的闭合对话；缺Admission/缺Outcome；未结束及时间逆序；原样自述/管理回执；scope逐字不符；原动机被改写；三类兴趣动机限制；synthetic/partial/unknown的限制；反证丢弃与未知；一个observed根的合法established（found及checked-none分别有正例）；checked-none缺引用、伪自述或覆盖不足不可成熟；仅旧自述不能证明稳定habit/relationship；同根重复不增资格；描述冲突；输入不变及确定性输出。
 采用资格测试通过只证明这些程序条件，不能称人格语义或真实模型修复已验收。本分支不执行构建/测试/Git/付费模型/服务器，由主代理提交规范后通知编码并统一运行相关测试。
+
+## Store 与公开工具接线
+
+主代理实现共同的 PersonaAdoptionStore，PersonaStore 的新候选及未采用候选后续修订写 v2；旧已采用 v1 继续按 legacy-unclassified 读取，不补造历史试行。采用复核先核对精确 Outcome／Admission 引用和范围，继承原候选支持、反证及本轮实际依赖，保存不可变 Review 与预检查 Decision。预检查允许只代表当时资格，不形成可缓存的授权。
+
+publish 沿用旧输入可解析和已完成请求幂等回执，但新的成功发布必须带 review 引用。整个批次先逐项重新核验当前候选、全部来源描述及规则，全部合格后才写新的提交 Decision、候选修订、阶段版本、场景选择及试行选择移除；任何失败在同一事务回滚。Decision 记录发布前的三个版本，候选正文、适用范围和原动机保持不变；新增支持与反证不丢失。已采用投影继续核对关联 Review／Decision 和当前来源；来源被撤回不能靠旧 allowed 结果继续出现。
+
+公开 adoption_review 工具只接收已曝光来源键、实际 Outcome 引用、适用范围、局限及目标成熟度。身份、motivation、来源性质、实际终态和 Decision 不由模型填写。checked-none 的来源键同样经过当前作用域和曝光校验；没有描述的旧来源保持 unknown。自述及摘要不能给原根增加独立票，来源性质为 unknown 的资料仍可在明确局限下形成 tentative 认识，不自动提升为 established。
+
+R2 已装配的旧 trial 投影只在原 Admission 所属 Run 内允许同内容、相邻版本的合法提升续接；历史依赖用独立的旧 trial 证明验证，避免用新采用链循环证明自身。新的 Run 使用 adopted 投影；撤下、来源失效、范围或内容改变依旧使旧投影不可用。维护流程产生的候选也经过同一个 PersonaStore，不增加模型或维护专用绕过开关。
+
+本轮追加 Store 单元检查和实际 Core／Memory／脚本 DSH 多 Run 联调。旧测试直接 propose→review→publish 的夹具须改为实际试用后复核的流程，保留原有隔离、来源撤回、事务和重启断言；不得只修改预期让不合格采用通过。

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { RuntimeStore } from '@dafeiyu/core/runtime-store';
 import { API_VERSION } from '@dafeiyu/contracts';
-import type { PersonaSourceRef } from '@dafeiyu/contracts';
+import type { PersonaSourceRef,PersonaEntryRef } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,otherGroup,bot,group,until } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
 type Fixture=Awaited<ReturnType<typeof qqCapabilityFixture>>;
@@ -97,15 +97,31 @@ test('native execution excludes unregistered global context and section data',as
 });
 
 test('target formatting uses the current scoped stage persona and stops if its real source is revoked',async t=>{
-  const h=await qqCapabilityFixture({tasks:true,extraConversationActions:['fixture_stage']});t.after(h.close);let source:PersonaSourceRef|undefined,step=0;
+  const h=await qqCapabilityFixture({tasks:true,extraConversationActions:['fixture_stage','fixture_adopt']});t.after(h.close);let source:PersonaSourceRef|undefined,trial:PersonaEntryRef|undefined,step=0;
   const seed=h.core.registerExtension({id:'fixture-seed',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{name:'fixture_seed',description:'虚构阶段来源',fields:{},execute:async(_raw,context)=>{
     const scope=h.core.scopeFor(context),event=h.core.journal.events(scope.route).find(event=>event.type==='message.accepted'&&event.traceId===scope.traceId)!;
     const receipt=z.object({id:z.uuid(),version:z.number(),revision:z.number()}).parse(await h.ctx.dafeiyuMemory.create(context,{requestId:'seed',kind:'knowledge',claimType:'reported_claim',content:'TARGET_STAGE_SENTINEL：这是虚构阶段认识。',sourceRefs:[`dafeiyu:source:${event.id}:0`]}));
     const opened=z.object({item:z.object({contentHash:z.string()})}).parse(h.ctx.dafeiyuMemory.read(context,{id:receipt.id}));source={kind:'memory',agentId:'dafeiyu',scopeKey:scope.route,id:receipt.id,version:receipt.version,revision:receipt.revision,contentHash:opened.item.contentHash};return {id:receipt.id};}}]});t.after(()=>seed.dispose());
-  const stage=h.core.registerExtensionV3({protocolVersion:3,id:'fixture-stage',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_stage',version:'1',description:'虚构阶段采用',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_input,context)=>{
-    const persona=h.ctx.dafeiyuMemory.persona!,candidate=persona.proposeReference(context,{requestId:'propose',kind:'view',contentRef:source,supports:[source],counters:[],applicability:'当前测试群',reason:'仅测试'},'fixture-stage');
-    const trial=persona.review(context,{requestId:'trial',id:candidate.id,expectedVersion:1,state:'trial',reason:'试行'},'fixture-stage'),published=persona.publish(context,{requestId:'adopt',expectedStageVersion:0,entries:[{id:trial.id,version:trial.version}]},'fixture-stage');return {status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(published),sources:[],receipts:[]};}}]});t.after(()=>stage.dispose());
-  h.setResponse(()=>++step===1?call('fixture_seed',{}):step===2?call('fixture_stage',{}):textReply('已保存虚构阶段状态'));await h.message('提供虚构阶段资料',{trigger:true});
+  const stage=h.core.registerExtensionV3({protocolVersion:3,id:'fixture-stage',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_stage',version:'1',description:'选择本群虚构认识供下一轮试行',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_input,context)=>{
+    assert.ok(source);const persona=h.ctx.dafeiyuMemory.persona!,candidate=persona.proposeReference(context,{requestId:'propose',kind:'view',contentRef:source,supports:[source],counters:[],applicability:'当前测试群',reason:'仅测试'},'fixture-stage');
+    const reviewed=persona.review(context,{requestId:'trial',id:candidate.id,expectedVersion:1,state:'trial',reason:'准备真实后续会话试行，未采用'},'fixture-stage');trial={id:reviewed.id,version:reviewed.version};
+    const selected=persona.selectTrial(context,{requestId:'trial-select',expectedSelectionVersion:0,entries:[{candidate:trial,applicability:'当前测试群',exitConditions:['来源撤回或本群范围变化时退出']}]},'fixture-stage');
+    return {status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(selected),sources:[],receipts:[]};}},
+    {id:'fixture_adopt',version:'1',description:'引用已闭合的本群试行评审并采用暂定认识',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_input,context)=>{
+      assert.ok(trial);const candidate=trial,persona=h.ctx.dafeiyuMemory.persona!,outcome=persona.status(context,'fixture-stage').trialOutcomes.find(value=>value.candidate.id===candidate.id&&value.candidate.version===candidate.version&&value.state==='completed');assert.ok(outcome);
+      const reviewed=persona.reviewAdoption(context,{requestId:'adoption-review',candidate,trialOutcomes:[outcome.ref],supports:[],counters:[],
+        counterCheck:{status:'unknown',reason:'未在该合成样例之外取得反证查证结果'},conclusionScope:'当前测试群',targetMaturity:'tentative',
+        limitations:['仅当前测试群的合成文字与有限会话试行，不证明真实长期效果'],reason:'采用仍暂定的本群认识并保留来源及适用限制'},'fixture-stage');
+      assert.equal(reviewed.eligibility,'allowed');
+      const published=persona.publish(context,{requestId:'adopt',expectedStageVersion:0,entries:[{...candidate,review:reviewed.review}]},'fixture-stage');
+      return {status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(published),sources:[],receipts:[]};}}]});t.after(()=>stage.dispose());
+  h.setResponse(()=>++step===1?call('fixture_seed',{}):step===2?call('fixture_stage',{}):textReply('已选择虚构认识，等待后续会话实际试行'));await h.message('提供虚构阶段资料',{trigger:true});
+  const trialStart=h.adapter.requests.length;h.setResponse(()=>textReply('这次我先确认资料的适用范围，再作有限回应，尚未采用该认识。'));
+  await h.message('继续当前群的虚构表达练习',{trigger:true});
+  assert.ok(h.adapter.requests.slice(trialStart).some(request=>JSON.stringify(request.messages).includes('stage-persona-trial')));
+  let adoptionStep=0;h.setResponse(()=>++adoptionStep===1?call('fixture_adopt',{}):textReply('已依据闭合试行采用仍暂定的本群认识'));
+  await h.message('复核刚才的试行并决定是否采用',{trigger:true});assert.ok(trial);
+  const adopted=new DatabaseSync(join(h.root,'memory','memory.sqlite'),{readOnly:true});try{assert.equal(adopted.prepare('SELECT state FROM persona_candidates WHERE id=?').get(trial.id)?.state,'adopted');}finally{adopted.close();}
   script(h);await h.message('任务：用当前人格整理文字',{trigger:true});const first=runId(h);assert.equal((await h.core.deliverMessageTaskResult(first))?.state,'sent');assert.ok(JSON.stringify(h.adapter.requests.find(request=>render(request.sessionId))?.messages).includes('TARGET_STAGE_SENTINEL'));
   script(h);await h.message('任务：再整理一次',{trigger:true});const second=runId(h),sent=h.platform.sent.length;
   h.setResponse(async request=>{if(render(request.sessionId)){h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:1});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);return textReply('不应发送');}return textReply('{"faithful":true,"issues":[]}');});
