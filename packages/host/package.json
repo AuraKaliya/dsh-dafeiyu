@@ -12,6 +12,7 @@
     "@dafeiyu/activity": "0.1.0",
     "@dafeiyu/media": "0.1.0",
     "@dafeiyu/bilibili": "0.1.0",
+    "@dafeiyu/server-executor": "0.1.0",
     "@dafeiyu/core": "0.15.0",
     "@dafeiyu/journal": "0.4.0",
     "@dafeiyu/memory": "0.15.0",

@@ -1,8 +1,8 @@
 import { randomUUID,createHash } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-llm';
-import { ParentMessageSchema,ExecutorCallSchema,ExecutorSettlementSchema,normalizeExecutorUsage,executorError,EXECUTOR_IPC_VERSION } from './protocol.js';
-import type { ParentMessage,ExecutorCall,ExecutorPermit,ExecutorSettlement,ExecutorIpcEndpoint,ExecutorRoute,ExecutorUsage } from './protocol.js';
+import { ParentMessageSchema,ExecutorCallSchema,ExecutorSettlementSchema,ExecutorToolCallSchema,ExecutorToolReceiptSchema,normalizeExecutorUsage,executorError,EXECUTOR_IPC_VERSION } from './protocol.js';
+import type { ParentMessage,ExecutorCall,ExecutorPermit,ExecutorSettlement,ExecutorIpcEndpoint,ExecutorRoute,ExecutorUsage,ExecutorToolCall,ExecutorToolReceipt } from './protocol.js';
 import { ExecutorHashSchema } from './types.js';
 
 type Binding=Extract<ParentMessage,{type:'bind'}>;
@@ -49,6 +49,10 @@ export class ExecutorChildBudgetClient {
     if(response.type!=='reserved'||response.callId!==call.callId)throw new Error('EXECUTOR_IPC_PROTOCOL');this.signal.throwIfAborted();return response.permit;}
   async settle(raw:ExecutorSettlement):Promise<{unknown:boolean}>{const settlement=ExecutorSettlementSchema.parse(raw),response=await this.request(settlement.callId,{type:'settle',settlement});
     if(response.type!=='settled'||response.callId!==settlement.callId)throw new Error('EXECUTOR_IPC_PROTOCOL');return {unknown:response.unknown};}
+  async authorizeTool(raw:ExecutorToolCall):Promise<string>{const tool=ExecutorToolCallSchema.parse(raw),response=await this.request(tool.callId,{type:'tool-admit',tool});
+    if(response.type!=='tool-permitted'||response.callId!==tool.callId)throw new Error('EXECUTOR_IPC_PROTOCOL');this.signal.throwIfAborted();return response.permitId;}
+  async finishTool(raw:ExecutorToolReceipt):Promise<void>{const receipt=ExecutorToolReceiptSchema.parse(raw),response=await this.request(receipt.callId,{type:'tool-finish',receipt});
+    if(response.type!=='tool-recorded'||response.callId!==receipt.callId)throw new Error('EXECUTOR_IPC_PROTOCOL');}
   async finish():Promise<void>{if(this.pending.size)throw new Error('EXECUTOR_CALL_INFLIGHT');const callId=randomUUID(),response=await this.request(callId,{type:'done',callId});
     if(response.type!=='finished')throw new Error('EXECUTOR_IPC_PROTOCOL');this.close();}
   close():void{this.fail('EXECUTOR_CHILD_CLOSED');this.unsubscribe();this.endpoint.disconnect();}
@@ -75,6 +79,6 @@ export function installExecutorChildBilling(ctx:Context,client:ExecutorChildBudg
     }}catch(caught){error??=executorError(caught,'EXECUTOR_STREAM_FAILED');throw new Error(error);}
     finally{if(!complete||invalid||finish==='error'||finish==='aborted')usage=null;
       await client.settle({callId,reservationId:permit.reservationId,usage,finish,durationMs:Math.max(0,Date.now()-start),error});}
-  });
+  },{global:true});
   return ()=>{dispose();client.signal.removeEventListener('abort',cancelled);};
 }

@@ -8,8 +8,8 @@ import { z } from 'zod';
 import { ExecutorHashSchema,ExecutorProcessSchema,executorHash } from './types.js';
 import type { ExecutorProcess } from './types.js';
 import type { ExecutionBudgetPort,ExecutorBudgetRecord } from './budget.js';
-import { executorError,ParentMessageSchema } from './protocol.js';
-import type { ExecutorRoute } from './protocol.js';
+import { executorError,ParentMessageSchema,ExecutorToolNameSchema } from './protocol.js';
+import type { ExecutorRoute,ExecutorToolRecord } from './protocol.js';
 import { parentIpcEndpoint } from './ipc.js';
 import { ExecutorParentTransport } from './transport.js';
 import { ExecutorOutputCollector } from './output.js';
@@ -20,7 +20,7 @@ const envValue=z.string().max(8000).refine(value=>!value.includes('\0'));
 export const ExecutorNodeCommandSchema=z.strictObject({nodePath:absolute,entryPath:absolute,cwd:absolute,args:z.array(z.string().max(8000).refine(value=>!value.includes('\0'))).max(40),
   nodeHash:ExecutorHashSchema,entryHash:ExecutorHashSchema,profilePath:absolute,profileHash:ExecutorHashSchema,
   env:z.strictObject({SystemRoot:envValue.optional(),WINDIR:envValue.optional(),PATH:envValue.optional(),TEMP:envValue.optional(),TMP:envValue.optional(),
-    DSH_PERMISSION_MODE:z.literal('danger-full-access').optional()})});
+    DSH_PERMISSION_MODE:z.literal('danger-full-access').optional(),DSH_HOME:absolute.optional(),DSH_TELEMETRY_DISABLED:z.literal('1').optional()})});
 export type ExecutorNodeCommand=z.infer<typeof ExecutorNodeCommandSchema>;
 /** Production supplies OS creation/token evidence. A test fixture must label its own substitute as simulated. */
 export interface ExecutorProcessControl {
@@ -30,11 +30,11 @@ export interface ExecutorProcessControl {
 export interface ExecutorNodeRunOptions {
   command:ExecutorNodeCommand;jobId:string;nonce:string;input:string;authorizationId:string;route:ExecutorRoute;deadline:number;budget:ExecutionBudgetPort;
   guard:()=>void;beforeSpawn:()=>void|Promise<void>;onReady:(process:ExecutorProcess)=>void|Promise<void>;processControl:ExecutorProcessControl;
-  signal?:AbortSignal;handshakeTimeoutMs?:number;cancelGraceMs?:number;
+  signal?:AbortSignal;handshakeTimeoutMs?:number;cancelGraceMs?:number;allowedTools?:readonly string[];
 }
 export interface ExecutorNodeRunResult {
   schemaVersion:1;spawned:boolean;ready:boolean;finished:boolean;process:ExecutorProcess|null;exit:{code:number|null;signal:string|null}|null;
-  termination:{requested:boolean;verified:boolean};output:ExecutorVisibleOutput;budget:readonly ExecutorBudgetRecord[];gaps:readonly string[];
+  termination:{requested:boolean;verified:boolean};output:ExecutorVisibleOutput;budget:readonly ExecutorBudgetRecord[];tools:readonly ExecutorToolRecord[];gaps:readonly string[];
 }
 export function executorSpawnOptions(command:ExecutorNodeCommand):SpawnOptions{
   const value=ExecutorNodeCommandSchema.parse(command);
@@ -53,6 +53,7 @@ async function pauseUntil(promise:Promise<unknown>,ms:number):Promise<void>{let 
 /** Only starts an already authorized, fixed Node program; it does not classify business effects or send platform messages. */
 export async function runExecutorNode(options:ExecutorNodeRunOptions):Promise<ExecutorNodeRunResult>{
   const command=ExecutorNodeCommandSchema.parse(options.command),grace=z.number().int().nonnegative().max(5000).parse(options.cancelGraceMs??500);
+  const allowedTools=z.array(ExecutorToolNameSchema).max(128).parse(options.allowedTools??[]);
   ParentMessageSchema.parse({version:1,type:'bind',jobId:options.jobId,nonce:options.nonce,profileHash:command.profileHash,deadline:options.deadline,route:options.route});
   z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/).parse(options.authorizationId);z.number().int().positive().max(60000).parse(options.handshakeTimeoutMs??10000);
   if(typeof options.input!=='string'||Buffer.byteLength(options.input)>1024*1024)throw new Error('EXECUTOR_INPUT_TOO_LARGE');
@@ -98,7 +99,7 @@ export async function runExecutorNode(options:ExecutorNodeRunOptions):Promise<Ex
   const monitor=setInterval(()=>{refreshExit();if(processExited)return;try{options.guard();if(Date.now()>=options.deadline)throw new Error('EXECUTOR_DEADLINE');}catch(error){stop(executorError(error,'EXECUTOR_AUTHORITY_REVOKED'));}},100);
   try{
     transport=new ExecutorParentTransport({endpoint:parentIpcEndpoint(child),port:options.budget,jobId:options.jobId,nonce:options.nonce,profileHash:command.profileHash,
-      route:options.route,authorizationId:options.authorizationId,deadline:options.deadline,guard:options.guard,
+      route:options.route,authorizationId:options.authorizationId,deadline:options.deadline,guard:options.guard,allowedTools,
       ...(options.handshakeTimeoutMs===undefined?{}:{handshakeTimeoutMs:options.handshakeTimeoutMs}),onStop:stop,
       onReady:async()=>{await started;const value=ExecutorProcessSchema.parse(await bounded(options.processControl.identify(child),2000));
         if(value.pid!==child.pid||value.executableHash!==command.nodeHash)throw new Error('EXECUTOR_PROCESS_IDENTITY_CHANGED');
@@ -117,5 +118,5 @@ export async function runExecutorNode(options:ExecutorNodeRunOptions):Promise<Ex
     if(!streamsClosed){child.stdin?.destroy();child.stdout?.destroy();child.stderr?.destroy();if(child.connected)child.disconnect();}
     if(!processExited)child.unref();
   }
-  return {schemaVersion:1,spawned,ready,finished:transport?.finished??false,process:identity,exit,termination,output:output.finish(),budget:transport?.budget.snapshot()??[],gaps:[...gaps]};
+  return {schemaVersion:1,spawned,ready,finished:transport?.finished??false,process:identity,exit,termination,output:output.finish(),budget:transport?.budget.snapshot()??[],tools:transport?.toolSnapshot()??[],gaps:[...gaps]};
 }

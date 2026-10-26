@@ -46,6 +46,7 @@ export class ExecutorOutputCollector {
     if(!raw||typeof raw!=='object'||Array.isArray(raw)){this.gaps.add('EXECUTOR_OUTPUT_UNCLASSIFIED');this.counts.discarded++;return;}
     const value=raw as Record<string,unknown>;
     if(value.type==='thinking'||value.type==='text'){this.counts.discarded++;return;}
+    if(value.type==='error'&&typeof value.code==='string'&&/^(EXECUTOR|EVALUATION)_[A-Z0-9_]{1,80}$/.test(value.code)){this.gaps.add(value.code);return;}
     if(value.type==='session'&&safeId(value.sessionId)){
       if(this.sessionId!==null&&this.sessionId!==value.sessionId){this.gaps.add('EXECUTOR_SESSION_CONFLICT');return;}
       this.sessionId=value.sessionId;this.append({type:'session',sessionId:value.sessionId});return;

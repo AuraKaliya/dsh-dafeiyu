@@ -18,12 +18,20 @@ export const ExecutorSettlementSchema=z.strictObject({callId:z.uuid(),reservatio
 export type ExecutorSettlement=z.infer<typeof ExecutorSettlementSchema>;
 export const ExecutorPermitSchema=z.strictObject({reservationId:z.uuid(),dispatchPermit:z.uuid()});
 export type ExecutorPermit=z.infer<typeof ExecutorPermitSchema>;
+export const ExecutorToolNameSchema=z.string().regex(/^[a-zA-Z][a-zA-Z0-9_.:-]{0,119}$/);
+export const ExecutorToolCallSchema=z.strictObject({callId:z.uuid(),name:ExecutorToolNameSchema,sourceCallHash:ExecutorHashSchema,sessionHash:ExecutorHashSchema,argumentsHash:ExecutorHashSchema});
+export type ExecutorToolCall=z.infer<typeof ExecutorToolCallSchema>;
+export const ExecutorToolReceiptSchema=z.strictObject({callId:z.uuid(),permitId:z.uuid(),state:z.enum(['completed','error','aborted','unknown'])});
+export type ExecutorToolReceipt=z.infer<typeof ExecutorToolReceiptSchema>;
+export interface ExecutorToolRecord {readonly call:ExecutorToolCall;readonly permitId:string;state:'admitted'|ExecutorToolReceipt['state']}
 const envelope={version:z.literal(EXECUTOR_IPC_VERSION),jobId:z.uuid(),nonce:ExecutorHashSchema};
 export const ChildMessageSchema=z.discriminatedUnion('type',[
   z.strictObject({version:z.literal(EXECUTOR_IPC_VERSION),type:z.literal('online'),profileHash:ExecutorHashSchema}),
   z.strictObject({...envelope,type:z.literal('ready'),profileHash:ExecutorHashSchema}),
   z.strictObject({...envelope,type:z.literal('reserve'),call:ExecutorCallSchema}),
   z.strictObject({...envelope,type:z.literal('settle'),settlement:ExecutorSettlementSchema}),
+  z.strictObject({...envelope,type:z.literal('tool-admit'),tool:ExecutorToolCallSchema}),
+  z.strictObject({...envelope,type:z.literal('tool-finish'),receipt:ExecutorToolReceiptSchema}),
   z.strictObject({...envelope,type:z.literal('done'),callId:z.uuid()}),
 ]);
 export type ChildMessage=z.infer<typeof ChildMessageSchema>;
@@ -32,6 +40,8 @@ export const ParentMessageSchema=z.discriminatedUnion('type',[
   z.strictObject({...envelope,type:z.literal('active')}),
   z.strictObject({...envelope,type:z.literal('reserved'),callId:z.uuid(),permit:ExecutorPermitSchema}),
   z.strictObject({...envelope,type:z.literal('settled'),callId:z.uuid(),unknown:z.boolean()}),
+  z.strictObject({...envelope,type:z.literal('tool-permitted'),callId:z.uuid(),permitId:z.uuid()}),
+  z.strictObject({...envelope,type:z.literal('tool-recorded'),callId:z.uuid()}),
   z.strictObject({...envelope,type:z.literal('denied'),callId:z.uuid(),code:ExecutorCodeSchema}),
   z.strictObject({...envelope,type:z.literal('finished'),callId:z.uuid()}),
   z.strictObject({...envelope,type:z.literal('cancel'),code:ExecutorCodeSchema}),

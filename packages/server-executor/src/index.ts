@@ -7,3 +7,7 @@ export * from './child.js';
 export * from './transport.js';
 export * from './output.js';
 export * from './runner.js';
+export * from './config.js';
+export * from './service.js';
+export * from './headless-manifest.js';
+export * from './windows-process.js';

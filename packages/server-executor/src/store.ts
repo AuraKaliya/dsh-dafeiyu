@@ -104,6 +104,26 @@ export class ExecutorStore {
     const event=ExecutorEventSchema.parse(JSON.parse(String(row.body)));check(event.id===row.id&&event.jobId===id&&event.version===row.version&&event.type===row.type&&executorHash(event)===row.body_hash,'EXECUTOR_EVIDENCE_CHANGED');return event;});}
   operations(id:string,scope:ExecutorTaskScope):ExecutorOperationBinding[]{const job=this.get(id,scope);return this.db.prepare('SELECT * FROM executor_job_operations WHERE job_id=? ORDER BY rowid').all(id).map(row=>{
     const binding=ExecutorOperationBindingSchema.parse(JSON.parse(String(row.body)));check(binding.operationId===row.operation_id&&binding.runId===row.run_id&&row.fingerprint===job.hash&&executorHash(binding)===row.body_hash,'EXECUTOR_EVIDENCE_CHANGED');return binding;});}
+  linkBudget(id:string,scope:ExecutorTaskScope,input:{callId:string;reservationId:string;requestHash:string}):void{
+    const value=z.strictObject({callId:z.uuid(),reservationId:z.uuid(),requestHash:ExecutorHashSchema}).parse(input);
+    this.transaction(()=>{const job=this.get(id,scope),old=this.db.prepare('SELECT reservation_id,request_hash FROM executor_budget_links WHERE job_id=? AND call_id=?').get(id,value.callId);
+      if(old){check(old.reservation_id===value.reservationId&&old.request_hash===value.requestHash,'EXECUTOR_BUDGET_CONFLICT');return;}
+      check(job.state==='running'&&!job.receipt,'EXECUTOR_BUDGET_STATE');
+      this.db.prepare("INSERT INTO executor_budget_links(job_id,call_id,reservation_id,request_hash,state) VALUES(?,?,?,?,'reserved')").run(id,value.callId,value.reservationId,value.requestHash);
+    });
+  }
+  settleBudget(id:string,scope:ExecutorTaskScope,input:{callId:string;reservationId:string;state:'settled'|'unknown';settlementHash:string}):void{
+    const value=z.strictObject({callId:z.uuid(),reservationId:z.uuid(),state:z.enum(['settled','unknown']),settlementHash:ExecutorHashSchema}).parse(input);
+    this.transaction(()=>{this.get(id,scope);const old=this.db.prepare('SELECT reservation_id,state,settlement_hash FROM executor_budget_links WHERE job_id=? AND call_id=?').get(id,value.callId);
+      check(old&&old.reservation_id===value.reservationId,'EXECUTOR_BUDGET_CONFLICT');
+      if(old.state!=='reserved'){check(old.state===value.state&&old.settlement_hash===value.settlementHash,'EXECUTOR_BUDGET_CONFLICT');return;}
+      this.db.prepare('UPDATE executor_budget_links SET state=?,settlement_hash=? WHERE job_id=? AND call_id=?').run(value.state,value.settlementHash,id,value.callId);
+    });
+  }
+  budgetLinks(id:string,scope:ExecutorTaskScope){this.get(id,scope);return this.db.prepare('SELECT call_id,reservation_id,request_hash,state,settlement_hash FROM executor_budget_links WHERE job_id=? ORDER BY rowid').all(id).map(row=>
+    z.strictObject({callId:z.uuid(),reservationId:z.uuid(),requestHash:ExecutorHashSchema,state:z.enum(['reserved','settled','unknown']),settlementHash:ExecutorHashSchema.nullable()})
+      .parse({callId:row.call_id,reservationId:row.reservation_id,requestHash:row.request_hash,state:row.state,settlementHash:row.settlement_hash}));}
+  counts():Record<string,number>{check(!this.closed,'EXECUTOR_CLOSED');return Object.fromEntries(this.db.prepare('SELECT state,count(*) AS n FROM executor_jobs GROUP BY state').all().map(row=>[ExecutorStateSchema.parse(row.state),Number(row.n)]));}
   prepare(raw:ExecutorJobSpec,rawBinding:ExecutorOperationBinding,now=Date.now()):{job:StoredExecutorJob;created:boolean}{
     const spec=ExecutorJobSpecSchema.parse(raw),binding=ExecutorOperationBindingSchema.parse(rawBinding);this.scope(spec.scope);const fingerprint=executorHash(spec);
     return this.transaction(()=>{
