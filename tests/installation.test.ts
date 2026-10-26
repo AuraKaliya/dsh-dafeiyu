@@ -23,6 +23,7 @@ test('allowlisted and joined installations both use the one verified group direc
     const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'data',model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/',groupIds:['11223344'],joinedGroups}});
     const config=installationProfile(settings,{schemaVersion:1,instanceId:'11111111-1111-4111-8111-111111111111',profileId:'fixture',agentId:'fish',createdAt:'2026-10-27T00:00:00.000Z',identityHash:'0'.repeat(64),biliOwner:null},'persona.md','settings.json',{scripted:true});
     const qq=config.plugins.find(plugin=>plugin.id==='qq');assert.ok(qq);
+    assert.equal(settings.qq.messageBatch.enabled,true);assert.equal(settings.qq.messageBatch.quietMs,5000);
     assert.deepEqual(z.object({groupSync:z.object({enabled:z.boolean(),mode:z.string()})}).parse(qq.config).groupSync,{enabled:true,mode:joinedGroups?'joined':'allowlist'});
   }
 });

@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-27",
+  "status": "implementation-tested-deployment-pending",
+  "localOnly": true,
+  "serverAccess": false,
+  "snowlumaModified": false,
+  "realModelCalls": 0,
+  "qqTestMessagesSent": 0,
+  "messageBatch": {"quietMs": 5000, "maxWaitMs": 15000, "maxMessages": 10, "maxTextCharacters": 32000, "maxMedia": 8},
+  "stickers": {"localOriginalBytes": true, "defaultScope": "conversation", "ownerPromotion": true, "maxBytes": 536870912, "maxEntries": 1000, "maxEntryBytes": 16777216, "gifPreserved": true},
+  "qqSchema": {"before": 7, "target": 8},
+  "preservedBehavior": ["group-assistant-filter", "single-group-list-refresh", "24h-observation-history", "no-history-inbound-replay", "2-to-10-second-text-delay", "unknown-send-no-retry", "persona-task-result-rendering"],
+  "tests": {
+    "distinctFiles": 12,
+    "distinctCases": 77,
+    "allLatestRelevantCasesPassed": true,
+    "fullRegression": false,
+    "realDsh": true,
+    "realFfmpeg": true,
+    "realQqPlatformScenarioAcceptance": false,
+    "reports": ["59537d22-7989-4ef1-be3e-eb72abbb7965", "a38cfcb2-7bed-46d9-933b-492b04b09ecb", "a2e60604-b31d-4f36-9b79-a9bdeece690a", "e3778e59-0b03-440a-a51e-bb2688cea444", "ad3f0e70-2368-4425-9681-09ab85d10599"]
+  },
+  "deployment": null
+}

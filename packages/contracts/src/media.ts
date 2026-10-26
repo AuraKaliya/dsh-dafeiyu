@@ -59,6 +59,8 @@ export interface MediaPort {
   acquire(context:ExecutionContextV3,owner:string,input:z.infer<typeof MediaAcquireSchema>):Promise<MediaAssetRef>;
   inspect(context:ExecutionContextV3,owner:string,ref:MediaAssetRef):unknown;
   read(context:ExecutionContextV3,owner:string,input:z.infer<typeof MediaReadSchema>):Promise<unknown>;
+  imageOriginal?(context:ExecutionContextV3,owner:string,exposureId:string):Promise<{data:Uint8Array;mime:string;source:MediaSourceDescription}>;
+  prepareReply?(context:ExecutionContextV3,input:unknown,owner?:string):Promise<unknown>;
   voice?(context:ExecutionContextV3,owner:string,exposureId:string):{text:string;evidence:MediaVoiceEvidence};
   voiceCurrent?(evidence:MediaVoiceEvidence):boolean;
   replyDraft?(runId:string):{id:string;version:number;selected:number;authority:MediaReplyAuthority}|null;

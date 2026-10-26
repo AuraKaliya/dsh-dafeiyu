@@ -101,6 +101,9 @@ export class Journal {
     return this.transaction(() => {
       const route = conversationKey(agentId, message.conversation);
       const payload = JSON.stringify(message);
+      const ids=message.batch?.sources.map(part=>part.id)??[message.id];
+      const overlap=this.db.prepare('SELECT id,payload FROM inbox WHERE route=? AND (message_id IN (SELECT value FROM json_each(?)) OR EXISTS (SELECT 1 FROM json_each(inbox.payload,\'$.batch.sources\') WHERE json_extract(value,\'$.id\') IN (SELECT value FROM json_each(?)))) LIMIT 1').get(route,JSON.stringify(ids),JSON.stringify(ids));
+      if(overlap&&overlap.payload!==payload)throw new Error('Duplicate message ID has different content');
       const old = this.db.prepare('SELECT id,state,payload FROM inbox WHERE route=? AND message_id=?').get(route, message.id);
       if (old) {
         if (old.payload !== payload) throw new Error('Duplicate message ID has different content');
@@ -231,12 +234,15 @@ export class Journal {
     return row ? text(row.session_id) : null;
   }
   messageFor(scope: TimelineScope, messageId: string): PendingMessage | null {
-    const row = this.db.prepare('SELECT id FROM inbox WHERE route=? AND message_id=?').get(scope.route, messageId);
+    const row = this.db.prepare("SELECT id FROM inbox WHERE route=? AND (message_id=? OR EXISTS(SELECT 1 FROM json_each(inbox.payload,'$.batch.sources') WHERE json_extract(value,'$.id')=?))").get(scope.route, messageId,messageId);
     return row ? this.get(text(row.id)) : null;
   }
   /** Revocation facts remain in the audit log; the original inbox row is not erased. */
   messageRecalled(scope: TimelineScope, messageId: string): boolean {
-    return !!this.db.prepare(`SELECT 1 FROM events WHERE ${this.scopePredicate()} AND json_extract(body,'$.type')='message.recalled' AND json_extract(body,'$.data.messageId')=? LIMIT 1`).get(scope.route,scope.agentId,scope.route,messageId);
+    const batch=this.db.prepare("SELECT payload FROM inbox WHERE route=? AND message_id=?").get(scope.route,messageId);
+    const message=batch?MessageSchema.parse(JSON.parse(text(batch.payload))):null;
+    const ids=message?.batch?.sources.map(part=>part.id)??[messageId];
+    return !!this.db.prepare(`SELECT 1 FROM events WHERE ${this.scopePredicate()} AND json_extract(body,'$.type')='message.recalled' AND json_extract(body,'$.data.messageId') IN (SELECT value FROM json_each(?)) LIMIT 1`).get(scope.route,scope.agentId,scope.route,JSON.stringify(ids));
   }
   messageSourceEpoch(scope: TimelineScope): number {
     return Number(this.db.prepare(`SELECT coalesce(max(seq),0) AS seq FROM events WHERE ${this.scopePredicate()} AND json_extract(body,'$.type')='message.recalled'`).get(scope.route,scope.agentId,scope.route)?.seq??0);

@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname,resolve } from 'node:path';
 import { z } from 'zod';
 import { inspectQqSchema, initializeQqSchema, QQ_SCHEMA_VERSION } from './schema.js';
 import { GroupListSchema, GroupSnapshotSchema, QqAccountIdSchema, groupReceivesMessages } from './groups.js';
@@ -12,6 +12,9 @@ import type { MediaAttachment } from '@dafeiyu/contracts';
 import { QqDeliveryLedger } from './delivery.js';
 import { QqMediaStore } from './media-store.js';
 import { QqMediaDeliveryLedger } from './media-delivery.js';
+import { QqMessageBatches,QqBatchConfigSchema } from './batch.js';
+import type { QqBatchHost } from './batch.js';
+import { QqStickerStore,QqStickersConfigSchema } from './sticker-store.js';
 const remembered = z.object({ id: z.string(), sender: z.string(), text: z.string() });
 const quoteSchema=z.strictObject({route:z.string(),messageId:z.string().max(80),observedAt:z.iso.datetime(),occurredAt:z.iso.datetime(),expiresAt:z.iso.datetime(),proof:QqCacheProofSchema});
 export class QqStore {
@@ -20,7 +23,9 @@ export class QqStore {
   readonly delivery: QqDeliveryLedger;
   readonly media:QqMediaStore;
   readonly mediaDelivery:QqMediaDeliveryLedger;
-  constructor(file: string, options: { migrate?: boolean; cache?: QqCacheOptions } = {}) {
+  readonly stickers:QqStickerStore;
+  batches(config:z.output<typeof QqBatchConfigSchema>,host:QqBatchHost,clock?:()=>number){return new QqMessageBatches(this.db,config,host,clock);}
+  constructor(file: string, options: { migrate?: boolean; cache?: QqCacheOptions;stickers?:z.input<typeof QqStickersConfigSchema> } = {}) {
     mkdirSync(dirname(file), { recursive: true }); this.db = new DatabaseSync(file);
     try {
       // Refuse unknown/legacy stores before changing their persistent journal mode.
@@ -33,6 +38,7 @@ export class QqStore {
       this.delivery = new QqDeliveryLedger(this.db);
       this.media=new QqMediaStore(this.db,this.cache);
       this.mediaDelivery=new QqMediaDeliveryLedger(this.db);
+      this.stickers=new QqStickerStore(this.db,resolve(dirname(file),'stickers','objects'),QqStickersConfigSchema.parse(options.stickers??{}));
     } catch (error) { this.db.close(); throw error; }
   }
   remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[];groupGeneration?:number;forwardIds?:readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }

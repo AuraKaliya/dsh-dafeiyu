@@ -10,27 +10,27 @@ import type { MediaFiles } from './files.js';
 import type { ReplySpeech } from './reply-speech.js';
 
 interface Host {ctx:Context;store:MediaStore;files:MediaFiles;ready():boolean;
-  prepareAsset(context:ExecutionContextV3,asset:MediaAssetRef,as:'image'|'record'|'file',key:string):Promise<{asset:MediaAssetRef;source:MediaSourceDescription}>;
+  prepareAsset(context:ExecutionContextV3,asset:MediaAssetRef,as:'image'|'record'|'file',key:string,owner:string):Promise<{asset:MediaAssetRef;source:MediaSourceDescription}>;
   sourceCurrent(source:MediaSourceDescription):boolean;speech?:ReplySpeech;}
 function filename(source:MediaSourceDescription,asset:MediaAssetRef){let name=(source.name??'attachment-'+asset.id.slice(0,8)+'.bin').normalize('NFKC').replace(/[\\/:\x00-\x1f]/g,'_').replace(/[. ]+$/g,'').slice(0,160);
   if(!name||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name))name='attachment-'+asset.id.slice(0,8)+'.bin';return name;}
 export class MediaReplies {
   constructor(private readonly host:Host){}
-  private write(context:ExecutionContextV3){if(!this.host.ready())throw new Error('MEDIA_NOT_CONFIGURED');const access=this.host.ctx.dafeiyu.personaAccess(context,'media','local-write');if(!access.historyTracked)throw new Error('HISTORY_UNTRACKED');return access;}
-  async prepare(context:ExecutionContextV3,raw:unknown){const input=MediaReplyDraftInputSchema.parse(raw),access=this.write(context),temporary:string[]=[];const parts:MediaDraft['parts']=[];let persisted=false;
+  private write(context:ExecutionContextV3,owner:string){if(!this.host.ready())throw new Error('MEDIA_NOT_CONFIGURED');const access=this.host.ctx.dafeiyu.personaAccess(context,owner,'local-write');if(!access.historyTracked)throw new Error('HISTORY_UNTRACKED');return access;}
+  async prepare(context:ExecutionContextV3,raw:unknown,owner='media'){const input=MediaReplyDraftInputSchema.parse(raw),access=this.write(context,owner),temporary:string[]=[];const parts:MediaDraft['parts']=[];let persisted=false;
     try{for(const [index,part] of input.parts.entries()){
       if(part.kind==='final-voice'){if(!this.host.speech)throw new Error('MEDIA_TTS_NOT_CONFIGURED');parts.push({kind:'final-voice',voiceHash:this.host.speech.hash});continue;}
-      const as=part.as??(part.asset.kind==='image'?'image':part.asset.kind==='audio'?'record':'file');const prepared=await this.host.prepareAsset(context,part.asset,as,'reply:'+mediaHash([input.requestId,input.expectedVersion,index]));access.guard();
+      const as=part.as??(part.asset.kind==='image'?'image':part.asset.kind==='audio'?'record':'file');const prepared=await this.host.prepareAsset(context,part.asset,as,'reply:'+mediaHash([input.requestId,input.expectedVersion,index]),owner);access.guard();
       if(prepared.asset.bytes>16*1024**2)throw new Error('MEDIA_SIZE_LIMIT');parts.push({kind:'asset',...prepared,as});
-      const mediaAccess=this.host.ctx.dafeiyu.mediaAccess(context,'media',prepared.source.origin);temporary.push(this.host.store.lease(mediaAccess,prepared.asset,'draft-preparing',Date.now()+3600000));
+      const mediaAccess=this.host.ctx.dafeiyu.mediaAccess(context,owner,prepared.source.origin);temporary.push(this.host.store.lease(mediaAccess,prepared.asset,'draft-preparing',Date.now()+3600000));
     }
       if(parts.reduce((n,p)=>n+(p.kind==='asset'?p.asset.bytes:0),0)>32*1024**2)throw new Error('MEDIA_SIZE_LIMIT');
       const content=mediaDraftContentSchema.parse({schemaVersion:1,runId:access.view.runId,scope:access.view.scope,taskEpoch:access.intentVersion,parts});
-      const authority=this.host.ctx.dafeiyu.captureMediaReplyAuthority(context,'media',mediaHash(content)),before=this.host.store.replies.current(context.runId)?.draft;
+      const authority=this.host.ctx.dafeiyu.captureMediaReplyAuthority(context,owner,mediaHash(content)),before=this.host.store.replies.current(context.runId)?.draft;
       const draft=this.host.store.replies.prepare(access,{requestId:input.requestId,expectedVersion:input.expectedVersion,content,authority});
       persisted=true;
       // Each immutable selection has bounded pins; replacing/cancelling only releases that selection's pins.
-      for(const part of draft.parts)if(part.kind==='asset'){const mediaAccess=this.host.ctx.dafeiyu.mediaAccess(context,'media',part.source.origin);this.host.store.ensureLease(mediaAccess,part.asset,'media-draft:'+draft.id,Date.now()+3600000);}
+      for(const part of draft.parts)if(part.kind==='asset'){const mediaAccess=this.host.ctx.dafeiyu.mediaAccess(context,owner,part.source.origin);this.host.store.ensureLease(mediaAccess,part.asset,'media-draft:'+draft.id,Date.now()+3600000);}
       if(before&&before.id!==draft.id)this.host.store.releaseLeases('media-draft:'+before.id);
       const current=this.host.store.replies.current(context.runId)!.draft;return {draftId:draft.id,version:draft.version,currentDraftId:current.id,currentVersion:current.version,selected:current.parts.length,cancelled:!current.parts.length};
     }catch(error){if(persisted)throw new Error('MEDIA_DRAFT_PREPARATION_INCOMPLETE');throw error;}finally{for(const id of temporary)this.host.store.releaseLease(id,'draft-preparing');}

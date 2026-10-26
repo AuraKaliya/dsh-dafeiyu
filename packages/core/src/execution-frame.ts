@@ -26,5 +26,6 @@ export interface ConversationExecutionFrame {
   mode:'conversation'|'delivery-v2';item:PendingMessage;persona:PersonaSnapshot;actions:readonly BoundAction[];
   signal:AbortSignal;channelDescription:string;delivery?:RuntimeDelivery;
   nativeActions?:readonly NativeAction[];
+  allowEmpty?:()=>boolean;
 }
 export type ExecutionFrame=TaskExecutionFrame|ConversationExecutionFrame;

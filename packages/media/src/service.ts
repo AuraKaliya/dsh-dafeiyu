@@ -65,7 +65,7 @@ export class MediaService extends Service implements MediaPort {
     this.documents=this.config.documents?new DocumentReader(this.files.work,this.files.root,this.config.documents):undefined;
     this.replySpeech=this.config.tts?new ReplySpeech(ctx,this.store,this.files,this.config.tts,testBackends?.ttsWorker):undefined;
     if(this.replySpeech)this.providers.set('media',{id:'media',describe:key=>this.replySpeech!.describe(key),open:async()=>{throw new Error('MEDIA_REPLY_OUTPUT_PRIVATE');}});
-    this.replies=new MediaReplies({ctx,store:this.store,files:this.files,ready:()=>this.ready(),prepareAsset:(c,a,as,key)=>this.prepareReplyAsset(c,a,as,key),sourceCurrent:source=>this.sourceCurrent(source),...(this.replySpeech?{speech:this.replySpeech}:{})});
+    this.replies=new MediaReplies({ctx,store:this.store,files:this.files,ready:()=>this.ready(),prepareAsset:(c,a,as,key,owner)=>this.prepareReplyAsset(c,a,as,key,owner),sourceCurrent:source=>this.sourceCurrent(source),...(this.replySpeech?{speech:this.replySpeech}:{})});
     try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'media',version:'0.1.0',agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['media.processing.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
       resourceProofs:{current:proof=>this.ready()&&(proof.key.startsWith('reply-text:')?this.replySpeech?.current(proof)===true:this.store.validateExposure(proof,source=>this.sourceCurrent(source))),epoch:scope=>this.ready()?mediaHash([this.store.epoch(),[...this.providers.keys()],ctx.dafeiyu.capabilityResourceEpochWithout('media',scope)]):'closed'}});
       this.unbind=ctx.dafeiyu.bindMedia(this);
@@ -139,15 +139,26 @@ export class MediaService extends Service implements MediaPort {
       const observation=this.observed(context,p.access,exposure);this.store.finishJob(p.access,jobId,{exposureId:exposure.id,technicalCompleteness:processed.technicalCompleteness},null);return observation;
     }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}finally{if(lease)this.store.releaseLease(lease,'audio');}
   }
-  private async prepareReplyAsset(context:ExecutionContextV3,asset:MediaAssetRef,as:'image'|'record'|'file',key:string){return this.withInput(context,'media',{requestId:key,asset,mode:'inspect'},async p=>{
+  private async prepareReplyAsset(context:ExecutionContextV3,asset:MediaAssetRef,as:'image'|'record'|'file',key:string,owner:string){return this.withInput(context,owner,{requestId:key,asset,mode:'inspect'},async p=>{
     const record=this.store.read(p.access,asset.id);if(as==='file'||record.processingHash!==null&&(as==='image'&&asset.mime==='image/png'&&asset.kind==='image'||as==='record'&&asset.mime==='audio/wav'&&asset.kind==='audio'))return {asset,source:p.source.description};
     const metadata=await this.decoder.inspect(p.input,p.signal);let data:Buffer,kind:'image'|'audio',mime:string;
+    if(as==='image'&&p.source.description.ref.provider==='qq-stickers'&&metadata.kind==='image'&&['image/gif','image/png','image/jpeg','image/webp'].includes(asset.mime))return {asset,source:p.source.description};
     if(as==='image'){if(metadata.kind!=='image')throw new Error('MEDIA_IMAGE_ASSET_REQUIRED');const decoded=await this.decoder.image(p.input,p.signal);data=decoded.data;mime=decoded.mime;kind='image';}
     else{if(!metadata.durationMs||metadata.durationMs>120000)throw new Error('MEDIA_AUDIO_INTERVAL_REQUIRED');const decoded=await this.decoder.audio(p.input,0,metadata.durationMs,p.signal);data=decoded.data;mime=decoded.mime;kind='audio';}
     const prepared=await this.files.ingest(p.access,key,p.source,{bytes:data.length,mime,stream:(async function*(){yield data;})()},p.signal,{kind,parent:asset,processingHash:mediaHash(['reply-normalization-v1',as,asset]),
       coverage:{acquiredBytes:data.length,processed:[],exposed:false,gaps:['已核验／归一化输出字节，不代表模型已理解'],completeness:'unknown'}});p.access.guard();return {asset:prepared,source:p.source.description};
   });}
-  prepareReply(context:ExecutionContextV3,input:unknown){return this.serial(()=>this.replies.prepare(context,input));}
+  prepareReply(context:ExecutionContextV3,input:unknown,owner='media'){return this.serial(()=>this.replies.prepare(context,input,owner));}
+  imageOriginal(context:ExecutionContextV3,owner:string,exposureId:string){return this.serial(async()=>{
+    const description=this.store.exposureOrigin(exposureId),{provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),exposure=this.store.exposure(access,exposureId),observation=this.store.observation(exposureId);
+    if(description.kind!=='image'||!z.object({mode:z.literal('image')}).safeParse(exposure.detail).success||!exposure.coverage.exposed)throw new Error('IMAGE_OBSERVATION_REQUIRED');
+    if(!access.execution.historyTracked||!access.execution.historyDependencies?.some(d=>(d.kind==='capability'||d.kind==='execution-source')&&mediaHash(d.ref)===mediaHash(observation)))throw new Error('OBSERVATION_NOT_EXPOSED');
+    return this.withInput(context,owner,{requestId:'sticker-original:'+exposureId,source:description.ref,mode:'inspect'},async p=>{
+      if(!p.parent||p.parent.bytes>16*1024**2)throw new Error('STICKER_FORMAT_UNSUPPORTED');
+      const data=await this.files.bytes(p.parent,p.signal,p.access.guard),mime=data.subarray(0,6).toString('ascii').match(/^GIF8[79]a$/)?'image/gif':data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':data[0]===255&&data[1]===216&&data[2]===255?'image/jpeg':data.subarray(0,4).toString('ascii')==='RIFF'&&data.subarray(8,12).toString('ascii')==='WEBP'?'image/webp':null;
+      if(!mime)throw new Error('STICKER_FORMAT_UNSUPPORTED');access.guard();return {data,mime,source:description};
+    });
+  });}
   replyDraft(runId:string){return this.replies.pending(runId);}
   finalizeReply(access:MediaReplyAccess){return this.serial(()=>this.replies.finalize(access));}
   readReplyPart(access:MediaReplyAccess,id:string,position:number){return this.replies.bytes(access,id,position);}

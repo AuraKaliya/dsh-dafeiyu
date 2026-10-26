@@ -47,7 +47,7 @@ test('QQ known unsent plans can continue after reopen, while legacy whole-messag
 
 test('QQ v3 migration preserves caches, metadata, group snapshots and receipts while adding empty delivery tables',async()=>{
   const path=await file(),store=new QqStore(path);store.remember('room','-123','user','虚构旧文字');store.acknowledge('room','-123');store.sent('old','-99');store.saveGroups('12345678',[],'2026-10-25T00:00:00.000Z');store.close();
-  const db=new DatabaseSync(path);db.exec('DROP TABLE qq_media_sources; DROP TABLE qq_media_drafts; DROP TABLE qq_media_deliveries; DROP TABLE qq_media_parts; DROP TABLE qq_delivery_segments; DROP TABLE qq_delivery_plans; PRAGMA user_version=3;');db.close();const before=await readFile(path);
+  const db=new DatabaseSync(path);db.exec('DROP TABLE qq_message_batches;DROP TABLE qq_stickers;DROP TABLE qq_sticker_leases;DROP TABLE qq_reply_quotes;DROP TABLE qq_media_sources; DROP TABLE qq_media_drafts; DROP TABLE qq_media_deliveries; DROP TABLE qq_media_parts; DROP TABLE qq_delivery_segments; DROP TABLE qq_delivery_plans; PRAGMA user_version=3;');db.close();const before=await readFile(path);
   assert.equal(inspectStorage(path,'qq').supported,true);assert.throws(()=>new QqStore(path),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),before);
   const migrated=new QqStore(path,{migrate:true});try{assert.equal(migrated.find('room','-123')?.text,'虚构旧文字');assert.ok(migrated.handled('room','-123'));assert.equal(migrated.receipt('old'),'-99');assert.equal(migrated.groupSnapshot('12345678')?.revision,1);assert.equal(migrated.delivery.counts().plans,0);}finally{migrated.close();}
   assert.equal(inspectStorage(path,'qq').version,QQ_SCHEMA_VERSION);

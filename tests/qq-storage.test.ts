@@ -80,7 +80,7 @@ test('Host init uses the QQ schema target and read-only inspection requests migr
     persona: { fixedFile: './persona.md', kind: 'test' }, modelRoutes: { chat: { provider: 'local-test', model: 'scripted' } },
     plugins: [{ id: 'model-scripted', config: {} }, { id: 'channel-qq', config: { botId: '12345678', ownerId: '87654321', groupIds: [], httpURL: 'http://127.0.0.1:1/', wsURL: 'ws://127.0.0.1:1/', tokenFile: './token' } }] }));
   const prepared = loadHostConfig(configFile); assert.equal(initializeProfile(prepared, coordination).ready, true);
-  const path = join(root, 'data/qq/qq.sqlite'), db = new DatabaseSync(path); db.exec('DROP TABLE qq_media_sources; DROP TABLE qq_media_drafts; DROP TABLE qq_media_deliveries; DROP TABLE qq_media_parts; DROP TABLE qq_delivery_segments; DROP TABLE qq_delivery_plans; DROP TABLE qq_browse_snapshots; DROP TABLE qq_cache_state; DROP TABLE qq_message_meta; DROP TABLE qq_group_snapshots; PRAGMA user_version=0; PRAGMA application_id=0;'); db.close();
+  const path = join(root, 'data/qq/qq.sqlite'), db = new DatabaseSync(path); db.exec('DROP TABLE qq_message_batches;DROP TABLE qq_stickers;DROP TABLE qq_sticker_leases;DROP TABLE qq_reply_quotes;DROP TABLE qq_media_sources; DROP TABLE qq_media_drafts; DROP TABLE qq_media_deliveries; DROP TABLE qq_media_parts; DROP TABLE qq_delivery_segments; DROP TABLE qq_delivery_plans; DROP TABLE qq_browse_snapshots; DROP TABLE qq_cache_state; DROP TABLE qq_message_meta; DROP TABLE qq_group_snapshots; PRAGMA user_version=0; PRAGMA application_id=0;'); db.close();
   const before = await readFile(path), result = inspectHost(prepared, coordination);
   assert.ok(result.codes.includes('HOST_MIGRATION_REQUIRED')); assert.equal(result.ready, false); assert.deepEqual(await readFile(path), before);
 });
@@ -101,7 +101,7 @@ test('QQ v1 upgrades additively and stores account-bound membership without chan
 test('QQ v5 migration preserves real records and marks legacy group settings unknown until freshly read',async()=>{
   const path=await file(),created=new QqStore(path);created.sent('preserved','receipt');created.remember('room','1','person','保留原文');
   created.saveGroups('12345678',[{id:'11223344',name:'原群',msgMask:1}],'2026-10-27T00:00:00.000Z');created.close();
-  const old=new DatabaseSync(path);old.prepare('UPDATE qq_group_snapshots SET groups_json=?').run(JSON.stringify([{id:'11223344',name:'原群'}]));old.exec('DROP TABLE qq_reply_quotes; PRAGMA user_version=5');old.close();
+  const old=new DatabaseSync(path);old.prepare('UPDATE qq_group_snapshots SET groups_json=?').run(JSON.stringify([{id:'11223344',name:'原群'}]));old.exec('DROP TABLE qq_message_batches;DROP TABLE qq_stickers;DROP TABLE qq_sticker_leases;DROP TABLE qq_reply_quotes; PRAGMA user_version=5');old.close();
   const before=await readFile(path);assert.throws(()=>new QqStore(path),/QQ_MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),before);
   const migrated=new QqStore(path,{migrate:true});try{
     assert.equal(migrated.receipt('preserved'),'receipt');assert.equal(migrated.find('room','1')?.text,'保留原文');

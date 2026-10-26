@@ -76,7 +76,7 @@ export class DafeiyuService extends Service {
   private readonly mediaReplyAccesses=new WeakSet<MediaReplyAccess>();
   bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({...(port.signal?{signal:port.signal}:{}),ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
   bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port),...(port.voice?{voice:port.voice.bind(port)}:{}),...(port.voiceCurrent?{voiceCurrent:port.voiceCurrent.bind(port)}:{}),
-    ...(port.replyDraft?{replyDraft:port.replyDraft.bind(port)}:{}),...(port.finalizeReply?{finalizeReply:port.finalizeReply.bind(port)}:{}),...(port.readReplyPart?{readReplyPart:port.readReplyPart.bind(port)}:{}),...(port.validateReply?{validateReply:port.validateReply.bind(port)}:{}),...(port.settleReply?{settleReply:port.settleReply.bind(port)}:{}),...(port.releaseReply?{releaseReply:port.releaseReply.bind(port)}:{}),...(port.nativeMaterial?{nativeMaterial:port.nativeMaterial.bind(port)}:{}),...(port.observedMaterial?{observedMaterial:port.observedMaterial.bind(port)}:{})});
+    ...(port.imageOriginal?{imageOriginal:port.imageOriginal.bind(port)}:{}),...(port.prepareReply?{prepareReply:port.prepareReply.bind(port)}:{}),...(port.replyDraft?{replyDraft:port.replyDraft.bind(port)}:{}),...(port.finalizeReply?{finalizeReply:port.finalizeReply.bind(port)}:{}),...(port.readReplyPart?{readReplyPart:port.readReplyPart.bind(port)}:{}),...(port.validateReply?{validateReply:port.validateReply.bind(port)}:{}),...(port.settleReply?{settleReply:port.settleReply.bind(port)}:{}),...(port.releaseReply?{releaseReply:port.releaseReply.bind(port)}:{}),...(port.nativeMaterial?{nativeMaterial:port.nativeMaterial.bind(port)}:{}),...(port.observedMaterial?{observedMaterial:port.observedMaterial.bind(port)}:{})});
     this.mediaPort=bound;return ()=>{if(this.mediaPort===bound)this.mediaPort=undefined;};}
   registerMediaProvider(provider:MediaSourceProvider){if(!this.mediaPort)throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.registerProvider(provider);}
   mediaAccess(context:ExecutionContextV3,owner:string,raw:unknown):MediaAccess {
@@ -87,6 +87,8 @@ export class DafeiyuService extends Service {
   acquireMedia(context:ExecutionContextV3,owner:string,input:unknown){this.executionAuthority(context,owner);if(!this.mediaPort?.ready())throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.acquire(context,owner,MediaAcquireSchema.parse(input));}
   inspectMedia(context:ExecutionContextV3,owner:string,ref:MediaAssetRef){this.executionAuthority(context,owner);if(!this.mediaPort?.ready())throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.inspect(context,owner,MediaAssetRefSchema.parse(ref));}
   readMedia(context:ExecutionContextV3,owner:string,input:unknown){this.executionAuthority(context,owner);if(!this.mediaPort?.ready())throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.read(context,owner,MediaReadSchema.parse(input));}
+  originalImage(context:ExecutionContextV3,owner:string,exposureId:string){this.executionAuthority(context,owner);if(!this.mediaPort?.ready()||!this.mediaPort.imageOriginal)throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.imageOriginal(context,owner,z.uuid().parse(exposureId));}
+  prepareReplyMedia(context:ExecutionContextV3,owner:string,input:unknown){this.executionAuthority(context,owner);if(!this.mediaPort?.ready()||!this.mediaPort.prepareReply)throw new Error('MEDIA_NOT_CONFIGURED');return this.mediaPort.prepareReply(context,input,owner);}
   mediaVoiceEvidence(context:ExecutionContextV3,owner:string,exposureId:string){this.executionAuthority(context,owner);if(!this.mediaPort?.ready()||!this.mediaPort.voice)throw new Error('MEDIA_VOICE_NOT_CONFIGURED');return this.mediaPort.voice(context,owner,z.uuid().parse(exposureId));}
   mediaVoiceCurrent(evidence:import('@dafeiyu/contracts').MediaVoiceEvidence){return this.mediaPort?.ready()===true&&this.mediaPort.voiceCurrent?.(evidence)===true;}
   captureMediaReplyAuthority(context:ExecutionContextV3,owner:string,payloadHash:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.captureMediaReply(context,owner,payloadHash,this.personaAccess(context,owner,'local-write'));}
@@ -688,7 +690,7 @@ export class DafeiyuService extends Service {
         started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const nativeActions=run?this.executions?.conversationActions(run,source.extension.id,signal,()=>{if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');})??[]:[];
-        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description,undefined,nativeActions);
+        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description,undefined,nativeActions,()=>!!(run&&this.mediaPort?.replyDraft?.(run.id)?.selected&&this.runStore?.operations(run.id).some(op=>op.action==='qq_sticker_use'&&op.plugin==='qq-stickers'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed')));
         signal.throwIfAborted();
         if(run)this.personas.current(run.id)?.guard();
       } catch (error) {
@@ -720,8 +722,9 @@ export class DafeiyuService extends Service {
       const authority=()=>{if(!source.active||this.fatal||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
         if(runId&&this.runStore)this.validateRunPersona(this.runStore.get(runId));
         evidence.guard();};
-      authority();const mediaOperation=runId?this.runStore?.operations(runId).findLast(op=>op.plugin==='media'&&op.action==='dafeiyu_media_reply'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'):undefined;
-      const uncertainMedia=runId&&this.runStore?.operations(runId).some(op=>op.plugin==='media'&&op.action==='dafeiyu_media_reply'&&(op.state==='unknown'||op.outcome?.effects==='unknown'));
+      const mediaSelection=(op:{plugin:string;action:string})=>op.plugin==='media'&&op.action==='dafeiyu_media_reply'||op.plugin==='qq-stickers'&&op.action==='qq_sticker_use';
+      authority();const mediaOperation=runId?this.runStore?.operations(runId).findLast(op=>mediaSelection(op)&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'):undefined;
+      const uncertainMedia=runId&&this.runStore?.operations(runId).some(op=>mediaSelection(op)&&(op.state==='unknown'||op.outcome?.effects==='unknown'));
       if(uncertainMedia)throw new Error('MEDIA_REPLY_OPERATION_UNCONFIRMED');
       const selection=mediaOperation?z.object({currentDraftId:z.uuid(),currentVersion:z.number().int().positive(),selected:z.number().int().nonnegative()}).parse(mediaOperation.outcome!.data):null;
       if(selection?.selected){

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { HostConfigSchema } from '@dafeiyu/contracts';
 import { loadHostConfig,initializeProfile,inspectHost,ManagedHost,pluginConfig,BILI_OWNER_NATIVE_ACTIONS } from '@dafeiyu/host';
 import type { HostRuntimeOptions } from '@dafeiyu/host';
-import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS } from '@dafeiyu/qq';
+import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS,QQ_STICKER_ACTIONS } from '@dafeiyu/qq';
 import { BILI_ACTIONS } from '@dafeiyu/bilibili';
 import { BiliOwnerStore,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE,biliOwnerScene,createBiliOwnerProductionPorts } from '@dafeiyu/bilibili/channel';
 import { BILI_OWNER_AUTH_HASH } from '@dafeiyu/bilibili/channel/production-config';
@@ -31,8 +31,9 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   const root=settings.dataDir,bili=settings.bilibili,activity=settings.activity.enabled;
   const resources=bili?.capabilities?[BILI_PUBLIC_SCENE]:[];
   const enabledMediaActions=settings.qq.media?.sendEnabled?MEDIA_ACTIONS:mediaActions;
-  const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?BILI_ACTIONS:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
-  const conversation=[...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
+  const stickerActions=settings.qq.stickers.enabled?[...QQ_STICKER_ACTIONS]:[];
+  const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...stickerActions,...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?BILI_ACTIONS:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
+  const conversation=[...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
   const plugins:unknown[]=[{id:options.scripted?'model-scripted':'model-deepseek',required:true,config:options.scripted?{}:{credentialStore:settings.model.credentialStore,...(settings.model.baseURL?{baseURL:settings.model.baseURL}:{}),...(settings.model.inlineTransport?{inlineTransport:settings.model.inlineTransport}:{})}},
     {id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true,config:{sourceTracking:true,context:{},maintenance:{}}},
     {id:'qq',required:true,config:{...settings.qq,joinedGroups:undefined,capabilities:{enabled:true},tasks:{enabled:true,policyId:'qq-task',deliverResults:true,explorationResources:resources},...(settings.media?{media:{enabled:true,...settings.qq.media}}:{}),groupSync:{enabled:true,mode:settings.qq.joinedGroups?'joined':'allowlist'}}}];
