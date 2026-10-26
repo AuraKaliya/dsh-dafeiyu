@@ -6,9 +6,9 @@ import {pathToFileURL} from 'node:url';
 export function inspectPublicRelease(root,{forbiddenValues=[]}={}){
   const findings=[];let files=0,bytes=0;
   const visit=directory=>{for(const name of readdirSync(directory)){if(name==='.git'||name==='node_modules')continue;const file=join(directory,name),info=lstatSync(file),path=relative(root,file).split(sep).join('/');
-    if(info.isSymbolicLink()){findings.push({path,code:'LINK'});continue;}if(info.isDirectory()){if(['.runtime','检查记录','大肥鱼人格提示词'].includes(name))findings.push({path,code:'PRIVATE_DIRECTORY'});else visit(file);continue;}
+    if(info.isSymbolicLink()){findings.push({path,code:'LINK'});continue;}if(info.isDirectory()){if(['.runtime','dafeiyu-data','检查记录','大肥鱼人格提示词'].includes(name))findings.push({path,code:'PRIVATE_DIRECTORY'});else visit(file);continue;}
     files++;bytes+=info.size;
-    if(/(?:^|\/)(?:\.env(?:\..*)?|credentials?[^/]*|[^/]*\.sqlite(?:-.*)?|[^/]*\.log)$/.test(path))findings.push({path,code:'PRIVATE_FILE'});
+    if(/(?:^|\/)(?:\.env(?:\..*)?|credentials?[^/]*|[^/]*\.sqlite(?:-.*)?|[^/]*\.log|[^/]*\.jsonl|[^/]*\.token|bilibili\.session\.json)$/.test(path))findings.push({path,code:'PRIVATE_FILE'});
     const text=readFileSync(file,'utf8');
     if(forbiddenValues.some(value=>value.length>=6&&text.includes(value)))findings.push({path,code:'PRIVATE_LOCAL_VALUE'});
     if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{24,}/.test(text))findings.push({path,code:'CREDENTIAL_PATTERN'});

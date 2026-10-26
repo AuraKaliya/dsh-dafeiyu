@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn,execFile } from 'node:child_process';
 import { mkdtemp,writeFile,rm,realpath,lstat } from 'node:fs/promises';
 import { join,resolve,dirname,relative,isAbsolute,sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,11 +30,12 @@ export class BoundedProcess {
         const child=spawn(this.powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',actualHelper,'-SpecFile',argsFile],{cwd:directory,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
         const chunks:Buffer[]=[];let bytes=0,settled=false,reason:string|null=null;
         const limit=Math.ceil(spec.maxStdoutBytes*1.4+spec.maxStderrBytes*1.4+16384);
-        let killing=false;const kill=(code:string)=>{reason??=code;if(killing||child.pid===undefined)return;killing=true;
+        let killing=false,termination:Promise<void>|undefined;const kill=(code:string)=>{reason??=code;if(killing||child.pid===undefined)return;killing=true;
           const killer=spawn(join(env.SystemRoot!,'System32/taskkill.exe'),['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
-          killer.on('error',()=>child.kill());};const abort=()=>kill('MEDIA_CANCELLED');raw.signal.addEventListener('abort',abort,{once:true});
+          termination=new Promise<void>(resolve=>{killer.once('close',()=>resolve());killer.once('error',()=>{child.kill();resolve();});});};const abort=()=>kill('MEDIA_CANCELLED');raw.signal.addEventListener('abort',abort,{once:true});
         const deadline=setTimeout(()=>kill('MEDIA_WORKER_TIMEOUT'),spec.timeoutMs+20000);
-        const finish=(error:Error|null)=>{if(settled)return;settled=true;clearTimeout(deadline);raw.signal.removeEventListener('abort',abort);if(error)reject(error);else done(Buffer.concat(chunks));};
+        const finish=(error:Error|null)=>{if(settled)return;settled=true;clearTimeout(deadline);raw.signal.removeEventListener('abort',abort);
+          const complete=()=>{if(error)reject(error);else done(Buffer.concat(chunks));};if(termination)void termination.then(complete);else complete();};
         child.stdout.on('data',(data:Buffer)=>{bytes+=data.length;if(bytes>limit)kill('MEDIA_WORKER_OUTPUT_LIMIT');else chunks.push(Buffer.from(data));});
         child.stderr.on('data',()=>{}); // No raw program diagnostics in application logs.
         child.on('error',()=>finish(new MediaWorkerError('MEDIA_WORKER_START_FAILED')));
@@ -44,6 +45,17 @@ export class BoundedProcess {
       if(!result.guardApplied)throw new MediaWorkerError('MEDIA_MEMORY_GUARD_UNAVAILABLE');if(result.code)throw new MediaWorkerError(/^[A-Z0-9_]{1,100}$/.test(result.code)?result.code:'MEDIA_WORKER_FAILED');
       const stdout=Buffer.from(result.stdoutBase64,'base64'),stderr=Buffer.from(result.stderrBase64,'base64');if(stdout.length>spec.maxStdoutBytes||stderr.length>spec.maxStderrBytes)throw new MediaWorkerError('MEDIA_WORKER_OUTPUT_LIMIT');
       return {stdout,stderr,peakCommitBytes:result.peakCommitBytes,memoryLimitBytes:spec.memoryBytes};
-    }finally{await contained(this.workRoot,directory);await rm(directory,{recursive:true,force:true});}
+    }finally{
+      const workRoot=await realpath(this.workRoot);await contained(workRoot,directory);
+      try{await rm(directory,{recursive:true,force:true,maxRetries:1,retryDelay:50});}
+      catch(error){
+        if(!(error instanceof Error)||!('code' in error)||!['EPERM','EACCES'].includes(String(error.code)))throw error;
+        // An interrupted Windows PowerShell CodeDOM compilation can retain its
+        // temporary no-delete ACE. Restore only that ACE after the owned tree stopped.
+        await new Promise<void>((done,reject)=>execFile(this.powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',fileURLToPath(new URL('../workers/restore-compiler-temp-access.ps1',import.meta.url)),'-WorkRoot',workRoot,'-Directory',directory],
+          {windowsHide:true,timeout:10000,maxBuffer:16384,env:{SystemRoot:process.env.SystemRoot??'C:\\Windows',TMP:directory,TEMP:directory}},error=>error?reject(new MediaWorkerError('MEDIA_WORKER_CLEANUP_FAILED')):done()));
+        await contained(workRoot,directory);await rm(directory,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+      }
+    }
   }
 }

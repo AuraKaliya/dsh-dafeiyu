@@ -59,7 +59,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   put(destination,'bin/dafeiyu.mjs',"#!/usr/bin/env node\nawait import('../runtime/plugin/bin/dafeiyu.mjs');\n");
   for(const file of ['README.md','LICENSE','NOTICE','cordis.patch.yml'])put(destination,file,readFileSync(join(repository,'packages/plugin',file)));
   for(const tree of ['examples','docs'])for(const file of files(join(repository,'packages/plugin',tree)))put(destination,tree+'/'+portable(relative(join(repository,'packages/plugin',tree),file)),readFileSync(file));
-  put(destination,'.gitignore','node_modules/\n.runtime/\n**/node_modules/\n**/.runtime/\n**/build-tests/\nsource/packages/*/lib/\n*.tsbuildinfo\n.env*\n*.sqlite*\n*.log\n');
+  put(destination,'.gitignore','node_modules/\n.runtime/\n**/node_modules/\n**/.runtime/\n**/build-tests/\nsource/packages/*/lib/\n**/dafeiyu-data/\n*.local.json\n*.token\n*.jsonl\nbilibili.session.json\n.credentials.yaml\n*.tsbuildinfo\n.env*\n*.sqlite*\n*.log\n');
   if(includeSource){
     for(const directory of moduleNames){const root=join(repository,'packages',directory);
       for(const name of ['package.json','tsconfig.json'])put(destination,'source/packages/'+directory+'/'+name,readFileSync(join(root,name)));

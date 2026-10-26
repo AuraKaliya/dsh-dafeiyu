@@ -12,3 +12,9 @@ build-tests/
 coverage/
 __pycache__/
 *.pyc
+**/dafeiyu-data/
+*.local.json
+*.token
+*.jsonl
+bilibili.session.json
+.credentials.yaml

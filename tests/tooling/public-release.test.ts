@@ -34,6 +34,9 @@ test('a publishable package installs without private workspaces and runs the sam
 
 test('release privacy checks reject private files and reviewer-supplied private values',async()=>{
   const root=await mkdtemp(join(tmpdir(),'release-privacy-')),release=join(root,'release');buildPublicRelease(release,{includeSource:false});
+  await execute('git',['init','-q'],{cwd:release,windowsHide:true});
+  const ignored=await execute('git',['check-ignore','--no-index','dafeiyu-data/history.json','settings.local.json','onebot.token'],{cwd:release,windowsHide:true});
+  assert.equal(ignored.stdout.trim().split(/\r?\n/).length,3);
   await writeFile(join(release,'.env'),'PRIVATE_RELEASE_SENTINEL');const result=inspectPublicRelease(release,{forbiddenValues:['PRIVATE_RELEASE_SENTINEL']});
   assert.equal(result.passed,false);assert.ok(result.findings.some(f=>f.code==='PRIVATE_FILE'));assert.ok(result.findings.some(f=>f.code==='PRIVATE_LOCAL_VALUE'));assert.ok(!JSON.stringify(result).includes('PRIVATE_RELEASE_SENTINEL'));
 });

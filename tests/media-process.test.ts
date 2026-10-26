@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp,mkdir,readdir,writeFile,readFile } from 'node:fs/promises';
+import { join,resolve } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { testTempDir } from './test-temp.js';
 import { BoundedProcess } from '../packages/media/lib/process.js';
 
@@ -19,12 +21,23 @@ test('bounded worker timeout, output overflow and cancellation recover their tem
   const directory=await root(),worker=new BoundedProcess(directory);
   await assert.rejects(worker.run({...basic,arguments:['-e','setInterval(()=>{},1000)'],timeoutMs:100}),/MEDIA_WORKER_TIMEOUT/);
   await assert.rejects(worker.run({...basic,arguments:['-e','process.stdout.write("x".repeat(100000))'],maxStdoutBytes:32}),/MEDIA_WORKER_OUTPUT_LIMIT/);
-  const abort=new AbortController(),pending=worker.run({...basic,arguments:['-e','setInterval(()=>{},1000)'],signal:abort.signal});setTimeout(()=>abort.abort(),100);
-  await assert.rejects(pending,/MEDIA_CANCELLED|AbortError/);assert.deepEqual(await readdir(directory),[]);
+  for(const delay of [20,100,200,350]){
+    const abort=new AbortController(),pending=worker.run({...basic,arguments:['-e','setInterval(()=>{},1000)'],signal:abort.signal});setTimeout(()=>abort.abort(),delay);
+    await assert.rejects(pending,/MEDIA_CANCELLED|AbortError/);assert.deepEqual(await readdir(directory),[]);
+  }
 });
 
 test('a native allocation beyond the configured committed-memory ceiling cannot finish successfully',async()=>{
   const directory=await root(),worker=new BoundedProcess(directory);
   await assert.rejects(worker.run({...basic,memoryBytes:64*1024*1024,arguments:['-e','const data=Buffer.alloc(256*1024*1024,1);process.stdout.write(String(data.length));']}),/MEDIA_WORKER_FAILED/);
   assert.deepEqual(await readdir(directory),[]);
+});
+
+test('compiler cleanup refuses the workspace root and outside paths without changing their files',async()=>{
+  const directory=await root(),outside=await root(),sentinel=join(outside,'keep.txt');await writeFile(sentinel,'synthetic-protected-file');
+  const powershell=join(process.env.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
+  const run=(target:string)=>promisify(execFile)(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',resolve('packages/media/workers/restore-compiler-temp-access.ps1'),'-WorkRoot',directory,'-Directory',target],{windowsHide:true,timeout:10000});
+  for(const target of [directory,outside])await assert.rejects(run(target));
+  const valid=join(directory,'process-fixture');await mkdir(valid);await run(valid);
+  assert.equal(await readFile(sentinel,'utf8'),'synthetic-protected-file');assert.deepEqual(await readdir(directory),['process-fixture']);
 });
