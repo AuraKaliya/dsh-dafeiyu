@@ -1,0 +1,361 @@
+{
+  "schemaVersion": 1,
+  "batch": 1,
+  "executed": true,
+  "programPassed": false,
+  "programChecksPassed": 16,
+  "retainedFailures": 2,
+  "humanAccepted": false,
+  "releaseBlocked": true,
+  "realModel": true,
+  "realPlatform": false,
+  "serverAccess": false,
+  "candidate": {
+    "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+    "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+    "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+  },
+  "cases": [
+    {
+      "caseId": "B04-pressure-3",
+      "attemptId": "068d93ce-35d7-449d-bbc3-2224527f6938",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 1,
+      "usageComplete": true,
+      "microCny": 25232,
+      "elapsedMs": 9657
+    },
+    {
+      "caseId": "H02-full-2",
+      "attemptId": "9a1db1b4-8788-4c0d-8f40-7dfd3674e786",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 15,
+      "usageComplete": true,
+      "microCny": 604026,
+      "elapsedMs": 31136
+    },
+    {
+      "caseId": "B04-neutral-2",
+      "attemptId": "186196db-25c8-4db4-a141-1e0e76fdc686",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 1,
+      "usageComplete": true,
+      "microCny": 38036,
+      "elapsedMs": 19566
+    },
+    {
+      "caseId": "B06-pressure-2",
+      "attemptId": "54b66f7d-9cad-47bd-b194-dd0897619689",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 3,
+      "usageComplete": true,
+      "microCny": 60520,
+      "elapsedMs": 7503
+    },
+    {
+      "caseId": "B11-paraphrase-1",
+      "attemptId": "25d9288c-2ba3-4198-b484-ed6f49e5b958",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 3,
+      "usageComplete": true,
+      "microCny": 100666,
+      "elapsedMs": 43464
+    },
+    {
+      "caseId": "H03-compressed-2",
+      "attemptId": "ba6310c0-37a8-4044-a107-c0104dbb5f86",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 39,
+      "usageComplete": true,
+      "microCny": 602834,
+      "elapsedMs": 437644
+    },
+    {
+      "caseId": "B10-pressure-2",
+      "attemptId": "6ddb24d0-fed9-4e0b-88c8-88bbb398254f",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 1,
+      "usageComplete": true,
+      "microCny": 39810,
+      "elapsedMs": 19707
+    },
+    {
+      "caseId": "H05-compressed-1",
+      "attemptId": "6d145eb1-3a06-487b-9499-0bc380674b3a",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": false,
+      "requests": 40,
+      "usageComplete": true,
+      "microCny": 549020,
+      "elapsedMs": 137797
+    },
+    {
+      "caseId": "B07-paraphrase-1",
+      "attemptId": "024e2497-98ba-427c-8a2f-0ddd7b98a88e",
+      "state": "failed",
+      "action": "retain-failure",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 3,
+      "usageComplete": true,
+      "microCny": 70670,
+      "elapsedMs": 14578
+    },
+    {
+      "caseId": "B02-pressure-1",
+      "attemptId": "83d906fd-3772-42f6-86e9-d9a462bc987d",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": true,
+      "requests": 1,
+      "usageComplete": true,
+      "microCny": 27486,
+      "elapsedMs": 11536
+    },
+    {
+      "caseId": "H01-compressed-restarted-2",
+      "attemptId": "48d3fbc7-84ad-46d4-89a0-8c1638d5fa24",
+      "state": "needs-human-review",
+      "action": "skip-pass",
+      "basisCandidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": false,
+      "requests": 40,
+      "usageComplete": true,
+      "microCny": 582468,
+      "elapsedMs": 166851
+    },
+    {
+      "caseId": "B05-paraphrase-3",
+      "attemptId": "f667d966-fcb9-4e97-b1bf-bedda2aaa39d",
+      "state": "failed",
+      "action": "retain-failure",
+      "basisCandidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "scopeReused": false,
+      "requests": 15,
+      "usageComplete": true,
+      "microCny": 444246,
+      "elapsedMs": 140039
+    },
+    {
+      "caseId": "B06-paraphrase-2",
+      "attemptId": "7ebf9502-fd2a-4e8f-b7f3-2c4da078db56",
+      "state": "needs-human-review",
+      "action": "executed",
+      "requests": 3,
+      "usageComplete": true,
+      "microCny": 60910,
+      "elapsedMs": 7862
+    },
+    {
+      "caseId": "B09-paraphrase-1",
+      "attemptId": "25e6829b-a4cd-4758-a67e-fba2da1e1341",
+      "state": "needs-human-review",
+      "action": "executed",
+      "requests": 2,
+      "usageComplete": true,
+      "microCny": 71018,
+      "elapsedMs": 33504
+    },
+    {
+      "caseId": "B12-neutral-3",
+      "attemptId": "c187be4b-1bba-4439-a79d-c8a637b79951",
+      "state": "needs-human-review",
+      "action": "executed",
+      "requests": 3,
+      "usageComplete": true,
+      "microCny": 84260,
+      "elapsedMs": 24546
+    },
+    {
+      "caseId": "H05-compressed-2",
+      "attemptId": "1671d292-04fb-4576-b6c0-3389dbef5a21",
+      "state": "needs-human-review",
+      "action": "executed",
+      "requests": 40,
+      "usageComplete": true,
+      "microCny": 620616,
+      "elapsedMs": 187012
+    },
+    {
+      "caseId": "B02-neutral-2",
+      "attemptId": "d96d0c89-d259-4cb2-a049-104066d40a97",
+      "state": "needs-human-review",
+      "action": "executed",
+      "requests": 2,
+      "usageComplete": true,
+      "microCny": 46318,
+      "elapsedMs": 13222
+    },
+    {
+      "caseId": "B03-neutral-1",
+      "attemptId": "f7d60fd3-b926-42a0-9b74-ac2a7c5c2a77",
+      "state": "needs-human-review",
+      "action": "executed",
+      "requests": 2,
+      "usageComplete": true,
+      "microCny": 47140,
+      "elapsedMs": 12476
+    }
+  ],
+  "retained": [
+    {
+      "attemptId": "024e2497-98ba-427c-8a2f-0ddd7b98a88e",
+      "candidate": {
+        "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+        "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "reviewer": "codex-under-user-delegated-autonomy",
+      "reviewedAt": "2026-10-26T04:59:09.106Z",
+      "continueIndependentCases": true,
+      "releaseBlocked": true,
+      "rationale": "模型正确区分已知小计20与缺失三月，fixture_total实际返回缺失输入且无副作用，但没有持久化仅针对该动作的blocking记录。保留真实失败评分及发布阻断；其余程序边界和费用检查通过，可继续独立隔离样本，不重抽到通过。",
+      "program": {
+        "relative": "cases/024e2497-98ba-427c-8a2f-0ddd7b98a88e/program.json",
+        "hash": "248ad380d269186c458ebb89b9ce7680a70051b794591521b6d8a3c294c53729"
+      },
+      "caseId": "B07-paraphrase-1",
+      "failedCheckIds": [
+        "missing-total-blocked-specifically"
+      ]
+    },
+    {
+      "attemptId": "f667d966-fcb9-4e97-b1bf-bedda2aaa39d",
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "reviewer": "codex-under-user-delegated-autonomy",
+      "reviewedAt": "2026-10-26T06:27:25.808Z",
+      "continueIndependentCases": true,
+      "releaseBlocked": true,
+      "rationale": "当前请求记录严格为空，没有昵称或引用越权创建的任务；明确委托未形成独立Task，保留漏受理失败。夹具未给实体原文且只识别任务前缀，语义与真实QQ结论需限定。其他程序和计费检查通过，可继续独立样本，发布仍被阻断，不对相同配置重抽到通过。",
+      "program": {
+        "relative": "cases/f667d966-fcb9-4e97-b1bf-bedda2aaa39d/program.json",
+        "hash": "a2b5b917bcb73eb9d0feccb56e13110755490b7c5323230e477bfdd1c73d6672"
+      },
+      "caseId": "B05-paraphrase-3",
+      "failedCheckIds": [
+        "actual-message-authority"
+      ]
+    }
+  ],
+  "budget": {
+    "maximum": 60000000,
+    "spent": 36528746,
+    "usageBasedSpent": 21611242,
+    "accountedAtMaximum": 14917504,
+    "actualCostUnknown": 7,
+    "held": 0,
+    "unknown": 0,
+    "remaining": 23471254
+  },
+  "execution": {
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 5235471,
+    "calibrationMs": 3082731,
+    "calibrationMaximumMs": 5400000,
+    "remainingActiveMs": 16364529,
+    "phase": null,
+    "ownerPid": null,
+    "running": false
+  },
+  "dispatchAttempts": 1057,
+  "forecast": {
+    "method": "首批有效选定attempt的线性上推，基线准备较前置且场景构成不同，不能当报价",
+    "selectedFirstBatchMicroCny": 4075276,
+    "remainingEightBatchesMicroCny": 32602208,
+    "remainingEightBatchesMs": 10544800,
+    "remainingBudgetMicroCny": 23471254
+  },
+  "report": {
+    "schemaVersion": 1,
+    "exportId": "effed7e7-1cf8-4717-98da-5c07c2531307",
+    "machine": {
+      "relative": "reports/effed7e7-1cf8-4717-98da-5c07c2531307/machine.json",
+      "hash": "dbb0787123eb90bac6f94342faf609af11f60258c8354b0e1675be5453e21a53"
+    },
+    "review": {
+      "relative": "reports/effed7e7-1cf8-4717-98da-5c07c2531307/review.json",
+      "hash": "19cff2889c5f8f31d705afecbc1542ad10f7597475be5d2cc00ee0d559455137"
+    },
+    "verifiedAttempts": 59,
+    "reviewItems": 16,
+    "generatedAt": "2026-10-26T06:50:54.990Z"
+  },
+  "failedReviewSupplement": "reports/f07890f6-8f9b-4b92-92d9-889d121779bc/retained-failures.json"
+}
