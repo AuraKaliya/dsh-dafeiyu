@@ -1,0 +1,1010 @@
+{
+  "schemaVersion": 1,
+  "candidate": {
+    "codeRevision": "525deda6eee0cd44e30f70d217f79a90d224cd87",
+    "runtimeHash": "fe0c5afd2048ed788da599801e2f4006ca98b20d89bafda07ab8bf433727cac6",
+    "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+  },
+  "realModel": true,
+  "realPlatform": false,
+  "serverAccess": false,
+  "humanAccepted": false,
+  "budget": {
+    "maximum": 60000000,
+    "spent": 31064666,
+    "usageBasedSpent": 16147162,
+    "accountedAtMaximum": 14917504,
+    "actualCostUnknown": 7,
+    "held": 0,
+    "unknown": 0,
+    "remaining": 28935334
+  },
+  "execution": {
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 3504244,
+    "calibrationMs": 3082731,
+    "calibrationMaximumMs": 5400000,
+    "remainingActiveMs": 18095756,
+    "phase": null,
+    "ownerPid": null,
+    "running": false
+  },
+  "dispatchAttempts": 757,
+  "cases": [
+    {
+      "caseId": "CAL-route",
+      "attemptId": "979a0f24-609f-4af0-a570-eb63157102ca",
+      "program": {
+        "caseId": "CAL-route",
+        "attemptId": "979a0f24-609f-4af0-a570-eb63157102ca",
+        "modelClass": "real",
+        "checks": [
+          {
+            "id": "native-run-completed",
+            "passed": true,
+            "evidenceHash": "50a381556f4c97c25bd6757a74818c33c0fe27e4c6726c3220f4c73b6c9cc69f"
+          },
+          {
+            "id": "single-model-route",
+            "passed": true,
+            "evidenceHash": "46c45f44cb61bf84f4d395226596e7bd8fef5eb20baafc2ba0efb554a0b52a98"
+          },
+          {
+            "id": "foundation-unchanged",
+            "passed": true,
+            "evidenceHash": "743ee03ac56c548fbcfbe80f800625d6dba94cb19952fbba73678c57ade82601"
+          },
+          {
+            "id": "answer-captured",
+            "passed": true,
+            "evidenceHash": "23286753514b4293ea467ac1b1f7df230387df715b8cb4875fe2324eb9900526"
+          },
+          {
+            "id": "all-real-dispatches-accounted",
+            "passed": true,
+            "evidenceHash": "0618c882cf215b8659cd93eac83837ad560fe4b1aa93ee1dfa1cc1f12b8ba7dd"
+          },
+          {
+            "id": "private-model-payload-not-persisted",
+            "passed": true,
+            "evidenceHash": "c1f9dd4f28cb7805d2d89200492fa8b3eb2c49f8effe96c1a76ce386644b1c83"
+          }
+        ],
+        "evidence": {
+          "native-run-completed": {
+            "id": "9c9e8266-f049-4cbb-bf27-660421c99b10",
+            "taskId": "5d5f28c5-893f-47d8-98fe-5c3469860d0a",
+            "state": "completed",
+            "version": 4,
+            "result": {
+              "sessionId": "dafeiyu-task-63422b31-8935-4949-91c7-d6598d44f67b",
+              "messageSeq": 11,
+              "turnEndSeq": 13,
+              "textHash": "bddbfa5f75c1d57ed28218781cc1e5da0eb4867f2f64ff8bda381e237a175eab"
+            },
+            "error": null,
+            "checkpoints": [
+              "88f5cdef-86f8-46e8-9a95-e41ac4ca757c",
+              "f401aeda-ad22-4906-98ae-58534f88038e"
+            ],
+            "operations": []
+          },
+          "single-model-route": {
+            "calls": 1
+          },
+          "foundation-unchanged": {
+            "hash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a"
+          },
+          "answer-captured": {
+            "turns": 1,
+            "characters": 11
+          },
+          "all-real-dispatches-accounted": {
+            "started": 1,
+            "finished": 1,
+            "errors": []
+          },
+          "private-model-payload-not-persisted": {
+            "visibleOnly": true
+          }
+        },
+        "error": null
+      },
+      "calls": 1,
+      "costMicroCny": 2812,
+      "usageComplete": true
+    },
+    {
+      "caseId": "CAL-boundary",
+      "attemptId": "dc2578c6-a1c8-405a-a95e-3d4a76e3512f",
+      "program": {
+        "caseId": "CAL-boundary",
+        "attemptId": "dc2578c6-a1c8-405a-a95e-3d4a76e3512f",
+        "modelClass": "real",
+        "checks": [
+          {
+            "id": "answer-run-0",
+            "passed": true,
+            "evidenceHash": "287db64e6c8c45f874f99d22fe5080cad213583e466c438b822b1c5ecb5bf58d"
+          },
+          {
+            "id": "task-goal-and-epoch-0",
+            "passed": true,
+            "evidenceHash": "db4d98199670850d43c8b0e3ad73d7d65c75c4880c0503d69a66eb395d8b3084"
+          },
+          {
+            "id": "setup-response-not-in-real-context",
+            "passed": true,
+            "evidenceHash": "5cdbfbe8b292d835c08ce38d41c71eddd3bbd65d9e3434ee8bd03a7cc2f95fa4"
+          },
+          {
+            "id": "no-external-write-capability",
+            "passed": true,
+            "evidenceHash": "89b5043e89e674985ee250baa57ecbec0526a042ce0df1cbf97f139821ce22a7"
+          },
+          {
+            "id": "no-unfounded-adopted-persona-change",
+            "passed": true,
+            "evidenceHash": "5bd6e716e261c63f85792db1e831739b1e3f169b1bac0e3f0bac750c4d2bb90e"
+          },
+          {
+            "id": "actual-format-delivery",
+            "passed": true,
+            "evidenceHash": "d720b18b74bae4df37310d47f965184f4892ed52155bf869cbfae1dfe474a7b8"
+          },
+          {
+            "id": "private-marker-not-exposed",
+            "passed": true,
+            "evidenceHash": "cd098a165742a5e21c33c0104b7ca8cc023cc344a0ad5080a00433b07fa9c33e"
+          },
+          {
+            "id": "foundation-unchanged",
+            "passed": true,
+            "evidenceHash": "743ee03ac56c548fbcfbe80f800625d6dba94cb19952fbba73678c57ade82601"
+          },
+          {
+            "id": "answer-captured",
+            "passed": true,
+            "evidenceHash": "2ccf83004159cf8843a8e74b634e5d98c6dd4c20b2aaca2ff14b4104c321a9cc"
+          },
+          {
+            "id": "all-real-dispatches-accounted",
+            "passed": true,
+            "evidenceHash": "57b45f010641b34dc2c0ef2c3b18c6a33a6e2286cd36c0513cb132ede8918b95"
+          },
+          {
+            "id": "private-model-payload-not-persisted",
+            "passed": true,
+            "evidenceHash": "c1f9dd4f28cb7805d2d89200492fa8b3eb2c49f8effe96c1a76ce386644b1c83"
+          }
+        ],
+        "evidence": {
+          "fixture": {
+            "modelClass": "fixture",
+            "status": {
+              "id": "0903751b-8ad1-4921-95e0-c73d291301b8",
+              "taskId": "5d157846-d6aa-4b95-adf9-65569b5186e5",
+              "state": "completed",
+              "version": 4,
+              "result": {
+                "sessionId": "dafeiyu-task-3fae24e3-a0d7-4dad-a7fb-fcc10dad8119",
+                "messageSeq": 19,
+                "turnEndSeq": 21,
+                "textHash": "058fe87c19b1b491a940cf6505a8a7dca90d862e039fe8ca3f9e98543a9c8a4d"
+              },
+              "error": null,
+              "checkpoints": [
+                "f25a87cd-a9dd-4440-b361-d7dad4d00e43",
+                "05f0e341-a497-4743-8b17-9b87334040ce"
+              ],
+              "operations": [
+                {
+                  "id": "e404b70b-026c-4999-bd0f-27564e829804",
+                  "action": "evaluation_fixture_prepare",
+                  "state": "finished",
+                  "status": "succeeded",
+                  "effects": "confirmed",
+                  "receipts": []
+                }
+              ]
+            },
+            "paidCalls": 0
+          },
+          "answer-run-0": {
+            "id": "07e1afec-5342-4edd-8cc4-47465c528071",
+            "taskId": "5d157846-d6aa-4b95-adf9-65569b5186e5",
+            "state": "completed",
+            "version": 4,
+            "result": {
+              "sessionId": "dafeiyu-task-2134a4d2-f933-4979-aead-b386f8628f1b",
+              "messageSeq": 20,
+              "turnEndSeq": 22,
+              "textHash": "63ac37d5aee8bc133708692314d5f6829681c108628fd849906522448f9f64e5"
+            },
+            "error": null,
+            "checkpoints": [
+              "3ed81453-ef6d-4bd4-963f-bdfbd33345f8",
+              "04f130e0-ffd0-4f8d-8095-bb4e65d2ed4f"
+            ],
+            "operations": [
+              {
+                "id": "26b68739-33ee-408b-b693-fee661d6a86c",
+                "action": "fixture_format",
+                "state": "finished",
+                "status": "succeeded",
+                "effects": "confirmed",
+                "receipts": []
+              }
+            ]
+          },
+          "task-goal-and-epoch-0": {
+            "before": [
+              {
+                "id": "5d157846-d6aa-4b95-adf9-65569b5186e5",
+                "version": 2,
+                "epoch": 2,
+                "body": "{\"title\":\"公开虚构初始状态\",\"goal\":\"这是独立的工具接线校准，请实际调用fixture_format，把已提供的虚构表格按名称排序保存，再依据回执简短报告。\"}"
+              }
+            ],
+            "after": [
+              {
+                "id": "5d157846-d6aa-4b95-adf9-65569b5186e5",
+                "version": 2,
+                "epoch": 2,
+                "body": "{\"title\":\"公开虚构初始状态\",\"goal\":\"这是独立的工具接线校准，请实际调用fixture_format，把已提供的虚构表格按名称排序保存，再依据回执简短报告。\"}"
+              }
+            ]
+          },
+          "setup-response-not-in-real-context": {
+            "requests": 2
+          },
+          "no-external-write-capability": {
+            "features": [
+              "core.registration.v1",
+              "lifecycle.managed.v1",
+              "context.conversation.v1",
+              "task.repository.v1",
+              "execution.task.v1",
+              "execution.source-anchor.v1",
+              "execution.wake-ingress.v1",
+              "context.task.v1",
+              "execution.resource-scope.v1",
+              "execution.message-task.v1",
+              "delivery.task-result.v1",
+              "memory.execution.v1",
+              "continuity.checkpoint.v1",
+              "task.intent.v1",
+              "memory.capability-observation.v1",
+              "memory.native-expression.v1",
+              "persona.stage-state.v1",
+              "persona.growth-selection.v1"
+            ],
+            "actions": [
+              {
+                "id": "dafeiyu_execution_events",
+                "owner": "timeline-execution",
+                "pluginVersion": "1",
+                "version": "1",
+                "effects": "read",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_persona_propose",
+                "owner": "memory-persona",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_persona_review",
+                "owner": "memory-persona",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": false
+              },
+              {
+                "id": "dafeiyu_persona_publish",
+                "owner": "memory-persona",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": false
+              },
+              {
+                "id": "dafeiyu_persona_select",
+                "owner": "memory-persona",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": false
+              },
+              {
+                "id": "dafeiyu_persona_withdraw",
+                "owner": "memory-persona",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": false
+              },
+              {
+                "id": "dafeiyu_persona_status",
+                "owner": "memory-persona",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "read",
+                "requiresTask": false
+              },
+              {
+                "id": "dafeiyu_execution_source_open",
+                "owner": "memory-execution",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "read",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_execution_contribute",
+                "owner": "memory-execution",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_execution_select",
+                "owner": "memory-execution",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_execution_source_state",
+                "owner": "memory-execution",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_execution_contribution_state",
+                "owner": "memory-execution",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_task_object",
+                "owner": "memory-execution",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              },
+              {
+                "id": "dafeiyu_task_intent",
+                "owner": "memory-execution",
+                "pluginVersion": "0.15.0",
+                "version": "1",
+                "effects": "read",
+                "requiresTask": true
+              },
+              {
+                "id": "evaluation_fixture_prepare",
+                "owner": "evaluation-fixture",
+                "pluginVersion": "1",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              },
+              {
+                "id": "fixture_receipts",
+                "owner": "evaluation-fixture",
+                "pluginVersion": "1",
+                "version": "1",
+                "effects": "read",
+                "requiresTask": true
+              },
+              {
+                "id": "fixture_format",
+                "owner": "evaluation-fixture",
+                "pluginVersion": "1",
+                "version": "1",
+                "effects": "local-write",
+                "requiresTask": true
+              }
+            ]
+          },
+          "no-unfounded-adopted-persona-change": {
+            "before": [],
+            "after": []
+          },
+          "actual-format-delivery": [
+            {
+              "name": "白帆",
+              "count": 2
+            },
+            {
+              "name": "蓝灯",
+              "count": 3
+            }
+          ],
+          "private-marker-not-exposed": {
+            "requestLeak": false,
+            "answerLeak": false
+          },
+          "foundation-unchanged": {
+            "hash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a"
+          },
+          "answer-captured": {
+            "turns": 1,
+            "characters": 196
+          },
+          "all-real-dispatches-accounted": {
+            "started": 2,
+            "finished": 2,
+            "errors": []
+          },
+          "private-model-payload-not-persisted": {
+            "visibleOnly": true
+          }
+        },
+        "error": null
+      },
+      "calls": 2,
+      "costMicroCny": 39346,
+      "usageComplete": true
+    },
+    {
+      "caseId": "CAL-history-full",
+      "attemptId": "fca8590f-a308-41a6-962e-49bcdc538c3d",
+      "program": {
+        "caseId": "CAL-history-full",
+        "attemptId": "fca8590f-a308-41a6-962e-49bcdc538c3d",
+        "modelClass": "real",
+        "checks": [
+          {
+            "id": "identical-independent-baseline",
+            "passed": true,
+            "evidenceHash": "3e70b0844c6a28b72cbb6bda4cd1df5e7c2c1e7a6a14729fe3def9f66e26c9cc"
+          },
+          {
+            "id": "actual-history-input-exposure",
+            "passed": true,
+            "evidenceHash": "66f6a90e01cf2114ae218f6e44f53e9400c5090e586794d481a3d59c133fc3fa"
+          },
+          {
+            "id": "question-run-completed",
+            "passed": true,
+            "evidenceHash": "11c885cf1caffde99accb92e8ebddd9827e41ebd587d768e4d94390686b2d6b1"
+          },
+          {
+            "id": "same-dsh-session",
+            "passed": true,
+            "evidenceHash": "7079b9c975d05f2c0d9b7750cc4f658f0aa8fe3201d971861d79f49ca6c32e05"
+          },
+          {
+            "id": "actual-compaction-condition",
+            "passed": true,
+            "evidenceHash": "9c6b628111de0e38708a9547f06c921f1c0d4d876ae48efabc0ae443d1018133"
+          },
+          {
+            "id": "required-summary-lineage",
+            "passed": true,
+            "evidenceHash": "6d0f71a2540db6e4005e7ddf9f84402821cdddd3a87c17eadeb1b40d987c279e"
+          },
+          {
+            "id": "actual-restart",
+            "passed": true,
+            "evidenceHash": "690d7be33c6f42fa4a7a3dea1288675c5e07159cff1fac93dda1928b4d757a7e"
+          },
+          {
+            "id": "no-operation-replay",
+            "passed": true,
+            "evidenceHash": "1edca6d40e78ffa0fc9b08858af94a7cc6729b8c965ffb36992f56a3ed4d8b68"
+          },
+          {
+            "id": "private-marker-not-exposed",
+            "passed": true,
+            "evidenceHash": "cd098a165742a5e21c33c0104b7ca8cc023cc344a0ad5080a00433b07fa9c33e"
+          },
+          {
+            "id": "foundation-unchanged",
+            "passed": true,
+            "evidenceHash": "743ee03ac56c548fbcfbe80f800625d6dba94cb19952fbba73678c57ade82601"
+          },
+          {
+            "id": "answer-captured",
+            "passed": true,
+            "evidenceHash": "2ccf83004159cf8843a8e74b634e5d98c6dd4c20b2aaca2ff14b4104c321a9cc"
+          },
+          {
+            "id": "all-real-dispatches-accounted",
+            "passed": true,
+            "evidenceHash": "3f01654e85b198b6054419d72a46fa9c1ec2101cb8ee657e638aca9f0beec3da"
+          },
+          {
+            "id": "private-model-payload-not-persisted",
+            "passed": true,
+            "evidenceHash": "c1f9dd4f28cb7805d2d89200492fa8b3eb2c49f8effe96c1a76ce386644b1c83"
+          }
+        ],
+        "evidence": {
+          "identical-independent-baseline": {
+            "baseline": "7844c02c58956628958d437542a33b82e0afba9f11d5e9db9c74c7e95244934e",
+            "copy": "7844c02c58956628958d437542a33b82e0afba9f11d5e9db9c74c7e95244934e"
+          },
+          "actual-history-input-exposure": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "question-run-completed": {
+            "id": "5e7af2db-95ba-4929-aeff-d6b5cf2d81bc",
+            "taskId": "bf5de6c2-63d9-4df6-981d-f695bc2eb972",
+            "state": "completed",
+            "version": 4,
+            "result": {
+              "sessionId": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+              "messageSeq": 221,
+              "turnEndSeq": 223,
+              "textHash": "1d93e23d2860b6ade34c885359d695c4880f793b718f7703b6f768f4077c275f"
+            },
+            "error": null,
+            "checkpoints": [
+              "59e24152-1133-4a4b-8c04-d31eda070391",
+              "d214f8df-b460-49cb-8919-f144e21d994e"
+            ],
+            "operations": []
+          },
+          "same-dsh-session": {
+            "expected": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+            "actual": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d"
+          },
+          "actual-compaction-condition": {
+            "committed": 0,
+            "failed": 0,
+            "summaries": 0,
+            "validVisibleSummaries": 0,
+            "unresolvedVisibleSummaries": 0,
+            "fragmentLineageDepth": 0,
+            "visibleLineageDepth": 0,
+            "viewReplacements": 0,
+            "sessionId": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+            "events": 226
+          },
+          "required-summary-lineage": {
+            "depth": 0,
+            "visibleDepth": 0,
+            "scriptedDuplicateFixture": false
+          },
+          "actual-restart": {
+            "restarts": 0
+          },
+          "no-operation-replay": {
+            "before": [
+              {
+                "action": "history_fixture_prepare",
+                "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"bf5de6c2-63d9-4df6-981d-f695bc2eb972\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"2f0505bc-2dad-4f57-bb74-50f66f5a975b\",\"b8abc512-8049-46dd-9f97-e827bb84b621\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+              }
+            ],
+            "after": [
+              {
+                "action": "history_fixture_prepare",
+                "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"bf5de6c2-63d9-4df6-981d-f695bc2eb972\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"2f0505bc-2dad-4f57-bb74-50f66f5a975b\",\"b8abc512-8049-46dd-9f97-e827bb84b621\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+              }
+            ]
+          },
+          "private-marker-not-exposed": {
+            "requestLeak": false,
+            "answerLeak": false
+          },
+          "foundation-unchanged": {
+            "hash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a"
+          },
+          "answer-captured": {
+            "turns": 1,
+            "characters": 196
+          },
+          "all-real-dispatches-accounted": {
+            "started": 17,
+            "finished": 17,
+            "errors": []
+          },
+          "private-model-payload-not-persisted": {
+            "visibleOnly": true
+          }
+        },
+        "error": null
+      },
+      "calls": 17,
+      "costMicroCny": 849434,
+      "usageComplete": true
+    },
+    {
+      "caseId": "CAL-history-compressed",
+      "attemptId": "53a6e0cd-8f67-4b04-868a-a8a335b18789",
+      "program": {
+        "caseId": "CAL-history-compressed",
+        "attemptId": "53a6e0cd-8f67-4b04-868a-a8a335b18789",
+        "modelClass": "real",
+        "checks": [
+          {
+            "id": "identical-independent-baseline",
+            "passed": true,
+            "evidenceHash": "3e70b0844c6a28b72cbb6bda4cd1df5e7c2c1e7a6a14729fe3def9f66e26c9cc"
+          },
+          {
+            "id": "actual-history-input-exposure",
+            "passed": true,
+            "evidenceHash": "66f6a90e01cf2114ae218f6e44f53e9400c5090e586794d481a3d59c133fc3fa"
+          },
+          {
+            "id": "question-run-completed",
+            "passed": true,
+            "evidenceHash": "977a3e27d4d053851922de89d4cefac3001a4d4d8337b5d8b64ccf85f9c517e6"
+          },
+          {
+            "id": "same-dsh-session",
+            "passed": true,
+            "evidenceHash": "7079b9c975d05f2c0d9b7750cc4f658f0aa8fe3201d971861d79f49ca6c32e05"
+          },
+          {
+            "id": "actual-compaction-condition",
+            "passed": true,
+            "evidenceHash": "7b6f830e6987c743ba110ef15cd5a6ec5374b117be32b57f6ba0e88e3dd04435"
+          },
+          {
+            "id": "required-summary-lineage",
+            "passed": true,
+            "evidenceHash": "7e03b984e8ed4271fca4b2366dd5ac714e8f84c63393b937a133455727c00348"
+          },
+          {
+            "id": "actual-restart",
+            "passed": true,
+            "evidenceHash": "690d7be33c6f42fa4a7a3dea1288675c5e07159cff1fac93dda1928b4d757a7e"
+          },
+          {
+            "id": "no-operation-replay",
+            "passed": true,
+            "evidenceHash": "1edca6d40e78ffa0fc9b08858af94a7cc6729b8c965ffb36992f56a3ed4d8b68"
+          },
+          {
+            "id": "private-marker-not-exposed",
+            "passed": true,
+            "evidenceHash": "cd098a165742a5e21c33c0104b7ca8cc023cc344a0ad5080a00433b07fa9c33e"
+          },
+          {
+            "id": "foundation-unchanged",
+            "passed": true,
+            "evidenceHash": "743ee03ac56c548fbcfbe80f800625d6dba94cb19952fbba73678c57ade82601"
+          },
+          {
+            "id": "answer-captured",
+            "passed": true,
+            "evidenceHash": "67649900a395d3325dfe8865e7b529dc3a785e64867509f8e55f3a0c4197fce9"
+          },
+          {
+            "id": "all-real-dispatches-accounted",
+            "passed": true,
+            "evidenceHash": "74e0127194ed8eaeade87ea93e24c24a6091bdd8571d4f92463d5509c4054745"
+          },
+          {
+            "id": "private-model-payload-not-persisted",
+            "passed": true,
+            "evidenceHash": "c1f9dd4f28cb7805d2d89200492fa8b3eb2c49f8effe96c1a76ce386644b1c83"
+          }
+        ],
+        "evidence": {
+          "identical-independent-baseline": {
+            "baseline": "7844c02c58956628958d437542a33b82e0afba9f11d5e9db9c74c7e95244934e",
+            "copy": "7844c02c58956628958d437542a33b82e0afba9f11d5e9db9c74c7e95244934e"
+          },
+          "actual-history-input-exposure": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "question-run-completed": {
+            "id": "288180c6-4cee-4127-a6e5-4b5236c042ab",
+            "taskId": "bf5de6c2-63d9-4df6-981d-f695bc2eb972",
+            "state": "completed",
+            "version": 4,
+            "result": {
+              "sessionId": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+              "messageSeq": 342,
+              "turnEndSeq": 344,
+              "textHash": "5aceda3d3ba990cd125d852bde50f8f0b00e9d459bf789782413a8075bbab639"
+            },
+            "error": null,
+            "checkpoints": [
+              "b8fc3a56-4ac7-413e-ad12-18ae280ea27a",
+              "1fdf0e5c-2597-4f6a-983b-6cc514ce00de"
+            ],
+            "operations": []
+          },
+          "same-dsh-session": {
+            "expected": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+            "actual": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d"
+          },
+          "actual-compaction-condition": {
+            "committed": 8,
+            "failed": 0,
+            "summaries": 8,
+            "validVisibleSummaries": 5,
+            "unresolvedVisibleSummaries": 0,
+            "fragmentLineageDepth": 2,
+            "visibleLineageDepth": 2,
+            "viewReplacements": 9,
+            "sessionId": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+            "events": 347
+          },
+          "required-summary-lineage": {
+            "depth": 2,
+            "visibleDepth": 2,
+            "scriptedDuplicateFixture": false
+          },
+          "actual-restart": {
+            "restarts": 0
+          },
+          "no-operation-replay": {
+            "before": [
+              {
+                "action": "history_fixture_prepare",
+                "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"bf5de6c2-63d9-4df6-981d-f695bc2eb972\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"2f0505bc-2dad-4f57-bb74-50f66f5a975b\",\"b8abc512-8049-46dd-9f97-e827bb84b621\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+              }
+            ],
+            "after": [
+              {
+                "action": "history_fixture_prepare",
+                "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"bf5de6c2-63d9-4df6-981d-f695bc2eb972\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"2f0505bc-2dad-4f57-bb74-50f66f5a975b\",\"b8abc512-8049-46dd-9f97-e827bb84b621\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+              }
+            ]
+          },
+          "private-marker-not-exposed": {
+            "requestLeak": false,
+            "answerLeak": false
+          },
+          "foundation-unchanged": {
+            "hash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a"
+          },
+          "answer-captured": {
+            "turns": 1,
+            "characters": 235
+          },
+          "all-real-dispatches-accounted": {
+            "started": 73,
+            "finished": 73,
+            "errors": []
+          },
+          "private-model-payload-not-persisted": {
+            "visibleOnly": true
+          }
+        },
+        "error": null
+      },
+      "calls": 73,
+      "costMicroCny": 857770,
+      "usageComplete": true
+    },
+    {
+      "caseId": "CAL-history-restarted",
+      "attemptId": "365ddc0e-5134-40d5-ac62-ebe736beecd6",
+      "program": {
+        "caseId": "CAL-history-restarted",
+        "attemptId": "365ddc0e-5134-40d5-ac62-ebe736beecd6",
+        "modelClass": "real",
+        "checks": [
+          {
+            "id": "identical-independent-baseline",
+            "passed": true,
+            "evidenceHash": "3e70b0844c6a28b72cbb6bda4cd1df5e7c2c1e7a6a14729fe3def9f66e26c9cc"
+          },
+          {
+            "id": "actual-history-input-exposure",
+            "passed": true,
+            "evidenceHash": "66f6a90e01cf2114ae218f6e44f53e9400c5090e586794d481a3d59c133fc3fa"
+          },
+          {
+            "id": "restart-no-automatic-call",
+            "passed": true,
+            "evidenceHash": "8a426a8986fe5156af486ca3b0145d30a2a3bf59d65643e7836980a3592c153b"
+          },
+          {
+            "id": "question-run-completed",
+            "passed": true,
+            "evidenceHash": "75ae813b467e438c49cefe7500d914cd344264dd3f5c24e8033c9d8a2c4bc58e"
+          },
+          {
+            "id": "same-dsh-session",
+            "passed": true,
+            "evidenceHash": "7079b9c975d05f2c0d9b7750cc4f658f0aa8fe3201d971861d79f49ca6c32e05"
+          },
+          {
+            "id": "actual-compaction-condition",
+            "passed": true,
+            "evidenceHash": "b0faced01edb0aade663b37ec962ef75c17af3dae2e5fa58a1d1c41b474aeb44"
+          },
+          {
+            "id": "required-summary-lineage",
+            "passed": true,
+            "evidenceHash": "7e03b984e8ed4271fca4b2366dd5ac714e8f84c63393b937a133455727c00348"
+          },
+          {
+            "id": "actual-restart",
+            "passed": true,
+            "evidenceHash": "8df2b539f58a73f89153ffa92980024d63702086e9df64b6344b5edcd8980cbb"
+          },
+          {
+            "id": "no-operation-replay",
+            "passed": true,
+            "evidenceHash": "1edca6d40e78ffa0fc9b08858af94a7cc6729b8c965ffb36992f56a3ed4d8b68"
+          },
+          {
+            "id": "private-marker-not-exposed",
+            "passed": true,
+            "evidenceHash": "cd098a165742a5e21c33c0104b7ca8cc023cc344a0ad5080a00433b07fa9c33e"
+          },
+          {
+            "id": "foundation-unchanged",
+            "passed": true,
+            "evidenceHash": "743ee03ac56c548fbcfbe80f800625d6dba94cb19952fbba73678c57ade82601"
+          },
+          {
+            "id": "answer-captured",
+            "passed": true,
+            "evidenceHash": "ee345abac32da07a9b173446de05a321f087e4ada402a3366b26d9bc1f89ac5b"
+          },
+          {
+            "id": "all-real-dispatches-accounted",
+            "passed": true,
+            "evidenceHash": "3bfb9a8aeac99e84c172dbfae69c892c07205454cc26f8bac292789257b8d7db"
+          },
+          {
+            "id": "private-model-payload-not-persisted",
+            "passed": true,
+            "evidenceHash": "c1f9dd4f28cb7805d2d89200492fa8b3eb2c49f8effe96c1a76ce386644b1c83"
+          }
+        ],
+        "evidence": {
+          "identical-independent-baseline": {
+            "baseline": "7844c02c58956628958d437542a33b82e0afba9f11d5e9db9c74c7e95244934e",
+            "copy": "7844c02c58956628958d437542a33b82e0afba9f11d5e9db9c74c7e95244934e"
+          },
+          "actual-history-input-exposure": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "restart-no-automatic-call": {
+            "calls": 0
+          },
+          "question-run-completed": {
+            "id": "63004d9b-799c-4556-b36e-c7c8868e1f42",
+            "taskId": "bf5de6c2-63d9-4df6-981d-f695bc2eb972",
+            "state": "completed",
+            "version": 4,
+            "result": {
+              "sessionId": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+              "messageSeq": 347,
+              "turnEndSeq": 349,
+              "textHash": "2ead0a7d4a1aa7ba5456c9488f2255626a258b657cd2681fc76f9e8ad53effea"
+            },
+            "error": null,
+            "checkpoints": [
+              "fc941fcf-ba0a-47b6-b7a5-002560b69838",
+              "2fd8ac05-cc73-45fb-a28e-71586bdabf73"
+            ],
+            "operations": []
+          },
+          "same-dsh-session": {
+            "expected": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+            "actual": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d"
+          },
+          "actual-compaction-condition": {
+            "committed": 8,
+            "failed": 0,
+            "summaries": 8,
+            "validVisibleSummaries": 6,
+            "unresolvedVisibleSummaries": 0,
+            "fragmentLineageDepth": 2,
+            "visibleLineageDepth": 2,
+            "viewReplacements": 9,
+            "sessionId": "dafeiyu-task-64862897-66d5-40ef-9a6a-fa732b01085d",
+            "events": 352
+          },
+          "required-summary-lineage": {
+            "depth": 2,
+            "visibleDepth": 2,
+            "scriptedDuplicateFixture": false
+          },
+          "actual-restart": {
+            "restarts": 1
+          },
+          "no-operation-replay": {
+            "before": [
+              {
+                "action": "history_fixture_prepare",
+                "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"bf5de6c2-63d9-4df6-981d-f695bc2eb972\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"2f0505bc-2dad-4f57-bb74-50f66f5a975b\",\"b8abc512-8049-46dd-9f97-e827bb84b621\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+              }
+            ],
+            "after": [
+              {
+                "action": "history_fixture_prepare",
+                "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"bf5de6c2-63d9-4df6-981d-f695bc2eb972\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"2f0505bc-2dad-4f57-bb74-50f66f5a975b\",\"b8abc512-8049-46dd-9f97-e827bb84b621\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+              }
+            ]
+          },
+          "private-marker-not-exposed": {
+            "requestLeak": false,
+            "answerLeak": false
+          },
+          "foundation-unchanged": {
+            "hash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a"
+          },
+          "answer-captured": {
+            "turns": 1,
+            "characters": 151
+          },
+          "all-real-dispatches-accounted": {
+            "started": 81,
+            "finished": 81,
+            "errors": []
+          },
+          "private-model-payload-not-persisted": {
+            "visibleOnly": true
+          }
+        },
+        "error": null
+      },
+      "calls": 81,
+      "costMicroCny": 970502,
+      "usageComplete": true
+    }
+  ],
+  "network": {
+    "requests": 174,
+    "establishedConnections": 54,
+    "connectionErrors": 0,
+    "final": {
+      "at": "2026-10-26T04:29:20.326Z",
+      "event": "observer-ended",
+      "requests": 174,
+      "dropped": 0
+    }
+  },
+  "report": {
+    "schemaVersion": 1,
+    "exportId": "6c8666ef-e492-4950-aad8-adbb8fef1a5d",
+    "machine": {
+      "relative": "reports/6c8666ef-e492-4950-aad8-adbb8fef1a5d/machine.json",
+      "hash": "cb07db303a693a15263fe1de12a48bdad3a2651ec61f0335154baea7b7b63046"
+    },
+    "review": {
+      "relative": "reports/6c8666ef-e492-4950-aad8-adbb8fef1a5d/review.json",
+      "hash": "a70394febb7a0067431ddc783821f643834d447e8bc57a8d3f36f25a6df6e29a"
+    },
+    "verifiedAttempts": 39,
+    "reviewItems": 5,
+    "generatedAt": "2026-10-26T04:29:20.316Z"
+  }
+}
