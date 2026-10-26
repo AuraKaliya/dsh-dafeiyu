@@ -19,7 +19,7 @@ export function signWbi(params,img,sub,seconds=Math.floor(Date.now()/1000)){
   return {...sorted,w_rid:createHash('md5').update(query+key).digest('hex')};
 }
 export class BiliAuth {
-  constructor({root,fetchImpl=globalThis.fetch,clock=Date.now}={}){Object.assign(this,{root,fetchImpl,clock});this.credentialFile=path.join(root,'配置文件','凭据','bilibili.session.json');this.configFile=path.join(root,'配置文件','bilibili.json');this.keys=null;}
+  constructor({root,credentialFile,fetchImpl=globalThis.fetch,clock=Date.now}={}){Object.assign(this,{root,fetchImpl,clock});this.credentialFile=credentialFile??path.join(root,'配置文件','凭据','bilibili.session.json');this.configFile=path.join(root,'配置文件','bilibili.json');this.keys=null;}
   config(){const cfg=readJson(this.configFile,{});if(!/^[1-9][0-9]{0,19}$/.test(String(cfg.ownerUid))||!/^[1-9][0-9]{0,19}$/.test(String(cfg.accountUid))||String(cfg.ownerUid)===String(cfg.accountUid))throw fail('BILI_OWNER_MISMATCH','必须配置不同的账号和主人UID');return cfg;}
   session(required=true){
     const s=readJson(this.credentialFile,null);if(!s){if(required)throw fail('BILI_LOGIN_REQUIRED','请维护者扫码登录大肥鱼独立账号');return null;}

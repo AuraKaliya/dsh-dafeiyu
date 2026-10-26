@@ -5,10 +5,10 @@ import { dirname,isAbsolute,join,parse,resolve } from 'node:path';
 import { z } from 'zod';
 import { BiliOwnerIdSchema,BiliOwnerHashSchema,biliOwnerHash } from './types.js';
 
-export const BILI_OWNER_AUTH_HASH='1aa6d5496a57661b05f81f49d7d62c85983eb6670445f65fe8dbc8a7225ad978';
+export const BILI_OWNER_AUTH_HASH='84444bbabb740fa2ab0a63986c91660e0365391df0d0361940ce762dfadf967e';
 export const BILI_OWNER_PRODUCTION_PROTOCOL='bili-owner-production.v1';
 const absolute=z.string().min(1).max(1000).refine(value=>isAbsolute(value)&&!/^[/\\]{2}/.test(value));
-export const BiliOwnerProductionConfigSchema=z.strictObject({installationRoot:absolute,manifestPath:absolute,manifestHash:BiliOwnerHashSchema});
+export const BiliOwnerProductionConfigSchema=z.strictObject({installationRoot:absolute,manifestPath:absolute,manifestHash:BiliOwnerHashSchema,credentialFile:absolute.optional()});
 export type BiliOwnerProductionConfig=z.infer<typeof BiliOwnerProductionConfigSchema>;
 export const BiliOwnerProductionManifestSchema=z.strictObject({schemaVersion:z.literal(1),kind:z.literal('bili-owner-channel'),enabled:z.literal(true),
   accountUid:BiliOwnerIdSchema,ownerUid:BiliOwnerIdSchema,generation:z.number().int().positive().safe(),authModuleHash:z.literal(BILI_OWNER_AUTH_HASH),publicConfigHash:BiliOwnerHashSchema});
@@ -47,6 +47,6 @@ export function loadBiliOwnerProductionBinding(raw:unknown):PinnedBiliOwnerProdu
   const guard=()=>{physical(root,true,'BILI_OWNER_INSTALLATION_CHANGED');if(hash(publicBytes(manifestPath,65536,'BILI_OWNER_MANIFEST_CHANGED'))!==config.manifestHash)fail('BILI_OWNER_MANIFEST_CHANGED');
     if(hash(publicBytes(authPath,65536,'BILI_OWNER_AUTH_CHANGED'))!==BILI_OWNER_AUTH_HASH)fail('BILI_OWNER_AUTH_CHANGED');publicConfig(configPath,manifest.publicConfigHash,manifest);};
   const value:PinnedBiliOwnerProductionBinding=Object.freeze({config,manifest,authSource,identityHash,bindingStamp:identityHash,guard,
-    credentialPathGuard:()=>{guard();const path=join(root,'配置文件','凭据','bilibili.session.json'),stat=physical(path,false,'BILI_OWNER_LOGIN_REQUIRED');if(stat.size>262144)fail('BILI_OWNER_CREDENTIAL_INVALID');}});
+    credentialPathGuard:()=>{guard();const path=config.credentialFile??join(root,'配置文件','凭据','bilibili.session.json'),stat=physical(path,false,'BILI_OWNER_LOGIN_REQUIRED');if(stat.size>262144)fail('BILI_OWNER_CREDENTIAL_INVALID');}});
   guard();bindings.add(value);return value;
 }

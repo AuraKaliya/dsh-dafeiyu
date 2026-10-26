@@ -42,6 +42,9 @@
     },
     {
       "path": "packages/server-runtime"
+    },
+    {
+      "path": "packages/plugin"
     }
   ]
 }

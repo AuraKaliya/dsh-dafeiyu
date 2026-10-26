@@ -11,7 +11,7 @@ const NAV='https://api.bilibili.com/x/web-interface/nav',READ='https://api.vc.bi
 const RESPONSE_LIMIT=1048576;
 export interface BiliOwnerProductionDependencies {readonly fetch?:typeof globalThis.fetch}
 interface AuthPort {status():Promise<unknown>;session(required?:boolean):unknown;request(url:string,options:Record<string,unknown>):Promise<unknown>}
-interface AuthModule {BiliAuth:new(options:{root:string;fetchImpl:typeof globalThis.fetch;clock:()=>number})=>AuthPort;parseApiJson(text:string):unknown}
+interface AuthModule {BiliAuth:new(options:{root:string;credentialFile?:string;fetchImpl:typeof globalThis.fetch;clock:()=>number})=>AuthPort;parseApiJson(text:string):unknown}
 interface Invocation {readonly kind:'verify'|'read'|'send';readonly signal:AbortSignal;readonly guard:()=>void;readonly before?:string;readonly limit?:number;readonly text?:string;dispatched:boolean;failure:string|undefined}
 const apiId=z.union([BiliOwnerIdSchema,z.number().int().positive().safe().transform(String)]);
 const messageSchema=z.object({msg_key:apiId.optional(),msg_seqno:apiId,sender_uid:apiId,receiver_id:apiId,receiver_type:z.literal(1),msg_type:z.number().int().nonnegative(),timestamp:z.number().int().nonnegative().max(253402300799),content:z.string().max(131072)});
@@ -68,7 +68,7 @@ export async function createBiliOwnerProductionTransport(binding:PinnedBiliOwner
   };
   // The approved source imports only builtins and performs no IO in its constructor. Execute the exact bytes already verified above.
   let module:AuthModule;try{const imported:unknown=await import('data:text/javascript;base64,'+Buffer.from(binding.authSource,'utf8').toString('base64'));if(!imported||typeof imported!=='object'||!('BiliAuth'in imported)||typeof imported.BiliAuth!=='function'||!('parseApiJson'in imported)||typeof imported.parseApiJson!=='function')throw new Error();module=imported as AuthModule;
-    auth=new module.BiliAuth({root:binding.config.installationRoot,fetchImpl:guardedFetch,clock:Date.now});}catch{throw new Error('BILI_OWNER_AUTH_LOAD_FAILED');}
+    auth=new module.BiliAuth({root:binding.config.installationRoot,...(binding.config.credentialFile?{credentialFile:binding.config.credentialFile}:{}),fetchImpl:guardedFetch,clock:Date.now});}catch{throw new Error('BILI_OWNER_AUTH_LOAD_FAILED');}
   guard();
   const invoke=async<T>(invocation:Invocation,work:()=>Promise<T>):Promise<T>=>local.run(invocation,async()=>{guard();invocation.signal.throwIfAborted();invocation.guard();credentials();return work();});
   const bindingResult=():z.infer<typeof BiliOwnerBindingSchema>=>({accountUid:accountUid,ownerUid:ownerUid,loggedIn:true,bindingStamp:binding.bindingStamp});
