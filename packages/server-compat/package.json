@@ -1,0 +1,6 @@
+{
+  "name":"@dafeiyu/server-compat","version":"0.1.0","private":true,"type":"module",
+  "main":"./lib/index.js","types":"./lib/index.d.ts",
+  "exports":{".":{"types":"./lib/index.d.ts","default":"./lib/index.js"}},
+  "dependencies":{"@dafeiyu/contracts":"0.15.0","zod":"4.4.3"}
+}

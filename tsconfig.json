@@ -39,6 +39,9 @@
     },
     {
       "path": "packages/server-bootstrap"
+    },
+    {
+      "path": "packages/server-compat"
     }
   ]
 }
