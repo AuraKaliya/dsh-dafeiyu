@@ -21,6 +21,27 @@
         "relative": "cases/024e2497-98ba-427c-8a2f-0ddd7b98a88e/program.json",
         "hash": "248ad380d269186c458ebb89b9ce7680a70051b794591521b6d8a3c294c53729"
       }
+    },
+    {
+      "caseId": "B05-paraphrase-3",
+      "attemptId": "f667d966-fcb9-4e97-b1bf-bedda2aaa39d",
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "reviewer": "codex-under-user-delegated-autonomy",
+      "reviewedAt": "2026-10-26T06:27:25.808Z",
+      "failedCheckIds": [
+        "actual-message-authority"
+      ],
+      "continueIndependentCases": true,
+      "releaseBlocked": true,
+      "rationale": "当前请求记录严格为空，没有昵称或引用越权创建的任务；明确委托未形成独立Task，保留漏受理失败。夹具未给实体原文且只识别任务前缀，语义与真实QQ结论需限定。其他程序和计费检查通过，可继续独立样本，发布仍被阻断，不对相同配置重抽到通过。",
+      "program": {
+        "relative": "cases/f667d966-fcb9-4e97-b1bf-bedda2aaa39d/program.json",
+        "hash": "a2b5b917bcb73eb9d0feccb56e13110755490b7c5323230e477bfdd1c73d6672"
+      }
     }
   ]
 }
