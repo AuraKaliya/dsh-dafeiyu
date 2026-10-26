@@ -29,7 +29,8 @@ import { sha256 } from './catalog.ts';
 import { transportFacts } from './transport-diagnostics.ts';
 
 export interface ObservedRequest {purpose:string;text:string;reasoningEffort:string|null;nativeUserInputs:readonly string[]}
-export const REAL_CONNECTION_HEADERS=Object.freeze({connection:'close'});
+// Keep the adapter's default connection reuse; fresh TLS setup was itself failing intermittently.
+export const REAL_CONNECTION_HEADERS=Object.freeze({});
 export function visibleRequestText(options:GenerateOptions){return JSON.stringify({system:options.system??'',messages:options.messages},(key,value:unknown)=>['replayState','reasoning_content'].includes(key)||value&&typeof value==='object'&&'type'in value&&value.type==='reasoning'?undefined:value);}
 /** Only transport cancellation changes; the model input and all semantic options remain untouched. */
 export class DeadlineAdapter extends LlmAdapter {

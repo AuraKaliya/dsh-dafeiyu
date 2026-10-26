@@ -12,9 +12,9 @@ export function observeAcceptanceNetwork(root:string,origin:string,controllerHas
   if(!/^[a-f0-9]{64}$/.test(controllerHash))throw new Error('NETWORK_CONTROLLER_HASH_INVALID');mkdirSync(root,{recursive:true});const path=join(root,randomUUID()+'.jsonl'),known=new WeakMap<object,number>(),subscriptions:{name:string;listener:(message:unknown)=>void}[]=[];let count=0,events=0,dropped=0,closed=false;
   const write=(record:Record<string,unknown>)=>{if(events++>=50000){dropped++;return;}appendFileSync(path,JSON.stringify({at:new Date().toISOString(),...record})+'\n');};
   write({event:'observer-started',schemaVersion:1,controllerHash,node:process.version,undici:process.versions.undici,proxyEnabled:process.env.NODE_USE_ENV_PROXY==='1'});
-  for(const name of ['undici:request:create','undici:client:sendHeaders','undici:request:bodySent','undici:request:headers','undici:request:trailers','undici:request:error','undici:client:connectError']){
+  for(const name of ['undici:request:create','undici:client:sendHeaders','undici:request:bodySent','undici:request:headers','undici:request:trailers','undici:request:error','undici:client:connectError','undici:client:connected']){
     const listener=(message:unknown)=>{try{if(closed||!object(message))return;
-      if(name==='undici:client:connectError'){const params=message.connectParams;if(object(params)&&params.hostname===new URL(origin).hostname)write({event:'connection-error',facts:transportFacts(message.error)});return;}
+      if(name==='undici:client:connectError'||name==='undici:client:connected'){const params=message.connectParams;if(object(params)&&params.hostname===new URL(origin).hostname)write(name==='undici:client:connected'?{event:'connection-established'}:{event:'connection-error',facts:transportFacts(message.error)});return;}
       const request=message.request;if(!object(request))return;
       if(name==='undici:request:create'){if(String(request.origin)!==origin)return;known.set(request,++count);write({event:'request-created',request:count});return;}
       const id=known.get(request);if(id===undefined)return;
