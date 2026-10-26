@@ -23,9 +23,9 @@ import { ServerExecutorService,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-e
 import type { ServerExecutorDependencies } from '@dafeiyu/server-executor';
 import { reconcileMedia } from './media-recovery.js';
 import * as Timeline from '@dafeiyu/timeline';
-import * as QQ from '@dafeiyu/channel-qq';
-import { openBiliOwnerChannel,BILI_OWNER_SCHEMA_VERSION } from '@dafeiyu/channel-bili-owner';
-import type { BiliOwnerChannel,BiliOwnerPorts } from '@dafeiyu/channel-bili-owner';
+import * as QQ from '@dafeiyu/qq';
+import { openBiliOwnerChannel,BILI_OWNER_SCHEMA_VERSION } from '@dafeiyu/bilibili/channel';
+import type { BiliOwnerChannel,BiliOwnerPorts } from '@dafeiyu/bilibili/channel';
 import * as Simulator from '@dafeiyu/channel-simulator';
 import { ExecutionRequestSchema } from '@dafeiyu/contracts';
 import { readFileSync,existsSync,writeFileSync,renameSync } from 'node:fs';

@@ -1,23 +1,24 @@
+import {BILI_OWNER_ACCOUNT,BILI_OWNER_UID} from './bili-owner-identity.js';
 import assert from 'node:assert/strict';
 import { mkdtemp,writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { ManagedHost,HostRuntimeOptions } from '@dafeiyu/host';
-import type { BiliOwnerIdentity } from '@dafeiyu/channel-bili-owner';
+import type { BiliOwnerIdentity } from '@dafeiyu/bilibili/channel';
 import { testTempDir } from './test-temp.js';
 
 const scenario=process.argv[2];assert.ok(['chat','task','missing','optional','optional-recovery','single','drain'].includes(scenario??''));
 const root=await mkdtemp(join(testTempDir(),'host-bili-owner-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
 process.env.DSH_HOME=join(root,'data/core/dsh-home');
 const {ManagedHost:Host,loadHostConfig,initializeProfile,inspectHost,owners,readHostStatus,BILI_OWNER_NATIVE_ACTIONS}=await import('@dafeiyu/host');
-const {BiliOwnerStore,BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE}=await import('@dafeiyu/channel-bili-owner');
+const {BiliOwnerStore,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE}=await import('@dafeiyu/bilibili/channel');
 const {biliOwnerBackend,incomingBili,fixtureHash}=await import('./bili-owner-channel-fixture.js');
 const {ScriptedModel,textReply,call}=await import('./harness.js');
 const {outcomes}=await import('./qq-capabilities-fixture.js');
 const recovery=scenario==='optional-recovery',task=scenario==='task'||scenario==='optional'||recovery,backend=biliOwnerBackend(),identity:BiliOwnerIdentity={agentId:'dafeiyu',profileId:'bili-owner-host-fixture',accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID};
 const plugins:{id:string;required:boolean;config:Record<string,unknown>}[]=[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{sourceTracking:true}},
   ...(task?[{id:'media',required:true,config:{ffmpeg:process.execPath,ffprobe:process.execPath}},{id:'bilibili',required:true,config:{minIntervalMs:100}}]:[]),
-  {id:'channel-bili-owner',required:scenario!=='optional'&&!recovery,config:{tasks:{enabled:task,deliverResults:!recovery}}},...(scenario==='optional'?[{id:'channel-simulator',required:true,config:{account:'fixture'}}]:[])];
+  {id:'channel-bili-owner',required:scenario!=='optional'&&!recovery,config:{accountUid:'10000001',ownerUid:'10000002',tasks:{enabled:task,deliverResults:!recovery}}},...(scenario==='optional'?[{id:'channel-simulator',required:true,config:{account:'fixture'}}]:[])];
 const config={schemaVersion:1,profileId:identity.profileId,agent:{id:identity.agentId},paths:{core:'data/core',memory:'data/memory',sessions:'data/sessions',query:'data/query.sqlite'},modelRoutes:{chat:{provider:'local-test',model:'scripted'}},
   persona:{fixedFile:'persona.md',kind:'test'},runtime:{turnTimeoutMs:10000,shutdownGraceMs:3000,...(recovery?{maxConcurrentRuns:1}:{})},diagnostics:{snapshotIntervalMs:recovery?60000:100},plugins,
   authorityPolicies:[{id:'local',producers:['host-cli'],actions:[],allowLocalWrite:false},

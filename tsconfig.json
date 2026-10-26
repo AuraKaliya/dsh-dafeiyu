@@ -42,9 +42,6 @@
     },
     {
       "path": "packages/server-runtime"
-    },
-    {
-      "path": "packages/channel-bili-owner"
     }
   ]
 }

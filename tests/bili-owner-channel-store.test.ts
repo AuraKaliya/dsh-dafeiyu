@@ -1,3 +1,4 @@
+import {BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE} from './bili-owner-identity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,readFile } from 'node:fs/promises';
@@ -5,9 +6,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { BiliOwnerStore,initializeBiliOwnerStorage,inspectBiliOwnerStorage,BILI_OWNER_APPLICATION_ID,BILI_OWNER_SCHEMA_VERSION,
-  BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE,biliOwnerTextHash } from '@dafeiyu/channel-bili-owner';
-import type { BiliOwnerMessage,BiliOwnerPage,BiliOwnerIdentity } from '@dafeiyu/channel-bili-owner';
+import { BiliOwnerStore,initializeBiliOwnerStorage,inspectBiliOwnerStorage,BILI_OWNER_APPLICATION_ID,BILI_OWNER_SCHEMA_VERSION,biliOwnerTextHash } from '@dafeiyu/bilibili/channel';
+import type { BiliOwnerMessage,BiliOwnerPage,BiliOwnerIdentity } from '@dafeiyu/bilibili/channel';
 import { testTempDir } from './test-temp.js';
 
 const identity:BiliOwnerIdentity={agentId:'dafeiyu',profileId:'bili-owner-test',accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID};

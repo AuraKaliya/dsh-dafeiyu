@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { MediaAssetRefSchema,conversationKey } from '@dafeiyu/contracts';
 import type { MediaAssetRef,MediaProviderRefSchema } from '@dafeiyu/contracts';
 import { MEDIA_ACTIONS } from '@dafeiyu/media';
-import { QQ_MEDIA_ACTIONS } from '@dafeiyu/channel-qq';
+import { QQ_MEDIA_ACTIONS } from '@dafeiyu/qq';
 import { qqCapabilityFixture,bot,owner,scene,group,until,outcomes } from './qq-capabilities-fixture.js';
 import { createImageFixture } from './phase1-image-fixture.js';
 import { syntheticPcm } from './media-pcm-fixture.js';

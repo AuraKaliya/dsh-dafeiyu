@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { QqStore,splitQqText,QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
+import { QqStore,splitQqText,QQ_SCHEMA_VERSION } from '@dafeiyu/qq';
 import { inspectStorage } from '@dafeiyu/host';
 import type { Reply } from '@dafeiyu/contracts';
 import { testTempDir } from './test-temp.js';

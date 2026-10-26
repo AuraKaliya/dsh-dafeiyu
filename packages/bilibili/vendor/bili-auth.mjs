@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 
-export const OWNER_UID='13461350';
 export const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 export const API='https://api.bilibili.com';
 export const HEADERS={'User-Agent':UA,Referer:'https://www.bilibili.com/',Origin:'https://www.bilibili.com',Accept:'application/json'};
@@ -21,11 +20,11 @@ export function signWbi(params,img,sub,seconds=Math.floor(Date.now()/1000)){
 }
 export class BiliAuth {
   constructor({root,fetchImpl=globalThis.fetch,clock=Date.now}={}){Object.assign(this,{root,fetchImpl,clock});this.credentialFile=path.join(root,'配置文件','凭据','bilibili.session.json');this.configFile=path.join(root,'配置文件','bilibili.json');this.keys=null;}
-  config(){const cfg=readJson(this.configFile,{});if(cfg.ownerUid&&String(cfg.ownerUid)!==OWNER_UID)throw fail('BILI_OWNER_MISMATCH','私信对象配置与维护者指定UID不一致');return cfg;}
+  config(){const cfg=readJson(this.configFile,{});if(!/^[1-9][0-9]{0,19}$/.test(String(cfg.ownerUid))||!/^[1-9][0-9]{0,19}$/.test(String(cfg.accountUid))||String(cfg.ownerUid)===String(cfg.accountUid))throw fail('BILI_OWNER_MISMATCH','必须配置不同的账号和主人UID');return cfg;}
   session(required=true){
     const s=readJson(this.credentialFile,null);if(!s){if(required)throw fail('BILI_LOGIN_REQUIRED','请维护者扫码登录大肥鱼独立账号');return null;}
     const configured=this.config().accountUid;
-    if(!/^[1-9][0-9]{0,18}$/.test(String(s.mid))||String(s.mid)===OWNER_UID||String(s.cookies?.DedeUserID)!==String(s.mid)||(configured&&String(configured)!==String(s.mid))||!s.cookies?.SESSDATA||!s.cookies?.bili_jct)throw fail('BILI_ACCOUNT_MISMATCH','独立账号凭据不一致，需重新登录');
+    if(!/^[1-9][0-9]{0,18}$/.test(String(s.mid))||String(s.mid)===String(this.config().ownerUid)||String(s.cookies?.DedeUserID)!==String(s.mid)||(configured&&String(configured)!==String(s.mid))||!s.cookies?.SESSDATA||!s.cookies?.bili_jct)throw fail('BILI_ACCOUNT_MISMATCH','独立账号凭据不一致，需重新登录');
     return s;
   }
   cookieHeader(url,required=true){
@@ -47,9 +46,9 @@ export class BiliAuth {
     return json;
   }
   async status(){
-    const session=this.session(false);if(!session)return {loggedIn:false,ownerUid:OWNER_UID,loginRequired:true};
+    const session=this.session(false);if(!session)return {loggedIn:false,ownerUid:String(this.config().ownerUid),loginRequired:true};
     const j=await this.request(API+'/x/web-interface/nav');
     if(!j.data?.isLogin||String(j.data.mid)!==String(session.mid))throw fail('BILI_LOGIN_EXPIRED','登录态失效或账号发生变化');
-    return {loggedIn:true,uid:String(j.data.mid),name:j.data.uname,level:j.data.level_info?.current_level,ownerUid:OWNER_UID,dmMode:'owner_only'};
+    return {loggedIn:true,uid:String(j.data.mid),name:j.data.uname,level:j.data.level_info?.current_level,ownerUid:String(this.config().ownerUid),dmMode:'owner_only'};
   }
 }

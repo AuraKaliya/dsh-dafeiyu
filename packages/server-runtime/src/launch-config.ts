@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { WindowsProcessControlOptionsSchema,WINDOWS_PROCESS_PROBE_PATH } from '@dafeiyu/server-executor/windows-process';
 import type { PreparedHostConfig } from '@dafeiyu/host';
-import { BiliOwnerProductionConfigSchema,loadBiliOwnerProductionBinding } from '@dafeiyu/channel-bili-owner/production-config';
+import { BiliOwnerProductionConfigSchema,loadBiliOwnerProductionBinding } from '@dafeiyu/bilibili/channel/production-config';
 import { RuntimeHashSchema,RuntimePathSchema,runtimeBytesHash,runtimeCheck,runtimeFreeze,runtimeDigest,runtimePathIdentity,readRuntimeJson } from './runtime-files.js';
 import { RuntimeIdentitySchema } from './types.js';
 import { ExecutorRouteSchema } from '@dafeiyu/server-executor/protocol';

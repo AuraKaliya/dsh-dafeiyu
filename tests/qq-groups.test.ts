@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
-import { GroupDirectory, GroupSyncConfigSchema, QqPluginConfigSchema, QqStore, naturallyAddressed } from '@dafeiyu/channel-qq';
+import { GroupDirectory, GroupSyncConfigSchema, QqPluginConfigSchema, QqStore, naturallyAddressed } from '@dafeiyu/qq';
 
 test('natural QQ address matching recognizes explicit Chinese addresses while ignoring quoted or incidental names', () => {
   const names = ['大肥鱼', '蓝色大肥鱼'];

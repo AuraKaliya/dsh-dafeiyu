@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { QqStore } from '@dafeiyu/channel-qq';
+import { QqStore } from '@dafeiyu/qq';
 import { ReplyMediaManifestSchema } from '@dafeiyu/contracts';
 import type { Reply,MediaAssetRef } from '@dafeiyu/contracts';
 import { qqMediaDeliveryPlan,qqTextHash,qqMediaHash } from '../packages/channel-qq/lib/media-delivery.js';

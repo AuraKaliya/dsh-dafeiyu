@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { API_VERSION,MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskControlSchema,MessageTaskSourceSchema } from '@dafeiyu/contracts';
 import type { ActionCapabilityV3,ExecutionContextV3,ExtensionHandle,HostConfig } from '@dafeiyu/contracts';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
-import { qqTaskDirective } from '@dafeiyu/channel-qq';
+import { qqTaskDirective } from '@dafeiyu/qq';
 import type { BoundarySample,EvaluationCase } from './catalog.ts';
 import { sha256 } from './catalog.ts';
 import { evaluationRows } from './boundary.ts';

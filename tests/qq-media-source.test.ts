@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer } from 'node:http';
-import { QqStore,inspectQqSchema } from '@dafeiyu/channel-qq';
+import { QqStore,inspectQqSchema } from '@dafeiyu/qq';
 import type { Conversation,MediaByteStream } from '@dafeiyu/contracts';
 import { QqMediaReader,QqMediaConfigSchema,publicIpv4 } from '../packages/channel-qq/lib/media-reader.js';
 import { testTempDir } from './test-temp.js';

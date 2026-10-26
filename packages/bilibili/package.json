@@ -1,7 +1,39 @@
 {
-  "name": "@dafeiyu/bilibili", "version": "0.1.0", "private": true, "type": "module",
-  "main": "./lib/index.js", "types": "./lib/index.d.ts",
-  "exports": {".": {"types": "./lib/index.d.ts", "default": "./lib/index.js"}, "./store": {"types": "./lib/store.d.ts", "default": "./lib/store.js"}},
-  "dependencies": {"@dafeiyu/contracts": "0.15.0", "@dafeiyu/core": "0.15.0", "@dafeiyu/journal": "0.4.0", "zod": "4.4.3"},
-  "peerDependencies": {"@deepseek-ai/cordis": "4.0.5"}
+  "name": "@dafeiyu/bilibili",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./store": {
+      "types": "./lib/store.d.ts",
+      "default": "./lib/store.js"
+    },
+    "./channel": {
+      "types": "./lib/channel/index.d.ts",
+      "default": "./lib/channel/index.js"
+    },
+    "./channel/store": {
+      "types": "./lib/channel/store.d.ts",
+      "default": "./lib/channel/store.js"
+    },
+    "./channel/production-config": {
+      "types": "./lib/channel/production-config.d.ts",
+      "default": "./lib/channel/production-config.js"
+    }
+  },
+  "dependencies": {
+    "@dafeiyu/contracts": "0.15.0",
+    "@dafeiyu/core": "0.15.0",
+    "@dafeiyu/journal": "0.4.0",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5"
+  }
 }

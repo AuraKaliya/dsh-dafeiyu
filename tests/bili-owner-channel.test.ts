@@ -1,9 +1,10 @@
+import {BILI_OWNER_SCENE} from './bili-owner-identity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Context } from '@deepseek-ai/cordis';
-import { BILI_OWNER_SCENE,BILI_OWNER_TASK_ACTIONS,BiliOwnerPluginConfigSchema,openBiliOwnerChannel } from '@dafeiyu/channel-bili-owner';
+import { BILI_OWNER_TASK_ACTIONS,BiliOwnerPluginConfigSchema,openBiliOwnerChannel } from '@dafeiyu/bilibili/channel';
 import { ActionOutcomeSchema } from '@dafeiyu/contracts';
 import { biliOwnerChannelFixture,biliOwnerBackend,incomingBili,fixedNow } from './bili-owner-channel-fixture.js';
 import { call,textReply } from './harness.js';
@@ -16,8 +17,8 @@ function tasks(h:Fixture){const db=new DatabaseSync(join(h.root,'core','runtime.
 function operationOutcomes(h:Fixture){const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{return db.prepare('SELECT action,outcome FROM run_operations WHERE outcome IS NOT NULL ORDER BY ordinal').all().map(row=>({action:row.action,outcome:ActionOutcomeSchema.parse(JSON.parse(String(row.outcome)))}));}finally{db.close();}}
 
 test('Bili owner ingress binds real fixed scene and exact IDs, ignores self messages and deduplicates without another model turn',async()=>{
-  const h=await biliOwnerChannelFixture();try{const original=incomingBili();h.backend.state.messages=[original,{...incomingBili('9007199254740993124'),senderUid:'170759822',receiverUid:'13461350'}];await h.poll();
-    assert.equal(h.adapter.requests.length,1);assert.equal(h.backend.state.sent.length,1);const item=h.core.journal.list()[0]!;assert.deepEqual(item.message.conversation,BILI_OWNER_SCENE);assert.equal(item.message.id,original.id);assert.equal(item.message.mainText,original.text);assert.equal(item.message.sender.id,'13461350');assert.equal(item.state,'delivered');
+  const h=await biliOwnerChannelFixture();try{const original=incomingBili();h.backend.state.messages=[original,{...incomingBili('9007199254740993124'),senderUid:'10000001',receiverUid:'10000002'}];await h.poll();
+    assert.equal(h.adapter.requests.length,1);assert.equal(h.backend.state.sent.length,1);const item=h.core.journal.list()[0]!;assert.deepEqual(item.message.conversation,BILI_OWNER_SCENE);assert.equal(item.message.id,original.id);assert.equal(item.message.mainText,original.text);assert.equal(item.message.sender.id,'10000002');assert.equal(item.state,'delivered');
     h.advance();await h.poll();assert.equal(h.adapter.requests.length,1);assert.equal(h.backend.state.attempts.length,1);assert.equal(h.channel.getStatus().counts.inbound.accepted,1);assert.equal(h.channel.getStatus().transport,'program-injected');
     h.backend.state.messages.push({...incomingBili('9007199254740993125'),senderUid:'123456'});h.advance();await h.poll();assert.equal(h.adapter.requests.length,1);assert.ok(h.channel.getStatus().error);assert.equal(h.channel.store.source('9007199254740993125'),null);
   }finally{await h.close();}
@@ -122,13 +123,13 @@ test('an actual account change persists source invalidation across restart inste
     backend.state.account='123456';h.advance();await h.poll();assert.equal(h.channel.getStatus().bindingFault,'BILI_OWNER_ACCOUNT_MISMATCH');assert.equal(h.channel.getStatus().bindingReady,false);assert.equal(h.channel.getStatus().verified,false);
     await assert.rejects(()=>port.readResult(port.restoreRun(id)),/SOURCE_STALE/);
   }finally{await h.close();}
-  backend.state.account='170759822';const checked=backend.state.verifications;
+  backend.state.account='10000001';const checked=backend.state.verifications;
   await assert.rejects(()=>biliOwnerChannelFixture({root,backend,create:false,tasks:true,deliverResults:false}),/BILI_OWNER_BINDING_REJECTED/);assert.equal(backend.state.verifications,checked);assert.equal(backend.state.closes,2);assert.equal(backend.state.releases,2);
 });
 
 test('constructor and identity-check failures release the transferred ports exactly once and cannot accept injected config authority',async()=>{
   for(const settings of [{accountUid:'123456'},{ownerUid:'123456'},{mode:'production'},{transport:{send:'fake'}}])assert.throws(()=>BiliOwnerPluginConfigSchema.parse(settings));
-  const missing=biliOwnerBackend(),ctx=new Context();try{await assert.rejects(()=>openBiliOwnerChannel(ctx,{agentId:'dafeiyu',profileId:'missing-core',dataDir:testTempDir()},missing.createPorts()),/BILI_OWNER_CORE_REQUIRED/);assert.equal(missing.state.closes,1);assert.equal(missing.state.releases,1);assert.equal(missing.state.verifications,0);}finally{await ctx.fiber.dispose();}
+  const missing=biliOwnerBackend(),ctx=new Context();try{await assert.rejects(()=>openBiliOwnerChannel(ctx,{agentId:'dafeiyu',profileId:'missing-core',dataDir:testTempDir(),settings:{accountUid:'10000001',ownerUid:'10000002'}},missing.createPorts()),/BILI_OWNER_CORE_REQUIRED/);assert.equal(missing.state.closes,1);assert.equal(missing.state.releases,1);assert.equal(missing.state.verifications,0);}finally{await ctx.fiber.dispose();}
   const construction=biliOwnerBackend();await assert.rejects(()=>biliOwnerChannelFixture({tasks:true,omitTaskPolicy:true,backend:construction}),/SCOPE_DENIED|CONSTRUCTION/);assert.equal(construction.state.closes,1);assert.equal(construction.state.releases,1);assert.equal(construction.state.verifications,0);
   const wrongAccount=biliOwnerBackend();wrongAccount.state.account='123456';await assert.rejects(()=>biliOwnerChannelFixture({backend:wrongAccount}));assert.equal(wrongAccount.state.closes,1);assert.equal(wrongAccount.state.releases,1);assert.equal(wrongAccount.state.attempts.length,0);
   const h=await biliOwnerChannelFixture();try{const journal=h.core.journal;await h.channel.close();await h.channel.close();assert.equal(h.backend.state.closes,1);assert.equal(h.backend.state.releases,1);assert.equal(h.ctx.get('dafeiyuBiliOwner'),undefined);

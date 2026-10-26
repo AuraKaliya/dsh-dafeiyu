@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { qqTaskDirective } from '@dafeiyu/channel-qq';
+import { qqTaskDirective } from '@dafeiyu/qq';
 import type { ExecutionContextV3 } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,otherGroup,outcomes,until,bot,group } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';

@@ -3,30 +3,27 @@ import { z } from 'zod';
 import { ConversationSchema,TaskResultAnchorSchema } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
 
-export const BILI_OWNER_ACCOUNT='170759822';
-export const BILI_OWNER_UID='13461350';
 export const BILI_OWNER_EXTENSION='channel-bili-owner';
 export const BILI_OWNER_VERSION='0.1.0';
-export const BILI_OWNER_CONSUMER_KEY='bilibili-owner:170759822:13461350';
-export const BILI_OWNER_SCENE=Object.freeze({channel:'bilibili',account:BILI_OWNER_ACCOUNT,kind:'private' as const,id:BILI_OWNER_UID});
 export const BILI_PUBLIC_SCENE=Object.freeze({channel:'bilibili',account:'public',kind:'local' as const,id:'public'});
 export const BiliOwnerHashSchema=z.string().regex(/^[a-f0-9]{64}$/);
 export const BiliOwnerCodeSchema=z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/);
 export const BiliOwnerIdSchema=z.string().regex(/^[1-9][0-9]{0,19}$/);
 export const BiliOwnerRequestSchema=z.string().regex(/^[A-Za-z0-9._:-]{1,120}$/);
-export const BiliOwnerIdentitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/),accountUid:z.literal(BILI_OWNER_ACCOUNT),ownerUid:z.literal(BILI_OWNER_UID)});
+export const BiliOwnerIdentitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/),accountUid:BiliOwnerIdSchema,ownerUid:BiliOwnerIdSchema});
 export type BiliOwnerIdentity=z.infer<typeof BiliOwnerIdentitySchema>;
-export const BiliOwnerBindingSchema=z.strictObject({accountUid:z.literal(BILI_OWNER_ACCOUNT),ownerUid:z.literal(BILI_OWNER_UID),loggedIn:z.literal(true),bindingStamp:BiliOwnerHashSchema});
+export const BiliOwnerBindingSchema=z.strictObject({accountUid:BiliOwnerIdSchema,ownerUid:BiliOwnerIdSchema,loggedIn:z.literal(true),bindingStamp:BiliOwnerHashSchema});
 export const BiliOwnerMessageSchema=z.strictObject({id:BiliOwnerIdSchema,seqno:BiliOwnerIdSchema,senderUid:BiliOwnerIdSchema,receiverUid:BiliOwnerIdSchema,
   type:z.number().int().nonnegative(),timestamp:z.number().int().nonnegative().max(253402300799),text:z.string().max(32000)})
-  .refine(value=>value.senderUid===BILI_OWNER_UID&&value.receiverUid===BILI_OWNER_ACCOUNT||value.senderUid===BILI_OWNER_ACCOUNT&&value.receiverUid===BILI_OWNER_UID,'Unexpected private message participants');
+;
 export type BiliOwnerMessage=z.infer<typeof BiliOwnerMessageSchema>;
 export const BiliOwnerPageSchema=BiliOwnerBindingSchema.extend({messages:z.array(BiliOwnerMessageSchema).max(30),hasMore:z.boolean(),nextBeforeSeqno:BiliOwnerIdSchema.nullable()})
+  .refine(value=>value.messages.every(message=>message.senderUid===value.ownerUid&&message.receiverUid===value.accountUid||message.senderUid===value.accountUid&&message.receiverUid===value.ownerUid),'Unexpected private message participants')
   .refine(value=>!value.hasMore||value.messages.length>0&&value.nextBeforeSeqno!==null,'Incomplete page cursor')
   .refine(value=>new Set(value.messages.map(message=>message.id)).size===value.messages.length,'Duplicate page IDs');
 export type BiliOwnerPage=z.infer<typeof BiliOwnerPageSchema>;
 export const BiliOwnerSendResultSchema=z.discriminatedUnion('status',[
-  z.strictObject({status:z.literal('sent'),receiptId:BiliOwnerIdSchema,accountUid:z.literal(BILI_OWNER_ACCOUNT),ownerUid:z.literal(BILI_OWNER_UID),requestId:z.string().regex(/^[A-Za-z0-9_-]{8,100}$/),wireHash:BiliOwnerHashSchema}),
+  z.strictObject({status:z.literal('sent'),receiptId:BiliOwnerIdSchema,accountUid:BiliOwnerIdSchema,ownerUid:BiliOwnerIdSchema,requestId:z.string().regex(/^[A-Za-z0-9_-]{8,100}$/),wireHash:BiliOwnerHashSchema}),
   z.strictObject({status:z.literal('not-dispatched'),code:BiliOwnerCodeSchema}),z.strictObject({status:z.literal('unknown'),code:BiliOwnerCodeSchema}),
 ]);
 export type BiliOwnerSendResult=z.infer<typeof BiliOwnerSendResultSchema>;
@@ -40,7 +37,7 @@ export interface BiliOwnerTransport {
   close?():void|Promise<void>;
 }
 /** Acquired by the trusted launcher across profiles; the epoch is persistent ownership, not a process nonce. */
-export interface BiliOwnerConsumerLease {readonly key:typeof BILI_OWNER_CONSUMER_KEY;readonly epoch:number;guard():void;release():void|Promise<void>}
+export interface BiliOwnerConsumerLease {readonly key:string;readonly epoch:number;guard():void;release():void|Promise<void>}
 export interface BiliOwnerPorts {readonly transport:BiliOwnerTransport;readonly lease:BiliOwnerConsumerLease;readonly now?:()=>number}
 
 export const BiliOwnerReplySchema=z.strictObject({id:z.string().min(1).max(200),conversation:ConversationSchema,sourceMessageId:BiliOwnerIdSchema,text:z.string().max(32000),taskResult:TaskResultAnchorSchema.optional()});
@@ -54,3 +51,7 @@ function canonical(value:Json):string{return value===null||typeof value!=='objec
 export const biliOwnerHash=(value:unknown)=>createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');
 export const biliOwnerTextHash=(value:string)=>createHash('sha256').update(value).digest('hex');
 export function biliOwnerCode(error:unknown,fallback='BILI_OWNER_FAILED'):string{return error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:fallback;}
+
+export type BiliOwnerAccount=Pick<BiliOwnerIdentity,'accountUid'|'ownerUid'>;
+export function biliOwnerScene(identity:BiliOwnerAccount){return Object.freeze({channel:'bilibili',account:identity.accountUid,kind:'private' as const,id:identity.ownerUid});}
+export function biliOwnerConsumerKey(identity:BiliOwnerAccount){return 'bilibili-owner:'+BiliOwnerIdSchema.parse(identity.accountUid)+':'+BiliOwnerIdSchema.parse(identity.ownerUid);}

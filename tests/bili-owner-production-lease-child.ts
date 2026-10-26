@@ -1,5 +1,5 @@
-import { loadBiliOwnerProductionBinding } from '../packages/channel-bili-owner/lib/production-config.js';
-import { acquireBiliOwnerConsumerLease } from '../packages/channel-bili-owner/lib/production-lease.js';
+import { loadBiliOwnerProductionBinding } from '../packages/bilibili/lib/channel/production-config.js';
+import { acquireBiliOwnerConsumerLease } from '../packages/bilibili/lib/channel/production-lease.js';
 
 try{const binding=loadBiliOwnerProductionBinding(JSON.parse(process.argv[2]??'null')),lease=await acquireBiliOwnerConsumerLease(binding);process.send?.({ready:true,epoch:lease.epoch});
   process.on('message',message=>{if(message==='release')void Promise.resolve(lease.release()).then(()=>process.exit(0));});

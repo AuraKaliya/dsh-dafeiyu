@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { MEDIA_ACTIONS } from '@dafeiyu/media';
-import { QQ_MEDIA_ACTIONS } from '@dafeiyu/channel-qq';
+import { QQ_MEDIA_ACTIONS } from '@dafeiyu/qq';
 import { MediaAssetRefSchema } from '@dafeiyu/contracts';
 import type { MediaAssetRef,MediaSourceDescription } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,otherGroup,bot,owner,until,outcomes } from './qq-capabilities-fixture.js';

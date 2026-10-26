@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { DafeiyuService } from '@dafeiyu/core';
 import type { MediaService } from '@dafeiyu/media';
-import { QqMediaDeliveryLedger } from '@dafeiyu/channel-qq';
+import { QqMediaDeliveryLedger } from '@dafeiyu/qq';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
 
 /** Reconcile only matching persisted facts. This module never constructs OneBot or reads credentials. */

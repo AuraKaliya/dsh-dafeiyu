@@ -5,8 +5,15 @@
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
-  "bin": {"dafeiyu-host":"./bin/dafeiyu-host.mjs"},
-  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
+  "bin": {
+    "dafeiyu-host": "./bin/dafeiyu-host.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
   "dependencies": {
     "@dafeiyu/contracts": "0.15.0",
     "@dafeiyu/activity": "0.1.0",
@@ -16,8 +23,7 @@
     "@dafeiyu/core": "0.15.0",
     "@dafeiyu/journal": "0.4.0",
     "@dafeiyu/memory": "0.15.0",
-    "@dafeiyu/channel-qq": "0.3.0",
-    "@dafeiyu/channel-bili-owner": "0.1.0",
+    "@dafeiyu/qq": "0.3.0",
     "@dafeiyu/channel-simulator": "0.4.0",
     "@dafeiyu/timeline": "0.8.0",
     "@deepseek-ai/cordis": "4.0.5",

@@ -1,3 +1,4 @@
+import {BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE} from './bili-owner-identity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -9,13 +10,13 @@ import { loadHostConfig,initializeProfile,inspectHost,inspectStorage,planMigrati
 import { readManifest,bindMigratedProfile,layoutPaths } from '../packages/host/lib/profile.js';
 import { runHostCommand } from '../packages/host/lib/cli.js';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
-import { BiliOwnerStore,BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE,BILI_OWNER_TABLES,inspectBiliOwnerStorage } from '@dafeiyu/channel-bili-owner';
-import type { BiliOwnerMessage,BiliOwnerPage,BiliOwnerIdentity } from '@dafeiyu/channel-bili-owner';
+import { BiliOwnerStore,BILI_OWNER_TABLES,inspectBiliOwnerStorage } from '@dafeiyu/bilibili/channel';
+import type { BiliOwnerMessage,BiliOwnerPage,BiliOwnerIdentity } from '@dafeiyu/bilibili/channel';
 import { testTempDir } from './test-temp.js';
 
 const identity={agentId:'fictional-fish',profileId:'host-bili-owner-storage'},binding:BiliOwnerIdentity={...identity,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID};
 const now=1793000000000,pin='a'.repeat(64),stamp='b'.repeat(64);
-const plugin={id:'channel-bili-owner',required:true,config:{tasks:{enabled:false}}};
+const plugin={id:'channel-bili-owner',required:true,config:{accountUid:'10000001',ownerUid:'10000002',tasks:{enabled:false}}};
 async function fixture(enabled=false){
   const root=await mkdtemp(join(testTempDir(),'host-bili-owner-storage-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
   const config={schemaVersion:1,profileId:identity.profileId,agent:{id:identity.agentId},paths:{core:'data/core',memory:'data/memory',sessions:'data/sessions',query:'data/query.sqlite'},
@@ -49,7 +50,7 @@ test('Host init creates only Bili owner schema in core and requires a separate e
 test('incremental enable backs up old stores, resumes failed schema creation, then binds before handover',async()=>{
   const f=await fixture(),enabled=await f.enable(),before=rows(join(f.old.paths.memory,'memory.sqlite')),paths=readManifest(f.old)!.paths;
   assert.ok(inspectHost(enabled,f.coordination).codes.includes('HOST_MIGRATION_REQUIRED'));assert.equal(existsSync(f.database),false);assert.throws(()=>initializeProfile(enabled,f.coordination),/REQUIRES_EMPTY/);
-  assert.throws(()=>bindMigratedProfile(enabled),/MIGRATION_REQUIRED/);const plan=await planMigration({...bundle(f),biliOwner:true});assert.equal(plan.files.find(value=>value.kind==='bili-owner')?.before.exists,false);
+  assert.throws(()=>bindMigratedProfile(enabled),/MIGRATION_REQUIRED/);const plan=await planMigration({...bundle(f),biliOwner:true,biliOwnerIdentity:{accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}});assert.equal(plan.files.find(value=>value.kind==='bili-owner')?.before.exists,false);
   await assert.rejects(applyMigration(plan,{afterStep:kind=>{if(kind==='bili-owner')throw new Error('fixture interrupted after schema');}}),/BACKUP_RETAINED/);
   assert.equal(inspectBiliOwnerStorage(f.database,binding).bindingReady,false);assert.throws(()=>bindMigratedProfile(enabled),/MIGRATION_REQUIRED/);
   const created=await readFile(f.database);await applyMigration(plan);assert.deepEqual(await readFile(f.database),created);assert.equal(verifyMigration(plan).passed,true);
@@ -60,7 +61,7 @@ test('incremental enable backs up old stores, resumes failed schema creation, th
 });
 
 test('an existing empty v2 is bound before handover without weakening frozen source-row verification',async()=>{
-  const f=await fixture();new BiliOwnerStore(f.database,binding,true).close();const before=await readFile(f.database),enabled=await f.enable(),plan=await planMigration({...bundle(f),biliOwner:true});
+  const f=await fixture();new BiliOwnerStore(f.database,binding,true).close();const before=await readFile(f.database),enabled=await f.enable(),plan=await planMigration({...bundle(f),biliOwner:true,biliOwnerIdentity:{accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}});
   assert.equal(plan.files.find(value=>value.kind==='bili-owner')?.before.exists,true);await applyMigration(plan);assert.deepEqual(await readFile(f.database),before);assert.equal(verifyMigration(plan).passed,true);
   bindMigratedProfile(enabled);const manifest=await readFile(join(enabled.paths.core,'host-profile.json'));handover(f.database);
   assert.equal(verifyMigration(plan).passed,false);assert.equal(verifyMigration(plan).biliOwnerEvidencePreserved,false);assert.equal(inspectHost(enabled,f.coordination).ready,true);
@@ -68,7 +69,7 @@ test('an existing empty v2 is bound before handover without weakening frozen sou
 });
 
 test('existing fresh channel, unknown and sending rows are backed up unchanged and retained after disabling the plugin',async()=>{
-  const f=await fixture(),initial=seedCurrent(f.database),enabled=await f.enable(),before=rows(f.database,BILI_OWNER_TABLES),bytes=await readFile(f.database),plan=await planMigration({...bundle(f),biliOwner:true});
+  const f=await fixture(),initial=seedCurrent(f.database),enabled=await f.enable(),before=rows(f.database,BILI_OWNER_TABLES),bytes=await readFile(f.database),plan=await planMigration({...bundle(f),biliOwner:true,biliOwnerIdentity:{accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}});
   await applyMigration(plan);assert.equal(verifyMigration(plan).passed,true);assert.deepEqual(rows(f.database,BILI_OWNER_TABLES),before);assert.deepEqual(await readFile(f.database),bytes);
   const index=plan.files.findIndex(value=>value.kind==='bili-owner'),backup=join(f.root,'backups',plan.id,`${index}-bili-owner.sqlite`);assert.deepEqual(rows(backup,BILI_OWNER_TABLES),before);
   const imported=JSON.parse(String(before.bili_owner_handover?.[0]?.body)) as unknown;assert.deepEqual(imported,initial);assert.deepEqual(before.bili_owner_deliveries?.map(row=>row.state),['unknown','sending']);
@@ -81,14 +82,14 @@ test('existing fresh channel, unknown and sending rows are backed up unchanged a
 test('wrong Bili owner identity and unknown schema fail read-only inspection and planning',async()=>{
   const f=await fixture(),enabled=await f.enable();new BiliOwnerStore(f.database,{...binding,agentId:'another-agent'},true).close();const original=await readFile(f.database);
   assert.equal(inspectStorage(f.database,'bili-owner',identity).identityMatches,false);assert.ok(inspectHost(enabled,f.coordination).codes.includes('HOST_PROFILE_IDENTITY_MISMATCH'));
-  await assert.rejects(planMigration({...bundle(f),biliOwner:true}),/STORE_UNSUPPORTED/);assert.deepEqual(await readFile(f.database),original);
+  await assert.rejects(planMigration({...bundle(f),biliOwner:true,biliOwnerIdentity:{accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}}),/STORE_UNSUPPORTED/);assert.deepEqual(await readFile(f.database),original);
   const other=await fixture(true),db=new DatabaseSync(other.database);db.exec('PRAGMA user_version=999');db.close();const changed=await readFile(other.database);
   assert.equal(inspectStorage(other.database,'bili-owner',identity).supported,false);assert.ok(inspectHost(other.old,other.coordination).codes.includes('HOST_STORAGE_UNSUPPORTED'));
-  await assert.rejects(planMigration({...bundle(other),biliOwner:true}),/STORE_UNSUPPORTED/);assert.deepEqual(await readFile(other.database),changed);
+  await assert.rejects(planMigration({...bundle(other),biliOwner:true,biliOwnerIdentity:{accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}}),/STORE_UNSUPPORTED/);assert.deepEqual(await readFile(other.database),changed);
 });
 
 test('a damaged required backup prevents manifest binding even when the new Bili owner schema is valid',async()=>{
-  const f=await fixture(),enabled=await f.enable(),plan=await planMigration({...bundle(f),biliOwner:true});await applyMigration(plan);assert.equal(verifyMigration(plan).passed,true);
+  const f=await fixture(),enabled=await f.enable(),plan=await planMigration({...bundle(f),biliOwner:true,biliOwnerIdentity:{accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}});await applyMigration(plan);assert.equal(verifyMigration(plan).passed,true);
   const backup=join(f.root,'backups',plan.id,'1-memory.sqlite'),db=new DatabaseSync(backup);db.exec('PRAGMA user_version=999');db.close();
   assert.equal(verifyMigration(plan).passed,false);assert.equal(verifyMigration(plan).biliOwnerEvidencePreserved,false);assert.throws(()=>bindMigratedProfile(enabled),/MIGRATION_REQUIRED/);
   assert.equal(readManifest(enabled)?.requiredStores.includes('bili-owner'),false);assert.equal(inspectBiliOwnerStorage(f.database,binding).bindingReady,false);
@@ -102,7 +103,7 @@ test('legacy plans keep their absent field and hash, and old profile layout/mani
 });
 
 test('CLI explicit migration binds the Bili owner schema while leaving the handover gate closed',async()=>{
-  const f=await fixture(),enabled=await f.enable(),plan=await planMigration({...bundle(f),biliOwner:true,provenance:{sourceRevision:'fictional-storage-fixture',dirty:true,configHash:enabled.hash}}),planFile=join(f.root,'plan.json');await writeFile(planFile,JSON.stringify(plan));
+  const f=await fixture(),enabled=await f.enable(),plan=await planMigration({...bundle(f),biliOwner:true,biliOwnerIdentity:{accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID},provenance:{sourceRevision:'fictional-storage-fixture',dirty:true,configHash:enabled.hash}}),planFile=join(f.root,'plan.json');await writeFile(planFile,JSON.stringify(plan));
   const output:unknown[]=[];assert.equal(await runHostCommand({mode:'migrate',migration:'apply',config:f.file,plan:planFile},value=>output.push(value)),0);assert.equal(output.length,1);
   assert.ok(readManifest(enabled)?.requiredStores.includes('bili-owner'));assert.equal(verifyMigration(plan).passed,true);assert.ok(inspectHost(enabled,f.coordination).codes.includes('HOST_BILI_OWNER_HANDOVER_REQUIRED'));
   const state=rows(f.database,['bili_owner_poll','bili_owner_handover','bili_owner_inbound']);assert.equal(state.bili_owner_poll?.[0]?.since,null);assert.equal(state.bili_owner_handover?.length,0);assert.equal(state.bili_owner_inbound?.length,0);

@@ -1,8 +1,9 @@
+import {BILI_OWNER_ACCOUNT,BILI_OWNER_UID} from './bili-owner-identity.js';
 import { mkdtemp,mkdir,readFile,writeFile } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
-import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,biliOwnerTextHash } from '@dafeiyu/channel-bili-owner';
-import { BILI_OWNER_AUTH_HASH,BiliOwnerProductionManifestSchema } from '../packages/channel-bili-owner/lib/production-config.js';
-import type { BiliOwnerProductionConfig } from '../packages/channel-bili-owner/lib/production-config.js';
+import { biliOwnerTextHash } from '@dafeiyu/bilibili/channel';
+import { BILI_OWNER_AUTH_HASH,BiliOwnerProductionManifestSchema } from '../packages/bilibili/lib/channel/production-config.js';
+import type { BiliOwnerProductionConfig } from '../packages/bilibili/lib/channel/production-config.js';
 import { testTempDir } from './test-temp.js';
 
 export const NAV='https://api.bilibili.com/x/web-interface/nav',READ='https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs',SEND='https://api.vc.bilibili.com/web_im/v1/web_im/send_msg';

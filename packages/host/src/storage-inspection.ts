@@ -4,13 +4,13 @@ import { inspectJournal } from '@dafeiyu/journal';
 import { RUNTIME_APPLICATION_ID, RuntimeIdentitySchema } from '@dafeiyu/core/runtime-store';
 import type { RuntimeIdentity } from '@dafeiyu/core/runtime-store';
 import { MEMORY_APPLICATION_ID, PERSONA_ADOPTION_TABLES, verifyPersonaAdoptionSchema } from '@dafeiyu/memory/store';
-import { inspectQqSchema } from '@dafeiyu/channel-qq';
+import { inspectQqSchema } from '@dafeiyu/qq';
 import { ACTIVITY_APPLICATION_ID,ACTIVITY_SCHEMA_VERSION,ACTIVITY_TABLES } from '@dafeiyu/activity/store';
 import { MEDIA_APPLICATION_ID,MEDIA_TABLES } from '@dafeiyu/media';
 import { BILI_APPLICATION_ID,BILI_TABLES } from '@dafeiyu/bilibili';
 import { EXECUTOR_APPLICATION_ID,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor/store';
 import { ExecutorIdentitySchema,executorHash } from '@dafeiyu/server-executor/types';
-import { BILI_OWNER_APPLICATION_ID,BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_TABLES,BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BiliOwnerIdentitySchema,inspectBiliOwnerStorage } from '@dafeiyu/channel-bili-owner';
+import { BILI_OWNER_APPLICATION_ID,BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_TABLES,BiliOwnerIdentitySchema,inspectBiliOwnerStorage } from '@dafeiyu/bilibili/channel';
 
 export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity'|'media'|'bilibili'|'executor'|'bili-owner';
 const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
@@ -55,7 +55,7 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
     if(kind==='media'&&supported&&identity){const row=db.prepare('SELECT body FROM media_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='bilibili'&&supported&&identity){const row=db.prepare('SELECT body FROM bili_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='bili-owner'&&supported){const row=db.prepare('SELECT body FROM bili_owner_binding WHERE id=1').get(),stored=BiliOwnerIdentitySchema.parse(JSON.parse(String(row?.body)));
-      const inspection=inspectBiliOwnerStorage(file,identity?{...identity,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}:stored);
+      const inspection=inspectBiliOwnerStorage(file,identity?{...identity,accountUid:stored.accountUid,ownerUid:stored.ownerUid}:stored);
       supported=inspection.supported;identityMatches=inspection.identityMatches;}
     if(kind==='executor'&&supported){
       const row=db.prepare('SELECT body,body_hash FROM executor_metadata WHERE id=1').get(),stored=ExecutorIdentitySchema.safeParse(JSON.parse(String(row?.body)));

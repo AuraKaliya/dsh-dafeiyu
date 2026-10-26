@@ -11,7 +11,7 @@ import { z } from 'zod';
 import Query from '@deepseek-ai/dsh-session-query-sqlite';
 import * as Timeline from '@dafeiyu/timeline';
 import * as Memory from '@dafeiyu/memory';
-import * as QQ from '@dafeiyu/channel-qq';
+import * as QQ from '@dafeiyu/qq';
 import * as Media from '@dafeiyu/media';
 import { LlmAdapter } from '@deepseek-ai/dsh-llm';
 import type { StreamChunk,LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';

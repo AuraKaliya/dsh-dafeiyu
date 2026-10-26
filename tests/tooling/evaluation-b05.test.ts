@@ -12,7 +12,7 @@ import type { RuntimeIdentity } from '../../scripts/evaluation/identity.ts';
 import { runBoundaryReal } from '../../scripts/evaluation/real-boundary.ts';
 import { b05Messages,B05_MATERIAL,B05_PROTOCOL } from '../../scripts/evaluation/b05.ts';
 import { b05TestResponse } from './b05-backend.ts';
-import { qqTaskDirective } from '@dafeiyu/channel-qq';
+import { qqTaskDirective } from '@dafeiyu/qq';
 
 if(!process.env.DAFEIYU_TEST_RUN||!tmpdir().startsWith(process.env.DAFEIYU_TEST_RUN))throw new Error('MANAGED_TEST_RUN_REQUIRED');
 const repository=resolve('.'),catalog=new EvaluationCatalog(repository),candidate={codeRevision:'a'.repeat(40),runtimeHash:'b'.repeat(64),protocolHash:'c'.repeat(64)},identity:RuntimeIdentity={schemaVersion:1,node:process.version,sqlite:process.versions.sqlite??'unknown',platform:process.platform,arch:process.arch,scope:'real-evaluation-runtime-v1',files:[],workspaceLinks:[]};

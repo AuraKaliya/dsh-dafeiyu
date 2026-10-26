@@ -5,11 +5,11 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { testTempDir as tmpdir } from './test-temp.js';
-import * as QQ from '@dafeiyu/channel-qq';
+import * as QQ from '@dafeiyu/qq';
 import { harness, textReply } from './harness.js';
 import type { Response } from './harness.js';
 
-const bot='1994142241', owner='756013063', group='1106067626';
+const bot='1994142241', owner='10000003', group='1106067626';
 const token='local-test-token-not-a-real-secret-1234567890';
 async function until(predicate:()=>boolean) {
   const deadline=Date.now()+4000;

@@ -4,7 +4,7 @@ import { dirname,join } from 'node:path';
 import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
 import type { Reply } from '@dafeiyu/contracts';
-import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_SCENE,BiliOwnerIdentitySchema,BiliOwnerHashSchema,BiliOwnerIdSchema,BiliOwnerCodeSchema,
+import { biliOwnerScene,BiliOwnerIdentitySchema,BiliOwnerHashSchema,BiliOwnerIdSchema,BiliOwnerCodeSchema,
   BiliOwnerMessageSchema,BiliOwnerPageSchema,BiliOwnerReplySchema,BiliOwnerRequestSchema,BiliOwnerInboundStateSchema,BiliOwnerDeliveryPlanSchema,BiliOwnerDeliveryStateSchema,biliOwnerHash,biliOwnerTextHash } from './types.js';
 import type { BiliOwnerIdentity,BiliOwnerMessage,BiliOwnerDelivery,BiliOwnerDeliveryPlan } from './types.js';
 
@@ -97,10 +97,10 @@ export class BiliOwnerStore {
     else this.db.prepare('UPDATE bili_owner_inbound SET state=?,version=?,binding_stamp=? WHERE id=?').run(state,next.version,bindingStamp,value.id);
     this.event('in:'+value.id,next.version,'inbound.'+state,this.sourceBody(next),now);return next;}
   private observe(message:BiliOwnerMessage,stamp:string,maxPending:number,now:number){const current=this.source(message.id),since=this.cursor().since;check(since!==null,'BILI_OWNER_HANDOVER_REQUIRED');
-    if(message.senderUid!==BILI_OWNER_UID)return;
+    if(message.senderUid!==this.identity.ownerUid)return;
     if(current){if(current.message)check(current.hash===biliOwnerHash(message),'BILI_OWNER_MESSAGE_CONFLICT');return;}
     const state=message.timestamp*1000<since?'before-start':message.type===1&&message.text.trim()?'pending':'unsupported';if(state==='pending')check(this.pending().length<maxPending,'BILI_OWNER_CAPACITY');this.insertSource(message.id,state==='before-start'?null:message,state,stamp,now);}
-  acceptPage(raw:unknown,expectedVersion:number,maxPending=1000,now=Date.now()){const page=BiliOwnerPageSchema.parse(raw);z.number().int().min(1).max(10000).parse(maxPending);return this.atomic(()=>{const cursor=this.cursor();check(this.bindingReady(),'BILI_OWNER_HANDOVER_REQUIRED');check(cursor.version===expectedVersion,'BILI_OWNER_CURSOR_CONFLICT');
+  acceptPage(raw:unknown,expectedVersion:number,maxPending=1000,now=Date.now()){const page=BiliOwnerPageSchema.parse(raw);check(page.accountUid===this.identity.accountUid&&page.ownerUid===this.identity.ownerUid,'BILI_OWNER_ACCOUNT_MISMATCH');z.number().int().min(1).max(10000).parse(maxPending);return this.atomic(()=>{const cursor=this.cursor();check(this.bindingReady(),'BILI_OWNER_HANDOVER_REQUIRED');check(cursor.version===expectedVersion,'BILI_OWNER_CURSOR_CONFLICT');
     const sorted=[...page.messages].sort((a,b)=>BigInt(a.seqno)<BigInt(b.seqno)?1:BigInt(a.seqno)>BigInt(b.seqno)?-1:0),smallest=sorted.at(-1)?.seqno??null,largest=sorted[0]?.seqno??null;
     if(page.hasMore)check(smallest===page.nextBeforeSeqno&&(!cursor.before||BigInt(smallest!)<BigInt(cursor.before)),'BILI_OWNER_CURSOR_INVALID');
     for(const message of sorted)this.observe(message,page.bindingStamp,maxPending,now);
@@ -120,10 +120,10 @@ export class BiliOwnerStore {
     const value:BiliOwnerDelivery={plan,hash,state:BiliOwnerDeliveryStateSchema.parse(row.state),version:z.number().int().positive().parse(row.version),receiptId:row.receipt===null?null:BiliOwnerIdSchema.parse(row.receipt),code:row.code===null?null:BiliOwnerCodeSchema.parse(row.code)};
     this.tail('out:'+replyId,value.version,this.deliveryBody(value));return value;}
   private logicalKey(plan:BiliOwnerDeliveryPlan){return plan.anchor?'task-result:'+plan.anchor.runId:'reply:'+plan.coreInboundId;}
-  prepareReply(raw:Reply,now=Date.now()):BiliOwnerDelivery{const reply=BiliOwnerReplySchema.parse(raw);check(biliOwnerHash(reply.conversation)===biliOwnerHash(BILI_OWNER_SCENE),'BILI_OWNER_TARGET_DENIED');return this.atomic(()=>{
+  prepareReply(raw:Reply,now=Date.now()):BiliOwnerDelivery{const reply=BiliOwnerReplySchema.parse(raw);check(biliOwnerHash(reply.conversation)===biliOwnerHash(biliOwnerScene(this.identity)),'BILI_OWNER_TARGET_DENIED');return this.atomic(()=>{
     const source=this.source(reply.sourceMessageId);check(source?.state==='accepted'&&source.coreInboundId&&source.hash,'BILI_OWNER_SOURCE_NOT_READY');
-    if(reply.taskResult)check(reply.taskResult.inboundId===source.coreInboundId&&reply.taskResult.target.channel==='bilibili'&&biliOwnerHash(reply.taskResult.target)===biliOwnerHash(BILI_OWNER_SCENE),'BILI_OWNER_TARGET_DENIED');
-    const text=reply.text.trim(),plan=BiliOwnerDeliveryPlanSchema.parse({schemaVersion:1,replyId:reply.id,requestId:'bili1_'+biliOwnerHash([this.identity,reply.id]),scene:BILI_OWNER_SCENE,sourceMessageId:reply.sourceMessageId,sourceHash:source.hash,
+    if(reply.taskResult)check(reply.taskResult.inboundId===source.coreInboundId&&reply.taskResult.target.channel==='bilibili'&&biliOwnerHash(reply.taskResult.target)===biliOwnerHash(biliOwnerScene(this.identity)),'BILI_OWNER_TARGET_DENIED');
+    const text=reply.text.trim(),plan=BiliOwnerDeliveryPlanSchema.parse({schemaVersion:1,replyId:reply.id,requestId:'bili1_'+biliOwnerHash([this.identity,reply.id]),scene:biliOwnerScene(this.identity),sourceMessageId:reply.sourceMessageId,sourceHash:source.hash,
       coreInboundId:source.coreInboundId,anchor:reply.taskResult??null,bodyHash:biliOwnerTextHash(reply.text),wireHash:biliOwnerTextHash(text),text}),hash=biliOwnerHash(plan),old=this.delivery(reply.id);
     if(old){check(old.hash===hash,'BILI_OWNER_DELIVERY_CONFLICT');return old;}
     check(!this.db.prepare('SELECT 1 FROM bili_owner_deliveries WHERE logical_key=?').get(this.logicalKey(plan)),'BILI_OWNER_LOGICAL_DELIVERY_CONFLICT');

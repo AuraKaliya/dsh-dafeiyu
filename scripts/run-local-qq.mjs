@@ -8,7 +8,7 @@ process.env.DSH_HOME = resolve(root, 'dsh-home');
 const { localHost } = await import('./local-host.mjs');
 const { Journal } = await import('@dafeiyu/journal');
 const { ScriptedModel, textReply } = await import('../build-tests/harness.js');
-const QQ = await import('@dafeiyu/channel-qq');
+const QQ = await import('@dafeiyu/qq');
 const config = {
   agentId: 'dafeiyu', botId: '1994142241', ownerId: '756013063', groupIds: ['1106067626'],
   httpURL: 'http://127.0.0.1:13000/', wsURL: 'ws://127.0.0.1:13001/',

@@ -11,7 +11,7 @@ import { z } from 'zod';
 import Query from '@deepseek-ai/dsh-session-query-sqlite';
 import * as Timeline from '@dafeiyu/timeline';
 import * as Memory from '@dafeiyu/memory';
-import * as QQ from '@dafeiyu/channel-qq';
+import * as QQ from '@dafeiyu/qq';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { API_VERSION, MessageSchema, ServiceGate, dependencyOrder, HostConfigSchema, ExecutionScopeSchema, taskScopeKey } from '@dafeiyu/contracts';
 import type { ExtensionV3 } from '@dafeiyu/contracts';
@@ -153,7 +153,7 @@ test('managed QQ connects only after explicit start and core readiness', async t
   const ws = new WebSocketServer({ server }); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture port missing');
   const h = await managed(join(root, 'core'));
-  const qq = await h.ctx.plugin(QQ, { agentId: 'dafeiyu', botId: '1994142241', ownerId: '756013063', groupIds: [], tokenFile,
+  const qq = await h.ctx.plugin(QQ, { agentId: 'dafeiyu', botId: '1994142241', ownerId: '10000003', groupIds: [], tokenFile,
     dataDir: join(root, 'qq'), httpURL: `http://127.0.0.1:${address.port}/`, wsURL: `ws://127.0.0.1:${address.port}/`, lifecycleMode: 'managed' });
   t.after(async () => { await qq.dispose(); await h.close(); for (const client of ws.clients) client.terminate(); await new Promise<void>(resolve => ws.close(() => resolve())); await new Promise<void>(resolve => server.close(() => resolve())); });
   await tick(); assert.equal(calls, 0); await assert.rejects(h.ctx.dafeiyuQQ.start(), /HOST_NOT_READY/);

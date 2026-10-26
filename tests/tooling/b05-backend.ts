@@ -1,7 +1,7 @@
 import type { GenerateOptions,StreamChunk } from '@deepseek-ai/dsh-llm';
 import { z } from 'zod';
 import { ActionOutcomeSchema } from '@dafeiyu/contracts';
-import { qqTaskDirective } from '@dafeiyu/channel-qq';
+import { qqTaskDirective } from '@dafeiyu/qq';
 import { evaluationCall,evaluationText } from '../../scripts/evaluation/runtime.ts';
 
 export function b05TestResponse(mode:'normal'|'omit-submit'|'omit-continuation'|'wrong-task'='normal'){

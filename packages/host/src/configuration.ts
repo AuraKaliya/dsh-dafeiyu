@@ -9,14 +9,15 @@ import { ActivityPluginConfigSchema,ACTIVITY_ACTIONS,validateQuiet } from '@dafe
 import { MediaPluginConfigSchema } from '@dafeiyu/media';
 import { BiliPluginConfigSchema } from '@dafeiyu/bilibili';
 import { ServerExecutorPluginConfigSchema,serverExecutorScene } from '@dafeiyu/server-executor';
-import { QqPluginConfigSchema, QQ_ACTIONS, QQ_TASK_ACTIONS } from '@dafeiyu/channel-qq';
-import { BiliOwnerPluginConfigSchema,BILI_OWNER_TASK_ACTIONS,BILI_OWNER_SCENE,BILI_PUBLIC_SCENE } from '@dafeiyu/channel-bili-owner';
+import { QqPluginConfigSchema, QQ_ACTIONS, QQ_TASK_ACTIONS } from '@dafeiyu/qq';
+import { BiliOwnerPluginConfigSchema,BILI_OWNER_TASK_ACTIONS,biliOwnerScene,BILI_PUBLIC_SCENE } from '@dafeiyu/bilibili/channel';
 import { TimelinePluginConfigSchema } from '@dafeiyu/timeline';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
 import { readFoundation } from '@dafeiyu/core';
 import { physicalPath,resource,overlap,pathIdentity,within } from './paths.js';
 import type { HostResource } from './paths.js';
 import { InlineModelSettingsSchema } from './inline-model.js';
+import { normalizeHostPlugins } from './plugin-assembly.js';
 
 const endpoint=z.url().refine(raw=>{const url=new URL(raw);return (url.protocol==='https:'||url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname))&&!url.username&&!url.password&&!url.search&&!url.hash;});
 export const DeepSeekConfigSchema=z.strictObject({credentialStore:z.string().min(1).default(join(homedir(),'.dsh','.credentials.yaml')),credentialName:z.literal('DEEPSEEK_API_KEY').default('DEEPSEEK_API_KEY'),baseURL:endpoint.default('https://api.deepseek.com/anthropic'),inlineTransport:InlineModelSettingsSchema.optional()});
@@ -39,7 +40,7 @@ function freeze(value:unknown):void{if(value&&typeof value==='object'&&!Object.i
 export function assertPaths(prepared:PreparedHostConfig){if(prepared.declarations.some(value=>pathIdentity(value.path)!==value.identity))throw new Error('HOST_PATH_CHANGED');}
 export function loadHostConfig(input:string):PreparedHostConfig{
   try{
-    const file=physicalPath(input),base=dirname(file),config=HostConfigSchema.parse(readJSON(file));
+    const file=physicalPath(input),base=dirname(file),config=normalizeHostPlugins(readJSON(file));
     if(redactJson(z.json().parse(config)).redacted)throw new Error('HOST_PRIVATE_CONFIG_REJECTED');
     const resolvePath=(path:string)=>physicalPath(resolve(base,path));
     const paths={core:resolvePath(config.paths.core),memory:resolvePath(config.paths.memory),sessions:resolvePath(config.paths.sessions),query:resolvePath(config.paths.query),
@@ -97,7 +98,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
         const native=config.authorityPolicies.find(policy=>policy.id===biliOwnerConfig.tasks.policyId&&policy.producers.includes('bili-owner-tasks'));
         if(!conversation?.allowLocalWrite||BILI_OWNER_TASK_ACTIONS.some(action=>!conversation.actions.includes(action))||!native?.allowLocalWrite||native.producers.length!==1||native.externalActions?.length
           ||BILI_OWNER_NATIVE_ACTIONS.some(action=>!native.actions.includes(action))||native.actions.some(action=>!BILI_OWNER_NATIVE_ACTIONS.some(allowed=>allowed===action)))throw new Error('HOST_BILI_OWNER_TASK_POLICY_REQUIRED');
-        if(!native.resources.some(scene=>runtimeHash(scene)===runtimeHash(BILI_PUBLIC_SCENE))||native.resources.some(scene=>![BILI_PUBLIC_SCENE,BILI_OWNER_SCENE].some(allowed=>runtimeHash(allowed)===runtimeHash(scene))))throw new Error('HOST_BILI_OWNER_RESOURCE_DENIED');
+        if(!native.resources.some(scene=>runtimeHash(scene)===runtimeHash(BILI_PUBLIC_SCENE))||native.resources.some(scene=>![BILI_PUBLIC_SCENE,biliOwnerScene(biliOwnerConfig)].some(allowed=>runtimeHash(allowed)===runtimeHash(scene))))throw new Error('HOST_BILI_OWNER_RESOURCE_DENIED');
       }
     }
     const executor=enabled.find(p=>p.id==='server-executor');if(executor){const settings=ServerExecutorPluginConfigSchema.parse(executor.config),route=config.modelRoutes.chat;

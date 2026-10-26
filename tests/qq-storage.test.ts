@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
-import { QqStore, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
+import { QqStore, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from '@dafeiyu/qq';
 import { inspectStorage, planMigration, applyMigration, verifyMigration, loadHostConfig, initializeProfile, inspectHost } from '@dafeiyu/host';
 import { migrationFixture } from './runtime-migration-fixture.js';
 

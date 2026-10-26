@@ -8,12 +8,12 @@ import { initializeCoreStorage } from '@dafeiyu/core';
 import { RUNTIME_SCHEMA_VERSION } from '@dafeiyu/core/runtime-store';
 import { initializeMemoryStorage } from '@dafeiyu/memory';
 import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
-import { QqStore, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
+import { QqStore, QQ_SCHEMA_VERSION } from '@dafeiyu/qq';
 import { ActivityStore,ACTIVITY_SCHEMA_VERSION } from '@dafeiyu/activity/store';
 import { MediaStore,MEDIA_SCHEMA_VERSION } from '@dafeiyu/media';
 import { BiliStore,BILI_SCHEMA_VERSION } from '@dafeiyu/bilibili';
 import { ExecutorStore,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor/store';
-import { BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_VERSION,BILI_OWNER_ACCOUNT,BILI_OWNER_UID,initializeBiliOwnerStorage,inspectBiliOwnerStorage } from '@dafeiyu/channel-bili-owner';
+import { BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_VERSION,initializeBiliOwnerStorage,inspectBiliOwnerStorage } from '@dafeiyu/bilibili/channel';
 import { executorFilesSnapshot } from './executor-snapshot.js';
 import { inspectStorage } from './storage-inspection.js';
 import type { StorageKind,StorageInspection } from './storage-inspection.js';
@@ -48,7 +48,7 @@ export function storageFiles(config:PreparedHostConfig){return [
   ...(['memory','analysis','working','feedback','retrieval'] as const).map(kind=>({name:kind,kind,file:join(config.paths.memory,kind+'.sqlite')})),
   ...Object.entries(config.paths.channels).map(([id,directory])=>({name:id,kind:'qq' as const,file:join(directory,'qq.sqlite')})),
   {name:'query',kind:'query' as const,file:config.paths.query}];}
-const packages:Record<string,string>={core:'@dafeiyu/core',memory:'@dafeiyu/memory',activity:'@dafeiyu/activity',media:'@dafeiyu/media',bilibili:'@dafeiyu/bilibili','server-executor':'@dafeiyu/server-executor',timeline:'@dafeiyu/timeline','channel-qq':'@dafeiyu/channel-qq','channel-bili-owner':'@dafeiyu/channel-bili-owner','channel-simulator':'@dafeiyu/channel-simulator','model-deepseek':'@deepseek-ai/dsh-llm-deepseek-api-key','model-scripted':'@deepseek-ai/dsh-llm'};
+const packages:Record<string,string>={core:'@dafeiyu/core',memory:'@dafeiyu/memory',activity:'@dafeiyu/activity',media:'@dafeiyu/media',bilibili:'@dafeiyu/bilibili','server-executor':'@dafeiyu/server-executor',timeline:'@dafeiyu/timeline','channel-qq':'@dafeiyu/qq','channel-bili-owner':'@dafeiyu/bilibili','channel-simulator':'@dafeiyu/channel-simulator','model-deepseek':'@deepseek-ai/dsh-llm-deepseek-api-key','model-scripted':'@deepseek-ai/dsh-llm'};
 const versions:Record<string,string>={core:'0.15.0',memory:'0.15.0',activity:'0.1.0',media:'0.1.0',bilibili:'0.1.0','server-executor':'0.1.0',timeline:'0.8.0','channel-qq':'0.3.0','channel-bili-owner':BILI_OWNER_VERSION,'channel-simulator':'0.4.0','model-deepseek':'0.2.1-rc.2','model-scripted':'0.2.1-rc.2'};
 export function packageVersion(id:string):string|null{try{const name=packages[id];if(!name)return null;let directory=dirname(fileURLToPath(import.meta.resolve(name)));
     for(let i=0;i<5;i++){const file=join(directory,'package.json');if(existsSync(file)){const body=z.object({name:z.string(),version:z.string()}).parse(JSON.parse(readFileSync(file,'utf8')));if(body.name===name)return body.version;}directory=dirname(directory);}return null;}catch{return null;}}
@@ -78,7 +78,7 @@ export function inspectHost(config:PreparedHostConfig,coordination?:string,ownIn
     if(!inspection.exists&&item.kind==='bilibili'&&pluginConfig(config,'bilibili'))codes.push(manifest?'HOST_MIGRATION_REQUIRED':'HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='executor'&&pluginConfig(config,'server-executor'))codes.push(manifest?'HOST_MIGRATION_REQUIRED':'HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='bili-owner'&&pluginConfig(config,'channel-bili-owner'))codes.push(manifest?'HOST_MIGRATION_REQUIRED':'HOST_INITIALIZATION_REQUIRED');
-    if(item.kind==='bili-owner'&&inspection.exists&&inspection.supported&&inspection.identityMatches&&pluginConfig(config,'channel-bili-owner')&&!inspectBiliOwnerStorage(item.file,{...identity,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID}).bindingReady)codes.push('HOST_BILI_OWNER_HANDOVER_REQUIRED');
+    if(item.kind==='bili-owner'&&inspection.exists&&inspection.supported&&inspection.identityMatches&&pluginConfig(config,'channel-bili-owner')&&!inspectBiliOwnerStorage(item.file,{...identity,accountUid:pluginConfig(config,'channel-bili-owner')!.accountUid,ownerUid:pluginConfig(config,'channel-bili-owner')!.ownerUid}).bindingReady)codes.push('HOST_BILI_OWNER_HANDOVER_REQUIRED');
     if(item.kind==='executor'&&inspection.exists&&inspection.supported){try{executorFilesSnapshot(config.paths.core);}catch{codes.push('HOST_EXECUTOR_ARCHIVE_INVALID');}}
     if(inspection.exists&&inspection.supported&&['memory','journal'].includes(item.kind)){
       const db=new DatabaseSync(item.file,{readOnly:true});try{const sql=item.kind==='memory'?'SELECT DISTINCT agent_id AS id FROM memory_items':"SELECT DISTINCT json_extract(body,'$.agentId') AS id FROM events";
@@ -103,7 +103,7 @@ export function initializeProfile(config:PreparedHostConfig,coordination?:string
     if(pluginConfig(config,'media'))new MediaStore(join(config.paths.core,'media.sqlite'),{agentId:config.config.agent.id,profileId:config.config.profileId},true).close();
     if(pluginConfig(config,'bilibili'))new BiliStore(join(config.paths.core,'bilibili.sqlite'),{agentId:config.config.agent.id,profileId:config.config.profileId},true).close();
     if(pluginConfig(config,'server-executor'))new ExecutorStore(join(config.paths.core,'executor.sqlite'),{agentId:config.config.agent.id,profileId:config.config.profileId},true).close();
-    if(pluginConfig(config,'channel-bili-owner'))initializeBiliOwnerStorage(config.paths.core,{agentId:config.config.agent.id,profileId:config.config.profileId,accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID});
+    if(pluginConfig(config,'channel-bili-owner'))initializeBiliOwnerStorage(config.paths.core,{agentId:config.config.agent.id,profileId:config.config.profileId,accountUid:pluginConfig(config,'channel-bili-owner')!.accountUid,ownerUid:pluginConfig(config,'channel-bili-owner')!.ownerUid});
     for(const directory of Object.values(config.paths.channels)){const qq=new QqStore(join(directory,'qq.sqlite'));qq.close();}
     manifest={...manifest,state:'initialized'};writeManifest(config,manifest);
   }catch(error){if(manifest)writeManifest(config,{...manifest,state:'failed'});throw error;}finally{lease.release();}

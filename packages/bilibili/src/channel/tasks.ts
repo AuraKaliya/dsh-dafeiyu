@@ -3,7 +3,7 @@ import type {} from '@dafeiyu/core';
 import { z } from 'zod';
 import { PersonaRequestIdSchema,MessageTaskStatusSchema } from '@dafeiyu/contracts';
 import type { ActionCapabilityV3,Conversation,ExecutionContextV3,InboundMessage } from '@dafeiyu/contracts';
-import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,BILI_OWNER_EXTENSION,BILI_OWNER_SCENE,biliOwnerHash } from './types.js';
+import { BILI_OWNER_EXTENSION,biliOwnerScene,biliOwnerHash } from './types.js';
 
 export const BILI_OWNER_TASK_ACTIONS=['bili_owner_task_submit','bili_owner_task_status','bili_owner_task_control'] as const;
 const submit=z.strictObject({requestId:PersonaRequestIdSchema,title:z.string().trim().min(1).max(200).optional(),kind:z.enum(['explicit-task','self-exploration']).default('explicit-task'),goal:z.string().trim().min(1).max(2000).optional()})
@@ -16,15 +16,15 @@ export function biliOwnerTaskDirective(message:Pick<InboundMessage,'mainText'>):
   const value=/^(?:任务[：:\s]+|请你|请|帮我|麻烦你)([\s\S]+)$/u.exec(text);return value?.[1]?.trim()?{kind:'submit',text:value[1].trim()}:{kind:'none',text:''};}
 export class BiliOwnerTasks {
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;private readonly unbind:()=>void;private closed=false;
-  constructor(private readonly ctx:Context,config:{agentId:string;policyId:string;version:string;deliverResults:boolean;explorationResources:readonly Conversation[]},private readonly current:()=>boolean,private readonly admitting:()=>boolean){
+  constructor(private readonly ctx:Context,private readonly config:{accountUid:string;ownerUid:string;agentId:string;policyId:string;version:string;deliverResults:boolean;explorationResources:readonly Conversation[]},private readonly current:()=>boolean,private readonly admitting:()=>boolean){
     this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'bili-owner-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1',...(config.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])],provides:['bilibili.owner-tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
-    try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'bili-owner-tasks',pluginId:'bili-owner-tasks',channelExtensionId:BILI_OWNER_EXTENSION,channel:'bilibili',account:BILI_OWNER_ACCOUNT,ownerId:BILI_OWNER_UID,
+    try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'bili-owner-tasks',pluginId:'bili-owner-tasks',channelExtensionId:BILI_OWNER_EXTENSION,channel:'bilibili',account:this.config.accountUid,ownerId:this.config.ownerUid,
       policyId:config.policyId,version:config.version,autoDeliver:config.deliverResults,explorationResources:config.explorationResources,classify:biliOwnerTaskDirective,active:()=>!this.closed&&this.current()});}
     catch(error){this.handle.dispose();throw error;}}
   private access(context:ExecutionContextV3,write:boolean){this.ctx.dafeiyu.executionAuthority(context,'bili-owner-tasks');
     if(write&&!this.admitting())throw new Error('BILI_OWNER_TASK_ADMISSION_CLOSED');
-    if(this.closed||!this.current()||context.origin.kind!=='message'||biliOwnerHash(context.origin.conversation)!==biliOwnerHash(BILI_OWNER_SCENE))throw new Error('SCOPE_DENIED');
-    const item=this.ctx.dafeiyu.journal.get(context.origin.inboundId);if(item.extensionId!==BILI_OWNER_EXTENSION||item.message.sender.id!==BILI_OWNER_UID)throw new Error('SCOPE_DENIED');}
+    if(this.closed||!this.current()||context.origin.kind!=='message'||biliOwnerHash(context.origin.conversation)!==biliOwnerHash(biliOwnerScene(this.config)))throw new Error('SCOPE_DENIED');
+    const item=this.ctx.dafeiyu.journal.get(context.origin.inboundId);if(item.extensionId!==BILI_OWNER_EXTENSION||item.message.sender.id!==this.config.ownerUid)throw new Error('SCOPE_DENIED');}
   private actions():ActionCapabilityV3[]{const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,work:(context:ExecutionContextV3,raw:unknown)=>unknown):ActionCapabilityV3=>({id,description,version:'1',inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',
     execute:async(input,context)=>{try{this.access(context,write);return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(work(context,input)),sources:[],receipts:[]};}
       catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_OWNER_TASK_FAILED';

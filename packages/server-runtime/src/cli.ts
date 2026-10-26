@@ -2,7 +2,7 @@ import { readFileSync,statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ExecutionRequestSchema } from '@dafeiyu/contracts';
 import { ManagedHost,inspectHost,readHostStatus } from '@dafeiyu/host';
-import { createBiliOwnerProductionPorts } from '@dafeiyu/channel-bili-owner';
+import { createBiliOwnerProductionPorts } from '@dafeiyu/bilibili/channel';
 import { loadServerLaunchEnvelope,prepareServerLaunch } from './launch-config.js';
 import { createProductionRuntime } from './production.js';
 import type { ProductionRuntimeResources } from './production.js';

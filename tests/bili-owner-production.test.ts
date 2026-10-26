@@ -1,3 +1,4 @@
+import {BILI_OWNER_ACCOUNT,BILI_OWNER_UID} from './bili-owner-identity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -5,9 +6,9 @@ import { once } from 'node:events';
 import { readFile,writeFile,symlink,rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BILI_OWNER_ACCOUNT,BILI_OWNER_UID,biliOwnerTextHash,createBiliOwnerProductionPorts,BiliOwnerProductionManifestSchema } from '@dafeiyu/channel-bili-owner';
-import { loadBiliOwnerProductionBinding,BiliOwnerProductionConfigSchema } from '../packages/channel-bili-owner/lib/production-config.js';
-import { acquireBiliOwnerConsumerLease } from '../packages/channel-bili-owner/lib/production-lease.js';
+import { biliOwnerTextHash,createBiliOwnerProductionPorts,BiliOwnerProductionManifestSchema } from '@dafeiyu/bilibili/channel';
+import { loadBiliOwnerProductionBinding,BiliOwnerProductionConfigSchema } from '../packages/bilibili/lib/channel/production-config.js';
+import { acquireBiliOwnerConsumerLease } from '../packages/bilibili/lib/channel/production-lease.js';
 import { productionFixture,NAV,READ,SEND,noNetwork,nav,json } from './bili-owner-production-fixture.js';
 
 const signal=()=>AbortSignal.timeout(5000),guard=()=>{};
@@ -28,7 +29,7 @@ test('production pinning rejects path aliases and changed source before any defa
 test('the actual pinned Auth preserves numeric IDs before JSON parsing and reads only the fixed owner page',{concurrency:false},async()=>{
   const f=await productionFixture(),requests:string[]=[];const ports=await createBiliOwnerProductionPorts(f.config,{fetch:async(input,init)=>{const url=new URL(String(input));requests.push(url.origin+url.pathname);
     assert.equal(init?.redirect,'error');assert.ok(init?.signal);if(url.origin+url.pathname===NAV)return json(nav());assert.equal(url.origin+url.pathname,READ);assert.equal(init?.method,'GET');assert.equal(url.searchParams.get('talker_id'),BILI_OWNER_UID);assert.equal(url.searchParams.get('size'),'2');assert.equal(url.searchParams.get('begin_seqno'),'9007199254740993999');
-    return new Response('{"code":0,"data":{"has_more":1,"messages":[{"msg_key":9007199254740993123,"msg_seqno":9007199254740993123,"sender_uid":13461350,"receiver_id":170759822,"receiver_type":1,"msg_type":1,"timestamp":1793000000,"content":"{\\"content\\":\\"虚构文字\\"}"}]}}');}});
+    return new Response('{"code":0,"data":{"has_more":1,"messages":[{"msg_key":9007199254740993123,"msg_seqno":9007199254740993123,"sender_uid":10000002,"receiver_id":10000001,"receiver_type":1,"msg_type":1,"timestamp":1793000000,"content":"{\\"content\\":\\"虚构文字\\"}"}]}}');}});
   try{const identity=await ports.transport.verify(signal(),guard);assert.equal(identity.accountUid,BILI_OWNER_ACCOUNT);const page=await ports.transport.readOwnerPage({limit:2,beforeSeqno:'9007199254740993999'},signal(),guard);
     assert.equal(page.messages[0]?.id,'9007199254740993123');assert.equal(page.messages[0]?.seqno,'9007199254740993123');assert.equal(page.messages[0]?.text,'虚构文字');assert.equal(page.nextBeforeSeqno,'9007199254740993123');assert.equal(page.bindingStamp,identity.bindingStamp);assert.deepEqual(requests,[NAV,NAV,READ]);
   }finally{await ports.transport.close?.();await ports.lease.release();}

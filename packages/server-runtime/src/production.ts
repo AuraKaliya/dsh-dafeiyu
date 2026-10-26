@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
-import type {} from '@dafeiyu/channel-qq';
+import type {} from '@dafeiyu/qq';
 import type { HostRuntimeOptions,PreparedHostConfig } from '@dafeiyu/host';
 import type { WindowsProcessControlOptions,WindowsHostProof } from '@dafeiyu/server-executor/windows-process';
 import { ExecutorRouteSchema } from '@dafeiyu/server-executor/protocol';
