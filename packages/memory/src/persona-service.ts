@@ -115,7 +115,7 @@ export class PersonaService {
       make('dafeiyu_execution_select','选择下轮要装入的精确证据版本，空数组清除选择；内容超预算时明确省略。',evidenceSelectionSchema,true,(c,i)=>this.selectEvidence(c,i)),
       make('dafeiyu_execution_source_state','逻辑删除或恢复来源；恢复产生新版本，旧证明不会复活。',z.strictObject({requestId:PersonaRequestIdSchema,id:z.uuid(),expectedVersion:z.number().int().positive(),deleted:z.boolean()}),true,(c,i)=>this.changeSource(c,i)),
       make('dafeiyu_execution_contribution_state','逻辑删除或恢复当前任务内部的记忆贡献；不改变源资料，也不恢复旧授权。',z.strictObject({requestId:PersonaRequestIdSchema,id:z.uuid(),expectedVersion:z.number().int().positive(),deleted:z.boolean(),reason:z.string().trim().min(1).max(500)}),true,(c,i)=>this.changeContribution(c,i)),
-      make('dafeiyu_task_object','记录异议。偏好与方法建议不阻塞任务；前提、信息和权限问题可阻塞列出的相关能力，actions为空表示整个任务。不会擅自修改目标。',TaskObjectionSchema,true,(c,i)=>this.object(c,i)),
+      make('dafeiyu_task_object','持久记录仍影响受托目标的异议。前提、信息或权限缺口尚未解决时，列出实际受影响的能力并设blocking；口头解释和部分交付不能代替登记。仅阻断这些步骤，独立可做部分继续；只有确实影响整个任务才让actions为空。先查询已有意图避免重复。偏好、方法建议不阻断，已经解决的可选探查失败不登记。不会擅自修改目标。',TaskObjectionSchema,true,(c,i)=>this.object(c,i)),
       make('dafeiyu_task_intent','查看当前任务的动机、异议和已解决记录。只有受信任务生产者能确认解决阻断异议。',z.strictObject({}),false,c=>this.intent(c)),
     ];
   }
