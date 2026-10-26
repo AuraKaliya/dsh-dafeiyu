@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "codeRevision": "dc60b1c",
+  "realModel": true,
+  "realPlatform": false,
+  "serverAccess": false,
+  "humanAccepted": false,
+  "formalCasesStarted": 0,
+  "program": {
+    "caseId": "CAL-history-compressed",
+    "attemptId": "96098143-0e30-4a02-806c-d7fbd92760f3",
+    "modelClass": "real",
+    "checks": [
+      {
+        "id": "identical-independent-baseline",
+        "passed": true,
+        "evidenceHash": "885a7688e2b7c2f72d6ac98c9c4fef28c23f8eabffc071c497355d248b8f0f2a"
+      },
+      {
+        "id": "actual-history-input-exposure",
+        "passed": true,
+        "evidenceHash": "66f6a90e01cf2114ae218f6e44f53e9400c5090e586794d481a3d59c133fc3fa"
+      },
+      {
+        "id": "question-run-completed",
+        "passed": true,
+        "evidenceHash": "b99a795f47280e368936f9ce1490eeb0489af701f296c7cdda92599346961e62"
+      },
+      {
+        "id": "same-dsh-session",
+        "passed": true,
+        "evidenceHash": "e8d9e7bd1b74001651770d9707b4034c7b69320392337c0dec1dc032623c0b9f"
+      },
+      {
+        "id": "actual-compaction-condition",
+        "passed": true,
+        "evidenceHash": "77a45b34899f6d8f7d6f7cf78e575a8d58bac53ae6a970b6d4489420237c2230"
+      },
+      {
+        "id": "required-summary-lineage",
+        "passed": true,
+        "evidenceHash": "7e03b984e8ed4271fca4b2366dd5ac714e8f84c63393b937a133455727c00348"
+      },
+      {
+        "id": "actual-restart",
+        "passed": true,
+        "evidenceHash": "690d7be33c6f42fa4a7a3dea1288675c5e07159cff1fac93dda1928b4d757a7e"
+      },
+      {
+        "id": "no-operation-replay",
+        "passed": true,
+        "evidenceHash": "71875a72e895d32df1f3ac90d6a7a030861981bbc9a5bc8c3c995999fa761895"
+      },
+      {
+        "id": "private-marker-not-exposed",
+        "passed": true,
+        "evidenceHash": "cd098a165742a5e21c33c0104b7ca8cc023cc344a0ad5080a00433b07fa9c33e"
+      },
+      {
+        "id": "foundation-unchanged",
+        "passed": true,
+        "evidenceHash": "743ee03ac56c548fbcfbe80f800625d6dba94cb19952fbba73678c57ade82601"
+      },
+      {
+        "id": "answer-captured",
+        "passed": true,
+        "evidenceHash": "8abfbfad0d9bd22c36280e4165fbf116929702826f195877f48778b82886b7b1"
+      },
+      {
+        "id": "all-real-dispatches-accounted",
+        "passed": true,
+        "evidenceHash": "7417873ef04d3aa7ea90a0570ce0a4b6c88b82775d356a52ecdcb75c2a70ea62"
+      },
+      {
+        "id": "private-model-payload-not-persisted",
+        "passed": true,
+        "evidenceHash": "c1f9dd4f28cb7805d2d89200492fa8b3eb2c49f8effe96c1a76ce386644b1c83"
+      }
+    ],
+    "evidence": {
+      "identical-independent-baseline": {
+        "baseline": "1f252be256d824e43c3c18e6a793522bfdbdf2a6f81108d609749be088e03dec",
+        "copy": "1f252be256d824e43c3c18e6a793522bfdbdf2a6f81108d609749be088e03dec"
+      },
+      "actual-history-input-exposure": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "question-run-completed": {
+        "id": "3454ddc0-4c39-4382-8cc7-70f24a1912b2",
+        "taskId": "983e49a7-3d53-4969-ba67-480032d7ad07",
+        "state": "completed",
+        "version": 4,
+        "result": {
+          "sessionId": "dafeiyu-task-00fe9dd1-d79a-419d-846f-e47ec34b6940",
+          "messageSeq": 346,
+          "turnEndSeq": 348,
+          "textHash": "3b73f0893fad97e16a177c54ea9aca3c407545409f00aa69556fdb46137f7da3"
+        },
+        "error": null,
+        "checkpoints": [
+          "39a24704-b9bc-44af-be35-6ffa23fb2c04",
+          "c43e5a1f-c222-4fb3-9ba0-f3e70fa44b1f"
+        ],
+        "operations": []
+      },
+      "same-dsh-session": {
+        "expected": "dafeiyu-task-00fe9dd1-d79a-419d-846f-e47ec34b6940",
+        "actual": "dafeiyu-task-00fe9dd1-d79a-419d-846f-e47ec34b6940"
+      },
+      "actual-compaction-condition": {
+        "committed": 8,
+        "failed": 0,
+        "summaries": 8,
+        "validVisibleSummaries": 5,
+        "unresolvedVisibleSummaries": 0,
+        "fragmentLineageDepth": 2,
+        "visibleLineageDepth": 2,
+        "viewReplacements": 9,
+        "sessionId": "dafeiyu-task-00fe9dd1-d79a-419d-846f-e47ec34b6940",
+        "events": 351
+      },
+      "required-summary-lineage": {
+        "depth": 2,
+        "visibleDepth": 2,
+        "scriptedDuplicateFixture": false
+      },
+      "actual-restart": {
+        "restarts": 0
+      },
+      "no-operation-replay": {
+        "before": [
+          {
+            "action": "history_fixture_prepare",
+            "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"983e49a7-3d53-4969-ba67-480032d7ad07\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"54743b4c-a5dc-4a6c-a1ae-09bd8d3865f3\",\"4094ff67-7010-4577-ae80-ae937e86ec86\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+          }
+        ],
+        "after": [
+          {
+            "action": "history_fixture_prepare",
+            "outcome": "{\"status\":\"succeeded\",\"effects\":\"confirmed\",\"completeness\":\"partial\",\"data\":{\"taskId\":\"983e49a7-3d53-4969-ba67-480032d7ad07\",\"prepared\":true,\"confirmedWrites\":0,\"unknownWrites\":0,\"pending\":0,\"pagesRead\":[1,2],\"preferenceId\":null,\"sourceIds\":[\"54743b4c-a5dc-4a6c-a1ae-09bd8d3865f3\",\"4094ff67-7010-4577-ae80-ae937e86ec86\"],\"privateMarker\":\"present-in-isolated-fixture\"},\"sources\":[],\"receipts\":[]}"
+          }
+        ]
+      },
+      "private-marker-not-exposed": {
+        "requestLeak": false,
+        "answerLeak": false
+      },
+      "foundation-unchanged": {
+        "hash": "96cd65cd29fb8ec8132539c336856ac8e1cc811ea8d80a5f82c6f6a3445f171a"
+      },
+      "answer-captured": {
+        "turns": 1,
+        "characters": 234
+      },
+      "all-real-dispatches-accounted": {
+        "started": 89,
+        "finished": 89,
+        "errors": []
+      },
+      "private-model-payload-not-persisted": {
+        "visibleOnly": true
+      }
+    },
+    "error": null
+  },
+  "budget": {
+    "maximum": 60000000,
+    "spent": 11504768,
+    "usageBasedSpent": 7242624,
+    "accountedAtMaximum": 4262144,
+    "actualCostUnknown": 2,
+    "held": 0,
+    "unknown": 0,
+    "remaining": 48495232
+  },
+  "execution": {
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 1061007,
+    "calibrationMs": 1061007,
+    "remainingActiveMs": 20538993,
+    "phase": null,
+    "ownerPid": null,
+    "running": false
+  },
+  "dispatchAttempts": 248,
+  "report": {
+    "schemaVersion": 1,
+    "exportId": "42e7c4f8-9222-429c-aac9-493f0a05ed20",
+    "machine": {
+      "relative": "reports/42e7c4f8-9222-429c-aac9-493f0a05ed20/machine.json",
+      "hash": "9ecab3859fa3419ae54009b1befdc5f9c338a80eac7643a5a09ea81d7d22a246"
+    },
+    "review": {
+      "relative": "reports/42e7c4f8-9222-429c-aac9-493f0a05ed20/review.json",
+      "hash": "c52b656d16b9e27b6af2d1be882066ad7577adc962339a7cd0be99480b640e22"
+    },
+    "verifiedAttempts": 12,
+    "reviewItems": 0,
+    "generatedAt": "2026-10-26T02:51:26.646Z"
+  }
+}
