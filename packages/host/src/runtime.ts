@@ -51,6 +51,8 @@ export interface HostRuntimeOptions {
   readonly biliTransport?:Bili.HttpTransport;
   /** Trusted ports supplied by the server launcher; profile JSON cannot supply functions or a replacement runner. */
   readonly serverExecutorDependencies?:ServerExecutorDependencies;
+  /** Trusted program hook, awaited before Core/Memory or channel admission; never loaded from profile JSON. */
+  readonly installModelAdmission?:(ctx:Context,config:PreparedHostConfig)=>void|Promise<void>;
   readonly onPhase?:(phase:HostPhase,host:ManagedHost)=>void;
   readonly onModelCall?:(call:{provider:string;model:string;purpose:string;status:'started'|'completed'|'failed'})=>void;
 }
@@ -108,6 +110,7 @@ export class ManagedHost {
       if(!(await ctx.credentials.describe(credentialRef(deepseek.credentialName))).configured)throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');
       await ctx.plugin(DeepSeek,{baseURL:deepseek.baseURL,apiKeyEnv:deepseek.credentialName});this.plugin('model-deepseek','ready');
     }else if(scripted){ctx.llm.registerAdapter(['local-test'],this.options.adapter??new FixedModel(scripted.response));this.plugin('model-scripted','ready');}
+    await this.options.installModelAdmission?.(ctx,this.config);this.options.signal?.throwIfAborted();
     const observe=this.options.onModelCall;ctx.on('llm/stream',async function*(options,next){const call={provider:options.provider??'',model:options.model??'',purpose:options.purpose??'task'};observe?.({...call,status:'started'});let okay=true;
       try{for await(const chunk of next()){if(chunk.type==='finish'&&['error','aborted','max-tokens'].includes(chunk.reason.kind))okay=false;yield chunk;}observe?.({...call,status:okay?'completed':'failed'});}catch(error){observe?.({...call,status:'failed'});throw error;}});
     const route=this.config.config.modelRoutes.chat,modelInfo=await ctx.llm.resolveModelInfo(route.provider,route.model,this.options.signal);
