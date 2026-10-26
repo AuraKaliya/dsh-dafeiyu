@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { initializeCoreStorage } from '@dafeiyu/core';
 import { RUNTIME_SCHEMA_VERSION } from '@dafeiyu/core/runtime-store';
 import { initializeMemoryStorage } from '@dafeiyu/memory';
+import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { QqStore, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
 import { ActivityStore,ACTIVITY_SCHEMA_VERSION } from '@dafeiyu/activity/store';
 import { MediaStore,MEDIA_SCHEMA_VERSION } from '@dafeiyu/media';
@@ -24,7 +25,7 @@ export type ProfileManifest=z.infer<typeof ProfileManifestSchema>;
 export interface HostInspection {readonly schemaVersion:1;readonly profileId:string;readonly agentId:string;readonly configHash:string;readonly foundationHash:string;
   readonly ready:boolean;readonly canInitialize:boolean;readonly codes:readonly string[];readonly occupied:boolean;
   readonly stores:readonly (StorageInspection&{name:string})[];readonly plugins:readonly {id:string;enabled:boolean;required:boolean;version:string|null;state:'configured'|'disabled'}[];readonly order:readonly string[]}
-const target:Partial<Record<StorageKind,number>>={journal:2,memory:11,runtime:RUNTIME_SCHEMA_VERSION,activity:ACTIVITY_SCHEMA_VERSION,media:MEDIA_SCHEMA_VERSION,bilibili:BILI_SCHEMA_VERSION,delivery:1,analysis:1,working:1,feedback:1,qq:QQ_SCHEMA_VERSION,query:8,retrieval:2};
+const target:Partial<Record<StorageKind,number>>={journal:2,memory:MEMORY_SCHEMA_VERSION,runtime:RUNTIME_SCHEMA_VERSION,activity:ACTIVITY_SCHEMA_VERSION,media:MEDIA_SCHEMA_VERSION,bilibili:BILI_SCHEMA_VERSION,delivery:1,analysis:1,working:1,feedback:1,qq:QQ_SCHEMA_VERSION,query:8,retrieval:2};
 export function layoutPaths(config:PreparedHostConfig){return Object.fromEntries(config.resources.map((resource,index)=>[String(index),resource.identity]));}
 export const manifestFile=(config:PreparedHostConfig)=>join(config.paths.core,'host-profile.json');
 export function readManifest(config:PreparedHostConfig):ProfileManifest|null{if(!existsSync(manifestFile(config)))return null;

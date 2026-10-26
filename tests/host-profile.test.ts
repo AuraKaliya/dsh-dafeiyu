@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { loadHostConfig,inspectHost,initializeProfile,claim,owners,processAlive,readManifest } from '@dafeiyu/host';
+import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { resource } from '../packages/host/lib/paths.js';
 
 async function fixture(){const root=await mkdtemp(join(tmpdir(),'dafeiyu-host-profile-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
@@ -73,11 +74,11 @@ test('Host inspect is read-only and does not initialize missing profile or coord
 });
 
 test('Host initializes an explicit empty profile and never rewrites its foundation or existing stores',async()=>{const f=await fixture(),foundation=await readFile(join(f.root,'persona.md'));
-  assert.equal(initializeProfile(f.prepared,f.coordination).ready,true);assert.equal(readManifest(f.prepared)?.state,'initialized');
+  const initialized=initializeProfile(f.prepared,f.coordination);assert.equal(initialized.ready,true);assert.equal(initialized.stores.find(store=>store.kind==='memory')?.version,MEMORY_SCHEMA_VERSION);assert.equal(readManifest(f.prepared)?.state,'initialized');
   assert.deepEqual(await readFile(join(f.root,'persona.md')),foundation);const before=await tree(join(f.root,'data'));
   assert.equal(inspectHost(f.prepared,f.coordination).ready,true);assert.deepEqual(await tree(join(f.root,'data')),before);
   assert.throws(()=>initializeProfile(f.prepared,f.coordination),/HOST_INIT_REQUIRES_EMPTY_DIRECTORIES/);assert.deepEqual(await tree(join(f.root,'data')),before);
-  const db=new DatabaseSync(join(f.prepared.paths.memory,'memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) AS n FROM persona_candidates').get()?.n,0);}finally{db.close();}
+  const db=new DatabaseSync(join(f.prepared.paths.memory,'memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.equal(db.prepare('SELECT count(*) AS n FROM persona_candidates').get()?.n,0);}finally{db.close();}
 });
 
 test('unknown files and partial initialization are retained and cannot be reset by init',async()=>{const f=await fixture();await mkdir(f.prepared.paths.memory,{recursive:true});const file=join(f.prepared.paths.memory,'keep.txt');await writeFile(file,'PRESERVE_ME');

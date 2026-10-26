@@ -1,6 +1,7 @@
 import { existsSync,readFileSync,statSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import type { PreparedHostConfig } from './configuration.js';
 import { owners,processAlive } from './coordination.js';
 const state=z.enum(['created','inspected','opening','binding','recovering','ready','degraded','draining','failed','stopped']);
@@ -15,7 +16,7 @@ const snapshotSchema=z.strictObject({schemaVersion:z.literal(1),profileId:id,age
     bilibili:z.strictObject({lifecycle:z.enum(['registered','recovered','active','quiescing','closed']),media:z.boolean(),counts:z.strictObject({pages:count,requests:count,pending:count}),backoffUntil:z.number().int().nonnegative().nullable()}).nullable().optional(),
     taskDelivery:z.strictObject({total:count,pending:count,sent:count,partial:count,uncertain:count,blocked:count}).nullable().optional(),
     qq:z.strictObject({state:z.enum(['starting','online','offline','rejected','stopped']),groupSync:z.enum(['disabled','unavailable','current','stale']),groupError:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),effectiveGroups:count,lastGroupSync:z.iso.datetime().nullable(),capabilities:z.boolean().optional(),tasks:z.strictObject({enabled:z.boolean(),registered:z.boolean(),deliverResults:z.boolean()}).optional(),delivery:z.strictObject({plans:count,pending:count,unknown:count}).optional()}).nullable().optional()}),
-  counts:z.strictObject({activeRuns:count,queuedRuns:count,queuedRoutes:count,pendingMessages:count,outbox:count}),schemas:z.strictObject({journal:z.literal(2),memory:z.union([z.literal(8),z.literal(9),z.literal(10),z.literal(11)]),runtime:z.union([z.literal(2),z.literal(3),z.literal(4)]),activity:z.literal(1).nullable().optional(),media:z.literal(2).nullable().optional(),bilibili:z.literal(1).nullable().optional()})});
+  counts:z.strictObject({activeRuns:count,queuedRuns:count,queuedRoutes:count,pendingMessages:count,outbox:count}),schemas:z.strictObject({journal:z.literal(2),memory:z.union([z.literal(8),z.literal(9),z.literal(10),z.literal(11),z.literal(MEMORY_SCHEMA_VERSION)]),runtime:z.union([z.literal(2),z.literal(3),z.literal(4)]),activity:z.literal(1).nullable().optional(),media:z.literal(2).nullable().optional(),bilibili:z.literal(1).nullable().optional()})});
 export type SavedHostSnapshot=z.infer<typeof snapshotSchema>;
 /** An old or edited file is evidence of a snapshot, never proof of a live healthy instance. */
 export function readHostStatus(config:PreparedHostConfig,coordination?:string,now=Date.now()){
