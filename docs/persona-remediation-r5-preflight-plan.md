@@ -88,8 +88,8 @@ R4 检查记录已保存，准确区分 40 项不同定向检查通过、实际 
 
 同样的已知入口问题存在于 `acceptance-retry.ts`：`retryOneRealCase` 无条件加载旧 scope 证书，新协议下会在实际单项恢复前被原证书阻挡。此处只记录建议，先完成第 6 节 matrix 的定向检查和提交，收到下一步实施通知后再改 retry 源码。
 
-建议为 `retry-integrated-case.mjs` 增加同名 `--no-scope-reuse`，并将显式选择传入单项恢复控制器及资格检查。默认行为保持不变；关闭复用时要求当前 candidate 自己的校准、当前 candidate 对该 case 的已关闭 failed／blocked／interrupted 记录，以及此前冻结顺序中的用例都已有当前 candidate 的通过记录。旧 scope、旧通过、旧 triage 或旧兼容 baseline 不能替代这些条件；不新增失败豁免，不解除原功能失败的审查与停止要求。
+建议为 `retry-integrated-case.mjs` 增加同名 `--no-scope-reuse`，并将显式选择传入单项恢复控制器及资格检查。默认行为保持不变；关闭复用时要求当前 candidate 自己的校准、当前 candidate 对该 case 的已关闭 failed／blocked／interrupted 记录，以及此前冻结顺序中的用例都已有当前 candidate 的通过记录。旧 scope、旧通过或旧兼容 baseline 不能替代这些条件。triage 仍须读取以保留对当前精确目标的原否决：当前同一候选若已判为须修复的产品行为失败，仍拒绝 `RETAINED_FAILURE_REQUIRES_FIX`。在无复用模式，triage 只能否决当前目标，不能代替前项通过；旧候选条目不授予当前候选准入。不新增失败豁免，不解除原功能失败的审查与停止要求。
 
 这条路径必须继续是**只执行所指定的一项**，在原账本中使用 **retest** 阶段和新的独立 attempt／profile，保留原失败、计费和时钟。它不重新执行整批，不把正式 162 项转记到 retest，也不将单项恢复费用误记到 formal。controller／batch 记录 `scopeReuse`、retest 阶段及唯一 case 选择，旧证书继续原样保留。
 
-最小后续范围为 `scripts/acceptance-retry.ts`、`scripts/retry-integrated-case.mjs` 及有关 case-recovery／CLI 专项测试。验收至少覆盖同名 flag 解析、默认行为不变、同候选失败和独立校准门槛、旧候选或旧前项不能复用、仅一项产生新 ordinal、retest 费用归属及原记录／时钟不变；仍由主代理统一执行受管测试，不发模型或服务器操作。
+最小后续范围为 `scripts/acceptance-retry.ts`、`scripts/retry-integrated-case.mjs` 及有关 case-recovery／CLI 专项测试。验收至少覆盖同名 flag 解析、默认行为不变、同候选失败和独立校准门槛、当前目标的 triage 否决在无复用模式仍生效、没有旧 scope 文件但有普通 triage 文件时可以完成准入检查、旧候选或旧前项不能复用、仅一项产生新 ordinal、retest 费用归属及原记录／时钟不变；仍由主代理统一执行受管测试，不发模型或服务器操作。
