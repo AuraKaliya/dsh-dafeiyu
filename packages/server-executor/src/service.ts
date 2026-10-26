@@ -187,8 +187,8 @@ export class ServerExecutorService extends Service {
     const bytes=readFileSync(actual);check(bytes.length===output.bytes&&digest(bytes)===output.hash,'EXECUTOR_EVIDENCE_CHANGED');const envelope=envelopeSchema.parse(JSON.parse(bytes.toString('utf8')));
     check(envelope.jobId===job.id&&envelope.jobHash===job.hash&&envelope.configHash===this.configHash&&executorHash(envelope.authorization)===envelope.authorizationHash&&executorHash(envelope.authorization.scope)===executorHash(job.spec.scope)
       &&envelope.authorization.intentVersion===job.spec.intentVersion&&this.store.operations(job.id,job.spec.scope).some(value=>value.authorizationHash===envelope.authorizationHash&&value.operationId===envelope.authorization.operationId),'EXECUTOR_EVIDENCE_CHANGED');return envelope;}
-  private sourceCurrent(envelope:Envelope):boolean{try{const body=envelope.authorization,port=this.ctx.dafeiyu.executionProducer(body.policy.producer),task=port.taskState(port.openTask(body.taskId));
-      if(task.epoch!==body.intentVersion||executorHash(task.goal)!==executorHash(body.goal))return false;const source=body.source;
+  private sourceCurrent(envelope:Envelope):boolean{try{const body=envelope.authorization;
+      if(!this.ctx.dafeiyu.externalTaskSourceCurrent(body,OWNER))return false;const source=body.source;
       if(source.kind==='owner-message'){const item=this.ctx.dafeiyu.journal.get(source.inboundId);return source.conversation.channel==='qq'&&source.conversation.account===this.config.settings.resultOwner.account&&source.senderId===this.config.settings.resultOwner.ownerId
         &&executorHash(item.message)===source.messageHash&&item.message.id===source.messageId&&item.message.sender.id===source.senderId&&executorHash(item.message.conversation)===executorHash(source.conversation)
         &&!this.ctx.dafeiyu.journal.messageRecalled({agentId:body.agentId,route:item.route},source.messageId);}

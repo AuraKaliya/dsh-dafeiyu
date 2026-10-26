@@ -235,13 +235,30 @@ export class ExecutionCoordinator {
     if(!grant||run.definition.scope.kind!=='task'||!run.definition.taskId)throw new Error('SCOPE_DENIED');
     const request=this.d.store.request(run.requestKey),policy=this.policy(request.producer,run.definition.policyId),action=grant.action;
     if(!this.externalActionAllowed(run,policy,action))throw new Error('SCOPE_DENIED');
-    const task=this.repository().readState(this.d.agentId,run.definition.taskId);
-    return ExternalTaskAuthorizationSchema.parse({schemaVersion:1,agentId:this.d.agentId,taskId:task.id,runId:run.id,operationId:context.operationId,
+    return this.externalDescription(run,action,context.operationId);
+  }
+  private externalDescription(run:StoredRun,action:BoundActionV3,operationId:string):ExternalTaskAuthorization {
+    if(run.definition.scope.kind!=='task'||!run.definition.taskId)throw new Error('TASK_REQUIRED');
+    const request=this.d.store.request(run.requestKey),policy=this.policy(request.producer,run.definition.policyId),task=this.repository().readState(this.d.agentId,run.definition.taskId);
+    return ExternalTaskAuthorizationSchema.parse({schemaVersion:1,agentId:this.d.agentId,taskId:task.id,runId:run.id,operationId,
       intentVersion:run.definition.intentVersion,parentRunId:run.definition.parentRunId,scope:run.definition.scope,goal:task.goal,motivation:this.motivation(run),
       policy:{producer:request.producer,id:policy.id,hash:runtimeHash(policy)},
       action:{owner:action.owner,id:action.id,version:action.version,pluginVersion:action.pluginVersion,effects:action.effects,
         hash:runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})},source:this.externalTaskSource(run)});
   }
+  /** Read-only provenance check; it never creates a TaskRef, live grant, operation or new dispatch. */
+  externalTaskSourceCurrent(raw:unknown,expectedOwner:string):boolean {try{
+    this.d.signal.throwIfAborted();const authorization=ExternalTaskAuthorizationSchema.parse(raw);
+    if(authorization.agentId!==this.d.agentId||authorization.action.owner!==expectedOwner)return false;
+    const run=this.d.store.get(authorization.runId),operation=this.d.store.operation(authorization.operationId);
+    if(run.definition.scope.kind!=='task'||run.definition.taskId!==authorization.taskId||operation.runId!==run.id||!operation.versionsBound||operation.plugin!==expectedOwner
+      ||operation.action!==authorization.action.id||operation.pluginVersion!==authorization.action.pluginVersion||operation.actionVersion!==authorization.action.version)return false;
+    const request=this.d.store.request(run.requestKey),policy=this.policy(request.producer,run.definition.policyId),task=this.repository().readState(this.d.agentId,authorization.taskId);
+    if(task.status!=='active'||task.epoch!==authorization.intentVersion||run.snapshot?.authorityVersion!==runtimeHash(policy))return false;
+    const action=this.d.registry.actions().find(value=>value.owner===expectedOwner&&value.id===operation.action);
+    if(!action?.active()||!this.externalActionAllowed(run,policy,action))return false;
+    return runtimeHash(this.externalDescription(run,action,operation.id))===runtimeHash(authorization);
+  }catch{return false;}}
   authorizeExternalTask(context:ExecutionContextV3,pluginId:string):ExternalTaskAuthority {
     const authorization=freezeExternalAuthorization(this.externalAuthorization(context,pluginId)),hash=runtimeHash(authorization);
     return Object.freeze({authorization,hash,guard:()=>{if(runtimeHash(this.externalAuthorization(context,pluginId))!==hash)throw new Error('EXTERNAL_AUTHORITY_CHANGED');}});

@@ -106,6 +106,18 @@ test('a real owner Task receives immutable current authority, while copied, fore
   }finally{await h.close();}
 });
 
+test('read-only external provenance stays valid while draining without reopening task admission or a finished write grant',async()=>{
+  let h:Harness,authority:ExternalTaskAuthority|undefined,context:ExecutionContextV3|undefined;
+  h=await fixture({execute:value=>{context=value;authority=h.core.authorizeExternalTask(value,owner);return completed();}});
+  try{ownerTurn(h);await h.core.whenIdle();assert.ok(authority);assert.ok(context);const body=authority.authorization;
+    assert.equal(h.core.externalTaskSourceCurrent(body,owner),true);
+    for(const altered of [{...body,goal:'伪造目标'},{...body,policy:{...body.policy,hash:'0'.repeat(64)}},{...body,action:{...body.action,version:'2'}},{...body,operationId:'00000000-0000-4000-8000-000000000001'}])assert.equal(h.core.externalTaskSourceCurrent(altered,owner),false);
+    assert.equal(h.core.externalTaskSourceCurrent(body,'another-plugin'),false);h.core.quiesce();
+    assert.equal(h.core.externalTaskSourceCurrent(body,owner),true);assert.throws(()=>h.ownerPort.openTask(body.taskId),/HOST_NOT_READY/);
+    assert.throws(()=>authority!.guard(),/SCOPE_DENIED/);assert.throws(()=>h.core.authorizeExternalTask(context!,owner),/SCOPE_DENIED/);
+  }finally{await h.close();}
+});
+
 test('conversation policy cannot directly execute an external action, and quoted or non-owner instructions cannot mint owner authority',async()=>{
   const h=await fixture();try{
     h.setResponse(request=>{assert.equal(request.tools?.some(tool=>tool.name===actionId),false);return textReply('普通聊天');});h.message('普通聊天');await h.core.whenIdle();
