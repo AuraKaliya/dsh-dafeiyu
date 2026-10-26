@@ -23,6 +23,8 @@ import { ExecutionEvidence } from './execution-evidence.js';
 import type { NativeContext } from './execution-evidence.js';
 import { MediaReplyAuthoritySchema } from '@dafeiyu/contracts';
 import { mediaAuthorityBodySchema } from './media-authority.js';
+import { ExternalTaskAuthorizationSchema } from '@dafeiyu/contracts';
+import type { ExternalTaskAuthority,ExternalTaskAuthorization,ExternalTaskSource } from '@dafeiyu/contracts';
 
 export const ExecutionOptionsSchema=z.strictObject({profileId:ProducerSchema,createStore:z.boolean().default(false),
   policies:HostConfigSchema.shape.authorityPolicies,maxPendingRuns:z.number().int().min(1).max(1000).default(100),
@@ -198,6 +200,48 @@ export class ExecutionCoordinator {
       anchor=>this.activityAnchorStatus(anchor).state==='valid',sourceRun=>this.wakeOrigins(sourceRun).some(origin=>!!this.wakes.get(origin.producerId)?.sourceAnchor));this.evidence.set(run.id,value);return value;}
   private repository(){const value=this.d.repository();if(!value)throw new Error('DEPENDENCY_UNAVAILABLE');return value;}
   private policy(producer:string,id:string){const value=this.d.options.policies.find(p=>p.id===id&&p.producers.includes(producer));if(!value)throw new Error('SCOPE_DENIED');return value;}
+  private externalTaskSource(run:StoredRun):ExternalTaskSource {
+    if(run.definition.scope.kind!=='task'||!run.definition.taskId)throw new Error('TASK_REQUIRED');
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),motivation=this.motivation(run);
+    if(saved.messageSource){
+      const source=saved.messageSource;
+      if(source.kind!=='explicit-task'||motivation.kind!=='explicit-task')throw new Error('EXTERNAL_TASK_SOURCE_REQUIRED');
+      this.validateMessageAncestors(run);const {binding,item}=this.validateMessageSource(source);
+      if(binding.channel!=='qq'||item.message.conversation.channel!=='qq')throw new Error('EXTERNAL_TASK_SOURCE_REQUIRED');
+      if(!source.voice){const directive=binding.classify(item.message);if(!['submit','revise'].includes(directive.kind)||!item.message.mainText?.trim())throw new Error('EXTERNAL_TASK_SOURCE_REQUIRED');}
+      return {kind:'owner-message',bindingId:binding.id,inboundId:item.id,messageId:item.message.id,messageHash:source.messageHash,
+        conversation:source.conversation,senderId:item.message.sender.id,modality:source.voice?'voice':'text',sourceHash:runtimeHash(source)};
+    }
+    if(motivation.kind!=='self-exploration')throw new Error('EXTERNAL_TASK_SOURCE_REQUIRED');
+    const task=this.repository().readState(this.d.agentId,run.definition.taskId);this.validateWakeChain(run,task);
+    const sources=this.wakeOrigins(run).map(origin=>{const provider=this.wakes.get(origin.producerId),anchor=provider?.sourceAnchor?.(origin,task);
+      if(!provider?.validate(origin,task)||!anchor||this.activityAnchorStatus(anchor).state!=='valid')throw new Error('EXTERNAL_TASK_SOURCE_REQUIRED');
+      return {origin,anchor:ActivityAnchorSchema.parse(anchor)};});
+    const first=sources[0];if(!first)throw new Error('EXTERNAL_TASK_SOURCE_REQUIRED');
+    return {kind:'activity-wake',...first,sourceHash:runtimeHash(sources)};
+  }
+  /** The same exact qualification controls native visibility, invocation and delegated local writes. */
+  private externalActionAllowed(run:StoredRun,policy:HostConfig['authorityPolicies'][number],action:BoundActionV3):boolean {
+    if(run.definition.scope.kind!=='task'||!action.requiresTask||action.effects!=='external-write'||!policy.actions.includes(action.id)
+      ||!policy.externalActions?.some(value=>value.extensionId===action.owner&&value.actionId===action.id&&value.actionVersion===action.version))return false;
+    try{this.externalTaskSource(run);return true;}catch{return false;}
+  }
+  private externalAuthorization(context:ExecutionContextV3,pluginId:string):ExternalTaskAuthorization {
+    this.authority(context,pluginId);const grant=this.grants.get(context),run=this.d.store.get(context.runId);
+    if(!grant||run.definition.scope.kind!=='task'||!run.definition.taskId)throw new Error('SCOPE_DENIED');
+    const request=this.d.store.request(run.requestKey),policy=this.policy(request.producer,run.definition.policyId),action=grant.action;
+    if(!this.externalActionAllowed(run,policy,action))throw new Error('SCOPE_DENIED');
+    const task=this.repository().readState(this.d.agentId,run.definition.taskId);
+    return ExternalTaskAuthorizationSchema.parse({schemaVersion:1,agentId:this.d.agentId,taskId:task.id,runId:run.id,operationId:context.operationId,
+      intentVersion:run.definition.intentVersion,parentRunId:run.definition.parentRunId,scope:run.definition.scope,goal:task.goal,motivation:this.motivation(run),
+      policy:{producer:request.producer,id:policy.id,hash:runtimeHash(policy)},
+      action:{owner:action.owner,id:action.id,version:action.version,pluginVersion:action.pluginVersion,effects:action.effects,
+        hash:runtimeHash({input:action.input,effects:action.effects,requiresTask:action.requiresTask,description:action.description})},source:this.externalTaskSource(run)});
+  }
+  authorizeExternalTask(context:ExecutionContextV3,pluginId:string):ExternalTaskAuthority {
+    const authorization=freezeExternalAuthorization(this.externalAuthorization(context,pluginId)),hash=runtimeHash(authorization);
+    return Object.freeze({authorization,hash,guard:()=>{if(runtimeHash(this.externalAuthorization(context,pluginId))!==hash)throw new Error('EXTERNAL_AUTHORITY_CHANGED');}});
+  }
   private ref(producer:string,run:StoredRun){const reference=Object.freeze({id:run.id});this.refs.set(reference,{producer,id:run.id});return reference;}
   private taskRef(producer:string,id:string){const ref=Object.freeze({id});this.tasks.set(ref,{producer,id});return ref;}
   private resolve(producer:string,ref:RunRef){const authority=this.refs.get(ref);if(authority?.producer!==producer)throw new Error('SCOPE_DENIED');return this.d.store.get(authority.id);}
@@ -391,7 +435,7 @@ export class ExecutionCoordinator {
         if(run.definition.origin.kind==='wake'&&!this.wakes.get(request.producer)?.validate(run.definition.origin,task))throw new Error('WAKE_NOT_AUTHORIZED');
         const inputs=repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules),inputHash=runtimeHash(inputs),authorityVersion=runtimeHash(policy);
         trialInputs=inputs;
-        const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite));
+        const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&(action.effects==='external-write'?this.externalActionAllowed(run,policy,action):action.effects!=='local-write'||policy.allowLocalWrite));
         const contributors=this.d.registry.contributors(),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
@@ -504,7 +548,13 @@ export class ExecutionCoordinator {
       .filter(action=>policy?.actions.includes(action.id)&&!action.requiresTask&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .map(action=>({id:action.id,owner:action.owner,version:action.version,input:action.input,effects:action.effects}))};}
   authority(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'){const grant=this.grants.get(context);
-    if(!grant||grant.action.owner!==pluginId||!grant.action.active()||effect==='local-write'&&grant.action.effects!=='local-write'||this.d.store.get(grant.runId).state!=='running')throw new Error('SCOPE_DENIED');grant.guard();return context;
+    if(!grant||grant.action.owner!==pluginId||!grant.action.active()||this.d.store.get(grant.runId).state!=='running')throw new Error('SCOPE_DENIED');
+    context.signal.throwIfAborted();grant.guard();
+    if(grant.action.effects==='external-write'){
+      const run=this.d.store.get(grant.runId),request=this.d.store.request(run.requestKey),policy=this.policy(request.producer,run.definition.policyId);
+      if(!this.externalActionAllowed(run,policy,grant.action)||effect==='local-write'&&!policy.allowLocalWrite)throw new Error('SCOPE_DENIED');
+    }else if(effect==='local-write'&&grant.action.effects!=='local-write')throw new Error('SCOPE_DENIED');
+    return context;
   }
   private inputsFor(run:StoredRun):ExecutionInput[]{if(!run.definition.taskId)return [];const request=this.d.store.request(run.requestKey),saved=savedSchema.parse(request.payload);return this.repository().readSelectedInputs(this.d.agentId,run.definition.taskId,saved.input.inputRefs,this.policy(request.producer,run.definition.policyId).sourceRules);}
   /** Recovery may use only the same bound inputs, never a later task revision or another origin. */
@@ -512,9 +562,11 @@ export class ExecutionCoordinator {
     if(!run.snapshot||runtimeHash(inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey})))!==runtimeHash(run.snapshot.inputs))throw new Error('SOURCE_STALE');this.evidence.delete(run.id);return inputs;
   }
   personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'):PersonaAccess{
-    const grant=this.grants.get(context);this.authority(context,pluginId,effect);if(!grant||effect==='local-write'&&grant.action.effects!=='local-write')throw new Error('SCOPE_DENIED');
+    const grant=this.grants.get(context);this.authority(context,pluginId,effect);if(!grant)throw new Error('SCOPE_DENIED');
     const run=this.d.store.get(context.runId),prepared=this.d.personas.current(run.id);const guard=()=>{this.authority(context,pluginId,effect);prepared?.guard();};
-    const commitGuard=()=>{context.signal.throwIfAborted();const current=this.grants.get(context);if(current!==grant||!grant.action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');grant.commitGuard();};
+    const commitGuard=()=>{context.signal.throwIfAborted();const current=this.grants.get(context);if(current!==grant||!grant.action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');grant.commitGuard();
+      if(grant.action.effects==='external-write'){const actual=this.d.store.get(run.id),request=this.d.store.request(actual.requestKey),policy=this.policy(request.producer,actual.definition.policyId);
+        if(!this.externalActionAllowed(actual,policy,grant.action)||effect==='local-write'&&!policy.allowLocalWrite)throw new Error('SCOPE_DENIED');}};
     guard();return Object.freeze({...this.d.personas.access(run,this.inputsFor(run),context.signal,commitGuard),commitGuard,producer:pluginId,operationId:context.operationId,startedEventId:this.d.store.operation(context.operationId).startedEventId,
       admittedSources:[...(prepared?.manifest.entries.flatMap(entry=>[entry.contentRef,...entry.dependencies])??[]),
         ...(prepared?.manifest.schemaVersion===2?prepared.manifest.trialEntries.flatMap(entry=>[entry.contentRef,...entry.dependencies]):[]),...(this.evidence.get(run.id)?.sourceRefs()??[])]});
@@ -550,3 +602,4 @@ export class ExecutionCoordinator {
 }
 function safeCode(error:unknown):string{return error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'EXECUTION_FAILED';}
 function freezeOrigin(raw:RunOrigin):RunOrigin{const origin=RunOriginSchema.parse(raw);if(origin.kind==='message')Object.freeze(origin.conversation);return Object.freeze(origin);}
+function freezeExternalAuthorization<T>(value:T):T{if(value!==null&&typeof value==='object'){for(const child of Object.values(value))freezeExternalAuthorization(child);Object.freeze(value);}return value;}

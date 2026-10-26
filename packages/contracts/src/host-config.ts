@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { FeatureSchema, ExtensionIdSchema } from './execution.js';
 import { ConversationSchema } from './conversation.js';
+import { ExternalActionPoliciesSchema } from './external-execution.js';
 
 const path = z.string().trim().min(1).max(4096);
 const route = z.strictObject({ provider: z.string().min(1).max(120), model: z.string().min(1).max(160), reasoningEffort: z.string().min(1).max(40).optional() });
@@ -24,6 +25,7 @@ export const HostConfigSchema = z.strictObject({
     compactionInputTokens: z.number().int().min(2048).max(1000000).optional() }).prefault({}),
   authorityPolicies: z.array(z.strictObject({ id: ExtensionIdSchema, producers: z.array(ExtensionIdSchema).min(1).max(64),
     actions: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).max(128), allowLocalWrite: z.boolean().default(false),
+    externalActions: ExternalActionPoliciesSchema.optional(),
     sourceRules: z.array(ExtensionIdSchema).max(64).default([]), resources: z.array(ConversationSchema).max(64).default([]) })).max(64).default([]),
   diagnostics: z.strictObject({ snapshotIntervalMs: z.number().int().min(100).max(60000).default(2000) }).prefault({}),
 }).superRefine((value, ctx) => {
