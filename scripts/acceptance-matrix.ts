@@ -7,6 +7,7 @@ import type { EvaluationWorkspace } from './evaluation/workspace.ts';
 import type { RealCandidate } from './evaluation/real-support.ts';
 import { stableEvaluationError } from './evaluation/real-support.ts';
 import { readRealAuthorization } from './evaluation/authorization.ts';
+import { validateAppliedBudgetAuthorization } from './evaluation/budget-amendment.ts';
 import { acquireEvaluationLease } from './evaluation/lease.ts';
 import { cleanEvaluationRevision,captureRuntimeIdentity,runtimeIdentityHash } from './evaluation/identity.ts';
 import { freezeRealCandidate,latestCandidateAttempt,requireRealCalibration } from './evaluation/real-candidate.ts';
@@ -33,6 +34,7 @@ async function evidenceBytes(root:string):Promise<number>{let total=0;for(const 
 
 export async function continueRealMatrix(repository:string,catalog:EvaluationCatalog,workspace:EvaluationWorkspace,batch:number,onProgress:(value:unknown)=>void=()=>{}){
   if(process.env.DAFEIYU_TEST_RUN)throw new Error('EVALUATION_LIVE_CALLS_DISABLED_IN_TESTS');const {authorization,hash}=readRealAuthorization(repository);if(workspace.config.executionBounds?.authorizationHash!==hash||workspace.config.budget.maximumMicroCny!==authorization.maximumMicroCny)throw new Error('EVALUATION_AUTHORIZATION_CHANGED');
+  validateAppliedBudgetAuthorization(repository,workspace.ledger);
   const lease=acquireEvaluationLease(workspace),batchId=randomUUID(),startedAt=new Date().toISOString(),resourcesBefore=process.resourceUsage();let completed=false,error:string|null=null,candidate:RealCandidate|undefined,controllerRevision:string|null=null,controllerArtifact:{relative:string;hash:string}|undefined,retained:FailureTriage[]=[];
   const dispositions:{caseId:string;attemptId:string;state:string;action:string;basisCandidate?:RealCandidate;scopeReused?:boolean}[]=[];
   try{if(workspace.ledger.report().attempts.some(a=>a.state==='running'))throw new Error('EVALUATION_EXPLICIT_RECOVERY_REQUIRED');if(workspace.ledger.budget.unknown)throw new Error('EVALUATION_UNKNOWN_COST');if(!workspace.ledger.phaseBudgetStatus())throw new Error('EVALUATION_PHASE_ALLOCATION_REQUIRED');workspace.ledger.startExecution('formal');

@@ -24,6 +24,7 @@ import { parseDocument } from 'yaml';
 import type { EvaluationLedger } from './ledger.ts';
 import { installEvaluationBilling } from './billing.ts';
 import { readRealAuthorization } from './authorization.ts';
+import { validateAppliedBudgetAuthorization } from './budget-amendment.ts';
 import { PERSONA_ACTIONS,EXECUTION_ACTIONS } from './runtime.ts';
 import { sha256 } from './catalog.ts';
 import { transportFacts } from './transport-diagnostics.ts';
@@ -47,6 +48,7 @@ export class DeadlineAdapter extends LlmAdapter {
 export async function openRealEvaluationRuntime(options:{repository:string;campaignRoot:string;root:string;foundationFile:string;ledger:EvaluationLedger;attemptId:string;create?:boolean;compaction?:Memory.Config['compaction'];caseDeadline?:number;extension?:(ctx:Context)=>Omit<ExtensionV3,'protocolVersion'|'agentId'>;policies?:HostConfig['authorityPolicies'];beforeActivate?:(ctx:Context)=>Promise<void>;testBackend?:LlmAdapter}){
   const {authorization:a,hash}=readRealAuthorization(options.repository);
   if(options.ledger.config.mode!=='real'||options.ledger.config.executionBounds?.authorizationHash!==hash||options.ledger.config.budget.maximumMicroCny!==a.maximumMicroCny)throw new Error('EVALUATION_REAL_AUTHORIZATION_REQUIRED');
+  validateAppliedBudgetAuthorization(options.repository,options.ledger);
   options.ledger.remainingExecutionMs();
   if(options.testBackend&&!process.env.DAFEIYU_TEST_RUN)throw new Error('EVALUATION_TEST_BACKEND_DENIED');
   if(!options.testBackend){const root=resolve(options.campaignRoot),home=process.env.DSH_HOME?resolve(process.env.DSH_HOME):'',delta=relative(root,home);if(!home||!delta||delta==='..'||delta.startsWith('..'+sep)||isAbsolute(delta))throw new Error('EVALUATION_ISOLATED_HOME_REQUIRED');}

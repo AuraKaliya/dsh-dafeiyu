@@ -9,6 +9,7 @@ import { EvaluationCatalog,sha256 } from './catalog.ts';
 import { RuntimeIdentitySchema,runtimeIdentityHash } from './identity.ts';
 import type { RuntimeIdentity } from './identity.ts';
 import { readRealAuthorization,authorizedCampaignPath,CALIBRATION_CASES } from './authorization.ts';
+import { validateAppliedBudgetAuthorization } from './budget-amendment.ts';
 
 const markerSchema=z.strictObject({kind:z.literal('dafeiyu-evaluation-workspace-v1'),id:z.uuid(),root:z.string(),configHash:z.string().length(64),createdAt:z.iso.datetime(),temporary:z.boolean()});
 const inside=(path:string,root:string)=>{const delta=relative(root,path);return delta!==''&&!delta.startsWith('..'+sep)&&delta!=='..'&&!isAbsolute(delta);};
@@ -41,7 +42,7 @@ export class EvaluationWorkspace {
     if(config.runtimeHash&&runtimeIdentityHash(RuntimeIdentitySchema.parse(JSON.parse((await readArtifact(root,'runtime-identity.json')).toString())))!==config.runtimeHash)throw new Error('EVALUATION_RUNTIME_CHANGED');
     if(config.executionBounds?.authorizationHash&&sha256(await readArtifact(root,'sources/authorization.json'))!==config.executionBounds.authorizationHash)throw new Error('EVALUATION_AUTHORIZATION_CHANGED');
     const ledgerFile=await lstat(join(root,'evaluation.sqlite'));if(!ledgerFile.isFile()||ledgerFile.isSymbolicLink())throw new Error('EVALUATION_LINK_DENIED');
-    return new EvaluationWorkspace(root,new EvaluationLedger(join(root,'evaluation.sqlite'),config));}
+    const ledger=new EvaluationLedger(join(root,'evaluation.sqlite'),config);try{validateAppliedBudgetAuthorization(repository,ledger);return new EvaluationWorkspace(root,ledger);}catch(error){ledger.close();throw error;}}
   async write(relativePath:string,content:string|Uint8Array){const file=artifactPath(this.root,relativePath),bytes=typeof content==='string'?Buffer.from(content):content;if(bytes.byteLength>4*1024**2)throw new Error('EVALUATION_ARTIFACT_TOO_LARGE');await safeDirectory(dirname(file),this.root,true);await writeFile(file,bytes,{flag:'wx'});return {relative:relativePath,hash:sha256(bytes)};}
   async read(relativePath:string,expectedHash:string){const bytes=await readArtifact(this.root,relativePath);if(sha256(bytes)!==expectedHash)throw new Error('EVALUATION_ARTIFACT_CHANGED');return bytes;}
   async exportReport(){return this.write('reports/'+randomUUID()+'.json',JSON.stringify(this.ledger.report(),null,2)+'\n');}

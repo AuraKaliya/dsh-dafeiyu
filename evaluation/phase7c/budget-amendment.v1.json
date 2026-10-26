@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "7c-20261026-remaining-50cny",
+  "parentAuthorizationId": "7c-20261026-flash-max-60cny",
+  "parentAuthorizationHash": "e607d277309e59e514cc2f8ae57d5fb60cd54894111858d019551f124a70f065",
+  "approvedOn": "2026-10-26",
+  "approvedBy": "human-user-in-this-thread",
+  "campaignId": "7c-20261026",
+  "policy": "remaining-budget-at-frozen-stop",
+  "originalMaximumMicroCny": 60000000,
+  "remainingAuthorizedMicroCny": 50000000,
+  "effectiveMaximumMicroCny": 97894922,
+  "increaseMicroCny": 37894922,
+  "maximumActiveMs": 21600000,
+  "validForMsAfterFirstCall": 172800000,
+  "automaticBudgetIncrease": false,
+  "boundedCostPolicy": "full-reservation-permanent-charge-actual-fee-unknown",
+  "baseline": {
+    "spent": 47894922,
+    "usageBasedSpent": 28715274,
+    "accountedAtMaximum": 19179648,
+    "actualCostUnknown": 9,
+    "held": 0,
+    "unknown": 0,
+    "phaseUsed": { "calibration": 23343152, "formal": 15875920, "retest": 8675850 },
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 7438303,
+    "calibrationMs": 3082731
+  },
+  "phaseAllocation": { "calibration": 33343152, "formal": 45875920, "retest": 18675850 }
+}

@@ -7,6 +7,7 @@ import type { EvaluationWorkspace } from './evaluation/workspace.ts';
 import type { RealCandidate } from './evaluation/real-support.ts';
 import { stableEvaluationError } from './evaluation/real-support.ts';
 import { readRealAuthorization } from './evaluation/authorization.ts';
+import { validateAppliedBudgetAuthorization } from './evaluation/budget-amendment.ts';
 import { acquireEvaluationLease } from './evaluation/lease.ts';
 import { cleanEvaluationRevision,captureRuntimeIdentity,runtimeIdentityHash } from './evaluation/identity.ts';
 import { freezeRealCandidate,latestCandidateAttempt,requireRealCalibration } from './evaluation/real-candidate.ts';
@@ -32,6 +33,7 @@ async function evidenceBytes(root:string):Promise<number>{let total=0;for(const 
 export async function retryOneRealCase(repository:string,catalog:EvaluationCatalog,workspace:EvaluationWorkspace,caseId:string,onProgress:(value:unknown)=>void=()=>{}){
   if(process.env.DAFEIYU_TEST_RUN)throw new Error('EVALUATION_LIVE_CALLS_DISABLED_IN_TESTS');
   const {authorization,hash}=readRealAuthorization(repository);if(workspace.config.executionBounds?.authorizationHash!==hash||workspace.config.budget.maximumMicroCny!==authorization.maximumMicroCny)throw new Error('EVALUATION_AUTHORIZATION_CHANGED');
+  validateAppliedBudgetAuthorization(repository,workspace.ledger);
   const lease=acquireEvaluationLease(workspace),batchId=randomUUID(),startedAt=new Date().toISOString(),resourcesBefore=process.resourceUsage();let error:string|null=null,completed=false,controllerRevision:string|null=null,candidate:RealCandidate|undefined,controllerArtifact:{relative:string;hash:string}|undefined;
   const dispositions:{caseId:string;attemptId:string;state:string;action:'executed'}[]=[];
   try{

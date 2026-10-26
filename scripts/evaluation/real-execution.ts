@@ -7,6 +7,7 @@ import type { EvaluationWorkspace } from './workspace.ts';
 import { acquireEvaluationLease } from './lease.ts';
 import { cleanEvaluationRevision,captureRuntimeIdentity,runtimeIdentityHash } from './identity.ts';
 import { CALIBRATION_CASES,readRealAuthorization } from './authorization.ts';
+import { validateAppliedBudgetAuthorization } from './budget-amendment.ts';
 import { freezeRealCandidate,latestCandidateAttempt,requireRealCalibration } from './real-candidate.ts';
 import { runBoundaryReal } from './real-boundary.ts';
 import { runContinuityReal } from './real-continuity.ts';
@@ -30,6 +31,7 @@ async function routeProbe(catalog:EvaluationCatalog,item:EvaluationCase,workspac
 /** Real calls are admitted only here, under one campaign lease, one clock, and one cumulative ledger. */
 export async function runAuthorizedBatch(repository:string,catalog:EvaluationCatalog,workspace:EvaluationWorkspace,selection:RealSelection,onProgress:(value:unknown)=>void=()=>{}){
   if(process.env.DAFEIYU_TEST_RUN)throw new Error('EVALUATION_LIVE_CALLS_DISABLED_IN_TESTS');const {authorization,hash}=readRealAuthorization(repository);if(workspace.config.executionBounds?.authorizationHash!==hash||workspace.config.budget.maximumMicroCny!==authorization.maximumMicroCny)throw new Error('EVALUATION_AUTHORIZATION_CHANGED');
+  validateAppliedBudgetAuthorization(repository,workspace.ledger);
   const selected=selectedRealCases(catalog,selection),isCalibration=!!(selection.calibrate||selection.calibrationCase),lease=acquireEvaluationLease(workspace),batchId=randomUUID(),startedAt=new Date().toISOString(),usage=process.resourceUsage();let completed=false,verified=false,error:string|null=null,controllerHead:string|null=null;const dispositions:{caseId:string;attemptId:string;state:string;action:'executed'|'skipped'}[]=[];let frozen:Awaited<ReturnType<typeof freezeRealCandidate>>|undefined;
   try{
     if(workspace.ledger.report().attempts.some(a=>a.state==='running'))throw new Error('EVALUATION_EXPLICIT_RECOVERY_REQUIRED');if(workspace.ledger.budget.unknown)throw new Error('EVALUATION_UNKNOWN_COST');if(!workspace.ledger.phaseBudgetStatus())throw new Error('EVALUATION_PHASE_ALLOCATION_REQUIRED');
