@@ -37,6 +37,7 @@ import type { PreparedHostConfig } from './configuration.js';
 import { inspectHost,bindMigratedProfile,packageVersion } from './profile.js';
 import { claim } from './coordination.js';
 import type { HostLease } from './coordination.js';
+import { installInlineDeepSeek } from './inline-model.js';
 
 const importedHome=process.env.DSH_HOME;
 export type HostPhase='created'|'inspected'|'opening'|'binding'|'recovering'|'ready'|'degraded'|'draining'|'failed'|'stopped';
@@ -108,7 +109,9 @@ export class ManagedHost {
     if(deepseek){const doc=parseDocument(readFileSync(deepseek.credentialStore,'utf8'),{logLevel:'silent'});if(doc.errors.length||doc.get('version')!==1)throw new Error('HOST_CREDENTIAL_STORE_UNSUPPORTED');
       this.credentials={file:deepseek.credentialStore,hash:hashFile(deepseek.credentialStore)};await ctx.plugin(Credentials,{path:deepseek.credentialStore,watch:false});
       if(!(await ctx.credentials.describe(credentialRef(deepseek.credentialName))).configured)throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');
-      await ctx.plugin(DeepSeek,{baseURL:deepseek.baseURL,apiKeyEnv:deepseek.credentialName});this.plugin('model-deepseek','ready');
+      if(deepseek.inlineTransport)await installInlineDeepSeek(ctx,{baseURL:deepseek.baseURL,credentialName:deepseek.credentialName,route:this.config.config.modelRoutes.chat,settings:deepseek.inlineTransport,
+        credentialGuard:()=>{if(!this.credentials||hashFile(this.credentials.file)!==this.credentials.hash)throw new Error('HOST_CREDENTIAL_STORE_CHANGED');}});
+      else await ctx.plugin(DeepSeek,{baseURL:deepseek.baseURL,apiKeyEnv:deepseek.credentialName});this.plugin('model-deepseek','ready');
     }else if(scripted){ctx.llm.registerAdapter(['local-test'],this.options.adapter??new FixedModel(scripted.response));this.plugin('model-scripted','ready');}
     await this.options.installModelAdmission?.(ctx,this.config);this.options.signal?.throwIfAborted();
     const observe=this.options.onModelCall;ctx.on('llm/stream',async function*(options,next){const call={provider:options.provider??'',model:options.model??'',purpose:options.purpose??'task'};observe?.({...call,status:'started'});let okay=true;
