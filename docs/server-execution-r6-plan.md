@@ -52,7 +52,11 @@ extensionId/actionId 沿现有命名 Schema，数组去重、有限容量、无�
 
 ## 3. R6b：受信 bootstrap 与独立 standing authority
 
-建议新增 packages/server-bootstrap 与 packages/server-executor；名称可在实施前统一，本文描述的接口不能因改名丢失。bootstrap 使用现有 DSH ctx 的 agents/sessions/sessionPersistence/tools/systemPrompt/llm，不重复装配一套全局 Agent、凭据服务或默认模型，不在旧 DSH 进程内启动 ManagedHost 自建 Context。
+新增 packages/server-bootstrap 与 packages/server-executor。bootstrap 采用现有 DSH 运行底座，不装配第二套全局凭据服务或默认模型，不在旧 DSH 进程内启动 ManagedHost 自建 Context。装配细节按下述本地 ABI 核对修订；父级官方基础组件保留。
+
+2026-10-26 实施前核对：DSH 0.2.1-rc.2 的 AgentLoop 实际 Agent scope 来自 loop 自身的 runtime ctx，不能仅在调用方隔离 attachments/compaction 就假设实际 Agent 已隔离；而 Media 与 Core 的来源跟踪明确拒绝其它附件/压缩服务。另一个官方 AgentLoop 实例会在 systemPrompt 中注册相同变量。最小候选方案是在产品子作用域隔离 agents、agentLoop、systemPrompt、attachments、compaction，装配独立的**官方** AgentRegistry/AgentLoop/Prompt 实例，复用父级 sessions/sessionPersistence/sessionQuery/tools/llm；不是重写模型循环，也不卸载或覆盖父级基础组件。先用实际 Cordis/DSH 组件与虚构样本验证实际 Agent 的服务继承及父实例保留，再接完整 bootstrap；不以构造未报错代替验证。
+
+共享存储单独核验：通过公开 registry/fiber.config 和 sessionPersistence.identity 绑定唯一活动 JSONL provider 及其配置，不读取私有 root 字段或猜测路径。项目只独占 core/memory/channel/executor 等自己的数据，不能声称独占整个 DSH sessions/query 根，也不初始化、迁移或整根清理这些借用存储。新增明确的 provided-DSH 预检/初始化路径，旧 standalone 行为保持不变，manifest 仍记录真实完整布局。bootstrap 自有状态不冒用 standalone 的独占资源状态报告。
 
 启动顺序沿现有公开接口：独立路径预检及占用 → Core(managed) → Timeline → Memory(managed) → configureExecution → executor/Activity/Media/Bili/QQ(managed) → 暂缓 QQ 入站 → Memory 就绪 → recoverExecutions（含 TrialOutcome 补齐）→ core.recover → activate(deferWork) → 渠道就绪 → 开放准入 → Activity.start。关闭先停新唤醒/新子任务/新入站，再排空或取消，最后逆序释放。失败不能遗留第二个消费者或删除其它实例占用。
 
