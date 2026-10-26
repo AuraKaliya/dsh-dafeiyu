@@ -41,7 +41,7 @@ export { readFoundation } from './foundation.js';
 export { initializeCoreStorage } from './storage-initialization.js';
 import type { StoredRun } from './runtime-store.js';
 import type { TaskRepositoryPort,ExecutionContextV3,WakeAuthorityProvider,PersonaProvider,ExecutionMemoryPort } from '@dafeiyu/contracts';
-import { ResourceProofSchema,CapabilityObservationSchema,CapabilitySelectionSchema,ConversationSchema } from '@dafeiyu/contracts';
+import { ResourceProofSchema,CapabilityObservationSchema,CapabilitySelectionSchema,ConversationSchema,ExecutionScopeSchema } from '@dafeiyu/contracts';
 import type { CapabilityObservationPort,PersonaAccess,PersonaSourceRef,SourceDependency,TimelineScope } from '@dafeiyu/contracts';
 export type { ExecutionOptions } from './execution-coordinator.js';
 export { EXECUTION_MESSAGE_SOURCE } from './native-runtime.js';
@@ -279,6 +279,8 @@ export class DafeiyuService extends Service {
   }
   capabilityResourceCurrent(raw:unknown):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registryV3.resourceCurrent(proof.data);}
   capabilityPublicView(raw:unknown,view:string):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registryV3.publicView(proof.data,view);}
+  capabilityTargetView(raw:unknown,view:string,target:Conversation,scope:unknown){const proof=ResourceProofSchema.safeParse(raw),destination=ConversationSchema.safeParse(target),execution=ExecutionScopeSchema.safeParse(scope);
+    return proof.success&&destination.success&&execution.success&&execution.data.agentId===this.config.agentId?this.registryV3.targetView(proof.data,view,destination.data,execution.data):null;}
   capabilityResourceEpoch(scope?:TimelineScope):string {return this.registryV3.resourceEpoch(scope);}
   capabilityResourceEpochWithout(providerId:string,scope?:TimelineScope):string {return this.registryV3.resourceEpoch(scope,providerId);}
   capabilityHistoryCurrent(scope:TimelineScope,deps:readonly SourceDependency[]):boolean {
@@ -288,12 +290,13 @@ export class DafeiyuService extends Service {
     return !!this.capabilityObservationPort?.ready()&&this.capabilityObservationPort.valid(scope,source,exposedHash);
   }
   mediaExpressionFence(access:PersonaAccess,target:Conversation,roots:readonly string[]){access.guard();const port=this.capabilityObservationPort;if(!port?.ready()||!port.mediaFence)throw new Error('DEPENDENCY_UNAVAILABLE');return port.mediaFence(access,target,roots);}
-  recordCapabilityObservation(context:ExecutionContextV3,pluginId:string,raw:unknown) {
+  recordCapabilityObservation(context:ExecutionContextV3,pluginId:string,raw:unknown,options?:{readonly inheritExecutionHistory:true}) {
+    if(options!==undefined)z.strictObject({inheritExecutionHistory:z.literal(true)}).parse(options);
     const input=CapabilityObservationSchema.parse(raw);if(input.proof.provider!==pluginId)throw new Error('SCOPE_DENIED');
     const scene=this.authorizeCapabilityResource(context,pluginId,input.proof.scene),execution=this.personaAccess(context,pluginId);
     const port=this.capabilityObservationPort;if(!port?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
     const guard=()=>{execution.guard();this.authorizeCapabilityResource(context,pluginId,scene);if(this.capabilityObservationPort!==port||!port.ready()||!this.capabilityResourceCurrent(input.proof))throw new Error('SOURCE_STALE');};
-    guard();return port.record({execution,scene,guard},input);
+    guard();return port.record({execution,scene,guard,...(options?.inheritExecutionHistory?{inheritExecutionHistory:true as const}:{})},input);
   }
   selectCapabilityObservation(context:ExecutionContextV3,pluginId:string,sceneInput:unknown,raw:unknown,actualView:string) {
     const scene=this.authorizeCapabilityResource(context,pluginId,sceneInput),execution=this.personaAccess(context,pluginId,'local-write'),input=CapabilitySelectionSchema.parse(raw);

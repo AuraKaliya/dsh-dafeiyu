@@ -26,13 +26,19 @@ export class NativeExpression implements NativeExpressionPort {
   private build(access:NativeExpressionAccess,allowExpired=false){access.guard();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const anchor=TaskResultAnchorSchema.parse(access.anchor),scope=access.execution.view.scope;
     if(scope.kind!=='task'||scope.taskId!==anchor.taskId||access.execution.view.runId!==anchor.runId||access.execution.intentVersion!==anchor.intentVersion||!allowExpired&&Date.parse(anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');
     if(access.media&&hash(this.ctx.dafeiyu.nativeMediaTargetMaterial(access))!==hash(access.media))throw new Error('SOURCE_STALE');
-    const candidates=z.array(NativeExpressionCandidateSchema).max(64).parse(access.candidates),evidence:NativeExpressionPacket['evidence']=[],proofs:unknown[]=[];let forbidden=false;
-    for(const candidate of candidates){const source=candidate.source;let material:string|null=null,fence:string|null=null,kind:'reported'|'inference'='reported',mediaStamp:string|null=null;
+    const candidates=z.array(NativeExpressionCandidateSchema).max(64).parse(access.candidates),evidence:NativeExpressionPacket['evidence']=[],proofs:unknown[]=[],targetInferences:number[]=[];let forbidden=false;
+    for(const candidate of candidates){const source=candidate.source;let material:string|null=null,fence:string|null=null,kind:'reported'|'inference'='reported',mediaStamp:string|null=null,targetStamp:string|null=null;
       if(source.kind==='memory')material=this.expression.nativeMemoryMaterial(scope.agentId,source,anchor.target,access.expressionPolicy??null);
       else if(candidate.view!==null){const observed=this.store.capabilities.withAccess(access.execution,()=>{const media=this.ctx.dafeiyu.nativeMediaObservedMaterial(access.execution,source,anchor.target,candidate.view!);if(media){kind=media.kind;mediaStamp=media.stamp;}
-        return this.store.capabilities.expressionView(access.execution,source,anchor.target,candidate.view!,!!media,(proof,view)=>this.ctx.dafeiyu.capabilityPublicView(proof,view));});material=observed?.text??null;fence=observed?.fence??null;}
+        return this.store.capabilities.expressionView(access.execution,source,anchor.target,candidate.view!,!!media,(proof,view)=>this.ctx.dafeiyu.capabilityPublicView(proof,view),
+          (proof,view)=>this.ctx.dafeiyu.capabilityTargetView(proof,view,anchor.target,scope));});material=observed?.text??null;fence=observed?.fence??null;
+        if(observed?.target){kind=observed.target.kind;targetStamp=observed.target.stamp;}}
       if(material===null){forbidden=true;continue;}if(evidence.length>=16)throw new Error('NATIVE_EXPRESSION_CAPACITY');
-      evidence.push({id:`S${evidence.length+1}`,kind,text:material});proofs.push({source,viewHash:hash(material),fence,...(mediaStamp?{mediaStamp}:{})});
+      if(targetStamp&&kind==='inference')targetInferences.push(evidence.length);
+      evidence.push({id:`S${evidence.length+1}`,kind,text:material});proofs.push({source,viewHash:hash(material),fence,...(mediaStamp?{mediaStamp}:{}),...(targetStamp?{targetStamp}:{})});
+    }
+    if(targetInferences.length&&(forbidden||access.derivedInputComplete!==true)){
+      for(const index of targetInferences.reverse()){evidence.splice(index,1);proofs.splice(index,1);}evidence.forEach((item,index)=>{item.id=`S${index+1}`;});forbidden=true;
     }
     const resultIncluded=!forbidden&&!access.opaqueInfluence;
     if(anchor.outcome==='waiting')evidence.push({id:'W',kind:'reported',text:'程序状态：任务仍在等待，尚未完成。只能讨论需要补充或确认的事项，不能把它描述为已经完成。'});

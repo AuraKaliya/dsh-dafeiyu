@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { CapabilityObservationSchema,CapabilitySelectionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema,SourceDependencySchema,PersonaSourceRefSchema,redactJson,conversationKey } from '@dafeiyu/contracts';
 import type { CapabilityObservationAccess,PersonaAccess,PersonaSourceRef,TimelineScope,MemoryAccessPurpose,Conversation,ResourceProof } from '@dafeiyu/contracts';
+import type { ResourceTargetView } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import { conservativeBoundary } from './boundary.js';
 import { personaScope } from './persona-digest.js';
@@ -67,15 +68,18 @@ export class CapabilityObservations {
   }
   material(access:PersonaAccess,ref:PersonaSourceRef){return this.withAccess(access,()=>{const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||!this.valid(scope,ref))return null;
     return {text:JSON.stringify(row.body),dependencies:row.body.parent?[row.body.parent]:[],rootSources:row.body.proof.roots};});}
-  expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string,publicMedia=false,publicView?:(proof:ResourceProof,view:string)=>boolean):{text:string;fence:string}|null{return this.withAccess(access,()=>{
-    const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||conversationKey(scope.agentId,row.body.proof.scene)!==conversationKey(scope.agentId,target)&&!(publicMedia&&row.body.proof.provider==='media')&&!(access.resourceAllowed?.(row.body.proof.scene)&&publicView?.(row.body.proof,view))
-      ||!this.valid(scope,ref,textHash(view))||this.suppressed(scope,row.body.proof)||this.suppressed({agentId:scope.agentId,route:conversationKey(scope.agentId,target)},row.body.proof))return null;
+  expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string,publicMedia=false,publicView?:(proof:ResourceProof,view:string)=>boolean,
+    targetView?:(proof:ResourceProof,view:string)=>ResourceTargetView|null):{text:string;fence:string;target?:ResourceTargetView}|null{return this.withAccess(access,()=>{
+    const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||!this.valid(scope,ref,textHash(view))||this.suppressed(scope,row.body.proof)||this.suppressed({agentId:scope.agentId,route:conversationKey(scope.agentId,target)},row.body.proof))return null;
+    const sameScene=conversationKey(scope.agentId,row.body.proof.scene)===conversationKey(scope.agentId,target),resourceAllowed=access.resourceAllowed?.(row.body.proof.scene)===true;
+    const permission=!sameScene&&resourceAllowed?targetView?.(row.body.proof,view)??null:null;
+    if(!sameScene&&!(publicMedia&&row.body.proof.provider==='media')&&!(resourceAllowed&&publicView?.(row.body.proof,view))&&!permission)return null;
     const versions=new Map<string,number>();for(const route of new Set([scope.route,conversationKey(scope.agentId,target)])){
       for(const memory of this.db.prepare('SELECT i.id,i.version,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,route)){
         for(const source of revisionSchema.parse(JSON.parse(String(memory.body))).sources){if(source.kind!=='capability')continue;const old=this.row({agentId:scope.agentId,route},source.ref.slice('dafeiyu:capability:'.length));
           if(old?.body.proof.provider===row.body.proof.provider&&old.body.proof.roots.some(root=>row.body.proof.roots.includes(root)))versions.set(String(memory.id),Number(memory.version));}
       }
-    }return {text:view,fence:digest([...versions].sort(([a],[b])=>a.localeCompare(b)))};
+    }return {text:view,fence:digest([...versions].sort(([a],[b])=>a.localeCompare(b))),...(permission?{target:permission}:{})};
   });}
   mediaFence(access:PersonaAccess,target:Conversation,roots:readonly string[]){return this.withAccess(access,()=>{const scope=this.scope(access),wanted=new Set(z.array(z.string().min(1).max(600)).max(512).parse(roots)),versions:unknown[]=[];let allowed=true;
     for(const route of new Set([scope.route,conversationKey(scope.agentId,target)]))for(const row of this.db.prepare('SELECT i.id,i.version,i.deleted,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id WHERE i.agent_id=? AND i.route=?').iterate(scope.agentId,route)){
@@ -99,9 +103,11 @@ export class CapabilityObservations {
     return {source:this.reference(scope,id)!,duplicate:false};}
   record(authority:CapabilityObservationAccess,input:z.output<typeof CapabilityObservationSchema>){const access=authority.execution;
     return this.withAccess(access,()=>this.memory.atomic(()=>{authority.guard();if(redactJson(input).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
+      const history=authority.inheritExecutionHistory?z.array(SourceDependencySchema).max(4096).parse(access.historyDependencies??[]):[];
+      if(authority.inheritExecutionHistory&&(!access.historyTracked||history.some(dep=>['unavailable','legacy','ephemeral'].includes(dep.kind))||!access.validateHistory?.(history)))throw new Error('HISTORY_UNTRACKED');
       const {text,...metadata}=input,body=recordSchema.parse({schemaVersion:1,kind:'observed',scope:access.view.scope,origin:access.view.origin,runId:access.view.runId,operationId:access.operationId,
-        producer:access.producer,proof:input.proof,observedHash:textHash(text),occurredAt:input.occurredAt,counts:input.counts,coverage:input.coverage,history:[],parent:null,selection:null,rawRetained:false});
-      const result=this.insert(access,'observe:'+input.requestId,digest({...metadata,observedHash:body.observedHash}),body);
+        producer:access.producer,proof:input.proof,observedHash:textHash(text),occurredAt:input.occurredAt,counts:input.counts,coverage:input.coverage,history,parent:null,selection:null,rawRetained:false});
+      const result=this.insert(access,'observe:'+input.requestId,digest({...metadata,observedHash:body.observedHash,...(authority.inheritExecutionHistory?{derivedHistoryHash:digest(history)}:{})}),body);
       if(!result.duplicate)this.event(access,'capability.observation.prepared',{sourceId:result.source.id,counts:input.counts,exposure:'prepared-tool-result',rawRetained:false});
       authority.guard();return result;
     }));}

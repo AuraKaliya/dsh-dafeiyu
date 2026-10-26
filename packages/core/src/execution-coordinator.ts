@@ -122,12 +122,14 @@ export class ExecutionCoordinator {
       if(current.status!=='active'||current.epoch!==run.definition.intentVersion||runtimeHash(this.inputsFor(run))!==inputHash)throw new Error('SOURCE_STALE');};structuralGuard();
     const access=this.d.personas.access(run,inputs,this.d.signal,structuralGuard),evidence=this.evidenceFor(run,access);
     const guard=()=>{structuralGuard();if(this.d.store.get(run.id).state!==run.state||run.state==='waiting'&&this.d.store.list().some(next=>next.definition.parentRunId===run.id)||!evidence.validate(proof)||run.state==='completed'&&this.d.memory()?.intent(access).blocking)throw new Error('SOURCE_STALE');const persona=this.d.store.personaBinding(run.id);if(persona.kind==='bound')this.d.personas.validateStored(run,persona.manifest,inputs,this.d.signal,structuralGuard);};guard();
-    const intent=this.d.memory()?.intent(access),output=run.state==='completed'?await this.d.runtime.readResult(run.result!):(intent?.events.filter(event=>event.kind==='objection'&&event.blocking&&!intent.events.some(resolved=>resolved.resolves===event.id)).map(event=>`${event.category}：${event.reason}`).join('\n')||'任务处于等待状态，尚未完成。');guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=source.kind==='self-exploration';
+    const intent=this.d.memory()?.intent(access),output=run.state==='completed'?await this.d.runtime.readResult(run.result!):(intent?.events.filter(event=>event.kind==='objection'&&event.blocking&&!intent.events.some(resolved=>resolved.resolves===event.id)).map(event=>`${event.category}：${event.reason}`).join('\n')||'任务处于等待状态，尚未完成。');guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=source.kind==='self-exploration',derivedInputComplete=!opaque;
     const add=(ref:PersonaSourceRef)=>{const key=runtimeHash(ref);candidates.set(key,{source:ref,view:views.get(key)??null});};
     const visit=(dependencies:readonly SourceDependency[])=>{for(const dependency of dependencies){const key=runtimeHash(dependency);if(visited.has(key))continue;if(visited.size>=4096)throw new Error('CAPACITY_EXCEEDED');visited.add(key);
       if(dependency.kind==='execution-source')add(dependency.ref);
       else if(dependency.kind==='execution-input'){const body=z.object({sources:z.array(PersonaSourceRefSchema),continuity:z.object({id:z.uuid()}).nullable()}).parse(this.d.store.readInput(dependency.runId,'native-program'));body.sources.forEach(add);
-        if(body.continuity){const checkpoint=this.d.memory()?.checkpoint(access,body.continuity.id);if(!checkpoint)opaque=true;else checkpoint.dependencies.forEach(add);}}
+        if(body.continuity){const checkpoint=this.d.memory()?.checkpoint(access,body.continuity.id);if(!checkpoint)opaque=true;else checkpoint.dependencies.forEach(add);
+          // A checkpoint's plain summary is not a full reconstruction of every derived input.
+          derivedInputComplete=false;}}
       else if(dependency.kind==='execution-operation'){
         const operation=this.d.store.operation(dependency.operationId),outcome=operation.outcome;visit(z.array(SourceDependencySchema).parse(this.d.store.readInput(operation.runId,`operation-inputs:${operation.id}`)));
         const page=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
@@ -135,20 +137,22 @@ export class ExecutionCoordinator {
         if(media.success&&operation.plugin==='media'&&operation.action==='dafeiyu_media_read'){const key=runtimeHash(media.data.observation.source);views.set(key,media.data.text);add(media.data.observation.source);}
         else if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
           if(operation.plugin!=='qq-capabilities'||operation.action!=='qq_browse')opaque=true;}
-        else if(!(operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select')&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action)))opaque=true;
-        if(!outcome||outcome.effects==='unknown'||outcome.status==='unknown')opaque=true;
+        else if(!(operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select')&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action))){opaque=true;derivedInputComplete=false;}
+        if(!outcome||outcome.effects==='unknown'||outcome.status==='unknown'){opaque=true;derivedInputComplete=false;}
         if(operation.plugin==='memory-execution'&&operation.action==='dafeiyu_task_object'){const refs=z.object({evidence:z.array(PersonaSourceRefSchema)}).safeParse(outcome?.data);if(refs.success)refs.data.evidence.forEach(add);}
       }else if(dependency.kind==='context'){
         if(dependency.id==='persona:availability'){opaque=true;continue;}
         const body=z.object({item:z.object({text:z.string()})}).safeParse(this.d.store.findContext(`context:${runtimeHash(dependency)}`));let selected:ReturnType<typeof PersonaSourceRefSchema.safeParse>|undefined;
         if(body.success){try{selected=PersonaSourceRefSchema.safeParse(z.object({source:z.unknown()}).parse(JSON.parse(body.data.item.text)).source);}catch{/* Unsupported context cannot grant expression. */}}
-        if(dependency.owner==='memory'&&dependency.region==='execution'&&selected?.success)add(selected.data);else opaque=true;
-      }else opaque=true;
+        if(dependency.owner==='memory'&&dependency.region==='execution'&&selected?.success)add(selected.data);else {opaque=true;
+          // Growth contexts already carry Core-verified content/dependency refs alongside this record.
+          if(!(dependency.owner==='memory'&&dependency.region==='growth'))derivedInputComplete=false;}
+      }else {opaque=true;derivedInputComplete=false;}
     }};visit(proof);for(const [key,candidate] of candidates)candidate.view=views.get(key)??candidate.view;
     if(candidates.size>64)throw new Error('CAPACITY_EXCEEDED');
     const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
     const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
-    const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],opaqueInfluence:opaque,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),guard};
+    const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),guard};
     const media=this.d.media?.()?.nativeMaterial?.(expression);return media?{...expression,media}:expression;
   }
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);

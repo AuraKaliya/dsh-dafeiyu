@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { ActionOutcomeSchema, ExtensionMetadataV3Schema, dependencyOrder,redactJson } from '@dafeiyu/contracts';
+import { ActionOutcomeSchema, ExtensionMetadataV3Schema, dependencyOrder,redactJson,ResourceTargetViewSchema } from '@dafeiyu/contracts';
+import type { Conversation,ExecutionScope,ResourceTargetView } from '@dafeiyu/contracts';
 import type { ActionCapabilityV3, ExtensionV3, ExtensionHandleV3, ExecutionContextV3, ActionOutcome, Json, ContextContributorV3, ResourceProof, ResourceProofProvider, TimelineScope } from '@dafeiyu/contracts';
 import { toolParameters } from './tool-schema.js';
 
@@ -39,6 +40,12 @@ export class CapabilityRegistryV3 {
   private resourceState(entry:Entry,scope?:TimelineScope){try{const epoch=entry.resourceProofs?.epoch(scope);return typeof epoch==='string'&&epoch.length<=8000?{ready:entry.active&&entry.ready(),epoch}:{ready:false,epoch:'INVALID_RESOURCE_EPOCH'};}catch{return {ready:false,epoch:'RESOURCE_UNAVAILABLE'};}}
   resourceCurrent(proof:ResourceProof):boolean {const entry=this.entries.get(proof.provider);try{return !!entry&&this.resourceState(entry).ready&&entry.resourceProofs?.current(proof)===true;}catch{return false;}}
   publicView(proof:ResourceProof,view:string):boolean {const entry=this.entries.get(proof.provider);try{return this.resourceCurrent(proof)&&entry?.resourceProofs?.publicView?.(proof,view)===true;}catch{return false;}}
+  targetView(proof:ResourceProof,view:string,target:Conversation,scope:ExecutionScope):ResourceTargetView|null {
+    const entry=this.entries.get(proof.provider);try{if(!this.resourceCurrent(proof)||!entry?.resourceProofs?.targetView)return null;
+      const result=entry.resourceProofs.targetView(proof,view,target,scope);if(result===null)return null;
+      const parsed=ResourceTargetViewSchema.safeParse(result);return parsed.success&&this.resourceCurrent(proof)?Object.freeze(parsed.data):null;
+    }catch{return null;}
+  }
   resourceEpoch(scope?:TimelineScope,excluding?:string):string{return JSON.stringify([...this.entries.values()].filter(entry=>entry.active&&entry.resourceProofs&&entry.metadata.id!==excluding).flatMap(entry=>{const state=this.resourceState(entry,scope);return state.epoch===''?[]:[[entry.metadata.id,state]];}));}
   contributors(){return [...this.entries.values()].filter(entry=>entry.active&&entry.ready()).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,version:entry.metadata.version,context,active:()=>entry.active&&entry.ready(),signal:entry.controller.signal})));}
   private readonly entries = new Map<string, Entry>();
@@ -64,7 +71,8 @@ export class CapabilityRegistryV3 {
     const entry: Entry = { metadata, active: true, controller:new AbortController(),actions: [], channels: [], contexts: [], ready: extension.lifecycleReady?.bind(extension) ?? (() => true) };
     if(extension.resourceProofs){if(typeof extension.resourceProofs.current!=='function'||typeof extension.resourceProofs.epoch!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
       if(extension.resourceProofs.publicView!==undefined&&typeof extension.resourceProofs.publicView!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
-      entry.resourceProofs=Object.freeze({current:extension.resourceProofs.current.bind(extension.resourceProofs),epoch:extension.resourceProofs.epoch.bind(extension.resourceProofs),...(extension.resourceProofs.publicView?{publicView:extension.resourceProofs.publicView.bind(extension.resourceProofs)}:{})});}
+      if(extension.resourceProofs.targetView!==undefined&&typeof extension.resourceProofs.targetView!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
+      entry.resourceProofs=Object.freeze({current:extension.resourceProofs.current.bind(extension.resourceProofs),epoch:extension.resourceProofs.epoch.bind(extension.resourceProofs),...(extension.resourceProofs.publicView?{publicView:extension.resourceProofs.publicView.bind(extension.resourceProofs)}:{}),...(extension.resourceProofs.targetView?{targetView:extension.resourceProofs.targetView.bind(extension.resourceProofs)}:{})});}
     const bound: BoundActionV3[] = [];
     for (const action of extension.actions ?? []) {
       const meta = actionMetaSchema.parse({ id: action.id, version: action.version, description: action.description, effects: action.effects, requiresTask: action.requiresTask ?? false });
