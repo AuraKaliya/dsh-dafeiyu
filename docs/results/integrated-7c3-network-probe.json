@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "authentication": false,
+  "configuredProxy": {
+    "mode": "configured-system-proxy",
+    "modelCalls": 0,
+    "authenticated": false,
+    "results": [
+      {
+        "sample": 1,
+        "status": 401,
+        "milliseconds": 329
+      },
+      {
+        "sample": 2,
+        "status": 401,
+        "milliseconds": 312
+      },
+      {
+        "sample": 3,
+        "status": 401,
+        "milliseconds": 308
+      },
+      {
+        "sample": 4,
+        "status": 401,
+        "milliseconds": 334
+      }
+    ]
+  },
+  "changesSystemSettings": false,
+  "method": "HEAD",
+  "apiOrigin": "https://api.deepseek.com",
+  "checkedAt": "2026-10-26T03:37:39.1964260Z",
+  "modelCalls": 0,
+  "serverAccess": false,
+  "direct": {
+    "mode": "default-direct",
+    "modelCalls": 0,
+    "authenticated": false,
+    "results": [
+      {
+        "sample": 1,
+        "status": 401,
+        "milliseconds": 378
+      },
+      {
+        "sample": 2,
+        "status": 401,
+        "milliseconds": 317
+      },
+      {
+        "sample": 3,
+        "status": 401,
+        "milliseconds": 329
+      },
+      {
+        "sample": 4,
+        "status": 401,
+        "milliseconds": 338
+      }
+    ]
+  }
+}
