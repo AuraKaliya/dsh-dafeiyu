@@ -1,5 +1,7 @@
 # 7C正式162项完整执行顺序（待确认）
 
+> 2026-10-27执行约束更新：不使用子代理，全部测试（含全量与真实模型/平台）在本机完成；服务器仅部署调通。旧服务器接管及运营资金授权系统已移除。当前架构、范围和流程以 [architecture.md](architecture.md)、[integrated-acceptance-plan.md](integrated-acceptance-plan.md)、[current-scope-and-cleanup.md](current-scope-and-cleanup.md) 为准；原样本、预算和历史失败不改写。
+
 2026-10-26。逐行复制原冻结清单顺序；没有重排、删项或启动调用。9批仅为检查点。此表供组织者核对，不与盲评包一起交给评阅者。
 
 原清单SHA256：`cdceb5ae607a8de54a72d670434e7b3f9307a3411f9b2372c6d8b9706561448a`。顺序ID数组SHA256：`5f87fe061c17da8a1a5baa9d5522de87651de585139fac60e379618aef4aab07`。

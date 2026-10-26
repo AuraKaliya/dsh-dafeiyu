@@ -1,5 +1,7 @@
 # R6e：目标绑定的执行结果与来源连续性
 
+> 历史子步骤检查记录。2026-10-27范围收敛后，旧服务器接管/旧资金系统相关后续要求作废；当前实现与测试边界见 [清理记录](current-scope-and-cleanup.md)。本文只证明原提交和原测试，不自动覆盖新候选。
+
 2026-10-26。完成可选的 `ResourceProofProvider.targetView`、Core 校验和 Memory 原生结果整理接线；没有修改账号、数据库 schema、已保存的旧观察或旧人格。
 
 目标许可不是 public 声明。提供者必须核验完整 proof、实际页面、当前 Task scope 和收件人，返回 reported/inference 及授权 stamp；Core 在返回前后检查 proof 当前有效。Memory 仍要求当前 Task 获准访问资源、观察仍有效且未被撤回/抑制。授权 stamp 进入目标材料指纹，变化后不能继续使用已准备的旧交付包。opaque 的原 Task 模型正文继续排除。

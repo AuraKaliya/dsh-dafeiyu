@@ -1,5 +1,7 @@
 # 第一阶段：大肥鱼核心与统一运行入口开发方案
 
+> 2026-10-27执行约束更新：不使用子代理，全部测试（含全量与真实模型/平台）在本机完成；服务器仅部署调通。旧服务器接管及运营资金授权系统已移除。当前架构、范围和流程以 [architecture.md](architecture.md)、[integrated-acceptance-plan.md](integrated-acceptance-plan.md)、[current-scope-and-cleanup.md](current-scope-and-cleanup.md) 为准；原样本、预算和历史失败不改写。
+
 日期：2026-10-24（北京时间）。方案版本：1.1（人格成长与连续性修订）。
 
 1F实施补充（2026-10-25）：[三个子步骤](phase1f-implementation-plan.md)均已完成；[1F-1配置、预检与初始化](phase1f1-profile-inspection.md)、[1F-2装配、准入与关闭](phase1f2-managed-runtime.md)、[1F-3命令和有限真实验收](phase1f3-cli-acceptance.md)分别保存记录和提交。当前529项回归通过，1G仍待完成；下文方案原始设计状态保留历史含义。

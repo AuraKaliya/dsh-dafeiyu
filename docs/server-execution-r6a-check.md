@@ -1,5 +1,7 @@
 # R6a 命名外部执行授权检查记录
 
+> 历史子步骤检查记录。2026-10-27范围收敛后，旧服务器接管/旧资金系统相关后续要求作废；当前实现与测试边界见 [清理记录](current-scope-and-cleanup.md)。本文只证明原提交和原测试，不自动覆盖新候选。
+
 2026-10-26。R6a 已实现可选的精确 externalActions 策略、程序接口 authorizeExternalTask 及其真实调用生命周期 guard。原生 Task 需同时匹配扩展、动作与版本，并具有真实 QQ 主人任务或有效 wake／持久锚点来源；普通会话继续排除外部执行。外部动作调用本地写端口还需同一 policy.allowLocalWrite。旧策略缺省字段不回填，旧 Run／人格记录和 hash 不改。
 
 根代理统一运行的相关组合为 **43/43 通过**：executor-policy 12 项、server-executor store 8 项、execution 8 项、execution-boundaries 6 项、activity-authority 9 项。实际报告为 `.runtime/test-reports/05f3721b-bede-4127-af2e-ae7a11894884.json`。这是该轮受管离线检查结果，不是全量回归或服务器验收。

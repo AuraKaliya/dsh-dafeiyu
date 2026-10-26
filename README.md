@@ -1,24 +1,10 @@
 # 大肥鱼 · 独立智能体插件项目
 
-当前仓库包版本仍为0.19.0，Host、activity、media和bilibili为0.1.0；正式阶段版本与标签在统一验收后处理。统一运行入口、QQ、记忆E、自主活动、统一媒体及B站首版已完成本地开发，见[本地使用说明](docs/host-usage.md)。真实模型／平台统一验收和服务器切换尚未进行。
+当前功能、边界和验证状态见 [整体架构](docs/architecture.md)。2026-10-27已按用户要求保留R1—R5修复及R6有价值功能，删除旧服务器接管与完整运营资金授权系统，见 [清理记录](docs/current-scope-and-cleanup.md)。
 
-第一阶段实施进度：1A—1F已完成。1F包含[配置／预检／初始化](docs/phase1f1-profile-inspection.md)、[运行装配](docs/phase1f2-managed-runtime.md)和[命令／有限真实验收](docs/phase1f3-cli-acceptance.md)，1F结束时529项回归通过。用户于2026-10-25决定将真实模型与整体验收延后至整体开发完成；[162次场景样本已保留](docs/phase1g-deferred-samples.md)，1G尚未通过，继续阶段2开发并保留本地程序回归。1A音画探针单独记录，现有QQ和服务器未切换。
+核心、阶段人格/记忆、QQ、自主活动、音画/B站只读能力已有实现；新增管理员执行、共享计量与B站主人私信继续保留。相关本机检查通过不等于整体验收：新候选162场景、真实平台/音画、持续运行及发布回归仍待完成。版本包号仍为0.19.0，当前功能以Git提交及锁文件区分。
 
-阶段2已完成[2A存储迁移基础](docs/qq-phase2a-storage.md)、[2B自然称呼／群同步](docs/qq-phase2b-triggers-groups.md)、[2C浏览／观察／选择性记忆](docs/qq-phase2c3-integration.md)、[2D可靠分段交付](docs/qq-phase2d3-host.md)、[2E可信任务与人格交付](docs/qq-phase2e5-host.md)和[2F阶段整合](docs/qq-phase2f-integration.md)的本地开发。当前QQ v5、memory v11、runtime v4，已有数据需显式备份升级。浏览／tasks默认关闭，样例明确开启。每步仅运行相关检查；真实模型／QQ及整体人工验收延期，全量回归留到部署／发布。
-
-阶段3记忆E已完成[方案](docs/agent-memory-phase-e-plan.md)、E1存储与迁移、E2经历分析／修订和人格建议、E3任务事件／请求持久化及[E4 Host联合检查](docs/memory-e4-integration.md)。整理默认不开启。
-
-阶段4自主活动已完成[方案](docs/autonomous-activity-plan.md)、4A计划／时间存储、4B核心来源锚点、4C唤醒／让出与整理调度、[4D Host联合检查](docs/activity-4d-integration.md)。activity库v1，按需启用；single-run不启动后台活动。
-
-阶段5已完成[统一媒体方案](docs/media-and-qq-plan.md)的5A—5F本地开发：受管音画／文档读取、QQ媒体观察与可选主人语音任务、逐部件媒体交付、批准正文TTS、[Host装配／迁移／恢复对账](docs/media-5f3-integration.md)。media库v2，真实模型／平台仍未验收，继续阶段6 B站首版。
-
-阶段6已完成[B站方案](docs/bilibili-capabilities-plan.md)的6A—6D本地开发：只读搜索／页面／字幕／弹幕／评论、独立音画来源、选择性记忆、QQ任务与兴趣、自主活动、Host和bilibili v1迁移。见[阶段记录](docs/bili-6d3-integration.md)及[使用边界](docs/bili-usage.md)。下一步准备整体验收，不能把脚本模型与合成媒体结果当作真实平台或理解质量通过。
-
-阶段7已提交[整体验收与发布包方案](docs/integrated-acceptance-plan.md)，完成7A及7B的本地离线工具：冻结样本、运行／费用账本、12类边界场景、6类连续性对照、批次恢复与证据导出，见[使用与检查记录](docs/integrated-7b6-offline-runner.md)。已用脚本后端做定向检查，未执行完整162项真实验收；真实模型／平台、持续运行和发布全量回归尚待7C—7F推进。
-
-7C的[真实模型执行提案](docs/integrated-7c-real-model-plan.md)及[162项完整顺序](docs/integrated-7c-execution-order.md)已整理，结合本机Flash／max配置和当前官方价格估算；模型、总预算与时间额度仍待确认，真实调用尚未开始。
-
-1D完成[执行验收](docs/phase1d-execution.md)，1E-1完成[底色与增量存储](docs/phase1e1-foundation-storage.md)，1E-2完成[显式阶段状态](docs/phase1e2-stage-persona.md)，1E-3完成[内部观察、任务意图与连续性](docs/phase1e3-execution-continuity.md)。1E-3真实模型验收7项通过，19次调用、3次实际压缩及重启接续；首次压缩失败与修正分别记录。正式底色新建于本项目，不使用管理中心现有人格文件；有限接口验收不等同长期人格成长通过。
+**全部测试在本机执行，不使用子代理。服务器由用户手动清理，只部署并调通本机冻结版本。** [测试方案](docs/integrated-acceptance-plan.md)与[部署范围](docs/runtime-deployment-plan.md)是当前入口。普通Host命令保留；带执行器的生产装配需要程序提供共享计量端口，薄命令行只提供inspect/status，不能把配置模板当作已完成的运营启动。
 
 ## 开始使用
 

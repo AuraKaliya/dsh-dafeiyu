@@ -1,5 +1,7 @@
 # R6f-2b 固定 inline 图像通路检查
 
+> 历史子步骤检查记录。2026-10-27范围收敛后，旧服务器接管/旧资金系统相关后续要求作废；当前实现与测试边界见 [清理记录](current-scope-and-cleanup.md)。本文只证明原提交和原测试，不自动覆盖新候选。
+
 日期：2026-10-26。Host 的 `model-deepseek` 新增可选 `inlineTransport` 配置：输出上界、实际官方上下文容量、流空闲超时、inline 图像总字节和图片数。未配置的旧 profile 保持原行为与解析结果。
 
 选择此模式时仍使用官方 DeepSeekAdapter、DSH 模型循环和媒体分析器；只通过公开的 resolveFiles 依赖选择一个拒绝文件上传/文件管理的固定实现。官方 fallback 把实际图像放在同一次 Messages 请求中。正常重试显式为零，文件 ID 列表为空，失效 fileId 不能触发隐藏的第二次 Messages 派发；不会改动官方 SDK 或桌面 profile。

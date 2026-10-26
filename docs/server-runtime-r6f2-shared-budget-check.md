@@ -1,5 +1,7 @@
 # R6f-2c 父子共享预算与受信资源工厂
 
+> 历史子步骤检查记录。2026-10-27范围收敛后，旧服务器接管/旧资金系统相关后续要求作废；当前实现与测试边界见 [清理记录](current-scope-and-cleanup.md)。本文只证明原提交和原测试，不自动覆盖新候选。
+
 日期：2026-10-26。新增独立 server-runtime 包，方向为 runtime→Host/executor，不把 Host 反向装入 standing-authority 模块。它借用已有资金权威，不新建余额、attempt、执行时钟或运营授权。
 
 ## 实现

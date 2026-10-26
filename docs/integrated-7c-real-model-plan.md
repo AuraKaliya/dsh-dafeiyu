@@ -1,5 +1,7 @@
 # 7C真实模型验收详细执行方案（待确认）
 
+> 2026-10-27执行约束更新：不使用子代理，全部测试（含全量与真实模型/平台）在本机完成；服务器仅部署调通。旧服务器接管及运营资金授权系统已移除。当前架构、范围和流程以 [architecture.md](architecture.md)、[integrated-acceptance-plan.md](integrated-acceptance-plan.md)、[current-scope-and-cleanup.md](current-scope-and-cleanup.md) 为准；原样本、预算和历史失败不改写。
+
 日期：2026-10-26。检查基线：`f2af92c`。本文件是执行提案，不是运行配置或授权记录；**真实执行授权为false，已批准预算为null**。本轮只读取本机配置、代码、既有脱敏记录和官方公开文档，不调用模型，不连接QQ／B站或服务器。
 
 配套材料：[162项完整执行顺序](integrated-7c-execution-order.md)、[机器可读提案与费用测算](plans/integrated-7c-proposal.json)。原`evaluation/phase1g/suite.v1.json`和`manifest.v1.json`不改动，全部not-run保留。
