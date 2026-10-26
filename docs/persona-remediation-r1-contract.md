@@ -91,7 +91,7 @@ propose/review/publish自身的成功回执不构成试行成功。R3可把close
 
 公开 `PersonaAdoptionReviewInputSchema`：`{requestId,candidate:PersonaEntryRef,trialOutcomes:OutcomeRef[1..16],supports:string[0..32],counters:string[0..32],counterCheck,conclusionScope:string(1..1000),targetMaturity:tentative|established,limitations:string(1..1000)[0..32],reason:string(1..2000)}`。supports/counters使用现有已曝光source选择键，不能让模型提交身份/根/性质/动机/实际结果。
 
-`counterCheck`是严格联合：`{status:'found',reason:string(1..1000)}`（解析后counters必须非空）或 `{status:'not-obtained'|'unknown',reason:string(1..1000)}`；后者不解释为“不存在反证”。来源引用可包含实际查证的合法资料，不以counters=[]冒充已查无反例。
+`counterCheck`是严格联合：`{status:'found',reason:string(1..1000)}`（解析后counters必须非空）、`{status:'not-obtained'|'unknown',reason:string(1..1000)}`，或`{status:'checked-none',checkedSources:[...],reason:string(1..1000)}`。R3补充：公开`PersonaCounterCheckInputSchema`的checkedSources为已曝光source键字符串数组（1..32），持久`PersonaCounterCheckSchema`为精确PersonaSourceRef数组（1..32）；root解析、继承依赖并验证实际可用/已结束的查证依据。未取得/未知不解释为“不存在反证”，checked-none也只说明在已核查覆盖内未发现，不证明世界没有反例；不能以counters=[]或自述reason冒充查证。
 
 持久 `PersonaAdoptionReviewSchema`：上述内容经解析后将supports/counters换为精确PersonaSourceRef，另加`schemaVersion:1,id,agentId,scope,runId,producer,createdAt,policyVersion,motivation:Motivation,dependencies:PersonaSourceRef[0..64],sourceEvidence:PersonaSourceEvidence[0..64]`。实际选择用已核验trialOutcomes→Admission→manifest链表达，不另信任模型的“实际选择”字段。候选原反证和实际曝光依赖不得借新review悄悄删去。
 

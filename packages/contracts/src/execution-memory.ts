@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PersonaRequestIdSchema,PersonaSourceRefSchema,MotivationSchema } from './persona.js';
+import { PersonaRequestIdSchema,PersonaSourceRefSchema,MotivationSchema,PersonaSourceNatureSchema } from './persona.js';
 import type { PersonaAccess,PersonaSourceRef,ContinuityCheckpoint } from './persona.js';
 import type { ExecutionSourceRef } from './execution.js';
 import type { ContextItem } from './context.js';
@@ -8,7 +8,7 @@ import type { CompactionProvider,SourceDependency } from './compaction.js';
 export const ExecutionObservationSchema=z.strictObject({requestId:PersonaRequestIdSchema,occurredAt:z.iso.datetime({offset:true}),
   text:z.string().min(1).max(32000),kind:z.enum(['primary','digest']),completeness:z.enum(['complete','partial','unknown']),
   resource:z.string().regex(/^[a-z][a-z0-9.-]{0,31}:[a-zA-Z0-9._:-]{1,200}$/),coverage:z.array(z.string().min(1).max(300)).max(32),
-  dependencies:z.array(PersonaSourceRefSchema).max(64).default([])});
+  dependencies:z.array(PersonaSourceRefSchema).max(64).default([]),nature:PersonaSourceNatureSchema.optional()});
 export const ExecutionContributionSchema=z.strictObject({requestId:PersonaRequestIdSchema,source:z.uuid(),version:z.number().int().positive(),
   mode:z.enum(['original','excerpt','summary']),start:z.number().int().nonnegative().optional(),end:z.number().int().positive().optional(),
   text:z.string().trim().min(1).max(8000).optional(),reason:z.string().trim().min(1).max(1000)});

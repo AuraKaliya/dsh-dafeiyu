@@ -381,7 +381,7 @@ export class ExecutionCoordinator {
   private async process(id:string):Promise<void>{
     const release=await this.d.scheduler.acquire(['explicit-task','mixed'].includes(this.motivation(this.d.store.get(id)).kind));
     try{if(!this.d.accepting()||this.failure)return;let run=this.d.store.get(id);if(!['accepted','queued'].includes(run.state))return;
-      const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);let runPersona:RunPersona|undefined;
+      const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);let runPersona:RunPersona|undefined,trialInputs:readonly ExecutionInput[]=[];
       try{
         if(run.state==='accepted')run=this.d.store.transition(id,run.version,'queued');
         const request=this.d.store.request(run.requestKey),saved=savedSchema.parse(request.payload),policy=this.policy(request.producer,run.definition.policyId),repository=this.repository();
@@ -390,6 +390,7 @@ export class ExecutionCoordinator {
         if(task.epoch!==run.definition.intentVersion||task.status!=='active')throw new Error('TASK_NOT_ACTIVE');
         if(run.definition.origin.kind==='wake'&&!this.wakes.get(request.producer)?.validate(run.definition.origin,task))throw new Error('WAKE_NOT_AUTHORIZED');
         const inputs=repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules),inputHash=runtimeHash(inputs),authorityVersion=runtimeHash(policy);
+        trialInputs=inputs;
         const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite));
         const contributors=this.d.registry.contributors(),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
@@ -409,6 +410,7 @@ export class ExecutionCoordinator {
         this.d.store.bindInput(id,'task-facts',{goal:task.goal,epoch:task.epoch});
         run=this.d.store.start(id,run.version,{sessionId,personaVersion:persona.version,model:this.d.model,registryVersion,authorityVersion,
           inputs:inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey}))},{...runPersona.manifest,continuityCheckpointId:prior?.id??null});
+        this.d.personas.admitTrial(this.d.store,id,inputs,signal,guard);
         this.d.store.checkpoint(id,{kind:'run-start',intentVersion:task.epoch});this.flushEvents();
         const view=Object.freeze({runId:id,taskId:task.id,scope:Object.freeze({...run.definition.scope}),origin:Object.freeze({...run.definition.origin}),signal});
         const contexts:NativeContext[]=runPersona.items.map(item=>({owner:'memory',region:'growth',item}));let contextBytes=Buffer.byteLength(JSON.stringify(contexts),'utf8'),omitted=0;
@@ -435,7 +437,7 @@ export class ExecutionCoordinator {
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
-      }finally{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting'].includes(this.d.store.get(id).state))this.d.settled?.(id);}
+      }finally{this.evidence.delete(id);try{this.d.personas.completeTrial(this.d.store,id,trialInputs,this.d.signal);}finally{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
     }finally{release();}
   }
   private previousContinuity(run:StoredRun,access:PersonaAccess,foundationHash:string){const memory=this.d.memory();if(!memory)return null;
@@ -505,12 +507,17 @@ export class ExecutionCoordinator {
     if(!grant||grant.action.owner!==pluginId||!grant.action.active()||effect==='local-write'&&grant.action.effects!=='local-write'||this.d.store.get(grant.runId).state!=='running')throw new Error('SCOPE_DENIED');grant.guard();return context;
   }
   private inputsFor(run:StoredRun):ExecutionInput[]{if(!run.definition.taskId)return [];const request=this.d.store.request(run.requestKey),saved=savedSchema.parse(request.payload);return this.repository().readSelectedInputs(this.d.agentId,run.definition.taskId,saved.input.inputRefs,this.policy(request.producer,run.definition.policyId).sourceRules);}
+  /** Recovery may use only the same bound inputs, never a later task revision or another origin. */
+  trialInputs(run:StoredRun):readonly ExecutionInput[]{if(run.definition.scope.kind==='conversation')return [];const inputs=this.inputsFor(run);
+    if(!run.snapshot||runtimeHash(inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey})))!==runtimeHash(run.snapshot.inputs))throw new Error('SOURCE_STALE');this.evidence.delete(run.id);return inputs;
+  }
   personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'):PersonaAccess{
     const grant=this.grants.get(context);this.authority(context,pluginId,effect);if(!grant||effect==='local-write'&&grant.action.effects!=='local-write')throw new Error('SCOPE_DENIED');
     const run=this.d.store.get(context.runId),prepared=this.d.personas.current(run.id);const guard=()=>{this.authority(context,pluginId,effect);prepared?.guard();};
     const commitGuard=()=>{context.signal.throwIfAborted();const current=this.grants.get(context);if(current!==grant||!grant.action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');grant.commitGuard();};
     guard();return Object.freeze({...this.d.personas.access(run,this.inputsFor(run),context.signal,commitGuard),commitGuard,producer:pluginId,operationId:context.operationId,startedEventId:this.d.store.operation(context.operationId).startedEventId,
-      admittedSources:[...(prepared?.manifest.entries.flatMap(entry=>[entry.contentRef,...entry.dependencies])??[]),...(this.evidence.get(run.id)?.sourceRefs()??[])]});
+      admittedSources:[...(prepared?.manifest.entries.flatMap(entry=>[entry.contentRef,...entry.dependencies])??[]),
+        ...(prepared?.manifest.schemaVersion===2?prepared.manifest.trialEntries.flatMap(entry=>[entry.contentRef,...entry.dependencies]):[]),...(this.evidence.get(run.id)?.sourceRefs()??[])]});
   }
   flushEvents():void{for(const event of this.d.store.outbox()){
     const run=this.d.store.get(event.runId);if(run.definition.scope.kind!=='task')continue;

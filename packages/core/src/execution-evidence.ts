@@ -71,7 +71,9 @@ export class ExecutionEvidence {
         inbound:(_scope,id)=>{const body=this.store.readInput(id,'native-program');if(!body)return this.unavailable('missing-native-input');const proof=inputProof.parse(body);
           return [{...scopeFields,kind:'execution-input',runId:id,hash:runtimeHash(proof)},...proof.sources.map(ref=>({...scopeFields,kind:'execution-source' as const,ref}))];},
         context:(_scope,region,item)=>{const own=this.contexts.find(context=>context.owner==='memory'&&context.region===region&&context.item.id===item.id);if(!own)return this.unavailable('missing-context');
-          const refs:PersonaSourceRef[]=region==='growth'?this.personas.current(this.run.id)?.manifest.entries.filter(entry=>`persona:${entry.candidate.id}`===item.id).flatMap(entry=>[entry.contentRef,...entry.dependencies])??[]
+          const refs:PersonaSourceRef[]=region==='growth'?(()=>{const manifest=this.personas.current(this.run.id)?.manifest;if(!manifest)return [];
+            return [...manifest.entries.filter(entry=>`persona:${entry.candidate.id}`===item.id).flatMap(entry=>[entry.contentRef,...entry.dependencies]),
+              ...(manifest.schemaVersion===2?manifest.trialEntries.filter(entry=>`persona-trial:${entry.candidate.id}`===item.id).flatMap(entry=>[entry.contentRef,...entry.dependencies]):[])];})()
             :(()=>{try{const value=z.object({source:PersonaSourceRefSchema}).safeParse(JSON.parse(item.text));return value.success?[value.data.source]:[];}catch{return [];}})();
           return [this.dependency(own),...refs.map(ref=>({...scopeFields,kind:'execution-source' as const,ref}))];},
         tool:(_scope,_name,_text,meta)=>{const parsed=z.object({dafeiyuExecution:ExecutionToolReceiptSchema}).safeParse(meta);if(!parsed.success)return this.unavailable('unbound-tool-result');const receipt=parsed.data.dafeiyuExecution;

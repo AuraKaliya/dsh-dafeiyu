@@ -35,6 +35,8 @@ import { RunScheduler } from './run-scheduler.js';
 import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
+import type { PersonaTrialCompletionStatus } from './persona-runtime.js';
+export type { PersonaTrialCompletionStatus } from './persona-runtime.js';
 export { readFoundation } from './foundation.js';
 export { initializeCoreStorage } from './storage-initialization.js';
 import type { StoredRun } from './runtime-store.js';
@@ -247,6 +249,11 @@ export class DafeiyuService extends Service {
     return ()=>{if(this.repositoryPort===bound)this.repositoryPort=undefined;};
   }
   bindPersonaProvider(provider:PersonaProvider):()=>void{this.assertOpen();const unbind=this.personas.bind(provider),unpin=this.contexts.pinRegion('memory:growth');return ()=>{unbind();unpin();};}
+  assertPersonaTrialAuthority(authority:unknown,input:unknown):void{this.personas.assertTrialAuthority(authority,input);}
+  personaTrialAccess(authority:unknown,input:unknown):PersonaAccess{const access=this.personas.trialAccess(authority,input);if(access.view.scope.kind==='task')return access;
+    const scope={agentId:access.view.scope.agentId,route:access.view.scope.route},session=this.journal.sessionFor(scope),history=session?this.runtime.exposedDependencies(session):null,origin=access.view.origin;
+    return Object.freeze({...access,historyTracked:history!==null,historyDependencies:history??[],validateHistory:(deps:readonly SourceDependency[])=>this.capabilityHistoryCurrent(scope,deps),resourceAllowed:(scene:Conversation)=>origin.kind==='message'&&runtimeHash(origin.conversation)===runtimeHash(scene)});
+  }
   bindExecutionMemory(port:ExecutionMemoryPort):()=>void{this.assertOpen();if(this.executionMemoryPort)throw new Error('DUPLICATE_PROVIDER');
     const bound:ExecutionMemoryPort=Object.freeze({ready:port.ready.bind(port),...(port.resourceEpoch?{resourceEpoch:port.resourceEpoch.bind(port)}:{}),validate:port.validate.bind(port),operationSources:port.operationSources.bind(port),outcomeSources:port.outcomeSources.bind(port),
       prepareContext:port.prepareContext.bind(port),validateContext:port.validateContext.bind(port),captureContinuity:port.captureContinuity.bind(port),checkpoint:port.checkpoint.bind(port),bindResult:port.bindResult.bind(port),
@@ -312,7 +319,13 @@ export class DafeiyuService extends Service {
       persona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),media:()=>this.mediaPort,mediaAccess:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),
     });
   }
-  async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}
+  async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;if(this.personas.ready)this.recoverPersonaTrials();}
+  /** Replays only missing completion records after providers are ready; never starts a model or reconstructs admission. */
+  recoverPersonaTrials():readonly PersonaTrialCompletionStatus[]{this.assertOpen();if(!this.runStore||!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(!this.personas.ready)throw new Error('DEPENDENCY_UNAVAILABLE');
+    return this.runStore.list(['completed','failed','cancelled','interrupted']).flatMap(run=>{const binding=this.runStore!.personaBinding(run.id);if(binding.kind!=='bound'||binding.manifest.schemaVersion!==2||!binding.manifest.trialEntries.length)return [];
+      try{return [this.personas.completeTrial(this.runStore!,run.id,this.executions!.trialInputs(run),this.controller.signal)];}
+      catch(error){const code=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'PERSONA_TRIAL_RECOVERY_FAILED';this.runStore!.appendExecutionEvent(run.id,'persona.trial-completion-deferred',{code});return [{runId:run.id,status:'deferred' as const,outcomes:[],code}];}});
+  }
   executionProducer(id:string,options?:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id,options);}
   bindWakeAuthority(provider:WakeAuthorityProvider){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindWake(provider);}
   bindExecutionLifecycle(owner:string,receive:(event:import('@dafeiyu/contracts').MaintenanceLifecycle)=>void){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindLifecycle(owner,receive);}
@@ -643,6 +656,7 @@ export class DafeiyuService extends Service {
         const signal = AbortSignal.any([this.controller.signal, source.controller.signal,AbortSignal.timeout(this.config.turnTimeoutMs)]);
         run=this.conversationRuns?.begin(item,persona,this.analysisModelRoute(),[...this.extensions.values()].map(entry=>({id:entry.extension.id,version:entry.extension.version})),this.executions?.conversationSnapshot(source.extension.id),
           record=>this.personas.prepare(record,persona,this.analysisModelRoute(),[],signal,()=>{signal.throwIfAborted();if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');}).manifest);
+        if(run&&this.runStore)this.personas.admitTrial(this.runStore,run.id,[],signal,()=>{signal.throwIfAborted();if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');});
         started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const channel = source.extension.channels?.find(capability => capability.channel === item.message.conversation.channel && capability.account === item.message.conversation.account);
@@ -651,12 +665,13 @@ export class DafeiyuService extends Service {
         if(run)this.personas.current(run.id)?.guard();
       } catch (error) {
         if(run)this.conversationRuns?.fail(run);
+        if(run&&this.runStore)this.personas.completeTrial(this.runStore,run.id,[],this.controller.signal);
         await this.conversationRuns?.project();
         this.journal.transition(item.id, this.journal.get(item.id).state, 'failed', { ...this.event(item, 'turn.failed', { code: 'TURN_FAILED', note: 'Earlier operations may have effects; no automatic replay' }, started?.id??null),
           sources: error instanceof DshRunError ? error.sources : [] });
         return;
       }
-      if(run&&this.conversationRuns){this.conversationRuns.complete(run,item,result,started!.id);await this.conversationRuns.project();}
+      if(run&&this.conversationRuns){this.conversationRuns.complete(run,item,result,started!.id);if(this.runStore)this.personas.completeTrial(this.runStore,run.id,[],this.controller.signal);await this.conversationRuns.project();}
       else{const reply: Reply = { id: `${item.id}:reply`, conversation: item.message.conversation, sourceMessageId: item.message.id, text: result.text };
         this.journal.transition(item.id, 'processing', 'reply-ready', { ...this.event(item, 'turn.completed', {}, started!.id), sources: result.sources }, reply);}
       item = this.journal.get(id);

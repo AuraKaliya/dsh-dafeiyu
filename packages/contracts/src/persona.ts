@@ -129,12 +129,20 @@ export type PersonaTrialOutcome=z.infer<typeof PersonaTrialOutcomeSchema>;
 export const PersonaCounterCheckSchema=z.discriminatedUnion('status',[
   z.strictObject({status:z.literal('found'),reason:z.string().trim().min(1).max(1000)}),
   z.strictObject({status:z.enum(['not-obtained','unknown']),reason:z.string().trim().min(1).max(1000)}),
+  z.strictObject({status:z.literal('checked-none'),checkedSources:z.array(PersonaSourceRefSchema).min(1).max(32),reason:z.string().trim().min(1).max(1000)}),
 ]);
 export type PersonaCounterCheck=z.infer<typeof PersonaCounterCheckSchema>;
+/** Model-facing source keys are resolved to exact references before a counter check is stored. */
+export const PersonaCounterCheckInputSchema=z.discriminatedUnion('status',[
+  z.strictObject({status:z.literal('found'),reason:z.string().trim().min(1).max(1000)}),
+  z.strictObject({status:z.enum(['not-obtained','unknown']),reason:z.string().trim().min(1).max(1000)}),
+  z.strictObject({status:z.literal('checked-none'),checkedSources:z.array(z.string().min(1).max(300)).min(1).max(32),reason:z.string().trim().min(1).max(1000)}),
+]);
+export type PersonaCounterCheckInput=z.infer<typeof PersonaCounterCheckInputSchema>;
 const adoptionReviewFields={candidate:PersonaEntryRefSchema,trialOutcomes:z.array(PersonaTrialOutcomeRefSchema).min(1).max(16),
   counterCheck:PersonaCounterCheckSchema,conclusionScope:z.string().trim().min(1).max(1000),targetMaturity:PersonaNewMaturitySchema,
   limitations:z.array(z.string().trim().min(1).max(1000)).max(32),reason:z.string().trim().min(1).max(2000)};
-export const PersonaAdoptionReviewInputSchema=z.strictObject({...adoptionReviewFields,requestId:PersonaRequestIdSchema,
+export const PersonaAdoptionReviewInputSchema=z.strictObject({...adoptionReviewFields,counterCheck:PersonaCounterCheckInputSchema,requestId:PersonaRequestIdSchema,
   supports:z.array(z.string().min(1).max(300)).max(32),counters:z.array(z.string().min(1).max(300)).max(32)})
   .refine(value=>value.counterCheck.status!=='found'||value.counters.length>0,'Found counter-evidence requires references');
 export type PersonaAdoptionReviewInput=z.infer<typeof PersonaAdoptionReviewInputSchema>;
@@ -216,6 +224,7 @@ export interface PersonaProvider {
   ready():boolean;
   prepare(access:PersonaAccess):PreparedPersona;
   validate(access:PersonaAccess,entry:PreparedPersonaEntry):boolean;
+  validateHistoricalTrial?(access:PersonaAccess,dependency:Extract<SourceDependency,{kind:'context'}>):boolean;
   trialAdmitted?(input:PersonaTrialAdmissionInput,authority:PersonaTrialAuthority):readonly PersonaTrialAdmissionRef[];
   completeTrial?(input:PersonaTrialCompletionInput,authority:PersonaTrialAuthority):readonly PersonaTrialOutcomeRef[];
 }

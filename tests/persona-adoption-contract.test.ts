@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   PersonaAdoptionClassificationSchema, PersonaAdoptionDecisionSchema, PersonaAdoptionReviewInputSchema,
-  PersonaCandidateRevisionSchema, PersonaCandidateRevisionV1Schema, PersonaCandidateRevisionV2Schema,
+  PersonaCandidateRevisionSchema, PersonaCandidateRevisionV1Schema, PersonaCandidateRevisionV2Schema, PersonaCounterCheckInputSchema, PersonaCounterCheckSchema,
   PersonaManifestSchema, PersonaManifestV1Schema, PersonaPublishInputSchema, PersonaSourceEvidenceSchema,
   PersonaSourceRefSchema, PersonaTrialAdmissionInputSchema, PersonaTrialCompletionInputSchema,
   PersonaTrialSelectInputSchema, taskScopeKey,
@@ -59,6 +59,18 @@ test('source metadata preserves synthetic coverage and disallows duplicate roots
   assert.equal(evidence.nature,'synthetic');assert.equal(evidence.completeness,'partial');
   assert.equal(PersonaSourceEvidenceSchema.safeParse({...evidence,roots:[evidence.roots[0],evidence.roots[0]]}).success,false);
   assert.equal(PersonaSourceEvidenceSchema.safeParse({...evidence,confidence:0.99}).success,false);
+});
+
+test('checked-none counter checks separate model source keys from stored exact evidence',()=>{
+  const input={status:'checked-none',checkedSources:[`execution-source:${source.id}`],reason:'The examined source contains no counterexample within its coverage'};
+  assert.equal(PersonaCounterCheckInputSchema.safeParse(input).success,true);
+  assert.equal(PersonaCounterCheckSchema.safeParse(input).success,false);
+  const stored={...input,checkedSources:[source]};
+  assert.equal(PersonaCounterCheckSchema.safeParse(stored).success,true);
+  assert.equal(PersonaCounterCheckInputSchema.safeParse(stored).success,false);
+  assert.equal(PersonaCounterCheckInputSchema.safeParse({...input,checkedSources:[]}).success,false);
+  assert.equal(PersonaCounterCheckSchema.safeParse({...stored,checkedSources:[]}).success,false);
+  assert.equal(PersonaCounterCheckSchema.safeParse({status:'unknown',checkedSources:[source],reason:'not yet checked'}).success,false);
 });
 
 test('trusted lifecycle payload shapes require admitted metadata and an ended visible result',()=>{

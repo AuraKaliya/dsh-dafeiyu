@@ -1,11 +1,13 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { PersonaProposalSchema,PersonaCandidateRevisionSchema,PersonaStageSchema,PersonaEntryRefSchema,PersonaRequestIdSchema,ContextItemSchema,redactJson } from '@dafeiyu/contracts';
-import type { PersonaAccess,PersonaSourceRef,PersonaCandidate,PersonaStage,PreparedPersona,PreparedPersonaEntry,Json } from '@dafeiyu/contracts';
+import { PersonaProposalSchema,PersonaCandidateRevisionSchema,PersonaStageSchema,PersonaEntryRefSchema,PersonaRequestIdSchema,ContextItemSchema,redactJson,PersonaTrialSelectInputSchema,PersonaTrialAdmissionInputSchema,PersonaTrialCompletionInputSchema,PersonaAdoptionDecisionSchema } from '@dafeiyu/contracts';
+import type { PersonaAccess,PersonaSourceRef,PersonaCandidate,PersonaStage,PreparedPersona,PreparedPersonaEntry,PreparedPersonaTrialEntry,PersonaSourceEvidence,SourceDependency,Json } from '@dafeiyu/contracts';
 import { personaDigest,personaScope,sourceKey,uniqueSources } from './persona-digest.js';
+import { PersonaTrialStore } from './persona-trials.js';
+import { readPersonaProof } from './persona-evidence.js';
 
-export interface PersonaMaterial {text:string;dependencies:PersonaSourceRef[];rootSources:string[]}
+export interface PersonaMaterial {text:string;dependencies:PersonaSourceRef[];rootSources:string[];evidence?:PersonaSourceEvidence}
 export type PersonaResolver=(access:PersonaAccess,ref:PersonaSourceRef)=>PersonaMaterial|null;
 const control=z.strictObject({requestId:PersonaRequestIdSchema,id:z.uuid(),expectedVersion:z.number().int().positive(),reason:z.string().trim().min(1).max(1000)});
 const reviewSchema=control.extend({state:z.enum(['held','trial','rejected'])});
@@ -17,7 +19,18 @@ const string=(raw:unknown)=>z.string().parse(raw);
 
 /** One authority for candidate, stage and scene-selection changes. Bodies remain source references. */
 export class PersonaStore {
-  constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly resolve:PersonaResolver){}
+  private readonly trials:PersonaTrialStore;
+  constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly resolve:PersonaResolver){
+    this.trials=new PersonaTrialStore(db,resolve,{check:(access,candidate)=>this.checked(access,candidate),event:(access,type,data)=>this.event(access,type,data),promoted:(access,trial,current,requireSelection)=>this.promotedTrial(access,trial,current,requireSelection)});
+  }
+  private promotedTrial(access:PersonaAccess,trial:PersonaCandidate,current:PersonaCandidate,requireSelection=true):boolean {
+    if(trial.state!=='trial'||current.schemaVersion!==2||current.state!=='adopted'||!current.adoption||current.id!==trial.id||current.version!==trial.version+1||
+      personaDigest(current.contentRef)!==personaDigest(trial.contentRef)||current.applicability!==trial.applicability)return false;
+    const decision=readPersonaProof(this.db,access,'persona_adoption_decisions',current.adoption.decision,PersonaAdoptionDecisionSchema);
+    if(decision.eligibility!=='allowed'||decision.candidate.id!==trial.id||decision.candidate.version!==trial.version||personaDigest(decision.review)!==personaDigest(current.adoption.review))return false;
+    if(!this.stage(current.agentId).entries.some(entry=>entry.id===current.id&&entry.version===current.version)||requireSelection&&!this.selection(access).entries.some(entry=>entry.id===current.id&&entry.version===current.version))return false;
+    this.checked(access,trial);return true;
+  }
   private request<T extends Json>(access:PersonaAccess,requestId:string,input:unknown,work:()=>T):T {
     access.guard();PersonaRequestIdSchema.parse(requestId);const payload=z.json().parse({scope:access.view.scope,input});
     if(redactJson(payload).redacted)throw new Error('PRIVATE_INPUT_REJECTED');const fingerprint=personaDigest(payload);
@@ -72,6 +85,10 @@ export class PersonaStore {
     const current=this.candidate(access,input.id);if(current.version!==input.expectedVersion)throw new Error('VERSION_CONFLICT');if(!['proposed','held','trial'].includes(current.state))throw new Error('PERSONA_TRANSITION_FORBIDDEN');
     if(input.state==='trial')this.checked(access,current);const updated={...current,version:current.version+1,state:input.state,reason:input.reason};this.writeCandidate(updated);this.event(access,'persona.reviewed',{id:current.id,version:updated.version,state:updated.state});return {id:current.id,version:updated.version,state:updated.state};
   });}
+  selectTrial(access:PersonaAccess,raw:unknown){const input=PersonaTrialSelectInputSchema.parse(raw);return this.request(access,input.requestId,{kind:'trial-select',input},()=>this.trials.select(access,input));}
+  admitTrial(access:PersonaAccess,raw:unknown){const input=PersonaTrialAdmissionInputSchema.parse(raw);access.guard();return this.transaction(()=>{const refs=this.trials.admit(access,input);(access.commitGuard??access.guard)();return refs;});}
+  completeTrial(access:PersonaAccess,raw:unknown){const input=PersonaTrialCompletionInputSchema.parse(raw);access.guard();return this.transaction(()=>{const refs=this.trials.complete(access,input);(access.commitGuard??access.guard)();return refs;});}
+  validateHistoricalTrial(access:PersonaAccess,dependency:Extract<SourceDependency,{kind:'context'}>):boolean{return this.trials.historical(access,dependency);}
   publish(access:PersonaAccess,raw:unknown){const input=publishSchema.parse(raw);return this.request(access,input.requestId,{kind:'publish',input},()=>{
     if(new Set(input.entries.map(entry=>entry.id)).size!==input.entries.length)throw new Error('INVALID_INPUT');const stage=this.stage(access.view.scope.agentId);if(stage.revision!==input.expectedStageVersion)throw new Error('VERSION_CONFLICT');
     const adopted=input.entries.map(entry=>{const current=this.candidate(access,entry.id);if(current.version!==entry.version)throw new Error('VERSION_CONFLICT');if(current.state!=='trial')throw new Error('PERSONA_REVIEW_REQUIRED');this.checked(access,current);
@@ -96,17 +113,19 @@ export class PersonaStore {
     access.guard();const stage=this.stage(access.view.scope.agentId),selection=this.selection(access),entries:PreparedPersonaEntry[]=[];
     for(const entry of selection.entries){try{const candidate=this.candidate(access,entry.id);if(candidate.version!==entry.version||candidate.state!=='adopted'||!stage.entries.some(value=>value.id===entry.id&&value.version===entry.version))continue;
       const material=this.checked(access,candidate),counterText=candidate.counters.map(ref=>this.resolve(access,ref)?.text??'来源不可用');
-      const text=JSON.stringify({kind:'stage-persona',category:candidate.kind,content:material.text,applicability:candidate.applicability,reason:candidate.reason,counterEvidence:counterText,
+      const adoption=candidate.schemaVersion===2&&candidate.adoption?{basis:'reviewed' as const,maturity:candidate.maturity,...candidate.adoption}:{basis:'legacy-unclassified' as const,maturity:'legacy-unclassified' as const};
+      const text=JSON.stringify({kind:'stage-persona',category:candidate.kind,content:material.text,applicability:candidate.applicability,reason:candidate.reason,counterEvidence:counterText,...(candidate.schemaVersion===2?{adoption}:{}),
         evidenceStatus:candidate.supports.length?'source-bound':'tentative-self-report',instructionAuthority:false});
       const item=ContextItemSchema.safeParse({id:`persona:${candidate.id}`,version:String(candidate.version),text,expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:`dafeiyu:persona:${candidate.id}`,version:String(candidate.version),hash:personaDigest({text,dependencies:candidate.dependencies})}]});
-      if(item.success)entries.push({candidate:entry,contentRef:candidate.contentRef,dependencies:candidate.dependencies,item:item.data});
+      if(item.success)entries.push({candidate:entry,contentRef:candidate.contentRef,dependencies:candidate.dependencies,item:item.data,adoption});
     }catch{access.guard();}}
-    return {stageRevision:stage.revision,selectionVersion:selection.version,entries,omitted:selection.legacy?1:selection.entries.length-entries.length};
+    const trial=this.trials.prepare(access);
+    return {stageRevision:stage.revision,selectionVersion:selection.version,entries,omitted:selection.legacy?1:selection.entries.length-entries.length,trialSelectionVersion:trial.version,trialEntries:trial.entries,omittedTrials:trial.omitted};
   }
-  validate(access:PersonaAccess,entry:PreparedPersonaEntry):boolean{try{access.guard();const current=this.prepare(access);return current.entries.some(value=>personaDigest(value)===personaDigest(entry));}catch{return false;}}
+  validate(access:PersonaAccess,entry:PreparedPersonaEntry|PreparedPersonaTrialEntry):boolean{try{access.guard();const current=this.prepare(access);return [...current.entries,...(current.trialEntries??[])].some(value=>personaDigest(value)===personaDigest(entry));}catch{return false;}}
   status(access:PersonaAccess){access.guard();const selection=this.selection(access);const candidates=this.db.prepare('SELECT id FROM persona_candidates WHERE agent_id=? ORDER BY rowid').all(access.view.scope.agentId).flatMap(row=>{
-    try{const value=this.candidate(access,string(row.id));let available=true;try{this.checked(access,value);}catch{available=false;}return [{id:value.id,version:value.version,state:value.state,available}];}catch{return [];}});
-    return {stageRevision:this.stage(access.view.scope.agentId).revision,selectionVersion:selection.version,legacySelection:selection.legacy,candidates};}
+      try{const value=this.candidate(access,string(row.id));let available=true;try{this.checked(access,value);}catch{available=false;}return [{id:value.id,version:value.version,state:value.state,kind:value.kind,applicability:value.applicability,maturity:value.schemaVersion===2?value.maturity:'legacy-unclassified',available}];}catch{return [];}});
+    return {stageRevision:this.stage(access.view.scope.agentId).revision,selectionVersion:selection.version,legacySelection:selection.legacy,candidates,...this.trials.status(access)};}
   drainOutbox(append:(body:unknown,id:string)=>void){let pending=0;for(const row of this.db.prepare('SELECT id,body FROM persona_outbox WHERE delivered=0 ORDER BY ordinal').all()){
     try{append(JSON.parse(string(row.body)),string(row.id));this.db.prepare('UPDATE persona_outbox SET delivered=1 WHERE id=?').run(row.id!);}catch{pending++;break;}}return pending;}
 }

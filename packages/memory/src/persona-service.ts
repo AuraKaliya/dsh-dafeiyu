@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { PersonaAccess,PersonaSourceRef,ActionCapabilityV3,ExecutionContextV3 } from '@dafeiyu/contracts';
-import { PersonaSourceRefSchema,PersonaKindSchema,PersonaRequestIdSchema,ExecutionScopeSchema,RunOriginSchema,ExecutionContributionSchema,TaskObjectionSchema } from '@dafeiyu/contracts';
+import { PersonaSourceRefSchema,PersonaKindSchema,PersonaRequestIdSchema,ExecutionScopeSchema,RunOriginSchema,ExecutionContributionSchema,TaskObjectionSchema,PersonaTrialSelectInputSchema } from '@dafeiyu/contracts';
 import type { ExecutionMemoryPort } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import type { MemoryStore } from './store.js';
@@ -47,7 +47,10 @@ export class PersonaService {
       resolveIntent:(access,input)=>{try{return this.executionState.resolveIntent(access,input);}finally{this.flush();}},
       ...(compact?{compactionPolicy:compact.policy,summarize:compact.summarize.bind(compact),summarizeFragments:compact.summarizeFragments.bind(compact),rewrite:compact.rewrite.bind(compact)}:{summarize:async()=>{throw new Error('COMPACTION_NOT_CONFIGURED');}})};
     this.unbindExecution=ctx.dafeiyu.bindExecutionMemory(port);
-    this.unbind=ctx.dafeiyu.bindPersonaProvider({ready,prepare:access=>this.store.prepare(access),validate:(access,entry)=>this.ready()&&this.store.validate(access,entry)});
+    this.unbind=ctx.dafeiyu.bindPersonaProvider({ready,prepare:access=>this.store.prepare(access),validate:(access,entry)=>this.ready()&&this.store.validate(access,entry),
+      validateHistoricalTrial:(access,dependency)=>this.ready()&&this.store.validateHistoricalTrial(access,dependency),
+      trialAdmitted:(input,authority)=>{try{return this.store.admitTrial(ctx.dafeiyu.personaTrialAccess(authority,input),input);}finally{this.flush();}},
+      completeTrial:(input,authority)=>{try{return this.store.completeTrial(ctx.dafeiyu.personaTrialAccess(authority,input),input);}finally{this.flush();}}});
     try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'memory-persona',version:MEMORY_VERSION,agentId,requires:['persona.stage-state.v1'],lifecycleReady:ready,actions:this.actions()});}
     catch(error){this.unbind();this.unbindExecution();throw error;}
     this.executionHandle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'memory-execution',version:MEMORY_VERSION,agentId,requires:['memory.execution.v1'],lifecycleReady:ready,actions:this.executionActions()});
@@ -85,6 +88,7 @@ export class PersonaService {
   /** Trusted program adapter: references are still checked against the live execution scope. */
   proposeReference(context:ExecutionContextV3,raw:unknown,pluginId:string){try{return this.store.propose(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   review(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.review(this.access(context,pluginId,true),raw);}finally{this.flush();}}
+  selectTrial(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.selectTrial(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   publish(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.publish(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   select(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.select(this.access(context,pluginId,true),raw);}finally{this.flush();}}
   withdraw(context:ExecutionContextV3,raw:unknown,pluginId='memory-persona'){try{return this.store.withdraw(this.access(context,pluginId,true),raw);}finally{this.flush();}}
@@ -128,6 +132,7 @@ export class PersonaService {
     return [
       make('dafeiyu_persona_propose','提出暂定认识。text是自述，不是世界事实。sources/counters只接受已曝光的task-link输入、execution-source:来源ID或memory:记忆ID:修订号。不会直接改变底色或稳定偏好。',proposal,true,(context,input)=>this.propose(context,input),true),
       make('dafeiyu_persona_review','明确复核自己的候选。trial表示试行，held表示仍需比较，rejected表示不采用；不能靠评分直接证明成长。',z.strictObject({...control,state:z.enum(['held','trial','rejected'])}),true,(context,input)=>this.review(context,input)),
+      make('dafeiyu_persona_trial_select','选择下一轮实际使用的精确trial候选及适用、退出条件。它仍是暂定认识，不会成为已采用人格；空数组撤下本范围试行选择。实际使用和闭合结果由核心记录，不可自行声明完成试行。',PersonaTrialSelectInputSchema,true,(context,input)=>this.selectTrial(context,input)),
       make('dafeiyu_persona_publish','采用已试行的精确候选版本，并保留证据与反证。只修改本范围阶段选择，不改底色、任务或平台权限。',z.strictObject({requestId:PersonaRequestIdSchema,expectedStageVersion:z.number().int().nonnegative(),entries:z.array(z.strictObject({id:z.uuid(),version:z.number().int().positive()})).min(1).max(32)}),true,(context,input)=>this.publish(context,input)),
       make('dafeiyu_persona_select','选择当前场景中已经采用且仍有效的阶段条目；空数组明确撤下该场景的全部选择。',z.strictObject({requestId:PersonaRequestIdSchema,expectedSelectionVersion:z.number().int().nonnegative(),entries:z.array(z.strictObject({id:z.uuid(),version:z.number().int().positive()})).max(32)}),true,(context,input)=>this.select(context,input)),
       make('dafeiyu_persona_withdraw','撤下有版本的阶段认识，保留历史。后续不会通过恢复旧快照自动重新采用。',z.strictObject(control),true,(context,input)=>this.withdraw(context,input)),

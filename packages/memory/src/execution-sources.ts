@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { createHash,randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { ExecutionScopeSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,redactJson,SourceDependencySchema,ExecutionObservationSchema } from '@dafeiyu/contracts';
+import { ExecutionScopeSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,redactJson,SourceDependencySchema,ExecutionObservationSchema,PersonaSourceNatureSchema,PersonaSourceEvidenceSchema } from '@dafeiyu/contracts';
+import type { PersonaSourceNature } from '@dafeiyu/contracts';
 import type { PersonaAccess,PersonaSourceRef } from '@dafeiyu/contracts';
 import type { PersonaMaterial,PersonaResolver } from './persona-store.js';
 import { personaDigest,personaScope,uniqueSources } from './persona-digest.js';
@@ -10,7 +11,7 @@ const bodySchema=z.strictObject({schemaVersion:z.literal(1),kind:z.literal('self
   runId:z.uuid(),producer:z.string(),operationId:z.string(),dependencies:z.array(PersonaSourceRefSchema).max(64),rootSources:z.array(z.string().max(2200)).max(64)});
 const observedSchema=z.strictObject({schemaVersion:z.literal(2),kind:z.enum(['primary','digest','self-report']),text:z.string().min(1).max(32000),scope:ExecutionScopeSchema,
   runId:z.uuid(),producer:z.string(),operationId:z.string(),dependencies:z.array(PersonaSourceRefSchema).max(64),rootSources:z.array(z.string().max(2200)).max(64),
-  history:z.array(SourceDependencySchema).max(4096),occurredAt:z.iso.datetime({offset:true}),resource:z.string(),coverage:z.array(z.string()),completeness:z.enum(['complete','partial','unknown'])});
+  history:z.array(SourceDependencySchema).max(4096),occurredAt:z.iso.datetime({offset:true}),resource:z.string(),coverage:z.array(z.string()),completeness:z.enum(['complete','partial','unknown']),nature:PersonaSourceNatureSchema.optional()});
 const storedSchema=z.union([bodySchema,observedSchema]);
 export class ExecutionSources {
   constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly resolve:PersonaResolver){}
@@ -22,15 +23,15 @@ export class ExecutionSources {
   selfReport(access:PersonaAccess,requestId:string,text:string,refs:readonly PersonaSourceRef[]):PersonaSourceRef{
     return this.record(access,requestId,text,refs,{kind:'self-report',occurredAt:new Date().toISOString(),resource:'self:reflection',coverage:['current-statement'],completeness:'unknown'});
   }
-  observe(access:PersonaAccess,raw:unknown):PersonaSourceRef{const input=ExecutionObservationSchema.parse(raw),{kind,occurredAt,resource,coverage,completeness}=input;return this.record(access,input.requestId,input.text,input.dependencies,{kind,occurredAt,resource,coverage,completeness});}
-  private record(access:PersonaAccess,requestId:string,text:string,refs:readonly PersonaSourceRef[],details:Pick<z.infer<typeof observedSchema>,'kind'|'occurredAt'|'resource'|'coverage'|'completeness'>):PersonaSourceRef{
+  observe(access:PersonaAccess,raw:unknown):PersonaSourceRef{const input=ExecutionObservationSchema.parse(raw),{kind,occurredAt,resource,coverage,completeness,nature}=input;return this.record(access,input.requestId,input.text,input.dependencies,{kind,occurredAt,resource,coverage,completeness,...(nature===undefined?{}:{nature})});}
+  private record(access:PersonaAccess,requestId:string,text:string,refs:readonly PersonaSourceRef[],details:Pick<z.infer<typeof observedSchema>,'kind'|'occurredAt'|'resource'|'coverage'|'completeness'|'nature'>):PersonaSourceRef{
     const scope=this.ensureTask(access);PersonaRequestIdSchema.parse(requestId);z.string().trim().min(1).max(details.kind==='self-report'?8000:32000).parse(text);
-    if(redactJson({text,...details}).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
+    if(redactJson(z.json().parse({text,...details})).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
     const dependencies=uniqueSources([...refs,...access.admittedSources,...access.inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[])]);
     const materials=dependencies.map(ref=>{const material=this.resolve(access,ref);if(!material)throw new Error('SOURCE_STALE');return material;});
     const history=access.historyDependencies??[];
     if(history.length&&!access.validateHistory?.(history))throw new Error('SOURCE_STALE');
-    const expanded=uniqueSources([...dependencies,...materials.flatMap(material=>material.dependencies)]),fingerprint=personaDigest({text,dependencies:expanded,kind:details.kind,resource:details.resource,coverage:details.coverage,completeness:details.completeness});
+    const expanded=uniqueSources([...dependencies,...materials.flatMap(material=>material.dependencies)]),fingerprint=personaDigest({text,dependencies:expanded,kind:details.kind,resource:details.resource,coverage:details.coverage,completeness:details.completeness,...(details.nature===undefined?{}:{nature:details.nature})});
     return this.transaction(()=>{access.guard();const old=this.db.prepare('SELECT fingerprint,receipt FROM execution_memory_requests WHERE scope_key=? AND producer=? AND request_id=?').get(scope.scopeKey,access.producer,requestId);
       if(old){if(old.fingerprint!==fingerprint)throw new Error('IDEMPOTENCY_CONFLICT');return PersonaSourceRefSchema.parse(JSON.parse(String(old.receipt)));}
       const id=randomUUID(),rootSources=[...new Set(materials.flatMap(material=>material.rootSources))];if(details.kind==='primary'||!rootSources.length)rootSources.push(JSON.stringify([details.kind,scope.agentId,scope.scopeKey,id]));
@@ -53,7 +54,13 @@ export class ExecutionSources {
     if(personaScope(body.scope)!==ref.scopeKey||body.scope.agentId!==ref.agentId||createHash('sha256').update(body.text).digest('hex')!==ref.contentHash)return null;
     if(body.schemaVersion===2){if(body.history.length&&!access.validateHistory?.(body.history))return null;
       if(body.operationId!==access.operationId&&access.operationFinished&&!access.operationFinished(body.operationId))return null;}
-    for(const dependency of body.dependencies)if(!this.resolve(access,dependency))return null;return {text:body.text,dependencies:body.dependencies,rootSources:body.rootSources};
+    const inherited=new Map<string,PersonaSourceNature>();
+    for(const dependency of body.dependencies){const material=this.resolve(access,dependency);if(!material)return null;
+      for(const root of material.evidence?.roots??material.rootSources.map(key=>({key,nature:'unknown' as const}))){const previous=inherited.get(root.key);inherited.set(root.key,previous&&previous!==root.nature?'unknown':root.nature);}}
+    const nature:PersonaSourceNature=body.kind==='self-report'?'self-report':body.kind==='digest'?'derived':body.schemaVersion===2?body.nature??'unknown':'unknown';
+    const evidence=PersonaSourceEvidenceSchema.parse({source:ref,nature,coverage:body.schemaVersion===2?body.coverage:[],completeness:body.schemaVersion===2?body.completeness:'unknown',
+      roots:[...new Set(body.rootSources)].map(key=>({key,nature:inherited.get(key)??nature}))});
+    return {text:body.text,dependencies:body.dependencies,rootSources:body.rootSources,evidence};
   }
   metadata(access:PersonaAccess,ref:PersonaSourceRef){if(!this.open(access,ref))throw new Error('SOURCE_STALE');return storedSchema.parse(JSON.parse(String(this.db.prepare('SELECT body FROM execution_sources WHERE id=?').get(ref.id)?.body)));}
   operationSources(access:PersonaAccess,operationId:string):PersonaSourceRef[]{return this.db.prepare("SELECT id FROM execution_sources WHERE scope_key=? AND json_extract(body,'$.operationId')=? AND deleted=0").all(personaScope(access.view.scope),operationId).flatMap(row=>{const ref=this.reference(access,String(row.id));return ref&&this.open(access,ref)?[ref]:[];});}

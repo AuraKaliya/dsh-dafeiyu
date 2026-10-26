@@ -205,6 +205,15 @@ export class RuntimeStore {
   });}
   findContext(id:string):Json|null{this.open();const row=this.db.prepare('SELECT body FROM run_inputs WHERE input_id=? ORDER BY rowid DESC LIMIT 1').get(id);return row?z.json().parse(JSON.parse(string(row.body))):null;}
   appendExecutionEvent(runId:string,type:string,data:Record<string,Json>):string{return this.transaction(()=>{this.get(runId);return this.event(runId,type,data);});}
+  /** Reads the immutable lifecycle fact, even after its outbox delivery was acknowledged. */
+  latestRunEvent(runId:string,state:RunState){this.get(runId);RunStateSchema.parse(state);const row=this.db.prepare("SELECT id,body FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')=? ORDER BY ordinal DESC LIMIT 1").get(runId,`run.${state}`);
+    if(!row)return null;const event=eventSchema.parse(JSON.parse(string(row.body)));if(event.id!==row.id||event.runId!==runId||event.type!==`run.${state}`)throw new Error('RUN_EVENT_BINDING_CONFLICT');return event;
+  }
+  /** Core-only receipts do not manufacture a model result or an admission in an already closed Run. */
+  bindPersonaTrialRecord(runId:string,kind:'admission-input'|'admission-receipt'|'completion-receipt',raw:unknown):void{z.enum(['admission-input','admission-receipt','completion-receipt']).parse(kind);const value=z.json().parse(raw),id=`persona-trial:${kind}`;this.transaction(()=>{
+    const run=this.get(runId);if(kind==='completion-receipt'?!['completed','failed','cancelled','interrupted'].includes(run.state):run.state!=='running')throw new Error('PERSONA_TRIAL_RUN_STATE_INVALID');
+    const old=this.readInput(runId,id);if(old!==null){if(runtimeHash(old)!==runtimeHash(value))throw new Error('INPUT_BINDING_CONFLICT');return;}this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,id,JSON.stringify(value));
+  });}
   operations(runId:string){this.open();return this.db.prepare('SELECT id FROM run_operations WHERE run_id=? ORDER BY ordinal').all(runId).map(row=>this.operation(string(row.id)));}
   finishOperation(id:string,raw:unknown){const outcome=ActionOutcomeSchema.parse(raw);return this.transaction(()=>{const operation=this.operation(id);if(operation.outcome){if(runtimeHash(operation.outcome)!==runtimeHash(outcome))throw new Error('OPERATION_OUTCOME_CONFLICT');return operation;}
     if(operation.state!=='started')throw new Error('OPERATION_UNCERTAIN');this.db.prepare("UPDATE run_operations SET state='finished',outcome=? WHERE id=?").run(JSON.stringify(outcome),id);this.event(operation.runId,`operation.${outcome.status}`,{operationId:id,effects:outcome.effects});return this.operation(id);});}
