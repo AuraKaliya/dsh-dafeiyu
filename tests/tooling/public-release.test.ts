@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,mkdir,writeFile,readFile,copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join,resolve } from 'node:path';
+import { join,resolve,dirname } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
@@ -13,7 +13,7 @@ const execute=promisify(execFile);
 test('a publishable package installs without private workspaces and runs the same cold-start/restart checks',async()=>{
   const root=await mkdtemp(join(tmpdir(),'public-release-')),release=join(root,'release'),consumer=join(root,'consumer');
   const result=buildPublicRelease(release);assert.ok(result.files>500);assert.equal(inspectPublicRelease(release).passed,true);
-  const npm=process.env.npm_execpath;assert.ok(npm);
+  const npm=process.env.npm_execpath??join(dirname(process.execPath),'node_modules/npm/bin/npm-cli.js');
   const env={...process.env,npm_config_cache:join(root,'npm-cache')};
   const packed=await execute(process.execPath,[npm,'pack','--json','--ignore-scripts','--pack-destination',root],{cwd:release,env,windowsHide:true,timeout:60000});
   const [pack]=JSON.parse(packed.stdout) as {filename:string;files:{path:string}[]}[];assert.ok(pack);
