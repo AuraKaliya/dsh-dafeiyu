@@ -12,12 +12,15 @@ import { QqStore, QQ_SCHEMA_VERSION } from '@dafeiyu/channel-qq';
 import { ActivityStore,ACTIVITY_SCHEMA_VERSION } from '@dafeiyu/activity/store';
 import { MediaStore,MEDIA_SCHEMA_VERSION } from '@dafeiyu/media';
 import { BiliStore,BILI_SCHEMA_VERSION } from '@dafeiyu/bilibili';
+import { ExecutorStore,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor/store';
+import { executorFilesSnapshot } from './executor-snapshot.js';
 import { inspectStorage } from './storage-inspection.js';
 import type { StorageKind,StorageInspection } from './storage-inspection.js';
 import { claim,conflict } from './coordination.js';
 import { assertPaths,pluginConfig } from './configuration.js';
 import type { PreparedHostConfig } from './configuration.js';
 import { pathIdentity,physicalPath,within } from './paths.js';
+import { MigrationPlanSchema,verifyMigration } from './migration.js';
 
 export const ProfileManifestSchema=z.strictObject({schemaVersion:z.literal(1),profileId:z.string(),agentId:z.string(),id:z.uuid(),state:z.enum(['initializing','initialized','failed']),createdAt:z.iso.datetime(),
   paths:z.record(z.string(),z.string()),requiredStores:z.array(z.string()),mode:z.enum(['init','migrated'])});
@@ -25,7 +28,7 @@ export type ProfileManifest=z.infer<typeof ProfileManifestSchema>;
 export interface HostInspection {readonly schemaVersion:1;readonly profileId:string;readonly agentId:string;readonly configHash:string;readonly foundationHash:string;
   readonly ready:boolean;readonly canInitialize:boolean;readonly codes:readonly string[];readonly occupied:boolean;
   readonly stores:readonly (StorageInspection&{name:string})[];readonly plugins:readonly {id:string;enabled:boolean;required:boolean;version:string|null;state:'configured'|'disabled'}[];readonly order:readonly string[]}
-const target:Partial<Record<StorageKind,number>>={journal:2,memory:MEMORY_SCHEMA_VERSION,runtime:RUNTIME_SCHEMA_VERSION,activity:ACTIVITY_SCHEMA_VERSION,media:MEDIA_SCHEMA_VERSION,bilibili:BILI_SCHEMA_VERSION,delivery:1,analysis:1,working:1,feedback:1,qq:QQ_SCHEMA_VERSION,query:8,retrieval:2};
+const target:Partial<Record<StorageKind,number>>={journal:2,memory:MEMORY_SCHEMA_VERSION,runtime:RUNTIME_SCHEMA_VERSION,activity:ACTIVITY_SCHEMA_VERSION,media:MEDIA_SCHEMA_VERSION,bilibili:BILI_SCHEMA_VERSION,executor:EXECUTOR_SCHEMA_VERSION,delivery:1,analysis:1,working:1,feedback:1,qq:QQ_SCHEMA_VERSION,query:8,retrieval:2};
 export function layoutPaths(config:PreparedHostConfig){return Object.fromEntries(config.resources.map((resource,index)=>[String(index),resource.identity]));}
 export const manifestFile=(config:PreparedHostConfig)=>join(config.paths.core,'host-profile.json');
 export function readManifest(config:PreparedHostConfig):ProfileManifest|null{if(!existsSync(manifestFile(config)))return null;
@@ -39,11 +42,12 @@ export function storageFiles(config:PreparedHostConfig){return [
   {name:'activity',kind:'activity' as const,file:join(config.paths.core,'activity.sqlite')},
   {name:'media',kind:'media' as const,file:join(config.paths.core,'media.sqlite')},
   {name:'bilibili',kind:'bilibili' as const,file:join(config.paths.core,'bilibili.sqlite')},
+  {name:'executor',kind:'executor' as const,file:join(config.paths.core,'executor.sqlite')},
   ...(['memory','analysis','working','feedback','retrieval'] as const).map(kind=>({name:kind,kind,file:join(config.paths.memory,kind+'.sqlite')})),
   ...Object.entries(config.paths.channels).map(([id,directory])=>({name:id,kind:'qq' as const,file:join(directory,'qq.sqlite')})),
   {name:'query',kind:'query' as const,file:config.paths.query}];}
-const packages:Record<string,string>={core:'@dafeiyu/core',memory:'@dafeiyu/memory',activity:'@dafeiyu/activity',media:'@dafeiyu/media',bilibili:'@dafeiyu/bilibili',timeline:'@dafeiyu/timeline','channel-qq':'@dafeiyu/channel-qq','channel-simulator':'@dafeiyu/channel-simulator','model-deepseek':'@deepseek-ai/dsh-llm-deepseek-api-key','model-scripted':'@deepseek-ai/dsh-llm'};
-const versions:Record<string,string>={core:'0.15.0',memory:'0.15.0',activity:'0.1.0',media:'0.1.0',bilibili:'0.1.0',timeline:'0.8.0','channel-qq':'0.3.0','channel-simulator':'0.4.0','model-deepseek':'0.2.1-rc.2','model-scripted':'0.2.1-rc.2'};
+const packages:Record<string,string>={core:'@dafeiyu/core',memory:'@dafeiyu/memory',activity:'@dafeiyu/activity',media:'@dafeiyu/media',bilibili:'@dafeiyu/bilibili','server-executor':'@dafeiyu/server-executor',timeline:'@dafeiyu/timeline','channel-qq':'@dafeiyu/channel-qq','channel-simulator':'@dafeiyu/channel-simulator','model-deepseek':'@deepseek-ai/dsh-llm-deepseek-api-key','model-scripted':'@deepseek-ai/dsh-llm'};
+const versions:Record<string,string>={core:'0.15.0',memory:'0.15.0',activity:'0.1.0',media:'0.1.0',bilibili:'0.1.0','server-executor':'0.1.0',timeline:'0.8.0','channel-qq':'0.3.0','channel-simulator':'0.4.0','model-deepseek':'0.2.1-rc.2','model-scripted':'0.2.1-rc.2'};
 export function packageVersion(id:string):string|null{try{const name=packages[id];if(!name)return null;let directory=dirname(fileURLToPath(import.meta.resolve(name)));
     for(let i=0;i<5;i++){const file=join(directory,'package.json');if(existsSync(file)){const body=z.object({name:z.string(),version:z.string()}).parse(JSON.parse(readFileSync(file,'utf8')));if(body.name===name)return body.version;}directory=dirname(directory);}return null;}catch{return null;}}
 function empty(config:PreparedHostConfig){return config.resources.every(item=>!existsSync(item.path)||item.kind==='directory'&&readdirSync(item.path).length===0);}
@@ -59,6 +63,7 @@ export function inspectHost(config:PreparedHostConfig,coordination?:string,ownIn
   if(pluginConfig(config,'activity')&&manifest&&!manifest.requiredStores.includes('activity')&&!activityMigrated(config))codes.push('HOST_MIGRATION_REQUIRED');
   if(pluginConfig(config,'media')&&manifest&&!manifest.requiredStores.includes('media')&&!mediaMigrated(config))codes.push('HOST_MIGRATION_REQUIRED');
   if(pluginConfig(config,'bilibili')&&manifest&&!manifest.requiredStores.includes('bilibili')&&!biliMigrated(config))codes.push('HOST_MIGRATION_REQUIRED');
+  if(pluginConfig(config,'server-executor')&&(manifest||hasMigration)&&!manifest?.requiredStores.includes('executor')&&!executorMigrated(config))codes.push('HOST_MIGRATION_REQUIRED');
   const stores=storageFiles(config).map(item=>{
     const concrete=physicalPath(item.file);if(concrete!==item.file&&!within(concrete,dirname(item.file)))codes.push('HOST_STORAGE_PATH_CHANGED');
     const inspection=inspectStorage(item.file,item.kind,identity);
@@ -68,6 +73,8 @@ export function inspectHost(config:PreparedHostConfig,coordination?:string,ownIn
     if(!inspection.exists&&item.kind==='activity'&&pluginConfig(config,'activity'))codes.push(manifest?'HOST_MIGRATION_REQUIRED':'HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='media'&&pluginConfig(config,'media'))codes.push(manifest?'HOST_MIGRATION_REQUIRED':'HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='bilibili'&&pluginConfig(config,'bilibili'))codes.push(manifest?'HOST_MIGRATION_REQUIRED':'HOST_INITIALIZATION_REQUIRED');
+    if(!inspection.exists&&item.kind==='executor'&&pluginConfig(config,'server-executor'))codes.push(manifest?'HOST_MIGRATION_REQUIRED':'HOST_INITIALIZATION_REQUIRED');
+    if(item.kind==='executor'&&inspection.exists&&inspection.supported){try{executorFilesSnapshot(config.paths.core);}catch{codes.push('HOST_EXECUTOR_ARCHIVE_INVALID');}}
     if(inspection.exists&&inspection.supported&&['memory','journal'].includes(item.kind)){
       const db=new DatabaseSync(item.file,{readOnly:true});try{const sql=item.kind==='memory'?'SELECT DISTINCT agent_id AS id FROM memory_items':"SELECT DISTINCT json_extract(body,'$.agentId') AS id FROM events";
         if(db.prepare(sql).all().some(row=>row.id!==identity.agentId))codes.push('HOST_AGENT_BINDING_MISMATCH');}finally{db.close();}}
@@ -85,11 +92,12 @@ export function initializeProfile(config:PreparedHostConfig,coordination?:string
   const lease=claim(config.resources,{profileId:config.config.profileId,agentId:config.config.agent.id},coordination);
   let manifest:ProfileManifest|undefined;
   try{assertPaths(config);if(!empty(config))throw new Error('HOST_INIT_REQUIRES_EMPTY_DIRECTORIES');for(const item of config.resources)mkdirSync(item.kind==='directory'?item.path:dirname(item.path),{recursive:true});
-    manifest={schemaVersion:1,profileId:config.config.profileId,agentId:config.config.agent.id,id:randomUUID(),state:'initializing',createdAt:new Date().toISOString(),paths:layoutPaths(config),requiredStores:storageFiles(config).filter(item=>!['query','retrieval'].includes(item.kind)&&(item.kind!=='activity'||!!pluginConfig(config,'activity'))&&(item.kind!=='media'||!!pluginConfig(config,'media'))&&(item.kind!=='bilibili'||!!pluginConfig(config,'bilibili'))).map(item=>item.name),mode:'init'};writeManifest(config,manifest);
+    manifest={schemaVersion:1,profileId:config.config.profileId,agentId:config.config.agent.id,id:randomUUID(),state:'initializing',createdAt:new Date().toISOString(),paths:layoutPaths(config),requiredStores:storageFiles(config).filter(item=>!['query','retrieval'].includes(item.kind)&&(item.kind!=='activity'||!!pluginConfig(config,'activity'))&&(item.kind!=='media'||!!pluginConfig(config,'media'))&&(item.kind!=='bilibili'||!!pluginConfig(config,'bilibili'))&&(item.kind!=='executor'||!!pluginConfig(config,'server-executor'))).map(item=>item.name),mode:'init'};writeManifest(config,manifest);
     initializeCoreStorage(config.paths.core,config.config.agent.id,config.config.profileId);initializeMemoryStorage(config.paths.memory);
     const activity=pluginConfig(config,'activity');if(activity){const store=new ActivityStore(join(config.paths.core,'activity.sqlite'),{agentId:config.config.agent.id,profileId:config.config.profileId},activity,true);store.close();}
     if(pluginConfig(config,'media'))new MediaStore(join(config.paths.core,'media.sqlite'),{agentId:config.config.agent.id,profileId:config.config.profileId},true).close();
     if(pluginConfig(config,'bilibili'))new BiliStore(join(config.paths.core,'bilibili.sqlite'),{agentId:config.config.agent.id,profileId:config.config.profileId},true).close();
+    if(pluginConfig(config,'server-executor'))new ExecutorStore(join(config.paths.core,'executor.sqlite'),{agentId:config.config.agent.id,profileId:config.config.profileId},true).close();
     for(const directory of Object.values(config.paths.channels)){const qq=new QqStore(join(directory,'qq.sqlite'));qq.close();}
     manifest={...manifest,state:'initialized'};writeManifest(config,manifest);
   }catch(error){if(manifest)writeManifest(config,{...manifest,state:'failed'});throw error;}finally{lease.release();}
@@ -100,7 +108,9 @@ export function bindMigratedProfile(config:PreparedHostConfig){const existing=re
     if(pluginConfig(config,'activity')&&!required.includes('activity')){if(!activityMigrated(config))throw new Error('HOST_MIGRATION_REQUIRED');required.push('activity');}
     if(pluginConfig(config,'media')&&!required.includes('media')){if(!mediaMigrated(config))throw new Error('HOST_MIGRATION_REQUIRED');required.push('media');}
     if(pluginConfig(config,'bilibili')&&!required.includes('bilibili')){if(!biliMigrated(config))throw new Error('HOST_MIGRATION_REQUIRED');required.push('bilibili');}
+    if(pluginConfig(config,'server-executor')&&!required.includes('executor')){if(!executorMigrated(config))throw new Error('HOST_MIGRATION_REQUIRED');required.push('executor');}
     if(required.length!==existing.requiredStores.length)writeManifest(config,{...existing,requiredStores:required,mode:'migrated'});return;}if(!migrated(config))throw new Error('HOST_INITIALIZATION_REQUIRED');
+  if(pluginConfig(config,'server-executor')&&!executorMigrated(config))throw new Error('HOST_MIGRATION_REQUIRED');
   writeManifest(config,{schemaVersion:1,profileId:config.config.profileId,agentId:config.config.agent.id,id:randomUUID(),state:'initialized',createdAt:new Date().toISOString(),paths:layoutPaths(config),requiredStores:storageFiles(config).filter(item=>existsSync(item.file)&&!['query','retrieval'].includes(item.kind)).map(item=>item.name),mode:'migrated'});}
 function activityMigrated(config:PreparedHostConfig):boolean{try{
   if(!migrated(config))return false;const marker=z.object({manifest:z.string()}).parse(JSON.parse(readFileSync(join(config.paths.core,'migration-state.json'),'utf8')));
@@ -114,4 +124,8 @@ function mediaMigrated(config:PreparedHostConfig):boolean{try{if(!migrated(confi
 function biliMigrated(config:PreparedHostConfig):boolean{try{if(!migrated(config))return false;const marker=z.object({manifest:z.string()}).parse(JSON.parse(readFileSync(join(config.paths.core,'migration-state.json'),'utf8')));
   const proof=z.object({phase:z.literal('complete'),plan:z.object({bundle:z.object({bilibili:z.literal(true)}),files:z.array(z.object({kind:z.string(),file:z.string()}))})}).parse(JSON.parse(readFileSync(marker.manifest,'utf8')));
   return proof.plan.files.some(item=>item.kind==='bilibili'&&pathIdentity(item.file)===pathIdentity(join(config.paths.core,'bilibili.sqlite')));
+}catch{return false;}}
+function executorMigrated(config:PreparedHostConfig):boolean{try{if(!migrated(config))return false;const marker=z.object({manifest:z.string()}).parse(JSON.parse(readFileSync(join(config.paths.core,'migration-state.json'),'utf8')));
+  const proof=z.object({phase:z.literal('complete'),plan:MigrationPlanSchema}).parse(JSON.parse(readFileSync(marker.manifest,'utf8')));
+  return proof.plan.bundle.executor===true&&proof.plan.files.some(item=>item.kind==='executor'&&pathIdentity(item.file)===pathIdentity(join(config.paths.core,'executor.sqlite')))&&verifyMigration(proof.plan).passed;
 }catch{return false;}}

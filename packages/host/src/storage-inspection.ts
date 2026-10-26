@@ -8,8 +8,10 @@ import { inspectQqSchema } from '@dafeiyu/channel-qq';
 import { ACTIVITY_APPLICATION_ID,ACTIVITY_SCHEMA_VERSION,ACTIVITY_TABLES } from '@dafeiyu/activity/store';
 import { MEDIA_APPLICATION_ID,MEDIA_TABLES } from '@dafeiyu/media';
 import { BILI_APPLICATION_ID,BILI_TABLES } from '@dafeiyu/bilibili';
+import { EXECUTOR_APPLICATION_ID,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor/store';
+import { ExecutorIdentitySchema,executorHash } from '@dafeiyu/server-executor/types';
 
-export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity'|'media'|'bilibili';
+export type StorageKind='journal'|'memory'|'runtime'|'delivery'|'analysis'|'working'|'feedback'|'retrieval'|'qq'|'query'|'activity'|'media'|'bilibili'|'executor';
 const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;versions:readonly number[];tables:readonly string[]}>= {
   query:{app:1146308689,versions:[8],tables:['search_state','persisted_sessions','persisted_docs']},
   memory:{app:MEMORY_APPLICATION_ID,versions:[1,2,3,4,5,6,7,8,9,10,11,12],tables:['memory_items','memory_revisions','dependencies','outbox','requests']},
@@ -21,6 +23,7 @@ const definitions:Record<Exclude<StorageKind,'journal'|'qq'>,{app:number;version
   activity:{app:ACTIVITY_APPLICATION_ID,versions:[ACTIVITY_SCHEMA_VERSION],tables:ACTIVITY_TABLES},
   media:{app:MEDIA_APPLICATION_ID,versions:[1,2],tables:MEDIA_TABLES.filter(t=>!t.startsWith('media_reply_'))},
   bilibili:{app:BILI_APPLICATION_ID,versions:[1],tables:BILI_TABLES},
+  executor:{app:EXECUTOR_APPLICATION_ID,versions:[EXECUTOR_SCHEMA_VERSION],tables:['executor_metadata','executor_clock','executor_jobs','executor_job_operations','executor_events','executor_receipts','executor_budget_links']},
   retrieval:{app:0x44465232,versions:[1,2],tables:['chunks','snapshots','vector_cache']},
 };
 export interface StorageInspection {kind:StorageKind;exists:boolean;version:number;applicationId:number;supported:boolean;activeOwner:boolean;integrity:boolean;identityMatches:boolean}
@@ -49,6 +52,16 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
       identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='media'&&supported&&identity){const row=db.prepare('SELECT body FROM media_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
     if(kind==='bilibili'&&supported&&identity){const row=db.prepare('SELECT body FROM bili_metadata WHERE id=1').get();const stored=RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));identityMatches=stored.success&&stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId;}
+    if(kind==='executor'&&supported){
+      const row=db.prepare('SELECT body,body_hash FROM executor_metadata WHERE id=1').get(),stored=ExecutorIdentitySchema.safeParse(JSON.parse(String(row?.body)));
+      identityMatches=stored.success&&executorHash(stored.data)===row?.body_hash&&(!identity||stored.data.agentId===identity.agentId&&stored.data.profileId===identity.profileId);
+      for(const [table,columns]of Object.entries({executor_jobs:'id,scope_key,intent_version,request_id,fingerprint,body,body_hash,state,version,nonce_hash,process,cancel_requested,created_at,updated_at',
+        executor_job_operations:'operation_id,job_id,run_id,fingerprint,body,body_hash',executor_events:'seq,id,job_id,version,type,body,body_hash',executor_receipts:'id,job_id,body,body_hash',
+        executor_budget_links:'job_id,call_id,reservation_id,request_hash,state,settlement_hash',executor_clock:'id,last_seen'}))db.prepare(`SELECT ${columns} FROM ${table} LIMIT 0`).all();
+      const triggers=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all().map(value=>String(value.name)));
+      supported=['executor_job_identity_immutable','executor_jobs_retain','executor_budget_identity_immutable','executor_budget_links_retain',
+        ...['executor_metadata','executor_job_operations','executor_events','executor_receipts'].flatMap(table=>[table+'_immutable',table+'_retain'])].every(name=>triggers.has(name));
+    }
     if(kind==='media'&&supported&&version>=2)supported=MEDIA_TABLES.every(t=>tables.has(t));
     if(kind==='runtime'&&supported&&version>=2)supported=tables.has('run_persona_manifests');
     if(kind==='runtime'&&supported&&version>=3)supported=tables.has('native_deliveries');
