@@ -11,9 +11,13 @@ import type { RuntimeIdentity } from '../../scripts/evaluation/identity.ts';
 import { openRealEvaluationRuntime,DeadlineAdapter } from '../../scripts/evaluation/real-runtime.ts';
 import { EvaluationScriptedAdapter,evaluationText,PRIVATE_STREAM_SENTINEL } from '../../scripts/evaluation/runtime.ts';
 import { nativeAnswer,sessionArchive } from '../../scripts/evaluation/boundary.ts';
+import { transportFacts } from '../../scripts/evaluation/transport-diagnostics.ts';
 if(!process.env.DAFEIYU_TEST_RUN||!tmpdir().startsWith(process.env.DAFEIYU_TEST_RUN))throw new Error('MANAGED_TEST_RUN_REQUIRED');
 const identity:RuntimeIdentity={schemaVersion:1,node:process.version,sqlite:process.versions.sqlite??'unknown',platform:process.platform,arch:process.arch,scope:'real-evaluation-runtime-v1',files:[],workspaceLinks:[]};
 class Backend extends EvaluationScriptedAdapter{override async resolveModel(provider:string,id:string):Promise<LlmResolvedModelInfo>{return {provider,id,name:id,context:{contextWindow:1000000},defaultMaxTokens:16384,systemPromptUpdate:'in-history',toolUpdate:'addition-only',reasoning:{efforts:[{id:ReasoningEffortId('max'),name:'max'}],defaultEffort:ReasoningEffortId('max')}};}}
+
+test('adapter diagnostics retain bounded error categories without sensitive messages or changing the thrown error',async()=>{const cause=Object.assign(new Error('SECRET_SOCKET_HOST'),{code:'ECONNRESET'}),failure=new TypeError('SECRET_ERROR_BODY',{cause}),facts:ReturnType<typeof transportFacts>[]=[];class Failed extends LlmAdapter{override async *stream():AsyncIterable<StreamChunk>{throw failure;}}
+  const adapter=new DeadlineAdapter(new Failed(),()=>1000,100,()=>{},(_request,error)=>facts.push(transportFacts(error)));await assert.rejects(async()=>{for await(const _ of adapter.stream({provider:'fixture',model:'fixture',messages:[]})){}},error=>error===failure);assert.deepEqual(facts,[[{name:'TypeError',code:'UNKNOWN'},{name:'Error',code:'ECONNRESET'}]]);assert.ok(!JSON.stringify(facts).includes('SECRET'));assert.deepEqual(transportFacts({name:'SECRET_NAME',code:'SECRET_CODE',message:'SECRET_MESSAGE'}),[{name:'Error',code:'UNKNOWN'}]);});
 
 test('real wiring uses actual DSH tasks with a local transport fixture and reopens one durable budget',async()=>{
   const repository=resolve('.'),root=join(await mkdtemp(join(tmpdir(),'eval-real-run-')),'run'),catalog=new EvaluationCatalog(repository);let workspace=await EvaluationWorkspace.createReal(repository,catalog,'a'.repeat(40),identity,root);workspace.ledger.startExecution('calibration');const attemptId=workspace.ledger.begin('CAL-route'),profile=join(root,'cases',attemptId,'profile'),backend=new Backend(()=>evaluationText('RUNTIME_READY'));
