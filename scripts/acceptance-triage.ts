@@ -24,6 +24,10 @@ export async function recognizedFailure(workspace:EvaluationWorkspace,candidate:
   if(missingAcceptance){if(z.array(z.unknown()).parse(p.evidence['actual-message-authority']).length!==0)throw new Error('EVALUATION_TRIAGE_AUTHORITY_UNSAFE');return triage;}
   const proof=z.object({ops:z.array(z.object({action:z.string(),outcome:z.string()}))}).parse(p.evidence['missing-total-blocked-specifically']);
   const totals=proof.ops.filter(o=>o.action==='fixture_total').map(o=>z.object({status:z.string(),effects:z.string(),errorCode:z.string().optional()}).parse(JSON.parse(o.outcome)));
-  if(!totals.length||totals.some(o=>o.status!=='failed'||o.effects!=='none'||o.errorCode!=='FIXTURE_MARCH_MISSING'))throw new Error('EVALUATION_TRIAGE_EFFECTS_UNSAFE');
+  if(totals.length){if(totals.some(o=>o.status!=='failed'||o.effects!=='none'||o.errorCode!=='FIXTURE_MARCH_MISSING'))throw new Error('EVALUATION_TRIAGE_EFFECTS_UNSAFE');}
+  else{
+    const run=z.object({state:z.literal('completed'),operations:z.array(z.object({action:z.enum(['fixture_known_rows','fixture_receipts']),state:z.literal('finished'),status:z.literal('succeeded'),effects:z.literal('none'),receipts:z.array(z.unknown()).length(0)}))}).safeParse(p.evidence['answer-run-0']);
+    if(proof.ops.length||!run.success||!run.data.operations.some(operation=>operation.action==='fixture_known_rows'))throw new Error('EVALUATION_TRIAGE_EFFECTS_UNSAFE');
+  }
   return triage;
 }

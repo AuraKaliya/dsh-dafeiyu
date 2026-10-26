@@ -53,13 +53,36 @@
       },
       "reviewer": "codex-under-user-delegated-autonomy",
       "reviewedAt": "2026-10-26T08:04:14.908Z",
-      "failedCheckIds": ["missing-total-blocked-specifically"],
+      "failedCheckIds": [
+        "missing-total-blocked-specifically"
+      ],
       "continueIndependentCases": true,
       "releaseBlocked": true,
       "rationale": "再次复现B07持久任务阻断缺失：模型准确区分已知小计20与三月缺失，fixture_total返回FIXTURE_MARCH_MISSING且effects为none，无完整总量写入。其余程序检查及三笔实际请求记账均通过。保留本次独立样本失败及发布阻断，不改评分或重抽到通过，仅继续其它隔离场景。",
       "program": {
         "relative": "cases/35d22913-984d-4550-b58a-7a581be81e20/program.json",
         "hash": "005d1ba5ec002ef932571446ba276d8083d6fb8404751765acaf324b76a031f1"
+      }
+    },
+    {
+      "caseId": "B07-paraphrase-3",
+      "attemptId": "8e005e45-842d-4fe5-98f9-facdaf19ce04",
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "reviewer": "codex-under-user-delegated-autonomy",
+      "reviewedAt": "2026-10-26T08:17:32.475Z",
+      "failedCheckIds": [
+        "missing-total-blocked-specifically"
+      ],
+      "continueIndependentCases": true,
+      "releaseBlocked": true,
+      "rationale": "未调用完整总量动作，只有已完成且成功的fixture_known_rows和fixture_receipts读取，effects为none且无回执。回答准确交付小计20及三月缺失，两笔真实请求均结算；缺持久阻断的原failed保留。依严格只读分支允许后续独立样本继续，不改评分、发布阻断或复测本项。",
+      "program": {
+        "relative": "cases/8e005e45-842d-4fe5-98f9-facdaf19ce04/program.json",
+        "hash": "86f0dd16f618ec1f71fd9d4c9f05a54ab8126e955cf491567d52ecf9102fb9c0"
       }
     }
   ]

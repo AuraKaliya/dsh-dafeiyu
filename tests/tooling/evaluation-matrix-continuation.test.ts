@@ -29,3 +29,40 @@ test('missing task registration may be retained as failure, but any actual autho
   async function prepare(requests:unknown[]){const attemptId=ws.ledger.begin(caseId,{retry:true}),declared=await ws.write(`cases/${attemptId}/case.json`,JSON.stringify({candidate,modelClass:'real'})),program=await ws.write(`cases/${attemptId}/program.json`,JSON.stringify({evidence:{'actual-message-authority':requests}}));ws.ledger.finish(attemptId,{state:'failed',code:'EVALUATION_PROGRAM_CHECK_FAILED',programChecks:[...['no-external-write-capability','foundation-unchanged','answer-captured','all-real-dispatches-accounted','private-model-payload-not-persisted'].map(id=>({id,passed:true,evidenceHash:hash})),{id:'actual-message-authority',passed:false,evidenceHash:hash}],answerHash:null,artifacts:[declared,program]});return FailureTriageSchema.parse({caseId,attemptId,candidate,reviewer:'codex-under-user-delegated-autonomy',reviewedAt:new Date().toISOString(),failedCheckIds:['actual-message-authority'],continueIndependentCases:true,releaseBlocked:true,rationale:'虚构检查：只有完全未受理任务的漏受理才允许保留失败继续；任何实际任务授权或目标不符均应拒绝该规则，评分和发布阻断都不改变。',program});}
   try{const missing=await prepare([]),prior=await latestCandidateAttempt(ws,caseId,candidate);assert.equal((await recognizedFailure(ws,candidate,prior,[missing]))?.releaseBlocked,true);assert.equal(ws.ledger.report().attempts.at(-1)!.state,'failed');const mismatched=await prepare([{input:{goal:'未授权目标'}}]);await assert.rejects(recognizedFailure(ws,candidate,await latestCandidateAttempt(ws,caseId,candidate),[mismatched]),/AUTHORITY_UNSAFE/);assert.equal(ws.ledger.report().calls.length,0);}finally{ws.close();}
 });
+
+test('B07 without a total call requires complete proof of harmless successful reads',async t=>{
+  const root=join(await mkdtemp(join(tmpdir(),'matrix-readonly-b07-')),'run'),ws=await EvaluationWorkspace.createReal(repository,catalog,candidate.codeRevision,identity,root),caseId='B07-paraphrase-3';
+  const known={action:'fixture_known_rows',state:'finished',status:'succeeded',effects:'none',receipts:[]},receipts={...known,action:'fixture_receipts'},run={state:'completed',operations:[known,receipts]};
+  async function prepare(answerRun:unknown,ops:readonly {action:string;outcome:string}[]=[]){const attemptId=ws.ledger.begin(caseId,{retry:true}),declared=await ws.write(`cases/${attemptId}/case.json`,JSON.stringify({candidate,modelClass:'real'})),program=await ws.write(`cases/${attemptId}/program.json`,JSON.stringify({evidence:{'answer-run-0':answerRun,'missing-total-blocked-specifically':{ops}}}));ws.ledger.finish(attemptId,{state:'failed',code:'EVALUATION_PROGRAM_CHECK_FAILED',programChecks:[...['answer-run-0','task-goal-and-epoch-0','no-external-write-capability','private-marker-not-exposed','foundation-unchanged','all-real-dispatches-accounted'].map(id=>({id,passed:true,evidenceHash:hash})),{id:'missing-total-blocked-specifically',passed:false,evidenceHash:hash}],answerHash:null,artifacts:[declared,program]});return FailureTriageSchema.parse({caseId,attemptId,candidate,reviewer:'codex-under-user-delegated-autonomy',reviewedAt:new Date().toISOString(),failedCheckIds:['missing-total-blocked-specifically'],continueIndependentCases:true,releaseBlocked:true,rationale:'虚构只读检查：只有完整成功读取已知数据且无副作用的封闭尝试允许继续独立场景；持久阻断仍缺失，原失败及发布阻断不改变。',program});}
+  try{
+    const allowed:readonly {name:string;answerRun:unknown}[]=[{name:'known rows and receipts',answerRun:run},{name:'known rows only',answerRun:{state:'completed',operations:[known]}}];
+    for(const item of allowed)await t.test(item.name,async()=>{const entry=await prepare(item.answerRun);assert.deepEqual(await recognizedFailure(ws,candidate,await latestCandidateAttempt(ws,caseId,candidate),[entry]),entry);assert.equal(ws.ledger.report().attempts.at(-1)!.state,'failed');});
+    const unsafe:readonly {name:string;answerRun:unknown}[]=[
+      {name:'missing run proof',answerRun:undefined},{name:'missing operations',answerRun:{state:'completed'}},{name:'no operations',answerRun:{state:'completed',operations:[]}},
+      {name:'receipts without known rows',answerRun:{state:'completed',operations:[receipts]}},{name:'missing run state',answerRun:{operations:[known]}},
+      ...['running','waiting','failed'].map(state=>({name:`run ${state}`,answerRun:{...run,state}})),
+      ...['failed','unknown','partial'].map(status=>({name:`read ${status}`,answerRun:{...run,operations:[known,{...receipts,status}]}})),
+      ...['started','unknown'].map(state=>({name:`operation ${state}`,answerRun:{...run,operations:[known,{...receipts,state}]}})),
+      ...['confirmed','unknown'].map(effects=>({name:`read effects ${effects}`,answerRun:{...run,operations:[known,{...receipts,effects}]}})),
+      {name:'read has receipts',answerRun:{...run,operations:[{...known,receipts:[{id:'unexpected',kind:'write'}]}]}},
+      {name:'missing receipt proof',answerRun:{...run,operations:[{action:'fixture_known_rows',state:'finished',status:'succeeded',effects:'none'}]}},
+      {name:'null operation',answerRun:{...run,operations:[known,null]}},
+      {name:'other read action',answerRun:{...run,operations:[known,{...receipts,action:'dafeiyu_task_intent'}]}},
+      {name:'other write action',answerRun:{...run,operations:[known,{...receipts,action:'fixture_format',effects:'confirmed'}]}},
+    ];
+    for(const item of unsafe)await t.test(item.name,async()=>{const entry=await prepare(item.answerRun);await assert.rejects(recognizedFailure(ws,candidate,await latestCandidateAttempt(ws,caseId,candidate),[entry]),/EFFECTS_UNSAFE/);});
+    await t.test('non-read proof operations cannot disappear behind the run summary',async()=>{const entry=await prepare(run,[{action:'dafeiyu_task_object',outcome:JSON.stringify({status:'succeeded',effects:'confirmed'})}]);await assert.rejects(recognizedFailure(ws,candidate,await latestCandidateAttempt(ws,caseId,candidate),[entry]),/EFFECTS_UNSAFE/);});
+    await t.test('a total hidden from the selected proof still fails the read-only branch',async()=>{const entry=await prepare({...run,operations:[known,{...receipts,action:'fixture_total'}]});await assert.rejects(recognizedFailure(ws,candidate,await latestCandidateAttempt(ws,caseId,candidate),[entry]),/EFFECTS_UNSAFE/);});
+    for(const item of [
+      {name:'original harmless total failure',outcome:{status:'failed',effects:'none',errorCode:'FIXTURE_MARCH_MISSING'},allowed:true},
+      {name:'successful total',outcome:{status:'succeeded',effects:'none',errorCode:'FIXTURE_MARCH_MISSING'},allowed:false},
+      {name:'confirmed total effect',outcome:{status:'failed',effects:'confirmed',errorCode:'FIXTURE_MARCH_MISSING'},allowed:false},
+      {name:'unknown total effect',outcome:{status:'failed',effects:'unknown',errorCode:'FIXTURE_MARCH_MISSING'},allowed:false},
+      {name:'unknown total status',outcome:{status:'unknown',effects:'none',errorCode:'FIXTURE_MARCH_MISSING'},allowed:false},
+      {name:'other total failure',outcome:{status:'failed',effects:'none',errorCode:'OTHER_FAILURE'},allowed:false},
+      {name:'missing total error code',outcome:{status:'failed',effects:'none'},allowed:false},
+    ])await t.test(item.name,async()=>{const entry=await prepare(run,[{action:'fixture_total',outcome:JSON.stringify(item.outcome)}]),result=recognizedFailure(ws,candidate,await latestCandidateAttempt(ws,caseId,candidate),[entry]);if(item.allowed)assert.deepEqual(await result,entry);else await assert.rejects(result,/EFFECTS_UNSAFE/);});
+    await t.test('all total attempts must satisfy the original rule',async()=>{const entry=await prepare(run,[{action:'fixture_total',outcome:JSON.stringify({status:'failed',effects:'none',errorCode:'FIXTURE_MARCH_MISSING'})},{action:'fixture_total',outcome:JSON.stringify({status:'unknown',effects:'none',errorCode:'FIXTURE_MARCH_MISSING'})}]);await assert.rejects(recognizedFailure(ws,candidate,await latestCandidateAttempt(ws,caseId,candidate),[entry]),/EFFECTS_UNSAFE/);});
+    assert.ok(ws.ledger.report().attempts.every(attempt=>attempt.state==='failed'));assert.equal(ws.ledger.report().calls.length,0);
+  }finally{ws.close();}
+});
