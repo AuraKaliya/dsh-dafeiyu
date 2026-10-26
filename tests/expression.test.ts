@@ -3,6 +3,7 @@ import { dropExecutionFixtureSchema } from './legacy-execution-fixture.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { expressionFixture } from './expression-fixture.js';
@@ -161,7 +162,7 @@ test('schema v5 migration leaves old boundaries intact and startup interrupts or
     const packet=z.object({packetId:z.string()}).parse(task.expression.prepare({requestId:randomUUID(),inboundId:receipt.id,linkIds:[]}));
     const db=new DatabaseSync(join(root,'memory.sqlite'));try{db.prepare("INSERT INTO expression_jobs VALUES(?,?,?,?,?,?,'running',NULL)").run(randomUUID(),'dafeiyu',taskId,'orphan','fixture',packet.packetId);}finally{db.close();}
   }finally{await next.close();}
-const restored=await taskMemoryFixture(root);try{const db=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(db.prepare("SELECT status FROM expression_jobs WHERE request_id='orphan'").get()?.status,'interrupted');assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,11);}finally{db.close();}assert.equal(restored.adapter.requests.length,0);}finally{await restored.close();}
+const restored=await taskMemoryFixture(root);try{const db=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(db.prepare("SELECT status FROM expression_jobs WHERE request_id='orphan'").get()?.status,'interrupted');assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);}finally{db.close();}assert.equal(restored.adapter.requests.length,0);}finally{await restored.close();}
 });
 
 test('provider unload during an active model request drains cancellation before closing persistence',async t=>{

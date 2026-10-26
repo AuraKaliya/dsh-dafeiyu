@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { HostRuntimeOptions,ManagedHost } from '@dafeiyu/host';
 import { DatabaseSync } from 'node:sqlite';
+import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 
 const scenario=process.argv[2],root=await mkdtemp(join(tmpdir(),'dafeiyu-host-runtime-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
 process.env.DSH_HOME=join(root,'data/core/dsh-home');
@@ -97,6 +98,6 @@ try{
     }
     await host.close();assert.equal(owners(coordination).length,0);
   }
-const db=new DatabaseSync(join(prepared.paths.memory,'memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,11);}finally{db.close();}
+const db=new DatabaseSync(join(prepared.paths.memory,'memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);}finally{db.close();}
   console.log(JSON.stringify({scenario,passed:true,phases,modelCalls,platformCalls,realModel:false,realPlatform:false,serverAccess:false}));
 }finally{await host?.close();if(wss){for(const socket of wss.clients)socket.terminate();await new Promise<void>(resolve=>wss!.close(()=>resolve()));}if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));}

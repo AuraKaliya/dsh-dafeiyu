@@ -6,8 +6,8 @@ import { join,resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID,createHash } from 'node:crypto';
 import { readFoundation } from '@dafeiyu/core';
-import { RuntimeStore,runtimeHash } from '@dafeiyu/core/runtime-store';
-import { MemoryStore } from '@dafeiyu/memory/store';
+import { RuntimeStore,runtimeHash,RUNTIME_SCHEMA_VERSION } from '@dafeiyu/core/runtime-store';
+import { MemoryStore, MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { PersonaManifestSchema,taskScopeKey } from '@dafeiyu/contracts';
 import { PERSONA_TABLES } from '../packages/memory/lib/migrate-persona.js';
 import { planMigration,applyMigration,inspectStorage } from '@dafeiyu/host';
@@ -45,11 +45,11 @@ test('managed runtime requires a matching immutable persona manifest in the same
   }finally{store.close();}
 });
 
-test('runtime v1 upgrade is explicit and retains old snapshots without inventing persona adoption',async()=>{
+test('runtime v1 upgrade to the current schema is explicit and retains old snapshots without inventing persona adoption',async()=>{
   const file=join(await directory(),'runtime.sqlite');let store=new RuntimeStore(file,identity,{create:true});const run=accepted(store);store.start(run.id,run.version,snapshot().body);store.close();
   const db=new DatabaseSync(file);db.exec('DROP TABLE native_deliveries;DROP TABLE run_persona_manifests;PRAGMA user_version=1');const before=db.prepare('SELECT * FROM runs').all();db.close();
   const raw=await readFile(file);assert.throws(()=>new RuntimeStore(file,identity),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(file),raw);
-  store=new RuntimeStore(file,identity,{migrate:true});try{assert.equal(store.personaBinding(run.id).kind,'legacy-unbound');const check=new DatabaseSync(file,{readOnly:true});try{assert.deepEqual(check.prepare('SELECT * FROM runs').all(),before);assert.equal(check.prepare('PRAGMA user_version').get()?.user_version,3);}finally{check.close();}}finally{store.close();}
+  store=new RuntimeStore(file,identity,{migrate:true});try{assert.equal(store.personaBinding(run.id).kind,'legacy-unbound');const check=new DatabaseSync(file,{readOnly:true});try{assert.deepEqual(check.prepare('SELECT * FROM runs').all(),before);assert.equal(check.prepare('PRAGMA user_version').get()?.user_version,RUNTIME_SCHEMA_VERSION);}finally{check.close();}}finally{store.close();}
 });
 
 test('memory v7 upgrade is additive, idempotent and does not promote old growth selections',async()=>{
@@ -68,23 +68,23 @@ test('persona upgrade failure rolls back additions while preserving v7 and its o
   assert.throws(()=>new MemoryStore(file),/already exists/);const check=new DatabaseSync(file);try{assert.equal(check.prepare('PRAGMA user_version').get()?.user_version,7);assert.equal(check.prepare('SELECT unrelated FROM persona_profiles').get()?.unrelated,'keep');assert.equal(check.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='persona_candidates'").get()?.n,0);}finally{check.close();}
 });
 
-test('profile migration resumes between current memory and runtime v2 with all old Run rows retained',async()=>{
+test('profile migration to current memory and runtime schemas resumes with all old Run rows retained',async()=>{
   const fixture=await migrationFixture(),memoryFile=join(fixture.memoryDir,'memory.sqlite'),runtimeFile=join(fixture.coreDir,'runtime.sqlite');new MemoryStore(memoryFile).close();
   const memory=new DatabaseSync(memoryFile);removePersonaTables(memory);memory.close();const original=new RuntimeStore(runtimeFile,fixture.identity,{create:true});const run=accepted(original);original.close();
   const runtime=new DatabaseSync(runtimeFile);runtime.exec('DROP TABLE native_deliveries;DROP TABLE run_persona_manifests;PRAGMA user_version=1');runtime.close();
-  const plan=await planMigration(fixture);assert.deepEqual(plan.files.filter(file=>file.kind==='memory'||file.kind==='runtime').map(file=>file.targetVersion),[11,3]);
+  const plan=await planMigration(fixture);assert.deepEqual(plan.files.filter(file=>file.kind==='memory'||file.kind==='runtime').map(file=>file.targetVersion),[MEMORY_SCHEMA_VERSION,RUNTIME_SCHEMA_VERSION]);
   await assert.rejects(applyMigration(plan,{afterStep:kind=>{if(kind==='memory')throw new Error('fixture interruption');}}),/BACKUP_RETAINED/);
-  assert.equal(inspectStorage(memoryFile,'memory').version,11);assert.equal(inspectStorage(runtimeFile,'runtime').version,1);
-  await applyMigration(plan);assert.equal(inspectStorage(runtimeFile,'runtime').version,3);assert.equal((await applyMigration(plan)).complete,true);
+  assert.equal(inspectStorage(memoryFile,'memory').version,MEMORY_SCHEMA_VERSION);assert.equal(inspectStorage(runtimeFile,'runtime').version,1);
+  await applyMigration(plan);assert.equal(inspectStorage(runtimeFile,'runtime').version,RUNTIME_SCHEMA_VERSION);assert.equal((await applyMigration(plan)).complete,true);
   const verified=new RuntimeStore(runtimeFile,fixture.identity);try{assert.deepEqual(verified.get(run.id),run);assert.equal(verified.personaBinding(run.id).kind,'legacy-unbound');}finally{verified.close();}
 });
 
-test('memory v8 to v9 adds observation bookkeeping without changing prior persona or memory rows',async()=>{
+test('memory v8 upgrade adds observation bookkeeping without changing prior persona or memory rows',async()=>{
   const file=join(await directory(),'memory.sqlite');new MemoryStore(file).close();const db=new DatabaseSync(file);
   dropCapabilityFixtureSchema(db);db.exec('PRAGMA user_version=8');db.prepare('INSERT INTO persona_profiles VALUES(?,?)').run('fish',0);
   const before=db.prepare('SELECT * FROM persona_profiles').all();db.close();const bytes=await readFile(file);
   assert.equal(inspectStorage(file,'memory').version,8);assert.deepEqual(await readFile(file),bytes);new MemoryStore(file).close();new MemoryStore(file).close();
-  const after=new DatabaseSync(file,{readOnly:true});try{assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,11);assert.deepEqual(after.prepare('SELECT * FROM persona_profiles').all(),before);
+  const after=new DatabaseSync(file,{readOnly:true});try{assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.deepEqual(after.prepare('SELECT * FROM persona_profiles').all(),before);
     assert.equal(after.prepare('SELECT count(*) AS n FROM capability_observations').get()?.n,0);assert.equal(after.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=9').get()?.n,1);
   }finally{after.close();}
 });

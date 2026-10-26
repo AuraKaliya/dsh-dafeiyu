@@ -104,11 +104,12 @@ Decision由共享资格策略生成，不是模型提交的授权令牌。review
 ## 6. PreparedPersona与Run manifest兼容
 
 - 现有 `PreparedPersonaEntry` 和 `PreparedPersona.entries`继续只表示adopted；entry新增可选`adoption?:PersonaAdoptionClassification`。缺字段只作为旧provider兼容读取，核心不能将其标成reviewed。
-- 新 `PreparedPersonaTrialEntry`保持candidate/contentRef/dependencies/item四个基础字段，另外必须 `projection:'trial',maturity:'tentative',trialSelection:PersonaTrialSelectionRef,exitConditions:string[]`。
+- 新 `PreparedPersonaTrialEntry`保持candidate/contentRef/dependencies/item四个基础字段，另外必须 `projection:'trial',maturity:'tentative',trialSelection:PersonaTrialSelectionRef,exitConditions:string[],sourceEvidence:readonly PersonaSourceEvidence[]`。核心没有独立memory resolver，必须使用实际装配条目携带的受信来源描述封存Admission。
 - `PreparedPersona`新增可选 `trialEntries?: readonly PreparedPersonaTrialEntry[]`、`trialSelectionVersion?:number`、`omittedTrials?:number`；v1 provider缺省等价空trial数组/版本0，不能自动从adopted推导trial。
 - `PersonaManifestSchema`为v1/v2联合，原定义保留为`PersonaManifestV1Schema`。v2的`schemaVersion=2,assemblyVersion='2'`，保留原基础字段；adopted `entries`每项增加必需adoption分类，另有必需`trialSelectionVersion`、独立`trialEntries`（candidate/contentRef/dependencies/trialSelection/projectionHash，明确projection=trial,maturity=tentative）及`omittedTrials`。
 - `PreparedPersonaTrialEntry.item.text`由R2明确标记暂定、适用与退出条件、来源限制、instructionAuthority=false。核心入manifest后才调用trialAdmitted；完成时只用原Run固定清单，不读取后来更新的trial选择替代。
 - 新采用的v2候选必须reviewed；旧v1 adopted投影为legacy-unclassified但继续当前scope来源验证。fixture种子保持隔离的原v1/明确fixture来历，无虚构TrialOutcome，生产没有“测试绕过门槛”开关。
+- Admission/Outcome中scope、候选、选择和真实Run身份一致性及发生顺序由共享store与core活证书联合核验，不能把Schema形状通过当成资格成立。Publish entries的review可选只服务旧形状的明确错误反馈；所有新成功采用必须有review。
 
 ## 7. 主memory v12追加表
 

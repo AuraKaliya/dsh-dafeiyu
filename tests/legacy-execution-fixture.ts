@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { EXECUTION_MEMORY_TABLES } from '../packages/memory/lib/migrate-execution.js';
 import { PERSONA_TABLES } from '../packages/memory/lib/migrate-persona.js';
 import { EXPERIENCE_TABLES } from '../packages/memory/lib/migrate-experience.js';
+import { PERSONA_ADOPTION_TABLES } from '../packages/memory/lib/migrate-persona-adoption.js';
 
 /** Remove later additive tables only when constructing an older synthetic test database. */
 export function dropExecutionFixtureSchema(db:DatabaseSync):void {
@@ -19,6 +20,12 @@ export function dropCapabilityFixtureSchema(db:DatabaseSync):void {
   db.prepare('DELETE FROM memory_schema_migrations WHERE version=9').run();
 }
 export function dropExperienceFixtureSchema(db:DatabaseSync):void {
+  dropPersonaAdoptionFixtureSchema(db);
   for(const table of [...EXPERIENCE_TABLES].reverse())db.exec(`DROP TABLE IF EXISTS ${table}`);
   db.prepare('DELETE FROM memory_schema_migrations WHERE version=11').run();
+}
+/** Synthetic fixture downgrade only: never use this to revert an active profile. */
+export function dropPersonaAdoptionFixtureSchema(db:DatabaseSync):void {
+  for(const table of [...PERSONA_ADOPTION_TABLES].reverse())db.exec(`DROP TABLE IF EXISTS ${table}`);
+  db.prepare('DELETE FROM memory_schema_migrations WHERE version=12').run();
 }

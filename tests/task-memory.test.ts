@@ -3,6 +3,7 @@ import { dropExecutionFixtureSchema } from './legacy-execution-fixture.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { taskMemoryFixture,scenes,resultSchema,currentVersion } from './task-memory-fixture.js';
@@ -149,7 +150,7 @@ test('schema v4 migration leaves existing boundaries and selections unchanged an
   const h=await taskMemoryFixture(),root=h.root,task=h.create(),before=h.store.read(h.scope(0),h.receipts[0]!.contributions[0]!.memoryId),id=before!.id;await h.close();
   const db=new DatabaseSync(join(root,'memory.sqlite'));try{dropExecutionFixtureSchema(db);for(const table of ['expression_jobs','expression_packets','expression_requests','expression_policies','expression_policy_revisions','task_memory_hits','task_memory_grants','task_memory_policies','task_memory_policy_revisions','task_memory_requests'])db.exec(`DROP TABLE ${table}`);db.exec('PRAGMA user_version=4');}finally{db.close();}
   const next=await taskMemoryFixture(root);try{assert.deepEqual(next.store.read(next.scope(0),id),before);assert.throws(()=>next.grant(next.core.resumeTaskWorkspace(task.reference.id)),/authorization_unavailable/);
-const db=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,11);assert.equal(db.prepare('SELECT count(*) AS n FROM task_memory_grants').get()?.n,0);}finally{db.close();}
+const db=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.equal(db.prepare('SELECT count(*) AS n FROM task_memory_grants').get()?.n,0);}finally{db.close();}
   }finally{await next.close();}
 });
 

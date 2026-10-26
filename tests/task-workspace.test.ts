@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { DatabaseSync } from 'node:sqlite';
+import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { join } from 'node:path';
 import { API_VERSION,conversationKey } from '@dafeiyu/contracts';
 import { taskFixture,taskVersion,sceneB } from './task-workspace-fixture.js';
@@ -222,7 +223,7 @@ test('schema v3 upgrade preserves old memory boundaries, observation sources and
     db.exec('PRAGMA user_version=3');
   }finally{db.close();}
   const next=await observationFixture(root);try{assert.deepEqual(next.store.read(next.scope,id,'deleted'),before);assert.equal(next.store.read(next.scope,id),null);
-assert.equal(before.boundary.task.kind,'unassigned');const verify=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(verify.prepare('PRAGMA user_version').get()?.user_version,11);assert.equal(verify.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{verify.close();}
+assert.equal(before.boundary.task.kind,'unassigned');const verify=new DatabaseSync(join(root,'memory.sqlite'));try{assert.equal(verify.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.equal(verify.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{verify.close();}
   }finally{await next.close();}
 });
 

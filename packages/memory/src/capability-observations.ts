@@ -19,7 +19,7 @@ type RecordBody=z.infer<typeof recordSchema>;
 type Validator=(scope:TimelineScope,body:RecordBody,access:PersonaAccess|undefined)=>boolean;
 export function migrateCapabilityObservations(db:DatabaseSync):void {
   const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===9||version===10||version===11){for(const table of ['capability_observations','capability_selections'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===9||version===10||version===11||version===12){for(const table of ['capability_observations','capability_selections'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==8)throw new Error('Unsupported capability observation database');
   db.exec(`CREATE TABLE capability_observations(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,content_hash TEXT NOT NULL,UNIQUE(agent_id,scope_key,producer,request_id));
     CREATE TABLE capability_selections(agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,scope_key,producer,request_id));

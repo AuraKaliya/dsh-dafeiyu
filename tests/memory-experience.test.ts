@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { MemoryStore } from '@dafeiyu/memory/store';
+import { MemoryStore, MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { experienceFixture } from './memory-experience-fixture.js';
 import { dropExperienceFixtureSchema } from './legacy-execution-fixture.js';
 
@@ -13,7 +13,7 @@ test('v10 migration preserves old rows and remains idempotent; a failed additive
   assert.throws(()=>new MemoryStore(file),/already exists/);db=new DatabaseSync(file);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,10);
   assert.deepEqual(db.prepare('SELECT * FROM task_workspaces').all(),before);db.exec('DROP TABLE experience_items');db.close();
   for(let i=0;i<2;i++){const memory=new MemoryStore(file);memory.close();}
-  db=new DatabaseSync(file);try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,11);assert.deepEqual(db.prepare('SELECT * FROM task_workspaces').all(),before);
+  db=new DatabaseSync(file);try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.deepEqual(db.prepare('SELECT * FROM task_workspaces').all(),before);
     assert.equal(db.prepare('SELECT count(*) AS n FROM experience_items').get()?.n,0);assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=11').get()?.n,1);}finally{db.close();}
 });
 
