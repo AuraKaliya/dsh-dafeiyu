@@ -60,3 +60,26 @@ R4 检查记录已保存，准确区分 40 项不同定向检查通过、实际 
 - 验证旧候选文件字节未改、新候选仍需自己对应的校准记录，原账本额度和首次调用时钟没有被候选升级重置。所有这些专项检查使用受管离线数据，不发真实模型调用。
 
 完成预飞不等于通过真实矩阵，更不等于可以直接部署。后续语义复核明确标记为代理／AI 评阅，逐项检查事实、mandatory／forbidden、无依据经历和任务边界；服务器阶段仍须先核对最新实际状态并保护新增真实记忆与账号。
+
+## 6. 必要入口补充：显式不复用旧 scope
+
+协议专项实施时确认，现有 `continueRealMatrix` 会无条件读取 `evaluation/phase7c/scope-compatibility.v1.json`。旧证书属于原候选，`7c-real-2` 应拒绝它；但直接删除证书或修改证书会损坏历史语义。另一方面，基础批次入口的 `--retry` 会将整批阶段设为 retest，不能用它把这次新候选的 162 项正式矩阵全部转记到重测份额。
+
+因此增加显式 matrix 参数 `--no-scope-reuse`。本节先由主代理提交，再实施以下最小变更；当前已完成的协议 11 项专项检查由主代理先统一执行，不在其编译窗口改动控制器源码。
+
+- `scripts/acceptance-matrix.ts`：为 `continueRealMatrix` 增加可选的 `scopeReuse` 设置，默认 true，保持原调用形式和旧行为兼容。false 时不加载旧 scope 作为准入依据，必须核验当前新 candidate 自己的校准；不接收兼容历史 baseline，不从旧 candidate 借用通过结果。
+- 计划函数同步接收这一选择。false 时只对当前 candidate 的 `needs-human-review` 项执行 skip-pass；旧 candidate 的通过／失败均不作为当前完成依据。新候选自身出现 failed／blocked／interrupted 等未通过结果时停止检查，不使用任何旧 triage 或 retain-failure 分支越过它。即使传入 scope 或 triage 对象，也不能在该模式恢复兼容放行。
+- 阶段仍显式使用 **formal**；既有 attempt 需要新的 ordinal 时，单项的 `retry` 仅表示保留旧 attempt 后新建记录，不改变活动执行区间的 formal 费用归属。原唯一账本、lease、时钟、费用未知保护和失败停止规则不变。
+- 冻结 manifest 的顺序、每批 18 项、此前批次全部完成门槛不变。此前用例只有当前 candidate 已通过才能满足门槛；旧 52 项不能抵扣。每项实际执行仍通过原 driver 创建独立 profile，H 组仅共享当前 candidate 自己产生的合法基线，不引入旧候选历史。
+- `scripts/continue-integrated-matrix.mjs`：解析唯一 1—9 批号及可选且不重复的 `--no-scope-reuse`，将显式设置传入控制器；未知参数、重复 flag 或多个批号仍拒绝。无 flag 时沿用原行为。
+- controller 和 batch 记录保存实际 `scopeReuse` 选择及 formal 阶段，使审阅者能够区分旧兼容续跑与新候选全量重验。旧证书与 triage 文件可作为历史控制器材料留存，但在 false 模式不参与准入／跳过判定，不删除、不重签、不改分。
+
+相关验收限定于 matrix continuation 和必要 CLI／scope 专项测试，仍由主代理统一构建执行：
+
+1. 默认模式的已有兼容／保留失败行为保持原测试结果。
+2. `--no-scope-reuse` 被 CLI 正确接受，受管测试环境仍在任何真实调用前拒绝；重复 flag、未知 flag 和错误批号拒绝。
+3. 无复用模式忽略旧通过、旧失败及旧 scope，按原顺序生成新候选执行计划；只跳过当前候选通过项。
+4. 新候选失败即停止，旧 triage 或传入的兼容对象不能掩盖；后一批不能以旧候选记录满足前项门槛。
+5. 新建 ordinal 的正式执行仍计入 formal，预算／时钟不重置；controller／batch 明确记录无复用选择。旧证书、旧 attempt／baseline 与原评分保持原字节。
+
+本补充不授权第二个真实执行器或并行模型调用。后续正式矩阵使用显式无复用入口；完成控制器检查、提交和 clean identity 冻结后，才继续原计划中的新候选校准与全部重验。
