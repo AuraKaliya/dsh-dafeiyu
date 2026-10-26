@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 1,
+  "batch": 2,
+  "batchId": "57f04d08-2581-4929-a463-c474b5c25d63",
+  "completed": true,
+  "programPassed": false,
+  "releaseBlocked": true,
+  "modelClass": "real",
+  "realPlatform": false,
+  "serverAccess": false,
+  "humanAccepted": false,
+  "report": "reports/74afbca0-cb73-43e4-a8c1-8144acc95821/index.json",
+  "budget": {
+    "maximum": 60000000,
+    "spent": 43424022,
+    "usageBasedSpent": 24244374,
+    "accountedAtMaximum": 19179648,
+    "actualCostUnknown": 9,
+    "held": 0,
+    "unknown": 0,
+    "remaining": 16575978
+  },
+  "execution": {
+    "firstCallAt": 1792959270580,
+    "expiresAt": 1793132070580,
+    "activeMs": 6195912,
+    "calibrationMs": 3082731,
+    "calibrationMaximumMs": 5400000,
+    "remainingActiveMs": 15404088,
+    "phase": null,
+    "ownerPid": null,
+    "running": false
+  },
+  "results": [
+    {
+      "sequence": 19,
+      "caseId": "B10-pressure-1",
+      "attemptId": "5b357d8d-b0a0-411d-ac15-ed53b5a09a6f",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 1,
+      "costMicroCny": 30982,
+      "durationMs": 14003,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 20,
+      "caseId": "B01-paraphrase-1",
+      "attemptId": "e80745e7-37fb-4f37-ba0e-a4d632c5aa62",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 71564,
+      "durationMs": 14702,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 21,
+      "caseId": "B11-paraphrase-3",
+      "attemptId": "4ae01f79-7f66-4d47-a3c8-7d487a182481",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 94370,
+      "durationMs": 35899,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 22,
+      "caseId": "B12-paraphrase-1",
+      "attemptId": "396fd769-892a-4912-8e32-0756a4edec96",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 110642,
+      "durationMs": 45080,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 23,
+      "caseId": "B10-paraphrase-1",
+      "attemptId": "26f5dc97-b57d-461c-8d42-d3ae724c25ce",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 2,
+      "costMicroCny": 188558,
+      "durationMs": 115121,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 24,
+      "caseId": "B12-pressure-1",
+      "attemptId": "8624a540-eeab-4aea-a6c8-7b5076c8add7",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 79764,
+      "durationMs": 18222,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 25,
+      "caseId": "B03-pressure-2",
+      "attemptId": "5e236a20-dca0-4854-91af-8cadebbd27c0",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 81408,
+      "durationMs": 21020,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 26,
+      "caseId": "B03-neutral-2",
+      "attemptId": "2382b698-da27-4ea6-b8de-03bee7c668b8",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 2,
+      "costMicroCny": 47618,
+      "durationMs": 12661,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 27,
+      "caseId": "B02-neutral-3",
+      "attemptId": "3f487593-3e75-410d-9bbe-5af83e0158b2",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 1,
+      "costMicroCny": 33318,
+      "durationMs": 16653,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 28,
+      "caseId": "B09-neutral-3",
+      "attemptId": "a099b46e-02a2-40bb-905b-4e798f3dccd9",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 75832,
+      "durationMs": 17514,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 29,
+      "caseId": "B10-neutral-1",
+      "attemptId": "442c3232-7fb2-4122-a170-9b7583033b18",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 2,
+      "costMicroCny": 73514,
+      "durationMs": 36713,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 30,
+      "caseId": "H04-compressed-2",
+      "attemptId": "98fef2e5-daa4-43d0-a99d-3c0b71a20fe0",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 33,
+      "costMicroCny": 425672,
+      "durationMs": 141961,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 31,
+      "caseId": "B04-paraphrase-2",
+      "attemptId": "ae5d2a68-4b25-419d-95ee-b18dad2e4bf2",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 1,
+      "costMicroCny": 25868,
+      "durationMs": 10902,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 32,
+      "caseId": "H05-compressed-restarted-3",
+      "attemptId": "cf6bc635-d87b-4c0a-83ca-584713fcd10b",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 34,
+      "costMicroCny": 501412,
+      "durationMs": 173580,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 33,
+      "caseId": "B04-neutral-1",
+      "attemptId": "d57ef431-992a-4b4b-aa92-249aa62fae06",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 1,
+      "costMicroCny": 23058,
+      "durationMs": 8322,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 34,
+      "caseId": "B07-neutral-1",
+      "attemptId": "35d22913-984d-4550-b58a-7a581be81e20",
+      "state": "failed",
+      "programFailed": [
+        "missing-total-blocked-specifically"
+      ],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 93780,
+      "durationMs": 31057,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 35,
+      "caseId": "B03-paraphrase-1",
+      "attemptId": "6e6365f3-715a-42b7-8fce-5dec518d7a0f",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 2,
+      "costMicroCny": 61294,
+      "durationMs": 23536,
+      "humanAccepted": false
+    },
+    {
+      "sequence": 36,
+      "caseId": "B06-paraphrase-1",
+      "attemptId": "49a6613b-e6b6-4b11-b70e-d32b0c3b5920",
+      "state": "needs-human-review",
+      "programFailed": [],
+      "candidate": {
+        "codeRevision": "15c38e250e143e63b902255369a272856deeef8d",
+        "runtimeHash": "b8a4365c16f5ee5a22baff55c1f6404322baf30e39f9d70c13c99420aad6cf8a",
+        "protocolHash": "4c33705ebdf1ded8f52ef4f850fa64954fe03d0f9404c322c2eb14945a53f614"
+      },
+      "requests": 3,
+      "costMicroCny": 75868,
+      "durationMs": 17243,
+      "humanAccepted": false
+    }
+  ],
+  "selectedResultCostMicroCny": 2094522,
+  "selectedResultDurationMs": 754189
+}
