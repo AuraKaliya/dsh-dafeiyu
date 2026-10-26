@@ -49,13 +49,13 @@ export async function harness(root: string, response: Response = () => textReply
     await ctx.plugin(AgentRegistry);
     await ctx.plugin(Persistence, { root: resolve(root, 'sessions'), compression: 'none' });
     await ctx.plugin(AgentLoop, { agents: [] });
-    ctx.llm.registerAdapter(['local-test'], adapter);
+    const adapterRegistration = ctx.llm.registerAdapter(['local-test'], adapter);
     const coreFiber = await ctx.plugin(Core, { agentId: 'dafeiyu', dataDir: root, personaFile,
       provider: 'local-test', model: 'scripted', turnTimeoutMs: timeout, lifecycleMode, ...(reasoningEffort ? { reasoningEffort } : {}),...(context?{context}:{}) });
     const simulatorFiber = await ctx.plugin(Simulator, { agentId: 'dafeiyu', account: 'local' });
     const core = ctx.dafeiyu;
     const simulator = ctx.dafeiyuSimulator;
-    return { ctx, adapter, core, simulator, coreFiber, simulatorFiber,
+    return { ctx, adapter, adapterRegistration, core, simulator, coreFiber, simulatorFiber,
       close: async () => { await simulatorFiber.dispose(); await coreFiber.dispose(); await ctx.fiber.dispose(); } };
   } catch (error) { await ctx.fiber.dispose(); throw error; }
 }

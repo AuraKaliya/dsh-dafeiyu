@@ -42,6 +42,9 @@
     },
     {
       "path": "packages/server-compat"
+    },
+    {
+      "path": "packages/server-runtime"
     }
   ]
 }
