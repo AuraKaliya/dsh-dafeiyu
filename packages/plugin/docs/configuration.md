@@ -2,6 +2,22 @@
 
 所有路径相对于配置文件所在目录解析。配置文件和 `dataDir` 放在安装包之外，避免升级时丢失。
 
+## 接到DSH桌面
+
+当前版本没有图形初始化表单，安装和启用插件本身不代表已配置成功。先退出DSH，再在当前profile的 `cordis.patch.yml` 序列末尾加入以下一项；已有同ID项时修改原项，不重复添加。默认桌面profile位于 `~/.dsh/profiles/desktop/`。
+
+```yaml
+- id: dsh-dafeiyu
+  name: dsh-dafeiyu
+  config:
+    settingsFile: 'D:/your-config/dafeiyu.config.json'
+    nodePath: 'D:/your-node/node.exe'
+```
+
+路径必须换成自己的配置文件和Node.js 24.13+。启动顺序为本机OneBot与QQ登录、DSH、启用大肥鱼。插件入口显示“运行中”不能证明QQ连接成功；使用 `node bin/dafeiyu.mjs status --settings <配置文件绝对路径>` 查看 `online`、`snapshot.phase` 和 `snapshot.services.qq`。`check`只检查配置及文件；`status`不发模型请求或平台消息。当前入口不会在依赖失败退出后自动重启，恢复依赖后需停用再启用。
+
+## 实例配置
+
 | 配置 | 必填 | 用途 |
 |---|---|---|
 | `dataDir` | 是 | 当前实例独立的数据目录，初次必须为空 |

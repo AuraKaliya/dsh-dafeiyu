@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-27",
+  "kind": "local-formal-deployment-smoke",
+  "sourceCodeCommit": "1b8bb96",
+  "pluginVersion": "0.20.0",
+  "scope": {
+    "formalInstance": true,
+    "localDsh": true,
+    "realModel": true,
+    "realPlatform": true,
+    "serverAccess": false,
+    "newGithubRelease": false,
+    "regressionSuiteRerun": false
+  },
+  "installation": {
+    "source": "local-link",
+    "package": "dsh-dafeiyu",
+    "directory": "D:/DSH/DaFeiYu-Local",
+    "check": "INSTALL_CONFIGURATION_VALID",
+    "init": "INSTALL_INITIALIZED",
+    "actualUiInstall": true,
+    "configurationMethod": "official-ConfigEditor",
+    "existingDesktopPatchRowsUnchanged": true,
+    "addedDependencies": ["dsh-dafeiyu"]
+  },
+  "model": {
+    "provider": "deepseek-official",
+    "model": "deepseek-flash",
+    "reasoningEffort": "max",
+    "greetingModelStreamsCompleted": 1,
+    "secretCopied": false,
+    "prior7cLedgerModified": false
+  },
+  "qq": {
+    "botId": "1994142241",
+    "ownerId": "756013063",
+    "mode": "joined",
+    "groupIntervalMs": 30000,
+    "additionalGroupSyncCycle": false,
+    "initial": {"joined": 7, "assistant": 3, "effective": 4, "unknown": 0},
+    "later": {
+      "checkedAt": "2026-10-26T22:27:20.807Z",
+      "snapshotAt": "2026-10-26T22:26:57.902Z",
+      "revision": 8,
+      "joined": 7,
+      "assistant": 4,
+      "effective": 3,
+      "pluginRestartedForThisChange": false
+    },
+    "realGroupSettingsModifiedByDeployment": false,
+    "groupTestMessagesSent": 0,
+    "realInboundReplyTested": false
+  },
+  "greeting": {
+    "origin": "explicit-local-deployment-request",
+    "coreNativeDraft": true,
+    "fakeQqInbound": false,
+    "transport": "operator-bound-original-OneBot",
+    "ordinaryReplyLedgerTested": false,
+    "sendRequests": 1,
+    "messageId": "-979949216",
+    "sentAt": "2026-10-26T22:23:45.753Z",
+    "readback": {"status": "ok", "retcode": 0, "senderMatches": true, "textMatches": true, "messageIdMatches": true},
+    "duplicateRefusedBeforeNetwork": true,
+    "duplicateCheckRecordUnchanged": true,
+    "partOfRoutineStartup": false
+  },
+  "restart": {
+    "viaDshPluginManager": true,
+    "childStoppedCleanly": true,
+    "readyAfterEnable": true,
+    "installationMetadataUnchanged": true,
+    "agentUnchanged": true,
+    "nativeRunsUnchanged": true,
+    "greetingReceiptUnchanged": true
+  },
+  "snowLuma": {
+    "version": "2.1.1",
+    "codeModified": false,
+    "indexSha256": "E23ED3D4AA7E01E7F45400A7FFE6B0C4B67BB6D011F776F2FD04B959510435E6",
+    "loopbackOnly": true,
+    "onlyExpectedAccountAttached": true
+  },
+  "initializationUsabilityAccepted": false,
+  "usabilityGaps": ["no-configuration-form", "plugin-active-does-not-prove-child-ready", "manual-dependency-startup-and-retry"],
+  "enabled": ["qq-text", "qq-tasks", "memory-growth", "activity"],
+  "notConfigured": ["media", "bilibili", "administrator-executor"],
+  "protectedMemoryDocumentSha256": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+}
