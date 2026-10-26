@@ -389,15 +389,18 @@ export class CompactionRuntime {
         for(const [index,group] of grouped.entries()){
           checkSources();
           const usedChars=fragments.reduce((sum,fragment)=>sum+Array.from(fragment.text).length,0);
-          const budget=Math.floor((p.maxSummaryChars-usedChars)/(grouped.length-index));
+          const remainingChars=p.maxSummaryChars-usedChars,remainingGroups=grouped.length-index;
+          const targetChars=Math.floor(remainingChars/remainingGroups),budget=remainingChars-64*(remainingGroups-1);
           const fragmentBudget=Math.max(1,Math.floor((Math.min(p.initialMaxFragments??p.maxFragments??16,p.maxFragments??16)-fragments.length)/(grouped.length-index)));
-          const results=await binding.provider.summarizeFragments!(this.scope(),group.sources,signal,checkSources,budget,fragmentBudget);
+          const results=await binding.provider.summarizeFragments!(this.scope(),group.sources,signal,checkSources,budget,fragmentBudget,targetChars);
           if(results.length>fragmentBudget)throw new Error('Fragment budget exceeded');
           const id=`G${index+1}`;
           groups.push({id,taskId:group.taskId,inputs:group.sources.map(({seq,role,hash})=>({seq,role,hash})),dependencies:group.dependencies});
           for(const result of results)fragments.push({...result,id:`F${fragments.length+1}`,version:1,group:id});
-          if(!results.length||fragments.length>(p.maxFragments??16)||results.reduce((n,f)=>n+Array.from(f.text).length,0)>budget)throw new Error('Fragment budget exceeded');
+          if(!results.length||fragments.length>(p.maxFragments??16))throw new Error('Fragment budget exceeded');
+          if(results.reduce((n,f)=>n+Array.from(f.text).length,0)>budget)throw new Error('Fragment text budget exceeded');
         }
+        if(fragments.reduce((n,f)=>n+Array.from(f.text).length,0)>p.maxSummaryChars)throw new Error('Fragment text budget exceeded');
         manifest=fragmentManifestSchema.parse({schemaVersion:1,compactionId:id,sessionId:session.id,agentId:this.agentId,route:this.item!.route,owner:binding.owner,
           producerVersion:binding.version,epoch:basis.epoch,taskId:basis.taskId,versions:basis.versions,policy:'dafeiyu-fragments-v1',policyHash:hash(JSON.stringify(p)),
           model:{provider:agent.options.provider??'',model:agent.options.model??''},createdAt:Date.now(),groups,fragments});

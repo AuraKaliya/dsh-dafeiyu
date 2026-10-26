@@ -14,6 +14,19 @@ import { textReply } from './harness.js';
 import { readCompactionEvents } from '@dafeiyu/core';
 import type {} from '@deepseek-ai/dsh-token-meter';
 
+test('a source group may exceed its soft share while preserving later groups and the total character limit',async t=>{
+  const h=await provenanceFixture(undefined,30000,{...fragmentSettings,maxSummaryChars:400,maxFragmentGroups:4,maxFragments:8});t.after(h.close);const observed:{target:number;maximum:number;length:number}[]=[];
+  h.setCompactionResponse(r=>{const prompt=r.messages.filter(m=>m.role==='system').flatMap(m=>m.content).filter(b=>b.type==='text').map(b=>b.text).join(''),match=prompt.match(/控制在(\d+)字内；不可超过的硬上限为(\d+)字/);assert.ok(match);const text='鱼'.repeat(observed.length===0?150:30);observed.push({target:Number(match[1]),maximum:Number(match[2]),length:Array.from(text).length});return textReply(JSON.stringify({fragments:[{kind:'note',text}]}));});
+  await h.run('稳定前缀');await h.run('旧阶段1：'+'虚构材料。'.repeat(500));await h.run('旧阶段2：'+'另一份材料。'.repeat(500));await h.run('保留近期尾部');await h.run('当前任务：'+'保留当前来源。'.repeat(2800));
+  const manifests=readSummaryArtifacts(h.session()).filter(e=>e.type==='plugin:dafeiyu/summary-manifest');assert.ok(manifests.length>0);assert.ok(observed.some(v=>v.length>v.target&&v.length<=v.maximum));assert.ok(manifests.every(m=>m.data.fragments.reduce((n,f)=>n+Array.from(f.text).length,0)<=400));assert.ok(!readCompactionEvents(h.session()).some(e=>e.type==='compaction/end'&&e.data.error));
+});
+
+test('soft shares cannot consume the hard character reservation for remaining groups',async t=>{
+  const h=await provenanceFixture(undefined,30000,{...fragmentSettings,maxSummaryChars:400,maxFragmentGroups:4,maxFragments:8});t.after(h.close);
+  h.setCompactionResponse(r=>{const prompt=r.messages.filter(m=>m.role==='system').flatMap(m=>m.content).filter(b=>b.type==='text').map(b=>b.text).join(''),match=prompt.match(/硬上限为(\d+)字/);assert.ok(match);return textReply(JSON.stringify({fragments:[{kind:'note',text:'鱼'.repeat(Number(match[1])+1)}]}));});
+  await h.run('稳定前缀');await h.run('旧阶段1：'+'虚构材料。'.repeat(500));await h.run('旧阶段2：'+'另一份材料。'.repeat(500));await h.run('保留近期尾部');await h.run('当前任务：'+'保留当前来源。'.repeat(2800));assert.equal(readSummaryArtifacts(h.session()).length,0);assert.ok(h.visible().includes('旧阶段1'));assert.ok(readCompactionEvents(h.session()).some(e=>e.type==='compaction/end'&&e.data.error));
+});
+
 test('isolated input groups produce independent fragments with private full proofs and compact references',async t=>{
   const h=await fragmentFixture();t.after(h.close);const view=h.view(),body=JSON.parse(view.text);
   assert.equal(body.schemaVersion,3);assert.ok(body.fragments.length>=4);

@@ -63,8 +63,14 @@ export class EvaluationLedger {
     const row=this.db.prepare('SELECT * FROM execution_clock WHERE id=1').get();if(!row)throw new Error('EVALUATION_CLOCK_MISSING');
     const since=row.active_since===null?null:Number(row.active_since);if(since!==null&&now<since)throw new Error('EVALUATION_CLOCK_MOVED_BACKWARDS');
     const elapsed=since===null?0:now-since,activeMs=Number(row.active_ms)+elapsed,calibrationMs=Number(row.calibration_ms)+(row.phase==='calibration'?elapsed:0),firstCallAt=row.first_call_at===null?null:Number(row.first_call_at);
-    return {firstCallAt,expiresAt:firstCallAt===null?null:firstCallAt+bounds.validForMsAfterFirstCall,activeMs,calibrationMs,remainingActiveMs:Math.max(0,bounds.maximumActiveMs-activeMs),phase:row.phase===null?null:String(row.phase),ownerPid:row.pid===null?null:Number(row.pid),running:since!==null};
+    return {firstCallAt,expiresAt:firstCallAt===null?null:firstCallAt+bounds.validForMsAfterFirstCall,activeMs,calibrationMs,calibrationMaximumMs:this.calibrationTimeLimit(),remainingActiveMs:Math.max(0,bounds.maximumActiveMs-activeMs),phase:row.phase===null?null:String(row.phase),ownerPid:row.pid===null?null:Number(row.pid),running:since!==null};
   }
+  calibrationTimeLimit(){const bounds=this.config.executionBounds;if(!bounds)return null;const row=this.db.prepare("SELECT body,hash FROM audit WHERE json_extract(body,'$.type')='calibration-time.allocated' ORDER BY seq DESC LIMIT 1").get();if(!row)return bounds.calibrationMaximumActiveMs;
+    const body:unknown=JSON.parse(String(row.body));if(digest(body)!==row.hash)throw new Error('EVALUATION_EVIDENCE_CORRUPT');const value=z.object({data:z.object({maximumActiveMs:integer.positive(),totalMaximumActiveMs:z.literal(bounds.maximumActiveMs)})}).parse(body).data;if(value.maximumActiveMs>bounds.maximumActiveMs)throw new Error('EVALUATION_TIME_ALLOCATION_INVALID');return value.maximumActiveMs;
+  }
+  allocateCalibrationTime(maximumActiveMs:number,reason:string){integer.positive().parse(maximumActiveMs);z.string().min(1).max(1000).parse(reason);const bounds=this.config.executionBounds;if(this.config.mode!=='real'||!bounds||maximumActiveMs>bounds.maximumActiveMs)throw new Error('EVALUATION_TIME_ALLOCATION_INVALID');return this.atomic(()=>{
+    const clock=this.executionStatus()!;if(clock.running||this.budget.unknown||this.db.prepare("SELECT 1 FROM reservations WHERE state='reserved'").get())throw new Error('EVALUATION_TIME_ALLOCATION_REQUIRES_IDLE');if(maximumActiveMs<clock.calibrationMs)throw new Error('EVALUATION_TIME_ALLOCATION_BELOW_USAGE');this.event('calibration-time.allocated',{maximumActiveMs,totalMaximumActiveMs:bounds.maximumActiveMs,reason});return this.executionStatus();
+  });}
   startExecution(phase:'calibration'|'formal'|'retest',now=Date.now()){
     if(!this.config.executionBounds||this.config.mode!=='real')throw new Error('EVALUATION_CLOCK_NOT_CONFIGURED');
     this.atomic(()=>{const row=this.db.prepare('SELECT * FROM execution_clock WHERE id=1').get()!;
@@ -74,7 +80,7 @@ export class EvaluationLedger {
         this.db.prepare('UPDATE execution_clock SET active_ms=active_ms+?,calibration_ms=calibration_ms+?,active_since=NULL,pid=NULL,nonce=NULL,phase=NULL WHERE id=1').run(elapsed,row.phase==='calibration'?elapsed:0);
       }
       const current=this.executionStatus(now)!;if(current.remainingActiveMs<=0)throw new Error('EVALUATION_TIME_EXHAUSTED');if(current.expiresAt!==null&&now>=current.expiresAt)throw new Error('EVALUATION_AUTHORIZATION_EXPIRED');
-      if(phase==='calibration'&&current.calibrationMs>=this.config.executionBounds!.calibrationMaximumActiveMs)throw new Error('EVALUATION_CALIBRATION_TIME_EXHAUSTED');
+      if(phase==='calibration'&&current.calibrationMs>=this.calibrationTimeLimit()!)throw new Error('EVALUATION_CALIBRATION_TIME_EXHAUSTED');
       const nonce=randomUUID();this.db.prepare('UPDATE execution_clock SET active_since=?,pid=?,nonce=?,phase=? WHERE id=1').run(now,process.pid,nonce,phase);this.executionNonce=nonce;this.event('execution.started',{phase});
     });
   }
@@ -85,7 +91,7 @@ export class EvaluationLedger {
   remainingExecutionMs(now=Date.now()){
     const bounds=this.config.executionBounds;if(!bounds)return Number.POSITIVE_INFINITY;const row=this.db.prepare('SELECT nonce,pid FROM execution_clock WHERE id=1').get()!;
     if(!this.executionNonce||row.nonce!==this.executionNonce||row.pid!==process.pid)throw new Error('EVALUATION_EXECUTION_NOT_STARTED');
-    const state=this.executionStatus(now)!,remaining=Math.min(state.remainingActiveMs,state.expiresAt===null?Number.POSITIVE_INFINITY:state.expiresAt-now,state.phase==='calibration'?bounds.calibrationMaximumActiveMs-state.calibrationMs:Number.POSITIVE_INFINITY);
+    const state=this.executionStatus(now)!,remaining=Math.min(state.remainingActiveMs,state.expiresAt===null?Number.POSITIVE_INFINITY:state.expiresAt-now,state.phase==='calibration'?this.calibrationTimeLimit()!-state.calibrationMs:Number.POSITIVE_INFINITY);
     if(remaining<=0)throw new Error(state.expiresAt!==null&&now>=state.expiresAt?'EVALUATION_AUTHORIZATION_EXPIRED':'EVALUATION_TIME_EXHAUSTED');return remaining;
   }
   begin(caseId:string,{retry=false}: {retry?:boolean}={}){if(!this.config.cases.some(c=>c.id===caseId))throw new Error('EVALUATION_CASE_UNKNOWN');return this.atomic(()=>{const last=this.db.prepare('SELECT * FROM attempts WHERE case_id=? ORDER BY ordinal DESC LIMIT 1').get(caseId);
