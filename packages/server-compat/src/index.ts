@@ -6,3 +6,4 @@ export { ExistingArchive,openExistingArchive,HostArchiveRecordSchema } from './a
 export type { ExistingArchiveOptions,HostArchiveRecord,ArchiveRecordRef,CycleSnapshot,VersionSnapshot,CyclePatch,PrepareArchiveVersion,ArchiveVersionNotes } from './archive.js';
 export * from './legacy-types.js';
 export { LegacyMemoryReader,openLegacyMemoryReader } from './legacy-memory.js';
+export * from './legacy-service.js';

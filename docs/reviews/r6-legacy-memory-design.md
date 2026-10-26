@@ -46,6 +46,20 @@ reset 引用固定的是 `{root identity, state path, resetAt}` 投影；普通 
 
 已落 `legacy-types.ts`、`legacy-files.ts`、`legacy-memory.ts`，没有新增依赖，未修改共享 index。主代理报告 `a23219c7-c0b2-4a4f-9d47-ed8e5005753d` 中初版读取端 11/11 通过（连同 Windows factory 6 项合计 17/17）；这只证明受管本地虚构数据测试，不证明线上记忆或渠道已接入。
 
-随后精确修正两点：已安装 `sourceCurrent` 端口仅返回 true 才放行（JS 错接 undefined 拒绝）；shared fact 原 ID 不重算，保留旧 commit 输入 section 在 trim 前计算的 ID，归属继续由全部当前 source 的 route/user/version 验证。候选 ID/version 算法仍重算。补一项原 ID 回归和一个错接断言后，`tests/server-legacy-memory.test.ts` 为 12 项，修正后尚待主代理复测。
+随后精确修正两点：已安装 `sourceCurrent` 端口仅返回 true 才放行（JS 错接 undefined 拒绝）；shared fact 原 ID 不重算，保留旧 commit 输入 section 在 trim 前计算的 ID，归属继续由全部当前 source 的 route/user/version 验证。候选 ID/version 算法仍重算。补一项原 ID 回归和一个错接断言后，主代理报告 `785898f2-6684-4905-b9b1-82b0ef654a0b` 中 12/12 通过，读取端已提交 `3dabd63`。
 
 测试仅创建 D 盘受管虚构目录，覆盖 existing-only/不改字节、reset/since、平台/用户/会话隔离、无来源偏好不曝光、源删改/私密/版本、到期、文件替换和链接、未知私有字段过滤。子代理未运行构建或测试，根代理统一验证。
+
+## 独立服务实现（读取端冻结后）
+
+新增 `legacy-service.ts`，固定注册 `legacy-memory` / `dafeiyu_legacy_memory_read`。构造参数为真实 `DafeiyuService` 和 `{agentId, reader, channels, clock?}`；`channels` 是程序端 `{ready(), binding(scene):{sinceMs,stamp}|null, epoch()}`，方法绑定后保存。stamp 应来自持久账号/渠道边界版本，变更不能恢复旧 stamp；网络断线不等于历史来源永久撤回。服务只借用 reader，close 卸本 extension，Host 在其后关闭 reader。
+
+模型输入严格仅 `{offset:0..63, limit:1..4}`，缺省 0/2。返回 `{page, observation, proof}`：可见 page 最多 8000 字符，标记分页、源预览裁剪和 reader 总上限；始终声明 historical/partial。空页的 observation/proof 为 null，不制造来源。来源正文仅来自当次 reader；旧 Markdown 不写回，不自动建新 Memory/Persona。
+
+仅真实 message origin 放行，principal 取已持久入站的 sender.id/scene，校验 recall 与实际 since。proof.detail 固定入站 hash、scope、binding stamp、精确 refs 与可见页 hash；provider current 每次重新查入站及各 ref。登记 `recordCapabilityObservation` 的 text 就是返回页的原 JSON；根代理已增加 MemorySourcePolicy 的准确能力分支，不再依赖未知工具的 legacy epoch fallback。公开字节与跨目标视图均不授予。
+
+`tests/server-legacy-service.test.ts` 新增 8 项：真实官方 DSH 循环/Core grant/Memory SQLite 的合成模型测试，涵盖页与观察封存、真实 capability dependency、撤回后历史退场、来源篡改、跨用户/会话、模型参数伪造、非 message task 拒绝、空页、不关闭借用 reader、Bili/QQ 分离和分页上限。未运行；未模拟成真实模型或平台验收。Host 生产挂载/导出由根代理另做。
+
+主代理首次服务组合报告 `b1343d27-2932-4658-9df8-24d4a544763f`：构建/两组类型检查通过，13 项中 12 通过、1 失败（service 7/8、B05 source-contract 5/5）。失败是测试误期待伪造参数产生 ActionOutcome。只读核对闭合现场：真实 DSH tool/result 为 `isError=true`、`Error: INVALID_INPUT`；Core runtime 的 legacy operation 数为 0，Memory capability observation 数为 0。静态路径 `ExecutionCoordinator` 先 `action.validateInput(raw)`，输入不合规时尚未建 operation，由 SDK 封装工具诊断。
+
+已仅修该测试：校验真实工具诊断、零 operation、零 reader.read 次数、零 observation/Memory；随后独立执行 fabricated grant 的 SCOPE_DENIED 断言。计数子类只包裹原 reader.read，不替换业务行为。生产服务与读取端未改；仍为 8 项，修正后待主代理复测。该报告保留失败现场 18085751 字节，cleanup blocked 为空；真实模型/平台/服务器标志均 false。
