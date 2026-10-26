@@ -27,6 +27,8 @@ Host 现有 `init/migrate` 继续由原入口执行，沿用空库初始化/显�
 
 所有路径来自固定 manifest 与命令的明确输入。薄入口只读公开配置以确定物理 core 路径，先设置本进程 `DSH_HOME=<core>/dsh-home`，随后才 import Host。不得加载 `.env`、改变桌面 profile/全局环境或动态载入 JSON 指定的函数、脚本、任意 npm 插件。
 
+2026-10-27 守护接线补充：生产 manifest 还必须指定各用户共用的 Host coordination 路径及其现存父目录身份；SYSTEM 守护与实际 Host 必须读取同一份，不使用各自 homedir 默认。该共享位置纳入固定资金作用域。生产 start/run 另在 core 数据目录持久记录启动/停止元数据与真实进程证明摘要；正常到限/未知资金停止不是崩溃，守护不能反复重启。状态文件新鲜也不独立证明进程存活，仍需匹配实际 PID/createID 与 Host 协调记录；正常 active funding lease 应结合当前 Host 所有者解释，不把 `FUNDING_LEASE_OWNED` 当作它自身故障。
+
 ## 3. 三份数据及固定绑定
 
 ### Launch manifest v1
