@@ -13,6 +13,7 @@ if(!mode||['--help','-h'].includes(mode)){
     const major=Number(process.versions.node.split('.')[0]),minor=Number(process.versions.node.split('.')[1]);if(major!==24||minor<13)throw new Error('INSTALL_NODE_24_REQUIRED');
     const file=resolve(args[2]),settings=readInstallationSettings(file);
     if(mode==='start'&&settings.dshTools&&!process.connected)throw new Error('INSTALL_DSH_DESKTOP_REQUIRED');
+    if(mode==='start'&&settings.dshTools&&process.env.DAFEIYU_DSH_BRIDGE!=='1')throw new Error('INSTALL_DSH_RELOAD_REQUIRED');
     if(mode==='check'){
       checkInstallationFiles(settings);report({code:'INSTALL_CONFIGURATION_VALID',connectivity:'not-tested',modelCalls:0});
     }else{

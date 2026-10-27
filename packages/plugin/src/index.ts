@@ -20,7 +20,7 @@ export function apply(ctx:Context,config:Config) {
   if(!isAbsolute(config.settingsFile))throw new Error('INSTALL_SETTINGS_ABSOLUTE_PATH_REQUIRED');
   let bridgeEnabled=false;try{bridgeEnabled=readInstallationSettings(config.settingsFile).dshTools;}catch{ctx.logger.warn('INSTALL_CONFIGURATION_REQUIRED：请检查大肥鱼配置文件。');return;}
   return ctx.effect(()=>{
-    const child=spawn(config.nodePath,[fileURLToPath(new URL('../bin/dafeiyu.mjs',import.meta.url)),'start','--settings',config.settingsFile],{windowsHide:true,stdio:['ignore','ignore','ignore','ipc']});
+    const child=spawn(config.nodePath,[fileURLToPath(new URL('../bin/dafeiyu.mjs',import.meta.url)),'start','--settings',config.settingsFile],{windowsHide:true,env:{...process.env,DAFEIYU_DSH_BRIDGE:bridgeEnabled?'1':''},stdio:['ignore','ignore','ignore','ipc']});
     const closeBridge=bridgeEnabled?attachDshBridge(ctx,child,config.settingsFile):async()=>{};
     let closed=false;const finished=new Promise<void>(resolve=>{child.once('close',()=>{closed=true;resolve();});child.once('error',()=>{ctx.logger.error('INSTALL_NODE_UNAVAILABLE：请检查Node.js路径与版本。');closed=true;resolve();});});
     child.on('message',(value:unknown)=>{if(!value||typeof value!=='object'||!('code' in value)||typeof value.code!=='string'||!/^[A-Z][A-Z0-9_]{0,99}$/.test(value.code))return;

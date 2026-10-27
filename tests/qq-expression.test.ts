@@ -38,7 +38,7 @@ test('a naturally accepted QQ task can report stages and save an expression pref
   h.setResponse(request=>{const id=String(request.sessionId);if(id.startsWith('memory-expression-verify-delivery-'))return textReply('{"faithful":true,"issues":[]}');
     if(id.startsWith('dafeiyu-progress-v1-')){assert.equal(request.tools?.length??0,0);return textReply('我先整理一下说法。');}
     if(id.startsWith('dafeiyu-delivery-v3-')){assert.equal(request.tools?.length??0,0);assert.match(JSON.stringify(request.messages),/尽量用口语表达/);return textReply(sequence('好，以后尽量用口语。','偏好已经保存。'));}
-    if(id.startsWith('dafeiyu-task-')){if(++work===1)return call('qq_progress',{kind:'intent',text:'先整理说法，再保存偏好。'});if(work===2)return call('dafeiyu_qq_expression_save',{requestId:'task-style',slot:'tone',text:'尽量用口语表达。',basis:'user-request',expectedVersion:0});assert.ok(outcomes(request).some(outcome=>outcome.status==='succeeded'));return textReply('已保存口语表达偏好。');}
+    if(id.startsWith('dafeiyu-task-')){assert.doesNotMatch(JSON.stringify(request.messages),/当前执行会话本身没有聊天发送权限/);if(++work===1)return call('qq_progress',{kind:'intent',text:'先整理说法，再保存偏好。'});if(work===2)return call('dafeiyu_qq_expression_save',{requestId:'task-style',slot:'tone',text:'尽量用口语表达。',basis:'user-request',expectedVersion:0});assert.ok(outcomes(request).some(outcome=>outcome.status==='succeeded'));return textReply('已保存口语表达偏好。');}
     return ++chat===1?call('qq_task_submit',{requestId:'natural-style'}):textReply('');});
   await h.message('之后说得口语一点，保存成偏好',{target:scene,trigger:true,id:'9829'});assert.deepEqual(texts(h.platform.sent),['我先整理一下说法。','好，以后尽量用口语。','偏好已经保存。']);
 });
