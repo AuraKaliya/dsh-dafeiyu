@@ -14,7 +14,8 @@ export const MediaProviderRefSchema=z.strictObject({provider:ExtensionIdSchema,k
 export const MediaSourceDescriptionSchema=z.strictObject({ref:MediaProviderRefSchema,origin:ResourceProofSchema,kind:MediaKindSchema,
   name:z.string().max(200).refine(v=>!/[\\/\x00-\x1f]/.test(v)).nullable(),mimeHint:z.string().max(120).nullable(),
   bytesHint:z.number().int().nonnegative().safe().nullable(),durationMsHint:z.number().int().nonnegative().safe().nullable(),
-  rangeReadable:z.boolean(),publicContent:z.boolean().default(false)}).refine(v=>v.ref.provider===v.origin.provider,'Media source provider mismatch');
+  sourceFrame:z.strictObject({positionMs:z.number().int().nonnegative().safe(),durationMs:z.number().int().positive().safe()}).refine(v=>v.positionMs<=v.durationMs).optional(),
+  rangeReadable:z.boolean(),publicContent:z.boolean().default(false)}).refine(v=>v.ref.provider===v.origin.provider,'Media source provider mismatch').refine(v=>!v.sourceFrame||v.kind==='image','Source frame must be an image');
 export type MediaSourceDescription=z.infer<typeof MediaSourceDescriptionSchema>;
 export const MediaAttachmentSchema=z.strictObject({schemaVersion:z.literal(1),source:MediaProviderRefSchema,kind:MediaKindSchema,name:z.string().max(200).nullable()});
 export type MediaAttachment=z.infer<typeof MediaAttachmentSchema>;
