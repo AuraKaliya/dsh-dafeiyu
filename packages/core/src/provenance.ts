@@ -137,10 +137,15 @@ export class SourceTracker {
       }]);
     }
     deps.push(this.context.nativeDependencies(this.scope()));this.admitted=unionDependencies(...deps);
-    if(!this.validate(this.admitted))throw new Error('Invalid exposed source');
+    if(!this.validate(this.admitted))this.reject('dispatch');
     const step=events.findLast(e=>e.type==='step/start');if(step?.type!=='step/start')throw new Error('Missing DSH step');
     appendPluginRecord(this.session,'plugin:dafeiyu/request-sources',{...this.common(),turn:step.data.turn,step:step.data.step,parents,dependencies:this.admitted,
       contexts:this.context.sourceItems().map(r=>({owner:r.owner,region:r.region,id:r.item.id,version:r.item.version,hash:digestSource(r.item.text),sources:r.item.sources}))});
   }
-  guard():void{if(this.item&&this.binding()?.provider.sources&&!this.validate(this.admitted))throw new Error('Exposed source changed after admission');}
+  private reject(phase:'dispatch'|'stream'):never{
+    const dependency=this.admitted.find(dep=>!this.validate([dep]));
+    if(dependency&&this.session&&this.item)appendPluginRecord(this.session,'plugin:dafeiyu/source-invalid',{traceId:this.item.id,phase,dependency,dependencyHash:digestSource(JSON.stringify(dependency)),reason:dependency.kind==='context'?(this.context.explainHistorical?.(dependency)??'context-rejected'):'source-dependency-rejected'});
+    throw new Error('SOURCE_VALIDATION_FAILED');
+  }
+  guard():void{if(this.item&&this.binding()?.provider.sources&&!this.validate(this.admitted))this.reject('stream');}
 }

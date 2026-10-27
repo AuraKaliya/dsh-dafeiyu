@@ -100,6 +100,7 @@ export type DeliveryResult =
   | { readonly status: 'not-sent'; readonly code: string }
   | { readonly status: 'unknown'; readonly code: string };
 export interface ChannelCapability {
+  deliveryProgress?(replyId:string):{confirmed:number;pending:number;unknown:number;canResume:boolean}|null;
   readonly channel: string;
   readonly account: string;
   /** Actual transport capabilities/limits, independent of the model's own modalities. */

@@ -6,16 +6,16 @@ export const BiliRetryPolicySchema=z.strictObject({
   riskDelayMs:z.number().int().min(1000).max(3600000).default(30000),
 });
 export type BiliRetryPolicy=z.infer<typeof BiliRetryPolicySchema>;
-export type BiliFailureKind='rate-limit'|'risk'|'login'|'permission'|'network'|'response'|'cancelled'|'local';
+export type BiliFailureKind='rate-limit'|'risk'|'login'|'permission'|'verification'|'network'|'response'|'cancelled'|'local';
 const controlSchema=z.strictObject({failures:z.number().int().nonnegative(),kind:z.string().max(40).nullable(),endpoint:z.string().max(40).nullable(),held:z.boolean(),probeId:z.string().nullable(),probeUntil:z.number().nonnegative()});
 const initial=()=>({failures:0,kind:null,endpoint:null,held:false,probeId:null,probeUntil:0});
 export const AttemptSchema=z.strictObject({id:z.uuid(),at:z.number().int().nonnegative(),sentAt:z.number().int().nonnegative().nullable().default(null),endedAt:z.number().int().nonnegative(),
   endpoint:z.enum(['nav','discover','search','video','comments','replies','player','play','danmaku','media','subtitle']),
   transport:z.enum(['http','dsh-browser']).default('http'),auth:z.enum(['anonymous','configured-session']),origin:z.enum(['task','maintenance']),taskId:z.uuid().nullable(),runId:z.uuid().nullable(),operationId:z.uuid().nullable(),
-  networkSent:z.boolean(),httpStatus:z.number().int().min(100).max(599).nullable(),platformCode:z.number().int().safe().nullable(),
+  networkSent:z.boolean().nullable(),httpStatus:z.number().int().min(100).max(599).nullable(),platformCode:z.number().int().safe().nullable(),
   contentType:z.string().max(100).nullable(),retryAfter:z.string().max(80).nullable(),retryAt:z.number().nonnegative().nullable(),
   waitSource:z.enum(['platform','local-policy','existing-state']).nullable(),outcome:z.enum(['success','headers-received','failed','blocked']),
-  errorCode:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),kind:z.enum(['rate-limit','risk','login','permission','network','response','cancelled','local']).nullable(),
+  errorCode:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),kind:z.enum(['rate-limit','risk','login','permission','verification','network','response','cancelled','local']).nullable(),
 });
 export type BiliAttempt=z.infer<typeof AttemptSchema>;
 export function initializeBiliDiagnostics(db:DatabaseSync){
@@ -42,7 +42,7 @@ export class BiliDiagnostics {
   success(id:string,endpoint:string){this.atomic(()=>{const s=this.state;if(s.probeId===id&&s.endpoint===endpoint){this.set(initial());this.db.prepare('UPDATE bili_clock SET error=NULL WHERE id=1').run();}});}
   failure(endpoint:string,kind:BiliFailureKind,now:number,policy:BiliRetryPolicy,platformAt:number|null){return this.atomic(()=>{
     const s=this.state,failures=s.failures+1,limit=kind==='risk'?2:policy.rateDelaysMs.length+1;
-    const held=kind==='login'||kind==='permission'||failures>=limit;
+    const held=kind==='login'||kind==='permission'||kind==='verification'||failures>=limit;
     const delay=kind==='risk'?policy.riskDelayMs:policy.rateDelaysMs[Math.min(failures-1,policy.rateDelaysMs.length-1)]!;
     const at=platformAt??now+delay;
     this.set({failures,kind,endpoint,held,probeId:null,probeUntil:0});

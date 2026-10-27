@@ -13,6 +13,7 @@ import { qqCapabilityFixture,bot,owner,scene,group,until,outcomes } from './qq-c
 import { createImageFixture } from './phase1-image-fixture.js';
 import { syntheticPcm } from './media-pcm-fixture.js';
 import { call,textReply } from './harness.js';
+import type {GenerateOptions} from '@deepseek-ai/dsh-llm';
 
 type H=Awaited<ReturnType<typeof qqCapabilityFixture>>;
 const messageSchema=z.object({group_id:z.number().optional(),message:z.array(z.object({type:z.string(),data:z.record(z.string(),z.unknown())}))});
@@ -21,9 +22,9 @@ async function prepare(h:H){const fixtures=[['picture',createImageFixture(67).da
   for(const [name,data] of fixtures){const file=join(h.root,'onebot-cache',name);await writeFile(file,data);h.platform.mediaFiles.set(name,file);}
 }
 function script(h:H,text:string){let step=0,refs:z.infer<typeof MediaProviderRefSchema>[]=[];const assets:MediaAssetRef[]=[];
-  h.setResponse(request=>{step++;if(step===1)return call('qq_media_list',{});if(step===2)refs=z.object({media:z.array(z.object({ref:z.object({provider:z.string(),key:z.string()})}))}).parse(outcomes(request).at(-1)?.data).media.map(m=>m.ref);
+  const respond=(request:GenerateOptions)=>{step++;if(step===1)return call('qq_media_list',{});if(step===2)refs=z.object({media:z.array(z.object({ref:z.object({provider:z.string(),key:z.string()})}))}).parse(outcomes(request).at(-1)?.data).media.map(m=>m.ref);
     if(step>=3&&step<=5)assets.push(MediaAssetRefSchema.parse(outcomes(request).at(-1)?.data));if(step>=2&&step<=4)return call('dafeiyu_media_acquire',{requestId:'get-'+step,source:refs[step-2]});
-    if(step===5)return call('dafeiyu_media_reply',{requestId:'parts',expectedVersion:0,parts:assets.map(asset=>({kind:'asset',asset}))});return textReply(text);});
+    if(step===5)return call('dafeiyu_media_reply',{requestId:'parts',expectedVersion:0,parts:assets.map(asset=>({kind:'asset',asset}))});return textReply(text);};h.setResponse(respond);return respond;
 }
 async function emit(h:H,id:number){const received=h.ctx.dafeiyuQQ.getStatus().counters.received;h.emit({post_type:'message',self_id:Number(bot),message_id:id,message_type:'group',group_id:Number(group),user_id:Number(owner),time:Math.ceil(Date.now()/1000),
   message:[{type:'at',data:{qq:bot}},{type:'image',data:{file:'picture',name:'picture.png'}},{type:'record',data:{file:'voice',name:'voice.wav'}},{type:'file',data:{file:'document',name:'document.txt'}}]});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received>received);await h.core.whenIdle();return h.core.journal.messageFor({agentId:'dafeiyu',route:conversationKey('dafeiyu',scene)},String(id))!;}
@@ -40,6 +41,15 @@ test('QQ sends final text plus image, standalone voice and file as ordered actua
 test('a lost media-part response preserves earlier receipts and cannot resend after reload or duplicate invocation',async()=>{
   const h=await qqCapabilityFixture({media:true,mediaSend:true});try{await prepare(h);script(h,'鱼'.repeat(4200));h.platform.loseAt=3;const item=await emit(h,1102);assert.equal(item.state,'uncertain');assert.equal(h.platform.sent.length,3);const status=h.ctx.dafeiyuQQ.deliveryStatus(item.reply!.id)!;assert.equal(status.confirmed,2);assert.equal(status.unknown,1);assert.equal(status.pending,2);
     const manifest=h.ctx.dafeiyuMedia.store.replies.exported(item.reply!.id)!.manifest;await h.reload();const result=await h.ctx.dafeiyuQQ.deliverMedia({...item.reply!,media:manifest},new AbortController().signal,()=>{},async()=>{throw new Error('MUST_NOT_REOPEN_BYTES');});assert.equal(result.status,'unknown');assert.equal(h.platform.sent.length,3);
+  }finally{await h.close();}
+});
+test('new input pauses a known-unsent media tail and a model resume sends only the remaining parts',async()=>{
+  const h=await qqCapabilityFixture({media:true,mediaSend:true});try{await prepare(h);const original=script(h,'附件说明'),seen:unknown[]=[];let emitted=false;
+    h.setResponse(request=>{const input=request.messages.findLast(m=>m.role==='user'&&m.source?.kind==='user')?.content.filter(b=>b.type==='text').map(b=>b.text).join('')??'';
+      if(String(request.sessionId).startsWith('dafeiyu-reply-decision-')){const pending=z.object({pending:z.array(z.object({inboundId:z.uuid()}))}).parse(JSON.parse(input)).pending;seen.push(pending);return textReply(JSON.stringify({decisions:pending.map(p=>({inboundId:p.inboundId,action:'resume'}))}));}
+      if(input.includes('继续附件'))return textReply('补充已收到');return original(request);});
+    h.platform.beforeVerify=async()=>{if(h.platform.sent.length!==1||emitted)return;emitted=true;const received=h.ctx.dafeiyuQQ.getStatus().counters.received;h.emit({post_type:'message',message_type:'group',self_id:Number(bot),group_id:Number(group),user_id:Number(owner),message_id:1106,time:Math.ceil(Date.now()/1000),message:[{type:'text',data:{text:'继续附件'}}],sender:{nickname:'虚构主人'}});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.received>received);};
+    const item=await emit(h,1105);await h.core.whenIdle();assert.equal(seen.length,1);assert.equal(h.core.journal.get(item.id).state,'delivered');assert.equal(h.ctx.dafeiyuQQ.deliveryStatus(item.reply!.id)?.unknown,0);assert.equal(h.ctx.dafeiyuMedia.store.replies.exported(item.reply!.id)!.state,'sent');assert.deepEqual(h.platform.sent.map(content).filter(p=>p.type!=='text').map(p=>p.type),['image','record','file']);
   }finally{await h.close();}
 });
 

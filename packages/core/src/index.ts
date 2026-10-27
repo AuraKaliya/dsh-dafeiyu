@@ -9,6 +9,7 @@ import type { FeedbackDelivery } from '@dafeiyu/contracts';
 import type { ActionCapability, ActionContext, OperationScope, Extension, ExtensionHandle, Json, PendingMessage, PersonaSnapshot, Receipt, Reply } from '@dafeiyu/contracts';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { DshRuntime, DshRunError } from './runtime.js';
+import {renderConversationRecovery,decidePendingReplies} from './conversation-recovery.js';
 import type { BoundAction,ActionResult } from './runtime.js';
 import { ContextCoordinator,contextConfigSchema } from './context.js';
 import type { ContextRequest } from '@dafeiyu/contracts';
@@ -196,6 +197,10 @@ export class DafeiyuService extends Service {
       provider:()=>[...this.extensions.values()].find(e=>e.active&&e.extension.taskExpressionProvider)?.extension.taskExpressionProvider,
       channel:item=>this.deliveryChannel(item),
       enqueue:(route,work)=>this.enqueueTaskDelivery(route,work)},true);}catch(error){this.journal.close();throw error;}
+    this.contexts.register('core-delivery-recovery','1',[{id:'pending-replies',kind:'operational-fact',prepare:async request=>{
+      const scope=this.contexts.scopeFor(request),current=this.journal.get(scope.traceId),facts=this.replyStateFacts(current);
+      return facts.map(f=>({id:f.inboundId,version:runtimeHash(f),text:JSON.stringify(f),expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:pending-reply:'+f.inboundId,version:'1',hash:runtimeHash(f)}]}));
+    },validate:(request,item)=>{try{const current=this.journal.get(this.contexts.scopeFor(request).traceId);return this.replyStateFacts(current).some(f=>f.inboundId===item.id&&runtimeHash(f)===item.version);}catch{return false;}}}]);
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
   recover():void {
@@ -481,6 +486,7 @@ export class DafeiyuService extends Service {
     return Object.freeze({provider:this.config.provider,model:this.config.model,
       ...(this.config.reasoningEffort ? {reasoningEffort:this.config.reasoningEffort} : {})});
   }
+  private recoveryModel(){return {provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})};}
   registerExtension(extension: Extension): ExtensionHandle {
     this.assertOpen();
     if (extension.apiVersion !== API_VERSION || extension.agentId !== this.config.agentId) throw new Error('Incompatible extension interface or agent binding');
@@ -516,6 +522,7 @@ export class DafeiyuService extends Service {
     extension = { ...extension,
       ...(extension.lifecycleReady?{lifecycleReady:extension.lifecycleReady.bind(extension)}:{}),
       channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
+        ...(channel.deliveryProgress?{deliveryProgress:channel.deliveryProgress.bind(channel)}:{}),
         ...(channel.processingSignal?{processingSignal:channel.processingSignal.bind(channel)}:{}),
         ...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),
         ...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),
@@ -613,8 +620,68 @@ export class DafeiyuService extends Service {
     const queued=result.then(()=>{},()=>{this.fatal='Task delivery persistence failure; automatic processing stopped';}).finally(()=>{if(this.queues.get(route)===queued)this.queues.delete(route);});
     this.queues.set(route,queued);return result;
   }
+  private async notifyConversationFailure(item:PendingMessage,failure:string){
+    if(item.message.conversation.channel!=='qq'||!this.accepting||failure==='PERSISTENCE_FAILED'||this.journal.events(item.route).some(e=>e.traceId===item.id&&e.type==='recovery.notice.started'))return;
+    const channel=this.deliveryChannel(item);if(!channel)return;
+    const signal=AbortSignal.any([this.controller.signal,channel.signal,AbortSignal.timeout(60000)]),id=randomUUID();
+    const guard=()=>{signal.throwIfAborted();if(!this.accepting||this.deliveryChannel(item)?.identity!==channel.identity||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');this.messageProcessingSignal(item.id)?.throwIfAborted();};
+    try{guard();}catch{return;}
+    const events=this.journal.events(item.route).filter(e=>e.traceId===item.id),operations=events.filter(e=>e.type==='operation.started').map(e=>({id:e.operationId,action:typeof e.data.action==='string'?e.data.action:'unknown',state:events.findLast(end=>end.operationId===e.operationId&&end.type!=='operation.started')?.type??'unknown'}));
+    this.journal.append(this.event(item,'recovery.notice.started',{noticeId:id,code:failure,phase:'recovery'}));
+    let text='【系统状态】刚才的处理未完成，进度和已有操作记录已保存；没有自动重做已执行的操作。',fallback=true,next='wait';
+    try{const persona=this.targetPersona(item,id,signal,guard),renderSignal=AbortSignal.any([signal,AbortSignal.timeout(20000)]);
+      const decision=await renderConversationRecovery(this.ctx,this.recoveryModel(),this.config.dataDir,id,persona.text,persona.items,{question:item.message.mainText??item.message.text,failureCode:failure,operations,originalTurn:'failed',automaticReplay:false},renderSignal,()=>{guard();persona.guard();});
+      text=decision.message;next=decision.next;fallback=false;
+    }catch{if(signal.aborted)return;}
+    try{guard();}catch{return;}this.journal.append(this.event(item,'recovery.notice.prepared',{noticeId:id,next,fallback}));
+    this.journal.append(this.event(item,'recovery.notice.sending',{noticeId:id}));
+    try{const result=await channel.capability.deliver({id:`recovery-notice:${item.id}`,conversation:item.message.conversation,sourceMessageId:item.message.id,text},signal,guard);
+      this.journal.append(this.event(item,'recovery.notice.'+result.status,{noticeId:id,...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code??'DELIVERY_INCOMPLETE'})}));
+    }catch{this.journal.append(this.event(item,'recovery.notice.unknown',{noticeId:id}));}
+  }
+  private pendingReplyFacts(current:PendingMessage){
+    const events=this.journal.events(current.route);
+    return this.journal.list(['uncertain','reply-ready']).filter(old=>old.id!==current.id&&old.route===current.route&&old.message.sender.id===current.message.sender.id&&old.reply).slice(-6).flatMap(old=>{
+      const progress=this.deliveryChannel(old)?.capability.deliveryProgress?.(old.reply!.id);if(!progress?.canResume||progress.unknown)return [];
+      const decision=events.findLast(e=>e.traceId===old.id&&['delivery.resume-requested','delivery.superseded'].includes(e.type)),interruption=events.findLast(e=>e.traceId===old.id&&['delivery.unknown','delivery.not-sent'].includes(e.type));
+      if(decision&&(!interruption||decision.seq>interruption.seq))return [];
+      return [{inboundId:old.id,sourceMessageId:old.message.id,state:'awaiting-reply-decision',confirmed:progress.confirmed,pending:progress.pending,unknown:progress.unknown,meaning:'前一答复因新消息暂缓；已发部分有回执，剩余确定未发。当前核心可决定续发或由新的回答替代。'}];
+    });
+  }
+  private replyStateFacts(current:PendingMessage){
+    const pending=this.pendingReplyFacts(current),events=this.journal.events(current.route);
+    const failures=this.journal.list(['failed']).filter(old=>old.id!==current.id&&old.route===current.route&&old.message.sender.id===current.message.sender.id).slice(-3).map(old=>{
+      const failed=events.findLast(e=>e.traceId===old.id&&e.type==='turn.failed'),notice=events.findLast(e=>e.traceId===old.id&&/^recovery\.notice\.(sent|not-sent|unknown)$/.test(e.type));
+      return {inboundId:old.id,sourceMessageId:old.message.id,state:'processing-failed',code:typeof failed?.data.code==='string'&&/^[A-Z0-9_]{1,100}$/.test(failed.data.code)?failed.data.code:'TURN_FAILED',notification:notice?.type??'unconfirmed',meaning:'此前这次处理没有完成。操作记录仍在，不能从失败推断所有动作均未执行，也不能自动重做旧动作。'};
+    });
+    return [...pending,...failures,...events.filter(e=>e.data.decisionSource===current.id&&['delivery.resume-requested','delivery.superseded'].includes(e.type)).slice(-6).map(e=>({inboundId:e.traceId,sourceMessageId:this.journal.get(e.traceId).message.id,state:e.type,meaning:e.type==='delivery.resume-requested'?'已选择续发并排队；尚不能推断已经送达。':'旧未发部分已由当前回答替代，已发回执保留。'}))];
+  }
+  private async decideRepliesBeforeTurn(current:PendingMessage,signal:AbortSignal){
+    const pending=this.pendingReplyFacts(current);if(!pending.length||this.journal.events(current.route).some(e=>e.traceId===current.id&&e.type==='reply.decision.started'))return;
+    this.journal.append(this.event(current,'reply.decision.started',{pending:pending.map(p=>p.inboundId)}));
+    const stamp=runtimeHash(pending),guard=()=>{signal.throwIfAborted();this.messageProcessingSignal(current.id)?.throwIfAborted();if(stamp!==runtimeHash(this.pendingReplyFacts(current)))throw new Error('REPLY_STATE_CHANGED');};
+    try{const persona=this.targetPersona(current,current.id,signal,guard),decision=await decidePendingReplies(this.ctx,this.recoveryModel(),this.config.dataDir,current.id,persona.text,persona.items,{incoming:current.message.mainText??current.message.text,pending:pending.map(p=>({...p,previousQuestion:this.journal.get(p.inboundId).message.mainText??this.journal.get(p.inboundId).message.text}))},AbortSignal.any([signal,AbortSignal.timeout(15000)]),()=>{guard();persona.guard();});
+      guard();const ids=new Set(decision.decisions.map(d=>d.inboundId));if(ids.size!==pending.length||decision.decisions.length!==pending.length||pending.some(p=>!ids.has(p.inboundId)))throw new Error('REPLY_DECISION_SCOPE');
+      this.journal.append(this.event(current,'reply.decision.prepared',{decisions:decision.decisions}));
+      for(const choice of decision.decisions)if(choice.action!=='wait')this.resolvePendingReply(current,choice.inboundId,choice.action);
+      this.journal.append(this.event(current,'reply.decision.completed',{decisions:decision.decisions}));
+    }catch{signal.throwIfAborted();this.journal.append(this.event(current,'reply.decision.waiting',{code:'REPLY_DECISION_UNAVAILABLE',preserved:true}));}
+  }
+  private resolvePendingReply(current:PendingMessage,id:string,decision:'resume'|'supersede'){
+    const old=this.journal.get(id);if(old.route!==current.route||old.message.sender.id!==current.message.sender.id||old.id===current.id)throw new Error('REPLY_SCOPE_DENIED');
+    const duplicate=this.journal.events(current.route).findLast(e=>e.traceId===old.id&&e.type==='delivery.'+(decision==='resume'?'resume-requested':'superseded')&&e.data.decisionSource===current.id);
+    if(duplicate)return {status:decision==='resume'?'queued':'superseded',inboundId:id,duplicate:true};
+    if(!this.pendingReplyFacts(current).some(f=>f.inboundId===id))throw new Error('REPLY_NOT_RESUMABLE');
+    this.journal.transition(id,old.state,decision==='resume'?'reply-ready':'handled',this.event(old,decision==='resume'?'delivery.resume-requested':'delivery.superseded',{decisionSource:current.id,decisionMessageId:current.message.id}));
+    if(decision==='resume')this.schedule(this.journal.get(id));
+    return {status:decision==='resume'?'queued':'superseded',inboundId:id,duplicate:false};
+  }
+  private replyRecoveryActions(item:PendingMessage):BoundAction[]{return (['resume','supersede'] as const).map(decision=>{
+    const definition:ActionCapability={name:'dafeiyu_reply_'+decision,description:decision==='resume'?'选择续发同一发送者、同一会话前一答复的确定未发送部分。原已发部分不重发；程序重新校验来源后排队交付。':'选择由当前回答替代同一发送者、同一会话的旧答复剩余部分。保留已发回执及旧草稿，不再自动续发旧内容。',fields:{inboundId:{description:'pending-replies中程序提供的inboundId。',required:true}},execute:async()=>{throw new Error('CORE_DISPATCH_REQUIRED');}};
+    return {definition,execute:async(raw,signal)=>{signal.throwIfAborted();this.messageProcessingSignal(item.id)?.throwIfAborted();const args=this.parseAction(definition,raw);return {value:this.resolvePendingReply(item,z.uuid().parse(args.inboundId),decision),feedback:null};}};
+  });}
   private actions(item: PendingMessage, causedBy: string): BoundAction[] {
-    return [...this.extensions.values()].flatMap(entry => (entry.extension.actions ?? []).map(definition => ({
+    const actions:BoundAction[]=[...this.extensions.values()].flatMap(entry => (entry.extension.actions ?? []).map(definition => ({
       definition,
       execute: async (raw: unknown, signal: AbortSignal): Promise<ActionResult> => {
         if (!entry.active) throw new Error('Capability unavailable');
@@ -671,6 +738,7 @@ export class DafeiyuService extends Service {
         } finally { this.actionScopes.delete(actionContext); }
       },
     })));
+    return this.pendingReplyFacts(item).length?[...actions,...this.replyRecoveryActions(item)]:actions;
   }
   private parseAction(action: ActionCapability, raw: unknown): Record<string, string> {
     const fields = Object.fromEntries(Object.entries(action.fields).map(([key, field]) => [key,
@@ -713,6 +781,7 @@ export class DafeiyuService extends Service {
         const access = this.messageProcessingSignal(id);
         const signal = AbortSignal.any([this.controller.signal, source.controller.signal, ...(access ? [access] : []), AbortSignal.timeout(this.config.turnTimeoutMs)]);
         signal.throwIfAborted();
+        await this.decideRepliesBeforeTurn(item,signal);
         run=this.conversationRuns?.begin(item,persona,this.analysisModelRoute(),[...this.extensions.values()].map(entry=>({id:entry.extension.id,version:entry.extension.version})),this.executions?.conversationSnapshot(source.extension.id),
           record=>this.personas.prepare(record,persona,this.analysisModelRoute(),[],signal,()=>{signal.throwIfAborted();if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');}).manifest);
         if(run&&this.runStore)this.personas.admitTrial(this.runStore,run.id,[],signal,()=>{signal.throwIfAborted();if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');});
@@ -723,11 +792,13 @@ export class DafeiyuService extends Service {
         signal.throwIfAborted();
         if(run)this.personas.current(run.id)?.guard();
       } catch (error) {
-        if(run)this.conversationRuns?.fail(run);
+        const failure=error instanceof DshRunError?error.code:'TURN_FAILED';
+        if(run)this.conversationRuns?.fail(run,failure);
         if(run&&this.runStore)this.personas.completeTrial(this.runStore,run.id,[],this.controller.signal);
         await this.conversationRuns?.project();
-        this.journal.transition(item.id, this.journal.get(item.id).state, 'failed', { ...this.event(item, 'turn.failed', { code: 'TURN_FAILED', note: 'Earlier operations may have effects; no automatic replay' }, started?.id??null),
+        this.journal.transition(item.id, this.journal.get(item.id).state, 'failed', { ...this.event(item, 'turn.failed', { code: failure, phase:'execution', note: 'Earlier operations may have effects; no automatic replay' }, started?.id??null),
           sources: error instanceof DshRunError ? error.sources : [] });
+        await this.notifyConversationFailure(item,failure);
         return;
       }
       if(run&&this.conversationRuns){this.conversationRuns.complete(run,item,result,started!.id);if(this.runStore)this.personas.completeTrial(this.runStore,run.id,[],this.controller.signal);await this.conversationRuns.project();}
@@ -766,7 +837,8 @@ export class DafeiyuService extends Service {
       if (result.status === 'sent' && !result.receiptId) throw new Error('Missing transport receipt');
     } catch(error) { const code=error instanceof Error&&['MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH','MEDIA_REPLY_OPERATION_UNCONFIRMED','MEDIA_TARGET_DENIED','MEDIA_SIZE_LIMIT','MEDIA_BLOB_CORRUPT','MEDIA_TTS_NOT_CONFIGURED'].includes(error.message)?error.message:'SOURCE_STALE';
       result = invoked?{status:'unknown' as const,code:'DELIVERY_UNKNOWN'}:{status:'not-sent' as const,code}; }finally{
-      try{if(mediaAccess&&mediaManifestId&&activeMedia?.settleReply&&(result?.status==='sent'||result?.status==='unknown')){
+      try{const paused=result?.status==='unknown'&&channel?.deliveryProgress?.(item.reply.id)?.canResume===true;
+        if(mediaAccess&&mediaManifestId&&activeMedia?.settleReply&&(result?.status==='sent'||result?.status==='unknown'&&!paused)){
         try{activeMedia.settleReply(mediaAccess,mediaManifestId,result.status==='sent'?'sent':'unknown');}catch{mediaSettlementPending=true;}
       }}finally{if(mediaAccess)activeMedia?.releaseReply?.(mediaAccess);mediaAccess?.release();release();}}
     const next = result.status === 'sent' ? 'delivered' : result.status === 'not-sent' ? ['QQ_MESSAGE_SEQUENCE_INVALID','DELIVERY_PLAN_INVALID','TEXT_SIZE_UNSUPPORTED','INVALID_TEXT_ENCODING'].includes(result.code)?'failed':'reply-ready' : 'uncertain';

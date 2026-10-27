@@ -16,6 +16,7 @@ export interface ContextEvidenceView {
   sourceItems():{owner:string;region:string;item:ContextItem}[];
   nativeDependencies(scope:CompactionScope):SourceDependency[];
   validateHistorical(dependency:Extract<SourceDependency,{kind:'context'}>):boolean;
+  explainHistorical?(dependency:Extract<SourceDependency,{kind:'context'}>):string;
 }
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
   'runtime-context': {kind:'runtime-context'} & ContextFormed;
@@ -70,6 +71,17 @@ export class ContextRuntime {
     return this.prepared.some(region=>region.entry.active&&region.entry.owner===dep.owner&&region.entry.contributor.id===dep.region
       &&region.items.some(item=>item.id===dep.id&&item.version===dep.version&&createHash('sha256').update(JSON.stringify([item.text,item.sources])).digest('hex')===dep.hash
         &&Date.parse(item.expiresAt)>Date.now()&&region.entry.contributor.validate(region.request,item)));
+  }
+  explainHistorical(dep:Extract<SourceDependency,{kind:'context'}>):string{
+    if(this.preparing)return 'context-preparing';
+    if(dep.owner==='$native')return 'native-context-changed';
+    const region=this.prepared.find(r=>r.entry.owner===dep.owner&&r.entry.contributor.id===dep.region);
+    if(!region)return 'context-region-missing';if(!region.entry.active)return 'context-provider-removed';
+    if(region.request.signal.aborted)return 'context-request-cancelled';
+    const item=region.items.find(i=>i.id===dep.id);if(!item)return 'context-item-missing';
+    if(item.version!==dep.version)return 'context-version-changed';if(Date.parse(item.expiresAt)<=Date.now())return 'context-expired';
+    if(createHash('sha256').update(JSON.stringify([item.text,item.sources])).digest('hex')!==dep.hash)return 'context-content-changed';
+    return 'context-provider-rejected';
   }
   private available(assembly:PromptAssembly):number{
     const native=renderContextSections({...assembly,contexts:assembly.contexts.filter(c=>c.name!==CONTEXT_CARRIER)});

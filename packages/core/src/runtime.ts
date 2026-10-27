@@ -36,7 +36,7 @@ export interface BoundAction {
 export interface RunResult { readonly text: string; readonly sources: SourceRef[]; readonly resultRef?:import('./runtime-store.js').RunResultRef }
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
-  constructor(readonly sources: SourceRef[]) { super('DSH turn failed; consult visible evidence'); }
+  constructor(readonly sources: SourceRef[],readonly code='MODEL_INCOMPLETE') { super('DSH turn failed; consult visible evidence'); }
 }
 
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
@@ -157,10 +157,10 @@ export class DshRuntime {
         const request=owned!.lastRequest;if(!request||!owned!.context.guard(request))throw new Error('Delivery context stale');owned!.feedback.guard(request);owned!.compaction.guard(request);
         if(!owned!.context.sourceItems().some(s=>s.owner==='task-delivery'&&s.item.id===delivery.id))throw new Error('Delivery material missing');});
       return result;
-    } catch {
+    } catch (error) {
       throw new DshRunError(agent.session.snapshotEvents().slice(before)
         .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
-        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })));
+        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })),error instanceof Error&&['SOURCE_VALIDATION_FAILED','PERSISTENCE_FAILED'].includes(error.message)?error.message:'MODEL_INCOMPLETE');
     } finally {
       try{owned.compaction.seal();}finally{
       owned.compaction.end();

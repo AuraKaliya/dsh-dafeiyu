@@ -11,7 +11,7 @@ import { loopbackURL, OneBot, platformId } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
 import { readRecentQqHistory,QQ_HISTORY_WINDOW_MS } from './history.js';
-import { waitForQqReply,waitBetweenQqMessages } from './reply-delay.js';
+import { waitForQqReply,waitBetweenQqMessages,deliveryAbortCode } from './reply-delay.js';
 import { forwardHandles,recentForwardNodes } from './forward.js';
 export { qqReplyDelayMs } from './reply-delay.js';
 import { naturallyAddressed } from './trigger.js';
@@ -146,7 +146,7 @@ export class QqChannel extends Service {
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
       this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
-        channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',
+        channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',deliveryProgress:id=>{const p=this.deliveryStatus(id);if(!p)return null;const segments='segments'in p?p.segments:p.parts;return {confirmed:p.confirmed,pending:p.pending,unknown:p.unknown,canResume:p.unknown===0&&p.pending>0&&segments.some(s=>s.state==='pending'&&s.code==='DELIVERY_INTERRUPTED_BY_MESSAGE')};},
           processingSignal: message => this.processingSignal(message),
           description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
@@ -295,7 +295,7 @@ export class QqChannel extends Service {
       this.store.acknowledge(route,message.message_id);this.counters.ignored++;return;
     }
     const tailContinuation=[...this.tails.values()].some(tail=>tail.route===route&&tail.sender===message.user_id);
-    for(const tail of this.tails.values())if(tail.route===route&&tail.sender===message.user_id)tail.controller.abort();
+    for(const tail of this.tails.values())if(tail.route===route&&tail.sender===message.user_id)tail.controller.abort(new Error('DELIVERY_INTERRUPTED_BY_MESSAGE'));
     const continuation=this.config.messageBatch.enabled&&this.batches.has({id:message.message_id,occurredAt:new Date(message.time*1000).toISOString(),conversation,sender:{id:message.user_id,displayName:''},text:'[pending]'});
     if (!triggered&&!continuation&&!tailContinuation) { this.store.acknowledge(route, message.message_id); this.counters.ignored++; return; }
     let content = plain;
@@ -362,7 +362,7 @@ export class QqChannel extends Service {
       (conversation.kind === 'private' ? conversation.id === this.config.ownerId : conversation.kind === 'group' && this.groups.effective().includes(conversation.id));
     if (!allowed) throw new Error('TARGET_NOT_ALLOWED');
     try { await this.api.verify(signal); signal.throwIfAborted(); }
-    catch {if(signal.aborted)throw new Error('DELIVERY_CANCELLED');this.verified=false;this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate();throw new Error('IDENTITY_UNAVAILABLE');}
+    catch {if(signal.aborted)throw new Error(deliveryAbortCode(signal));this.verified=false;this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate();throw new Error('IDENTITY_UNAVAILABLE');}
     if(this.stopped||this.state!=='online')throw new Error('CHANNEL_OFFLINE');
     if (conversation.kind === 'group' && !this.groups.effective().includes(conversation.id)) throw new Error('TARGET_NOT_ALLOWED');
     if(this.ctx.dafeiyu.journal.messageRecalled({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},reply.sourceMessageId))throw new Error('SOURCE_STALE');

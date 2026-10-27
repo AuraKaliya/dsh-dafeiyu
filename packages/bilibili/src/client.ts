@@ -39,9 +39,11 @@ export class BiliClient {
   async browserRead(port:BiliBrowserPort,request:BiliBrowserRequest,signal:AbortSignal,guard:()=>void){
     if(!this.config.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');
     const record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint:request.section==='video'?'video':'comments',transport:'dsh-browser',auth:'configured-session',origin:'task',taskId:request.taskId,runId:request.runId,operationId:request.operationId,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
-    try{await this.slot(record.id,signal,guard);record.sentAt=Date.now();record.networkSent=true;const value=BiliBrowserResultSchema.parse(await port.read(request,signal));guard();signal.throwIfAborted();
+    try{await this.slot(record.id,signal,guard);record.sentAt=Date.now();record.networkSent=null;const value=BiliBrowserResultSchema.parse(await port.read(request,signal));guard();signal.throwIfAborted();
       if(value.accountUid!==this.config.browser.expectedUid||value.bvid!==request.bvid||value.section!==request.section||value.url!==`https://www.bilibili.com/video/${request.bvid}/`)throw new Error('BILI_BROWSER_BINDING_MISMATCH');record.outcome='success';return value;
-    }catch(error){record.errorCode=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_READ_FAILED';record.kind=record.networkSent?'response':'local';if(!record.networkSent){record.outcome='blocked';record.retryAt=this.store.clock.blockedUntil||null;record.waitSource='existing-state';}throw error;}
+    }catch(error){record.errorCode=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_READ_FAILED';record.kind=record.networkSent!==false?'response':'local';
+      if(record.errorCode==='BILI_BROWSER_CHALLENGE'||['BILI_BROWSER_ACCOUNT_MISMATCH','BILI_BROWSER_BINDING_MISMATCH'].includes(record.errorCode)){record.kind=record.errorCode==='BILI_BROWSER_CHALLENGE'?'verification':'login';const retry=this.store.diagnostics.failure(record.endpoint,record.kind,Date.now(),this.config.retry,null);record.retryAt=retry.at;record.waitSource=retry.source;}
+      if(record.networkSent===false){record.outcome='blocked';record.retryAt=this.store.clock.blockedUntil||null;record.waitSource='existing-state';}throw error;}
     finally{record.endedAt=Date.now();this.store.diagnostics.release(record.id);this.store.diagnostics.record(record);}
   }
   private session(){const setting=this.config.session;if(!setting)return null;try{if(!/^[a-zA-Z]:[\\/][^:\x00]+$/.test(setting.file))throw new Error('BILI_SESSION_INVALID');const stat=lstatSync(setting.file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16384)throw new Error('BILI_SESSION_INVALID');const bytes=readFileSync(setting.file);if(bytes.length>16384)throw new Error('BILI_SESSION_INVALID');
@@ -56,8 +58,8 @@ export class BiliClient {
       if(backoff){const supplied=parseRetryAfter(response?.headers['retry-after'],Date.now()),policy={...this.config.retry,...(this.config.backoffMs===undefined?{}:{riskDelayMs:this.config.backoffMs,rateDelaysMs:[this.config.backoffMs]})};
         const retry=this.store.diagnostics.failure(endpoint,kind,Date.now(),policy,supplied?.at??null);record.retryAt=retry.at;record.waitSource=retry.source;}
       throw new Error(code);};
-    try{await this.slot(record.id,signal,guard);record.networkSent=true;record.sentAt=Date.now();response=await this.transport(url,{...headers,...extra,...(cookie?{Cookie:cookie}:{})},signal);
-      record.httpStatus=response.status;const mime=response.headers['content-type']?.split(';')[0]?.trim().toLowerCase();record.contentType=mime&&/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mime)&&mime.length<=100?mime:null;
+    try{await this.slot(record.id,signal,guard);record.networkSent=null;record.sentAt=Date.now();response=await this.transport(url,{...headers,...extra,...(cookie?{Cookie:cookie}:{})},signal);
+      record.networkSent=true;record.httpStatus=response.status;const mime=response.headers['content-type']?.split(';')[0]?.trim().toLowerCase();record.contentType=mime&&/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mime)&&mime.length<=100?mime:null;
       record.retryAfter=parseRetryAfter(response.headers['retry-after'],Date.now())?.raw??null;guard();signal.throwIfAborted();
       if(response.status>=400&&record.contentType==='application/json'){try{const body=z.object({code:z.number().int().safe()}).safeParse(boundedJson(await boundedBytes(response,16384,signal,guard)));if(body.success)record.platformCode=body.data.code;}catch{/* HTTP status remains evidence even when an error body is absent or malformed. */}}
       if(response.status===412||response.status===429)reject(response.status===429?'rate-limit':'risk','BILI_BACKOFF',true);
@@ -65,9 +67,9 @@ export class BiliClient {
       const expected=extra.Range?206:200;if(response.status!==expected&&!(extra.Range&&allowWhole&&response.status===200))reject(response.status>=500?'network':'response',response.status>=300&&response.status<400?'BILI_REDIRECT_DENIED':'BILI_HTTP_FAILED',response.status>=500);
       const result=await consume(response,record,reject);if(record.outcome!=='headers-received')record.outcome='success';this.store.diagnostics.success(record.id,endpoint);return result;
     }catch(error){response?.close();const code=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:signal.aborted?'BILI_CANCELLED':'BILI_REQUEST_FAILED';record.errorCode??=code;
-      record.kind??=!record.networkSent?'local':signal.aborted?'cancelled':record.httpStatus===null?'network':'response';
+      record.kind??=record.networkSent===false?'local':signal.aborted?'cancelled':record.httpStatus===null?'network':'response';
       if(record.kind==='network'&&record.retryAt===null&&!signal.aborted){const retry=this.store.diagnostics.failure(endpoint,'network',Date.now(),{...this.config.retry,rateDelaysMs:[2000,5000,10000]},null);record.retryAt=retry.at;record.waitSource=retry.source;}
-      if(!record.networkSent){record.outcome='blocked';record.retryAt=this.store.clock.blockedUntil||null;record.waitSource='existing-state';}
+      if(record.networkSent===false){record.outcome='blocked';record.retryAt=this.store.clock.blockedUntil||null;record.waitSource='existing-state';}
       throw error;
     }finally{record.endedAt=Date.now();this.store.diagnostics.release(record.id);this.store.diagnostics.record(record);}
   }
