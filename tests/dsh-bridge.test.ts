@@ -7,7 +7,7 @@ import { writeFile,mkdtemp,readFile,access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { ExternalTaskAuthorizationSchema,DshToolCatalogSchema,taskScopeKey } from '@dafeiyu/contracts';
+import { ExternalTaskAuthorizationSchema,DshToolCatalogSchema,BiliBrowserResultSchema,taskScopeKey } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
 import { attachDshBridge } from '../packages/plugin/lib/bridge-parent.js';
 import { DeferredPluginChanges } from '../packages/plugin/lib/deferred-plugins.js';
@@ -20,14 +20,14 @@ class Permissions extends Service {constructor(ctx:Context){super(ctx,'permissio
 
 test('Node IPC bridge discovers and executes real DSH Tools with original schema, policy hooks, cancellation and no planning model',async t=>{
   const root=await mkdtemp(join(testTempDir(),'dsh-bridge-')),h=await harness(join(root,'core'));t.after(h.close);new Presets(h.ctx);new Permissions(h.ctx);
-  const settingsFile=join(root,'settings.json');await writeFile(settingsFile,JSON.stringify({schemaVersion:1,dataDir:join(root,'data'),dshTools:true,model:{model:'scripted',credentialStore:join(root,'unused')},qq:{botId:'12345678',ownerId:'87654321',tokenFile:join(root,'unused'),httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}}));
+  const settingsFile=join(root,'settings.json');await writeFile(settingsFile,JSON.stringify({schemaVersion:1,dataDir:join(root,'data'),dshTools:true,media:{},bilibili:{capabilities:true,browser:{expectedUid:'42'}},model:{model:'scripted',credentialStore:join(root,'unused')},qq:{botId:'12345678',ownerId:'87654321',tokenFile:join(root,'unused'),httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}}));
   let dispatched=0,guarded=0;h.ctx.on('tools/pre-execute',async(exec,next)=>{guarded++;assert.ok(String(exec.agent?.id).startsWith('dafeiyu-tools-'));return next();});
   h.ctx.tools.register({name:'fixture_write',description:'真实文件写入',parameters:{type:'object',properties:{text:{type:'string'}},required:['text'],additionalProperties:false},output:{schema:{type:'object',properties:{saved:{type:'boolean'}},required:['saved'],additionalProperties:false},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async raw=>{dispatched++;const input=z.object({text:z.string()}).parse(raw);await writeFile(join(root,'output.txt'),input.text);return {saved:true};}});
   let waiting=false,aborted=false;
   h.ctx.tools.register({name:'fixture_wait',description:'验证协作取消',parameters:{type:'object',properties:{},additionalProperties:false},output:{schema:{},render:()=>[]},execute:async(_raw,exec)=>{waiting=true;await new Promise<void>(resolve=>{exec.signal.addEventListener('abort',()=>{aborted=true;resolve();},{once:true});});return null;}});
   const childFile=join(root,'ipc.mjs');await writeFile(childFile,"process.on('message',value=>{if(value.type==='fixture.request')process.send(value.request);else process.send({type:'fixture.response',response:value});});");
-  const child=spawn(process.execPath,[childFile],{stdio:['ignore','ignore','ignore','ipc'],windowsHide:true}),close=attachDshBridge(h.ctx,child,settingsFile);t.after(async()=>{await close();child.kill();});
-  const rpc=async(payload:{type:string;id:string;call?:unknown;authorization?:unknown}):Promise<{value:Json;error?:string|undefined}>=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('IPC_TEST_TIMEOUT')),5000);const listener=(value:unknown)=>{const parsed=z.object({type:z.literal('fixture.response'),response:z.object({id:z.literal(payload.id),value:z.json(),error:z.string().optional()})}).safeParse(value);if(!parsed.success)return;clearTimeout(timer);child.off('message',listener);resolve(parsed.data.response);};child.on('message',listener);child.send!({type:'fixture.request',request:payload});});
+  const child=spawn(process.execPath,[childFile],{stdio:['ignore','ignore','ignore','ipc'],windowsHide:true});t.after(()=>{child.kill();});const close=attachDshBridge(h.ctx,child,settingsFile);t.after(close);
+  const rpc=async(payload:{type:string;id:string;call?:unknown;authorization?:unknown;request?:unknown}):Promise<{value:Json;error?:string|undefined}>=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('IPC_TEST_TIMEOUT')),5000);const listener=(value:unknown)=>{const parsed=z.object({type:z.literal('fixture.response'),response:z.object({id:z.literal(payload.id),value:z.json(),error:z.string().optional()})}).safeParse(value);if(!parsed.success)return;clearTimeout(timer);child.off('message',listener);resolve(parsed.data.response);};child.on('message',listener);child.send!({type:'fixture.request',request:payload});});
   const catalog=DshToolCatalogSchema.parse((await rpc({type:'dsh.catalog',id:randomUUID()})).value);assert.ok(catalog.tools.some(tool=>tool.name==='fixture_write'));
   const auth=authorization(),call={catalogVersion:catalog.version,name:'fixture_write',argumentsJson:JSON.stringify({text:'实际通过DSH写入'})};
   assert.equal((await rpc({type:'dsh.call',id:randomUUID(),call:{...call,argumentsJson:'{"text":17}'},authorization:auth})).error,'DSH_TOOL_ARGUMENTS_INVALID');assert.equal(dispatched,0);
@@ -36,6 +36,15 @@ test('Node IPC bridge discovers and executes real DSH Tools with original schema
   for(let attempt=0;attempt<100&&!waiting;attempt++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(waiting,true);child.send!({type:'fixture.request',request:{type:'dsh.cancel',id:waitId}});assert.equal(z.object({isError:z.boolean()}).parse((await waitResult).value).isError,true);assert.equal(aborted,true);
   h.ctx.tools.register({name:'changed_tool',description:'目录变动',parameters:{type:'object',properties:{}},output:{schema:{},render:()=>[]},execute:async()=>null});
   assert.equal((await rpc({type:'dsh.call',id:randomUUID(),call,authorization:auth})).error,'DSH_CATALOG_CHANGED');assert.equal(dispatched,1);
+  // Real IPC + DSH tool dispatch, simulated DOM. An empty first avatar read must not turn into a login error.
+  const browserCalls:string[]=[],bvid='BV1xx411c7mD',url=`https://www.bilibili.com/video/${bvid}/`;let identityReads=0;
+  for(const name of ['dsh_browser_open','dsh_browser_execute','dsh_browser_scroll'])h.ctx.tools.register({name,description:'B站只读桥接夹具',parameters:{type:'object'},output:{schema:{},render:()=>[]},execute:async raw=>{
+    browserCalls.push(name);if(name==='dsh_browser_open'){assert.equal(z.object({url:z.string()}).parse(raw).url,url);return {url,challenge:{blocked:false}};}if(name==='dsh_browser_scroll')return null;
+    const {script}=z.object({script:z.string()}).parse(raw);return {ok:true,value:JSON.stringify(script.includes('space.bilibili.com')?{url,ids:++identityReads===1?[]:['42']}:{title:'桥接标题',text:'延迟加载后的评论',truncated:false})};
+  }});
+  const browserResult=await rpc({type:'dsh.bili-read',id:randomUUID(),request:{taskId:randomUUID(),runId:randomUUID(),operationId:randomUUID(),bvid,section:'comments'}});
+  assert.equal(browserResult.error,undefined);assert.equal(BiliBrowserResultSchema.parse(browserResult.value).text,'延迟加载后的评论');assert.equal(identityReads,3);
+  assert.equal(browserCalls.filter(name=>name==='dsh_browser_open').length,1);assert.equal(browserCalls.filter(name=>name==='dsh_browser_scroll').length,1);assert.equal(h.adapter.requests.length,0);
 });
 
 test('plugin changes persist and wait for authenticated idle; an interrupted apply stays unknown without replay',async()=>{
