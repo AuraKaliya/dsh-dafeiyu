@@ -10,6 +10,7 @@ import {BiliStore} from '@dafeiyu/bilibili';
 import {BiliConfigSchema} from '../packages/bilibili/lib/config.js';
 import {testTempDir} from './test-temp.js';
 import type {BiliBrowserRequest} from '@dafeiyu/contracts';
+import {runInNewContext} from 'node:vm';
 const input=():BiliBrowserRequest=>({taskId:randomUUID(),runId:randomUUID(),operationId:randomUUID(),bvid:'BV1xx411c7mD',section:'video'});
 const result=(value:unknown)=>({ok:true,value:JSON.stringify(value)});
 const content={title:'公开标题',text:'已加载简介',truncated:false};
@@ -94,11 +95,22 @@ test('anonymous HTTP hold preserves its evidence while a separately bound browse
 });
 
 test('browser discovery validates identity and emits only visible public listing text',async()=>{
-  const i={taskId:randomUUID(),runId:randomUUID(),operationId:randomUUID(),section:'discover' as const},url='https://www.bilibili.com/v/popular/all';let checks=0;
+  const i={taskId:randomUUID(),runId:randomUUID(),operationId:randomUUID(),section:'discover' as const,feed:'popular' as const},url='https://www.bilibili.com/v/popular/all';let checks=0;
   const value=await readBiliBrowser(i,'42',async(name,args)=>{if(name==='dsh_browser_open'){assert.equal(args.url,url);return {url};}
     assert.equal(name,'dsh_browser_execute');if(isIdentity(args)){checks++;return result({url,ids:['42']});}
     assert.doesNotMatch(String(args.script),/cookie|localStorage|fetch\(/);return result({title:'热门列表',text:'样本 https://www.bilibili.com/video/BV1xx411c7mD/',truncated:true});
   },new AbortController().signal);assert.equal(checks,2);assert.equal(value.bvid,null);assert.equal(value.truncated,true);
+});
+
+test('real extraction scripts ignore a footer candidate and a recommendation author beside the fixed account header',async()=>{
+  const i={taskId:randomUUID(),runId:randomUUID(),operationId:randomUUID(),section:'discover' as const},url='https://www.bilibili.com/',time=clock();let contentReads=0;
+  const anchor=(href:string,text:string,footer=false)=>({href,innerText:text,title:'',getBoundingClientRect:()=>({width:100,height:30,top:13,left:1000}),closest:()=>footer?{}:null});
+  const avatar=anchor('https://space.bilibili.com/42',''),author=anchor('https://space.bilibili.com/43',''),footer=anchor('https://www.bilibili.com/video/BV1Xx411c7cH/','高级弹幕',true),title=anchor('https://www.bilibili.com/video/BV1xx411c7mD','真实卡片标题'),stats=anchor(title.href,'123万 05:00');
+  const value=await readBiliBrowser(i,'42',async(name,args)=>{if(name==='dsh_browser_open'){assert.equal(args.url,url);return {url};}const script=String(args.script),identityRead=isIdentity(args);if(!identityRead)contentReads++;
+    const document={querySelectorAll:(selector:string)=>identityRead?(selector.includes('header-avatar-wrap')?[avatar]:[avatar,author]):selector.includes('bili-video-card__info--tit')?(contentReads===1?[]:[title]):[footer,stats,title]};
+    return result(runInNewContext(script,{document,URL,innerWidth:1280,location:{href:url}}));
+  },new AbortController().signal,time);
+  assert.equal(value.accountUid,'42');assert.equal(value.feed,'home');assert.match(value.text,/真实卡片标题/);assert.doesNotMatch(value.text,/高级弹幕|123万/);assert.equal(time.waits,1);
 });
 
 test('video frame capture is position-bound, identity-checked and refuses protected or inaccessible pixels',async()=>{
