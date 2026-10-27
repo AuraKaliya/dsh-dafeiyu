@@ -50,14 +50,18 @@ test('a lost acknowledgement cannot reject an accepted Run and restart never rep
 });
 
 test('task completion with selected evidence is scheduled for maintenance while redundant selection requests coalesce',async()=>{
-  let f:Awaited<ReturnType<typeof fixture>>,step=0,maintenance=false,source:PersonaSourceRef|undefined;const text='虚构气球在观察窗口内向东移动';
+  let f:Awaited<ReturnType<typeof fixture>>,step=0,maintenance=false,maintenanceId='',source:PersonaSourceRef|undefined;const text='虚构气球在观察窗口内向东移动';
   const extension={id:'fixture',version:'1',actions:[{id:'fixture_observe',version:'1',description:'fictional observation',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
     execute:async(_i:unknown,c:ExecutionContextV3)=>{source=f.h.memory.persona!.recordObservation(c,{requestId:'source',text,kind:'primary',resource:'fixture:balloon',occurredAt:new Date().toISOString(),coverage:['fictional-window'],completeness:'partial'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'partial' as const,data:z.json().parse(source),sources:[],receipts:[]};}}]};
   f=await fixture(options=>{
     if(JSON.stringify(options).includes('独立经历分析器'))return textReply(JSON.stringify({schemaVersion:1,summary:'一次有界观察',gaps:['未知未来'],experiences:[{content:{observation:'气球向东',action:'虚构观察',outcome:'窗口内向东',interpretation:'不能推断永久方向',conditions:['本次窗口'],unknowns:['未来方向']},supports:[{sourceId:'S1',quote:text}],counters:[],target:null}],relations:[],persona:[]}));
     step++;if(!maintenance)return step===1?call('fixture_observe',{}):step===2?call('dafeiyu_execution_select',{requestId:'select',expectedVersion:0,entries:[source],reason:'选择观察'}):textReply('观察结束');
-    const id=String(read(f.directory,"SELECT id FROM maintenance_requests WHERE state='waiting-scheduler' ORDER BY rowid DESC LIMIT 1",'memory')[0]?.id);
-    return step===1?call('dafeiyu_memory_consolidate',{id}):textReply('整理完成');
+    const id=maintenanceId||=String(read(f.directory,"SELECT id FROM maintenance_requests WHERE state='waiting-scheduler' ORDER BY rowid DESC LIMIT 1",'memory')[0]?.id);
+    const program=options.messages.flatMap(message=>message.role==='user'?message.content.filter(block=>block.type==='text').map(block=>{try{return JSON.parse(block.text);}catch{return null;}}):[]).find(value=>value?.work?.kind==='memory-maintenance');
+    assert.ok(program);assert.equal(program.work.requestId,id);assert.notEqual(program.goal,request.goal);assert.equal(program.work.backgroundTaskGoal,request.goal);
+    assert.deepEqual(program.work.toolArguments.dafeiyu_memory_consolidate,{id});
+    if(step===2)assert.match(JSON.stringify(options.messages),/MAINTENANCE_REQUEST_ID_REQUIRED/);
+    return step===1?call('dafeiyu_memory_maintenance_status',{id:program.work.taskId}):step===2?call('dafeiyu_memory_maintenance_status',{id}):step===3?call('dafeiyu_memory_consolidate',{id}):textReply('整理完成');
   // Includes an independent analysis turn and durable source sealing. This checks state,
   // not a 10-second latency guarantee while other regression workers contend for IO.
   },{extension,settings:{maintenance:true},turnTimeoutMs:30000});

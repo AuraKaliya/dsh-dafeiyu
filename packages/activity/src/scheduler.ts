@@ -24,7 +24,9 @@ export class ActivityScheduler {
   constructor(private readonly ctx:Context,private readonly store:ActivityStore,private readonly configHash:string,private readonly ready:()=>boolean,private readonly now:()=>number,private readonly monotonic:()=>number=()=>performance.now()){
     this.explore=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'self-exploration',basis:['scheduled-autonomous-exploration']}});
     this.maintain=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'maintenance',basis:['durable-memory-maintenance-request']}});
-    this.unbindWake=ctx.dafeiyu.bindWakeAuthority({producerId:'activity',validate:(origin,task)=>this.authorized(origin,task),sourceAnchor:origin=>this.store.snapshot(origin.scheduleId,origin.scheduleVersion).anchor});
+    this.unbindWake=ctx.dafeiyu.bindWakeAuthority({producerId:'activity',validate:(origin,task)=>this.authorized(origin,task),sourceAnchor:origin=>this.store.snapshot(origin.scheduleId,origin.scheduleVersion).anchor,
+      work:(origin,task)=>{if(!this.authorized(origin,task))return null;const plan=this.store.snapshot(origin.scheduleId,origin.scheduleVersion);
+        return plan.purpose==='maintenance'&&plan.maintenanceId?{kind:'memory-maintenance',requestId:plan.maintenanceId,goal:plan.goal}:null;}});
     try{this.unbindEvents=ctx.dafeiyu.bindExecutionLifecycle('activity',event=>this.receive(event));}catch(error){this.unbindWake();throw error;}
   }
   bindMemory(port:MemoryMaintenanceSchedulingPort){if(this.memory)throw new Error('DUPLICATE_PROVIDER');this.disconnectMemory=port.connect();this.memory=port;}

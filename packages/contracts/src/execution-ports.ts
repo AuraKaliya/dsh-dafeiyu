@@ -27,9 +27,12 @@ export const ExecutionRequestSchema = z.union([TaskSubmitSchema,ExistingTaskRequ
 export const RunControlSchema = z.strictObject({requestId:z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),expectedVersion:z.number().int().positive(),reason:z.string().min(1).max(300)});
 export const ResumeRunSchema = ExistingTaskRequestSchema.extend({parentRunId:z.uuid(),checkpointId:z.uuid()});
 export const WakeRequestSchema = ExistingTaskRequestSchema.extend({origin:WakeOriginSchema});
+/** Trusted wake purpose; it describes this run without changing its task or authority. */
+export const WakeWorkSchema=z.strictObject({kind:z.literal('memory-maintenance'),requestId:z.uuid(),goal:z.string().min(1).max(2000)});
 export interface WakeAuthorityProvider {
   readonly producerId:string;
   validate(origin:Extract<z.infer<typeof RunOriginSchema>,{kind:'wake'}>,task:TaskState):boolean;
   sourceAnchor?(origin:Extract<z.infer<typeof RunOriginSchema>,{kind:'wake'}>,task:TaskState):import('./activity.js').ActivityAnchor|null;
+  work?(origin:Extract<z.infer<typeof RunOriginSchema>,{kind:'wake'}>,task:TaskState):z.infer<typeof WakeWorkSchema>|null;
 }
 export const ProducerSchema=ExtensionIdSchema;

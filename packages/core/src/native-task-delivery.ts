@@ -19,7 +19,7 @@ interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:s
   media():MediaPort|undefined;mediaAccess(authority:MediaReplyAuthority,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>;
 }
 const codes=new Set(['SOURCE_STALE','DEPENDENCY_UNAVAILABLE','DELIVERY_BINDING_CONFLICT','DELIVERY_RENDER_ALREADY_EXISTS','DELIVERY_TOOLS_FORBIDDEN','DELIVERY_CAPACITY','MODEL_INCOMPLETE','PERSISTENCE_FAILED','DELIVERY_CREDENTIAL_INVALID','DELIVERY_BODY_MISMATCH','NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL','NATIVE_EXPRESSION_UNAVAILABLE','NATIVE_EXPRESSION_CAPACITY','PRIVATE_INPUT_REJECTED','DELIVERY_UNFAITHFUL','DELIVERY_VERIFICATION_INCOMPLETE','MEDIA_TARGET_DENIED','MEDIA_SOURCE_SUPPRESSED','MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH']);
-const code=(error:unknown)=>error instanceof Error&&(codes.has(error.message.toUpperCase())||['DELIVERY_VERIFICATION_TIMEOUT','DELIVERY_RENDER_TIMEOUT'].includes(error.message))?error.message.toUpperCase():'NATIVE_DELIVERY_FAILED';
+const code=(error:unknown)=>error instanceof Error&&(codes.has(error.message.toUpperCase())||['DELIVERY_VERIFICATION_TIMEOUT','DELIVERY_VERIFICATION_MODEL_CHANGED','DELIVERY_VERIFICATION_MAX_TOKENS','DELIVERY_VERIFICATION_MODEL_ERROR','DELIVERY_VERIFICATION_ABORTED','DELIVERY_VERIFICATION_INVALID_RESULT','DELIVERY_RENDER_TIMEOUT'].includes(error.message))?error.message.toUpperCase():'NATIVE_DELIVERY_FAILED';
 const resultSchema=z.discriminatedUnion('status',[z.object({status:z.literal('sent'),receiptId:z.string().min(1).max(256)}),z.object({status:z.literal('not-sent'),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/)}),z.object({status:z.literal('unknown'),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/)})]);
 const terminal=new Set(['sent','not-sent','partial','uncertain','rejected','interrupted']);
 /** One intent per completed native Run, a clean persona turn, verification, then anchored transport. */
@@ -120,7 +120,9 @@ export class NativeTaskDelivery {
     const guard=()=>{signal.throwIfAborted();const description=this.host.describe(runId);if(!description||description.item.id!==item.id||this.host.channel(item)?.identity!==channel.identity||this.host.store.nativeDeliveries.get(runId)?.version!==row.version)throw new Error('SOURCE_STALE');};
     try{guard();const persona=this.host.persona(item,row.id,signal,guard),message=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,row.id,persona.text,persona.items,
       {target:row.anchor.target,taskId:row.anchor.taskId,runId,inboundId:item.id,question:'向原会话说明本次任务的实际交付状态及当前限制。',taskState:row.state,
-        evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,workPreserved:true,note:'程序未取得最终回复的发送回执；内部工作保留。仅说明状态，不复述未通过核验的草稿。'})}]},signal,()=>{guard();persona.guard();},32000);
+        evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,sendAttempted:row.state==='not-sent',workPreserved:true,
+          phase:row.state==='not-sent'?'transport':row.error?.startsWith('DELIVERY_VERIFICATION_')||row.error==='DELIVERY_UNFAITHFUL'?'verification':'pre-send',
+          note:row.state==='not-sent'?'发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。':'回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。'})}]},signal,()=>{guard();persona.guard();},32000);
       const receipt=await this.host.enqueue(item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'native-status:'+row.id,conversation:row.anchor.target,sourceMessageId:item.message.id,text:message.text},signal,()=>{guard();persona.guard();});});
       this.host.store.appendExecutionEvent(runId,'native.delivery.feedback',{status:receipt.status});this.host.flush();
     }catch{/* The original delivery state remains authoritative; never resend its rejected body. */}

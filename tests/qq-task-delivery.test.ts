@@ -69,6 +69,24 @@ test('failed independent verification never creates a send credential or perform
   const calls=h.adapter.requests.length;await h.core.deliverMessageTaskResult(id);assert.equal(h.adapter.requests.length,calls);
 });
 
+for(const mode of ['recover-cutoff','repeated-cutoff','invalid-json'] as const)test(`delivery verifier ${mode} keeps the candidate gated and exposes the actual failure phase`,async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);let chat=0,checks=0;
+  h.setResponse(request=>{
+    if(render(request.sessionId))return textReply(reply);
+    if(verify(request.sessionId)){checks++;assert.ok((request.maxTokens??0)>=8192);
+      if(mode==='invalid-json')return textReply('invalid response');
+      if(mode==='repeated-cutoff'||checks===1)return [{type:'finish',reason:{kind:'max-tokens'}}];
+      return textReply('{"faithful":true,"issues":[]}');}
+    if(String(request.sessionId).startsWith('dafeiyu-progress-')){assert.match(JSON.stringify(request.messages),/"sendAttempted":false/);assert.match(JSON.stringify(request.messages),/verification/);return textReply('结果核验未完成，正文还未发送。');}
+    if(native(request.sessionId))return textReply('完成虚构材料');
+    return ++chat===1?call('qq_task_submit',{requestId:'verify-recovery'}):textReply('已受理');
+  });
+  await h.message('任务：写一句虚构感想',{trigger:true});const state=h.core.messageTaskDeliveryStatus(runId(h))!;
+  assert.equal(checks,mode==='invalid-json'?1:2);
+  if(mode==='recover-cutoff'){assert.equal(state.state,'sent');assert.equal(h.platform.sent.filter(item=>sentText(item)===reply).length,1);}
+  else{assert.equal(state.state,'rejected');assert.equal(state.error,mode==='invalid-json'?'DELIVERY_VERIFICATION_INVALID_RESULT':'DELIVERY_VERIFICATION_MAX_TOKENS');assert.ok(h.platform.sent.every(item=>!sentText(item).includes(reply)));}
+});
+
 test('new group chat and cache eviction do not replace the fixed task-result anchor',async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);script(h);await h.message('任务：保留结果锚点',{trigger:true});const id=runId(h);
   for(let i=0;i<205;i++)await h.message('无关群消息'+i);
