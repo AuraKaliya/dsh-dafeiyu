@@ -4,13 +4,13 @@ import type { Journal } from '#dafeiyu/journal';
 export declare const deliveryDigest: (v: unknown) => string;
 declare const stateSchema: z.ZodEnum<{
     interrupted: "interrupted";
-    rejected: "rejected";
+    uncertain: "uncertain";
     rendering: "rendering";
     ready: "ready";
     sending: "sending";
     sent: "sent";
     "not-sent": "not-sent";
-    uncertain: "uncertain";
+    rejected: "rejected";
 }>;
 export type TaskDeliveryState = z.infer<typeof stateSchema>;
 export declare const deliveryBindingSchema: z.ZodObject<{
@@ -61,7 +61,7 @@ export declare class DeliveryStore {
     }): {
         id: string;
         taskId: string;
-        state: "interrupted" | "rejected" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain";
+        state: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         binding: {
             material: {
                 jobId: string;
@@ -70,7 +70,7 @@ export declare class DeliveryStore {
                 target: {
                     channel: string;
                     account: string;
-                    kind: "group" | "private" | "local";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 question: string;
@@ -101,7 +101,7 @@ export declare class DeliveryStore {
     }, binding: DeliveryBinding): {
         id: string;
         taskId: string;
-        state: "interrupted" | "rejected" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain";
+        state: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         binding: {
             material: {
                 jobId: string;
@@ -110,7 +110,7 @@ export declare class DeliveryStore {
                 target: {
                     channel: string;
                     account: string;
-                    kind: "group" | "private" | "local";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 question: string;
@@ -137,7 +137,7 @@ export declare class DeliveryStore {
     get(id: string): {
         id: string;
         taskId: string;
-        state: "interrupted" | "rejected" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain";
+        state: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         binding: {
             material: {
                 jobId: string;
@@ -146,7 +146,7 @@ export declare class DeliveryStore {
                 target: {
                     channel: string;
                     account: string;
-                    kind: "group" | "private" | "local";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 question: string;
@@ -173,7 +173,7 @@ export declare class DeliveryStore {
     status(taskId: string, id: string): {
         deliveryId: string;
         jobId: string;
-        status: "interrupted" | "rejected" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain";
+        status: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         receiptId: string | null;
         simulationOnly: boolean;
     };

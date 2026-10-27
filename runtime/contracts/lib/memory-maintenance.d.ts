@@ -48,11 +48,11 @@ export declare const MaintenanceLifecycleSchema: z.ZodObject<{
     }, z.core.$strict>], "kind">;
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
-            unknown: "unknown";
-            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
+            unknown: "unknown";
             "conversation-invitation": "conversation-invitation";
+            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -73,8 +73,8 @@ export declare const MaintenanceLifecycleSchema: z.ZodObject<{
         action: z.ZodString;
         status: z.ZodEnum<{
             unknown: "unknown";
-            partial: "partial";
             failed: "failed";
+            partial: "partial";
             cancelled: "cancelled";
             succeeded: "succeeded";
             started: "started";
@@ -91,6 +91,35 @@ export declare const MaintenanceLifecycleSchema: z.ZodObject<{
         }>;
     }, z.core.$strict>>;
     omittedOperations: z.ZodNumber;
+    assessmentSource: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        kind: z.ZodLiteral<"memory">;
+        revision: z.ZodNumber;
+        authorization: z.ZodOptional<z.ZodObject<{
+            taskId: z.ZodUUID;
+            taskEpoch: z.ZodNumber;
+            grantId: z.ZodUUID;
+            grantVersion: z.ZodNumber;
+            policyId: z.ZodString;
+            policyVersion: z.ZodNumber;
+        }, z.core.$strict>>;
+        selectionId: z.ZodOptional<z.ZodUUID>;
+        range: z.ZodOptional<z.ZodObject<{
+            start: z.ZodNumber;
+            end: z.ZodNumber;
+        }, z.core.$strict>>;
+        id: z.ZodUUID;
+        agentId: z.ZodString;
+        scopeKey: z.ZodString;
+        version: z.ZodNumber;
+        contentHash: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodLiteral<"execution-source">;
+        id: z.ZodUUID;
+        agentId: z.ZodString;
+        scopeKey: z.ZodString;
+        version: z.ZodNumber;
+        contentHash: z.ZodString;
+    }, z.core.$strict>], "kind">>;
 }, z.core.$strict>;
 export type MaintenanceLifecycle = z.infer<typeof MaintenanceLifecycleSchema>;
 export declare const MaintenanceRequestInputSchema: z.ZodObject<{
@@ -150,11 +179,11 @@ export declare const MaintenanceSnapshotSchema: z.ZodObject<{
     goal: z.ZodString;
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
-            unknown: "unknown";
-            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
+            unknown: "unknown";
             "conversation-invitation": "conversation-invitation";
+            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -383,11 +412,11 @@ export declare const MaintenanceSnapshotSchema: z.ZodObject<{
         }, z.core.$strict>], "kind">;
         motivation: z.ZodObject<{
             kind: z.ZodEnum<{
-                unknown: "unknown";
-                maintenance: "maintenance";
                 "explicit-task": "explicit-task";
                 "self-exploration": "self-exploration";
+                unknown: "unknown";
                 "conversation-invitation": "conversation-invitation";
+                maintenance: "maintenance";
                 mixed: "mixed";
             }>;
             basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -408,8 +437,8 @@ export declare const MaintenanceSnapshotSchema: z.ZodObject<{
             action: z.ZodString;
             status: z.ZodEnum<{
                 unknown: "unknown";
-                partial: "partial";
                 failed: "failed";
+                partial: "partial";
                 cancelled: "cancelled";
                 succeeded: "succeeded";
                 started: "started";
@@ -426,6 +455,35 @@ export declare const MaintenanceSnapshotSchema: z.ZodObject<{
             }>;
         }, z.core.$strict>>;
         omittedOperations: z.ZodNumber;
+        assessmentSource: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            kind: z.ZodLiteral<"memory">;
+            revision: z.ZodNumber;
+            authorization: z.ZodOptional<z.ZodObject<{
+                taskId: z.ZodUUID;
+                taskEpoch: z.ZodNumber;
+                grantId: z.ZodUUID;
+                grantVersion: z.ZodNumber;
+                policyId: z.ZodString;
+                policyVersion: z.ZodNumber;
+            }, z.core.$strict>>;
+            selectionId: z.ZodOptional<z.ZodUUID>;
+            range: z.ZodOptional<z.ZodObject<{
+                start: z.ZodNumber;
+                end: z.ZodNumber;
+            }, z.core.$strict>>;
+            id: z.ZodUUID;
+            agentId: z.ZodString;
+            scopeKey: z.ZodString;
+            version: z.ZodNumber;
+            contentHash: z.ZodString;
+        }, z.core.$strict>, z.ZodObject<{
+            kind: z.ZodLiteral<"execution-source">;
+            id: z.ZodUUID;
+            agentId: z.ZodString;
+            scopeKey: z.ZodString;
+            version: z.ZodNumber;
+            contentHash: z.ZodString;
+        }, z.core.$strict>], "kind">>;
     }, z.core.$strict>>;
     watermark: z.ZodString;
     createdAt: z.ZodISODateTime;
@@ -434,10 +492,10 @@ export declare const MaintenanceSnapshotSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type MaintenanceSnapshot = z.infer<typeof MaintenanceSnapshotSchema>;
 export declare const MaintenanceStateSchema: z.ZodEnum<{
-    ready: "ready";
     failed: "failed";
     completed: "completed";
     cancelled: "cancelled";
+    ready: "ready";
     running: "running";
     "waiting-scheduler": "waiting-scheduler";
     stale: "stale";
@@ -478,11 +536,11 @@ export declare const ExperienceRevisionSchema: z.ZodObject<{
     goal: z.ZodString;
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
-            unknown: "unknown";
-            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
+            unknown: "unknown";
             "conversation-invitation": "conversation-invitation";
+            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -783,10 +841,10 @@ export declare const MaintenanceSchedulingItemSchema: z.ZodObject<{
     watermark: z.ZodString;
     expiresAt: z.ZodISODateTime;
     state: z.ZodEnum<{
-        ready: "ready";
         failed: "failed";
         completed: "completed";
         cancelled: "cancelled";
+        ready: "ready";
         running: "running";
         "waiting-scheduler": "waiting-scheduler";
         stale: "stale";

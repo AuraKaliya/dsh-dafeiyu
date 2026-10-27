@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { ConversationSchema, TaskResultAnchorSchema, ReplyMediaManifestSchema, ReplyMediaPartSchema } from '#dafeiyu/contracts';
+import { ConversationSchema, TaskResultAnchorSchema, ReplyMediaManifestSchema, ReplyMediaPartSchema, qqMessageSequence } from '#dafeiyu/contracts';
 import { splitQqText } from './delivery.js';
 function canonical(value) { const valid = z.json().parse(value); if (valid === null || typeof valid !== 'object')
     return JSON.stringify(valid); if (Array.isArray(valid))
@@ -9,7 +9,7 @@ export const qqMediaHash = (value) => createHash('sha256').update(canonical(valu
 export const qqTextHash = (text) => createHash('sha256').update(text).digest('hex');
 const state = z.enum(['pending', 'sending', 'sent', 'unknown']);
 const part = z.union([z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(4000) }), ReplyMediaPartSchema]);
-const planSchema = z.strictObject({ version: z.literal(2), replyId: z.string(), target: ConversationSchema, sourceMessageId: z.string(), textHash: z.string().length(64), manifest: ReplyMediaManifestSchema, parts: z.array(part).min(1).max(72) });
+const planSchema = z.strictObject({ version: z.literal(2), replyId: z.string(), target: ConversationSchema, sourceMessageId: z.string(), textHash: z.string().length(64), manifest: ReplyMediaManifestSchema, parts: z.array(part).min(1).max(72), originalText: z.string().max(32000).optional() });
 const progressPart = z.strictObject({ position: z.number().int().nonnegative(), state, receipt: z.string().nullable(), code: z.string().nullable() });
 /** Builds fixed bytes/identity metadata, never authorizes those bytes or invokes a platform. */
 export function qqMediaDeliveryPlan(reply) {
@@ -23,7 +23,8 @@ export function qqMediaDeliveryPlan(reply) {
     }
     else if (manifest.anchor.kind !== 'reply' || reply.id !== manifest.anchor.inboundId + ':reply')
         throw new Error('DELIVERY_MANIFEST_MISMATCH');
-    return planSchema.parse({ version: 2, replyId: reply.id, target: reply.conversation, sourceMessageId: reply.sourceMessageId, textHash: manifest.textHash, manifest, parts: [...(reply.text ? splitQqText(reply.text) : []).map(text => ({ kind: 'text', text })), ...manifest.parts] });
+    const sequence = qqMessageSequence(reply.text), before = sequence.messages.slice(0, sequence.mediaAt).flatMap(splitQqText).map(text => ({ kind: 'text', text })), after = sequence.messages.slice(sequence.mediaAt).flatMap(splitQqText).map(text => ({ kind: 'text', text }));
+    return planSchema.parse({ version: 2, replyId: reply.id, target: reply.conversation, sourceMessageId: reply.sourceMessageId, textHash: manifest.textHash, manifest, parts: [...before, ...manifest.parts, ...after], ...(sequence.structured ? { originalText: reply.text } : {}) });
 }
 export class QqMediaDeliveryLedger {
     db;
@@ -46,7 +47,7 @@ export class QqMediaDeliveryLedger {
         const plan = planSchema.parse(JSON.parse(String(row.body)));
         if (plan.replyId !== id || qqMediaHash(plan) !== row.plan_hash)
             throw new Error('DELIVERY_LEDGER_CORRUPT');
-        const expected = qqMediaDeliveryPlan({ id: plan.replyId, conversation: plan.target, sourceMessageId: plan.sourceMessageId, text: plan.parts.filter(p => p.kind === 'text').map(p => p.text).join(''), media: plan.manifest, ...(plan.manifest.anchor.kind === 'task-result' ? { taskResult: plan.manifest.anchor } : {}) });
+        const expected = qqMediaDeliveryPlan({ id: plan.replyId, conversation: plan.target, sourceMessageId: plan.sourceMessageId, text: plan.originalText ?? plan.parts.filter(p => p.kind === 'text').map(p => p.text).join(''), media: plan.manifest, ...(plan.manifest.anchor.kind === 'task-result' ? { taskResult: plan.manifest.anchor } : {}) });
         if (qqMediaHash(plan) !== qqMediaHash(expected))
             throw new Error('DELIVERY_LEDGER_CORRUPT');
         return plan;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { TaskAssessment } from './task-assessment.js';
 import { ConversationSchema } from './conversation.js';
 import { PersonaSourceRefSchema } from './persona.js';
 import type { PersonaAccess } from './persona.js';
@@ -13,6 +14,8 @@ export const NativeExpressionPacketSchema=z.strictObject({id:z.uuid(),version:z.
 export type NativeExpressionPacket=z.infer<typeof NativeExpressionPacketSchema>;
 /** Created by the core from persisted, verified native execution facts, never model-supplied. */
 export interface NativeExpressionAccess {readonly execution:PersonaAccess;readonly anchor:TaskResultAnchor;readonly question:string;readonly output:string;
+  readonly assessment?:TaskAssessment;readonly selectedSourceIds?:readonly string[];
+  readonly operationalEvidence?:readonly NativeExpressionPacket['evidence'][number][];
   readonly candidates:readonly z.infer<typeof NativeExpressionCandidateSchema>[];readonly opaqueInfluence:boolean;
   /** Only the Core source walk can attest that a derived target page has no unclassified input influence. */
   readonly derivedInputComplete?:boolean;readonly requestMaxBytes:number;readonly expressionPolicy?:{id:string;version:number};readonly media?:NativeMediaMaterial;guard():void;}

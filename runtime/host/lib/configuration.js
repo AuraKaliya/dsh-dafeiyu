@@ -17,7 +17,7 @@ import { physicalPath, resource, overlap, pathIdentity, within } from './paths.j
 import { InlineModelSettingsSchema } from './inline-model.js';
 import { normalizeHostPlugins } from './plugin-assembly.js';
 const endpoint = z.url().refine(raw => { const url = new URL(raw); return (url.protocol === 'https:' || url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) && !url.username && !url.password && !url.search && !url.hash; });
-export const DeepSeekConfigSchema = z.strictObject({ credentialStore: z.string().min(1).default(join(homedir(), '.dsh', '.credentials.yaml')), credentialName: z.literal('DEEPSEEK_API_KEY').default('DEEPSEEK_API_KEY'), baseURL: endpoint.default('https://api.deepseek.com/anthropic'), inlineTransport: InlineModelSettingsSchema.optional() });
+export const DeepSeekConfigSchema = z.strictObject({ auth: z.enum(['api-key', 'dsh-account']).optional(), credentialStore: z.string().min(1).default(join(homedir(), '.dsh', '.credentials.yaml')), credentialName: z.literal('DEEPSEEK_API_KEY').default('DEEPSEEK_API_KEY'), baseURL: endpoint.default('https://api.deepseek.com/anthropic'), inlineTransport: InlineModelSettingsSchema.optional() });
 export const ScriptedConfigSchema = z.strictObject({ response: z.string().trim().min(1).max(8000).default('这是本机虚构样例；模拟模型已完成任务。') });
 export const TimelineConfigSchema = TimelinePluginConfigSchema;
 export const SimulatorConfigSchema = z.strictObject({ account: z.string().min(1).max(100).default('local-test') });
@@ -129,8 +129,10 @@ export function loadHostConfig(input) {
         const enabled = plugins.filter(p => p.enabled), models = enabled.filter(p => p.id.startsWith('model-'));
         if (models.length !== 1)
             throw new Error('HOST_MODEL_PROVIDER_REQUIRED');
-        if (config.modelRoutes.chat.provider !== (models[0].id === 'model-deepseek' ? 'deepseek-official' : 'local-test'))
+        if (config.modelRoutes.chat.provider !== (models[0].id === 'model-deepseek' ? (models[0].config.auth === 'dsh-account' ? 'deepseek-account' : 'deepseek-official') : 'local-test'))
             throw new Error('HOST_MODEL_ROUTE_MISMATCH');
+        if (models[0].config.auth === 'dsh-account' && new URL(String(models[0].config.baseURL)).origin !== 'https://api.deepseek.com')
+            throw new Error('HOST_ACCOUNT_ORIGIN_INVALID');
         if (models[0].config.inlineTransport && !['off', 'low', 'high', 'max'].includes(config.modelRoutes.chat.reasoningEffort ?? ''))
             throw new Error('HOST_INLINE_REASONING_REQUIRED');
         if (models[0].id === 'model-scripted' && (config.persona.kind !== 'test' || config.modelRoutes.chat.model !== 'scripted'))
@@ -254,7 +256,7 @@ export function loadHostConfig(input) {
                 throw new Error('HOST_QQ_TASK_DEPENDENCY_REQUIRED');
             const conversation = config.authorityPolicies.find(policy => policy.id === 'conversation' && policy.producers.includes('channel-qq'));
             const native = config.authorityPolicies.find(policy => policy.id === qqTasks.policyId && policy.producers.includes('qq-tasks'));
-            if (!conversation || QQ_TASK_ACTIONS.some(action => !conversation.actions.includes(action)) || !native?.allowLocalWrite || ['dafeiyu_task_intent', 'dafeiyu_task_object'].some(action => !native.actions.includes(action)))
+            if (!conversation || QQ_TASK_ACTIONS.slice(0, 3).some(action => !conversation.actions.includes(action)) || !native?.allowLocalWrite || ['dafeiyu_task_intent', 'dafeiyu_task_object'].some(action => !native.actions.includes(action)))
                 throw new Error('HOST_QQ_TASK_POLICY_REQUIRED');
             if (qqTasks.explorationResources?.some(scene => !native.resources.some(allowed => runtimeHash(scene) === runtimeHash(allowed))))
                 throw new Error('HOST_QQ_EXPLORATION_RESOURCE_DENIED');

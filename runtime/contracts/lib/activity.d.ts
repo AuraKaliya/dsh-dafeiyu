@@ -201,10 +201,10 @@ export declare const WakeOccurrenceBodySchema: z.ZodObject<{
     dueAt: z.ZodISODateTime;
     createdAt: z.ZodISODateTime;
     reason: z.ZodEnum<{
-        time: "time";
-        maintenance: "maintenance";
-        condition: "condition";
         resume: "resume";
+        maintenance: "maintenance";
+        time: "time";
+        condition: "condition";
     }>;
     eventId: z.ZodNullable<z.ZodString>;
     configHash: z.ZodString;
@@ -212,12 +212,12 @@ export declare const WakeOccurrenceBodySchema: z.ZodObject<{
 export type WakeOccurrenceBody = z.infer<typeof WakeOccurrenceBodySchema>;
 export declare const ActivityOccurrenceStateSchema: z.ZodEnum<{
     failed: "failed";
-    waiting: "waiting";
-    blocked: "blocked";
     completed: "completed";
     pending: "pending";
     cancelled: "cancelled";
     accepted: "accepted";
+    waiting: "waiting";
+    blocked: "blocked";
     running: "running";
 }>;
 export type ActivityOccurrenceState = z.infer<typeof ActivityOccurrenceStateSchema>;

@@ -51,8 +51,8 @@ export declare const archiveSchema: z.ZodObject<{
         schemaVersion: z.ZodLiteral<1>;
         outcome: z.ZodEnum<{
             unknown: "unknown";
-            partial: "partial";
             failed: "failed";
+            partial: "partial";
             succeeded: "succeeded";
             running: "running";
         }>;
@@ -64,9 +64,9 @@ export declare const archiveSchema: z.ZodObject<{
         }>;
         effects: z.ZodEnum<{
             unknown: "unknown";
-            partial: "partial";
             none: "none";
             applied: "applied";
+            partial: "partial";
         }>;
         resourceVersion: z.ZodString;
         diagnostics: z.ZodArray<z.ZodObject<{

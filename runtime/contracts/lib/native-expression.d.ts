@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { TaskAssessment } from './task-assessment.js';
 import type { PersonaAccess } from './persona.js';
 import type { NativeMediaMaterial } from './media.js';
 export declare const TaskResultAnchorSchema: z.ZodObject<{
@@ -97,9 +98,9 @@ export declare const NativeExpressionPacketSchema: z.ZodObject<{
         parts: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
             kind: z.ZodLiteral<"asset">;
             delivery: z.ZodEnum<{
-                image: "image";
                 record: "record";
                 file: "file";
+                image: "image";
             }>;
             asset: z.ZodObject<{
                 schemaVersion: z.ZodLiteral<1>;
@@ -128,6 +129,9 @@ export interface NativeExpressionAccess {
     readonly anchor: TaskResultAnchor;
     readonly question: string;
     readonly output: string;
+    readonly assessment?: TaskAssessment;
+    readonly selectedSourceIds?: readonly string[];
+    readonly operationalEvidence?: readonly NativeExpressionPacket['evidence'][number][];
     readonly candidates: readonly z.infer<typeof NativeExpressionCandidateSchema>[];
     readonly opaqueInfluence: boolean;
     /** Only the Core source walk can attest that a derived target page has no unclassified input influence. */

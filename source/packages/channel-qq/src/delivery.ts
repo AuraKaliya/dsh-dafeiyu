@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { ConversationSchema,TaskResultAnchorSchema } from '@dafeiyu/contracts';
+import { ConversationSchema,TaskResultAnchorSchema,qqMessageSequence } from '@dafeiyu/contracts';
 import type { Reply } from '@dafeiyu/contracts';
 
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const replySchema=z.strictObject({id:z.string().min(1).max(200),conversation:ConversationSchema,sourceMessageId:z.string().min(1).max(80),text:z.string().min(1).max(32000),taskResult:TaskResultAnchorSchema.optional()});
 const segmentState=z.enum(['pending','sending','sent','unknown']);
 const segmentSchema=z.object({position:z.number().int().nonnegative(),state:segmentState,receipt:z.string().nullable(),code:z.string().nullable()});
-const planSchema=z.strictObject({version:z.literal(1),replyId:z.string(),target:ConversationSchema,anchor:z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('reply'),messageId:z.string()}),TaskResultAnchorSchema.extend({messageId:z.string()})]),bodyHash:z.string(),segments:z.array(z.string().min(1).max(4000)).min(1).max(64)});
+const planSchema=z.strictObject({version:z.literal(1),replyId:z.string(),target:ConversationSchema,anchor:z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('reply'),messageId:z.string()}),TaskResultAnchorSchema.extend({messageId:z.string()})]),bodyHash:z.string(),segments:z.array(z.string().min(1).max(4000)).min(1).max(64),originalText:z.string().max(32000).optional()});
 export type QqDeliveryPlan=z.infer<typeof planSchema>;
 export interface QqDeliveryProgress {replyId:string;planHash:string|null;state:'ready'|'sending'|'partial'|'uncertain'|'sent';total:number;confirmed:number;pending:number;unknown:number;legacy:boolean;segments:z.infer<typeof segmentSchema>[]}
 
@@ -27,7 +27,7 @@ export function splitQqText(text:string):string[]{
   }
   return result;
 }
-export function qqDeliveryPlan(reply:Reply):QqDeliveryPlan {const value=replySchema.parse(reply);return planSchema.parse({version:1,replyId:value.id,target:value.conversation,anchor:value.taskResult?{...value.taskResult,messageId:value.sourceMessageId}:{kind:'reply',messageId:value.sourceMessageId},bodyHash:digest(value.text),segments:splitQqText(value.text)});}
+export function qqDeliveryPlan(reply:Reply):QqDeliveryPlan {const value=replySchema.parse(reply),sequence=qqMessageSequence(value.text);if(!sequence.messages.length)throw new Error('QQ_MESSAGE_SEQUENCE_INVALID');return planSchema.parse({version:1,replyId:value.id,target:value.conversation,anchor:value.taskResult?{...value.taskResult,messageId:value.sourceMessageId}:{kind:'reply',messageId:value.sourceMessageId},bodyHash:digest(value.text),segments:sequence.messages.flatMap(splitQqText),...(sequence.structured?{originalText:value.text}:{})});}
 
 /** Ledger only: no network, automatic retransmission, model calls or source authority. */
 export class QqDeliveryLedger {

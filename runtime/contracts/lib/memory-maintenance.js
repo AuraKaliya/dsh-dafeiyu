@@ -14,6 +14,7 @@ export const MaintenanceLifecycleSchema = z.strictObject({
         status: z.enum(['started', 'succeeded', 'partial', 'failed', 'cancelled', 'unknown']),
         effects: z.enum(['none', 'confirmed', 'unknown']), completeness: z.enum(['complete', 'partial', 'unknown']) })).max(256),
     omittedOperations: z.number().int().nonnegative(),
+    assessmentSource: PersonaSourceRefSchema.optional(),
 });
 export const MaintenanceRequestInputSchema = z.strictObject({ requestId: PersonaRequestIdSchema,
     sources: z.array(PersonaSourceRefSchema).max(32), reason: short,

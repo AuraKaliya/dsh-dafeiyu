@@ -2,6 +2,10 @@ import { z } from 'zod';
 import type { HostConfig } from '#dafeiyu/contracts';
 import type { HostResource } from './paths.js';
 export declare const DeepSeekConfigSchema: z.ZodObject<{
+    auth: z.ZodOptional<z.ZodEnum<{
+        "api-key": "api-key";
+        "dsh-account": "dsh-account";
+    }>>;
     credentialStore: z.ZodDefault<z.ZodString>;
     credentialName: z.ZodDefault<z.ZodLiteral<"DEEPSEEK_API_KEY">>;
     baseURL: z.ZodDefault<z.ZodURL>;
@@ -137,16 +141,6 @@ export declare const pluginSchemas: {
         maintenance: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>;
     readonly media: z.ZodObject<{
-        ffmpeg: import("zod").ZodString;
-        ffprobe: import("zod").ZodString;
-        maxBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
-        maxAssetBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
-        timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
-        vision: import("zod").ZodOptional<import("zod").ZodObject<{
-            provider: import("zod").ZodString;
-            model: import("zod").ZodString;
-            reasoningEffort: import("zod").ZodOptional<import("zod").ZodString>;
-        }, import("zod/v4/core").$strict>>;
         audio: import("zod").ZodOptional<import("zod").ZodObject<{
             whisper: import("zod").ZodOptional<import("zod").ZodObject<{
                 node: import("zod").ZodString;
@@ -173,6 +167,16 @@ export declare const pluginSchemas: {
                 numpyVersion: import("zod").ZodString;
                 memoryBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
             }, import("zod/v4/core").$strict>>;
+        }, import("zod/v4/core").$strict>>;
+        ffmpeg: import("zod").ZodString;
+        ffprobe: import("zod").ZodString;
+        maxBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
+        maxAssetBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
+        timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
+        vision: import("zod").ZodOptional<import("zod").ZodObject<{
+            provider: import("zod").ZodString;
+            model: import("zod").ZodString;
+            reasoningEffort: import("zod").ZodOptional<import("zod").ZodString>;
         }, import("zod/v4/core").$strict>>;
         documents: import("zod").ZodOptional<import("zod").ZodObject<{
             python: import("zod").ZodString;
@@ -253,11 +257,6 @@ export declare const pluginSchemas: {
             maxReadBytes: z.ZodDefault<z.ZodNumber>;
             voiceDirectives: z.ZodDefault<z.ZodBoolean>;
         }, z.core.$strict>>;
-        stickers: z.ZodPrefault<z.ZodObject<{
-            enabled: z.ZodDefault<z.ZodBoolean>;
-            maxBytes: z.ZodDefault<z.ZodNumber>;
-            maxEntries: z.ZodDefault<z.ZodNumber>;
-        }, z.core.$strict>>;
         botId: z.ZodString;
         ownerId: z.ZodString;
         groupIds: z.ZodArray<z.ZodString>;
@@ -282,6 +281,11 @@ export declare const pluginSchemas: {
             quietMs: z.ZodDefault<z.ZodNumber>;
             maxWaitMs: z.ZodDefault<z.ZodNumber>;
             maxMessages: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        stickers: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+            maxEntries: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         tasks: z.ZodPrefault<z.ZodObject<{
             enabled: z.ZodDefault<z.ZodBoolean>;
@@ -335,6 +339,10 @@ export declare const pluginSchemas: {
         account: z.ZodDefault<z.ZodString>;
     }, z.core.$strict>;
     readonly 'model-deepseek': z.ZodObject<{
+        auth: z.ZodOptional<z.ZodEnum<{
+            "api-key": "api-key";
+            "dsh-account": "dsh-account";
+        }>>;
         credentialStore: z.ZodDefault<z.ZodString>;
         credentialName: z.ZodDefault<z.ZodLiteral<"DEEPSEEK_API_KEY">>;
         baseURL: z.ZodDefault<z.ZodURL>;

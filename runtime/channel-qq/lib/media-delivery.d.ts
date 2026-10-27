@@ -170,15 +170,16 @@ declare const planSchema: z.ZodObject<{
         }, z.core.$strict>;
         name: z.ZodString;
     }, z.core.$strict>], "kind">]>>;
+    originalText: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export type QqMediaDeliveryPlan = z.infer<typeof planSchema>;
 declare const progressPart: z.ZodObject<{
     position: z.ZodNumber;
     state: z.ZodEnum<{
         unknown: "unknown";
-        sending: "sending";
         sent: "sent";
         pending: "pending";
+        sending: "sending";
     }>;
     receipt: z.ZodNullable<z.ZodString>;
     code: z.ZodNullable<z.ZodString>;
@@ -324,6 +325,7 @@ export declare class QqMediaDeliveryLedger {
             };
             name: string;
         })[];
+        originalText?: string | undefined;
     } | null;
     prepare(reply: Reply): {
         version: 2;
@@ -450,6 +452,7 @@ export declare class QqMediaDeliveryLedger {
             };
             name: string;
         })[];
+        originalText?: string | undefined;
     };
     progress(id: string): QqMediaDeliveryProgress | null;
     begin(id: string, position: number): void;

@@ -3,17 +3,17 @@ import { z } from 'zod';
 import type { Json, TaskResultAnchor, Conversation } from '#dafeiyu/contracts';
 export declare const nativeDeliveryHash: (value: unknown) => string;
 declare const stateSchema: z.ZodEnum<{
-    interrupted: "interrupted";
-    rejected: "rejected";
     accepted: "accepted";
+    interrupted: "interrupted";
+    partial: "partial";
+    uncertain: "uncertain";
     rendering: "rendering";
     verifying: "verifying";
     ready: "ready";
     sending: "sending";
     sent: "sent";
     "not-sent": "not-sent";
-    partial: "partial";
-    uncertain: "uncertain";
+    rejected: "rejected";
 }>;
 export type NativeDeliveryState = z.infer<typeof stateSchema>;
 declare const materialSchema: z.ZodObject<{
@@ -40,7 +40,7 @@ export declare class NativeDeliveryStore {
     get(runId: string): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -51,7 +51,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -81,7 +81,7 @@ export declare class NativeDeliveryStore {
     create(anchor: TaskResultAnchor): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -92,7 +92,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -123,7 +123,7 @@ export declare class NativeDeliveryStore {
     start(runId: string, raw: NativeDeliveryMaterial): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -134,7 +134,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -164,7 +164,7 @@ export declare class NativeDeliveryStore {
     rendered(runId: string, raw: z.infer<typeof renderRef>): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -175,7 +175,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -205,7 +205,7 @@ export declare class NativeDeliveryStore {
     approve(runId: string, body: string): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -216,7 +216,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -247,7 +247,7 @@ export declare class NativeDeliveryStore {
     sending(runId: string): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -258,7 +258,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -288,7 +288,7 @@ export declare class NativeDeliveryStore {
     finish(runId: string, state: 'sent' | 'not-sent' | 'partial' | 'uncertain', receipt: string | null, code: string | null): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -299,7 +299,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -329,7 +329,7 @@ export declare class NativeDeliveryStore {
     reject(runId: string, code: string): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -340,7 +340,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -370,7 +370,7 @@ export declare class NativeDeliveryStore {
     interrupt(runId: string): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -381,7 +381,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -412,7 +412,7 @@ export declare class NativeDeliveryStore {
     list(states?: readonly NativeDeliveryState[]): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -423,7 +423,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -453,7 +453,7 @@ export declare class NativeDeliveryStore {
     recent(target: Conversation): {
         id: string;
         runId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         anchor: {
             kind: "task-result";
@@ -464,7 +464,7 @@ export declare class NativeDeliveryStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "group" | "private" | "local";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -504,7 +504,7 @@ export declare class NativeDeliveryStore {
         deliveryId: string;
         runId: string;
         taskId: string;
-        state: "interrupted" | "rejected" | "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain";
+        state: "accepted" | "interrupted" | "partial" | "uncertain" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
         version: number;
         receiptId: string | null;
         error: string | null;

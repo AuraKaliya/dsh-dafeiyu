@@ -12,6 +12,7 @@ import { visibleStream } from './visible-stream.js';
 import { NativeRuntime } from './native-runtime.js';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { conversationHistory } from './history-frame.js';
+import { assessTask } from './task-assessment.js';
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
     sources;
@@ -229,6 +230,7 @@ export class DshRuntime {
         await this.native.close();
     }
     runExecution(frame) { return this.runFrame(frame); }
+    assessExecution(frame, draft, facts) { return assessTask(this.ctx, this.model, this.cwd, frame, draft, facts); }
     readResult(ref) { return readPersistedResult(this.ctx, ref); }
     summaryCommitted(sessionId, id, text) {
         const session = this.handles.get(sessionId)?.handle.agent.session;

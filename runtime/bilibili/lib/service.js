@@ -1,6 +1,7 @@
 import { Service } from '@deepseek-ai/cordis';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { ReadProgressSchema } from '#dafeiyu/contracts';
 import { ServiceGate, CapabilitySelectionSchema, PersonaRequestIdSchema, ExecutionScopeSchema, RunOriginSchema, redactContent } from '#dafeiyu/contracts';
 import { BiliConfigSchema, BILI_SCENE, BvidSchema, NumberIdSchema, code } from './config.js';
 import { BiliStore, biliOwner, biliHash } from './store.js';
@@ -123,7 +124,7 @@ export class BiliService extends Service {
         const items = z.object({ items: z.array(z.unknown()) }).safeParse(page.data), count = items.success ? items.data.items.length : 1;
         const observation = this.ctx.dafeiyu.recordCapabilityObservation(context, 'bilibili', { requestId: 'page:' + page.id, proof: this.store.proof(page), text, occurredAt: page.fetchedAt, coverage: page.coverage, counts: { received: count, processed: count } });
         this.store.bindObservation(page, observation.source);
-        return { pageId: page.id, page: view, observation };
+        return { pageId: page.id, page: view, readProgress: ReadProgressSchema.parse({ state: 'observed', subject: 'provided-page', completeness: 'complete' }), observation };
     }
     async readPage(context, id, fingerprint, kind, sourceKey, read, parents = []) {
         const active = this.guard(context), guard = () => { active(); if (parents.some(p => !this.store.current(p)))

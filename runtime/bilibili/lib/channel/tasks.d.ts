@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Conversation, InboundMessage } from '#dafeiyu/contracts';
-export declare const BILI_OWNER_TASK_ACTIONS: readonly ["bili_owner_task_submit", "bili_owner_task_status", "bili_owner_task_control"];
+export declare const BILI_OWNER_TASK_ACTIONS: readonly ["bili_owner_task_submit", "bili_owner_task_status", "bili_owner_task_control", "bili_owner_explore"];
 export declare function biliOwnerTaskDirective(message: Pick<InboundMessage, 'mainText'>): {
     kind: 'submit' | 'cancel' | 'revise' | 'resolve' | 'none';
     text: string;

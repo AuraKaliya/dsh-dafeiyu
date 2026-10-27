@@ -1262,7 +1262,7 @@ export declare function composeFragmentContent(views: readonly ResolvedFragmentV
         semanticDepth?: number | undefined;
     }[];
     fragments: {
-        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+        kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
         text: string;
         id: string;
         version: 1;
@@ -1592,7 +1592,7 @@ export declare function rewrittenContent(session: Session, parent: ResolvedFragm
         semanticDepth?: number | undefined;
     }[];
     fragments: {
-        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+        kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
         text: string;
         id: string;
         version: 1;
@@ -1607,7 +1607,7 @@ export declare function resolveFragmentView(session: Session, reference: string,
 /** Display lifecycle only. Neither 'active' nor 'superseded' asserts live source validity. */
 export declare function summarySelectionState(session: Session, reference: string, scope: TimelineScope): 'active' | 'withdrawn' | 'superseded' | 'unselected' | 'unproven';
 export declare function activeFragments(view: ResolvedFragmentView): {
-    kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+    kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
     text: string;
     id: string;
     version: 1;

@@ -11,6 +11,18 @@ interface Host {
     cwd: string;
     signal: AbortSignal;
     timeoutMs: number;
+    sendTimeoutMs: number;
+    feedbackSource(runId: string): {
+        item: PendingMessage;
+        taskId: string;
+        state: string;
+        error: string | null;
+        operations: readonly {
+            state: string;
+            status: string | null;
+            effects: string | null;
+        }[];
+    } | null;
     describe(runId: string): {
         item: PendingMessage;
         anchor: TaskResultAnchor;
@@ -37,6 +49,7 @@ interface Host {
 /** One intent per completed native Run, a clean persona turn, verification, then anchored transport. */
 export declare class NativeTaskDelivery {
     private readonly host;
+    private readonly notices;
     private readonly active;
     private readonly views;
     private readonly unregister;
@@ -46,7 +59,7 @@ export declare class NativeTaskDelivery {
         deliveryId: string;
         runId: string;
         taskId: string;
-        state: "rejected" | "interrupted" | "partial" | "ready" | "accepted" | "sending" | "uncertain" | "sent" | "not-sent" | "rendering" | "verifying";
+        state: "accepted" | "interrupted" | "rendering" | "ready" | "sending" | "partial" | "uncertain" | "verifying" | "sent" | "not-sent" | "rejected";
         version: number;
         receiptId: string | null;
         error: string | null;
@@ -54,7 +67,10 @@ export declare class NativeTaskDelivery {
     activate(): void;
     whenIdle(): Promise<void>;
     get pending(): number;
+    progress(runId: string): Promise<import('#dafeiyu/contracts').Json>;
+    private statusNotice;
     close(): void;
     private execute;
+    private feedback;
 }
 export {};

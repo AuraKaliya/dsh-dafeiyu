@@ -6,7 +6,8 @@ const path = z.string().trim().min(1).max(4096), uid = z.string().regex(/^[1-9][
 export const InstallationSettingsSchema = z.strictObject({
     schemaVersion: z.literal(1), dataDir: path, instanceName: z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('dafeiyu'),
     foundationFile: path.optional(),
-    model: z.strictObject({ model: z.string().trim().min(1).max(160), reasoningEffort: z.string().trim().min(1).max(40).optional(),
+    dshTools: z.boolean().default(false),
+    model: z.strictObject({ auth: z.enum(['api-key', 'dsh-account']).optional(), model: z.string().trim().min(1).max(160), reasoningEffort: z.string().trim().min(1).max(40).optional(),
         credentialStore: path, baseURL: z.url().optional(), inlineTransport: z.record(z.string(), z.json()).optional() }),
     qq: z.strictObject({ botId: qq, ownerId: qq, tokenFile: path, httpURL: z.url(), wsURL: z.url(),
         messageBatch: QqBatchConfigSchema.prefault({ enabled: true }), stickers: QqStickersConfigSchema.prefault({}),

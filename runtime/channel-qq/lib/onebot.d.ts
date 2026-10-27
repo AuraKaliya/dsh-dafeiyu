@@ -15,7 +15,7 @@ export declare class OneBot {
     groups(signal: AbortSignal): Promise<{
         id: string;
         name: string;
-        msgMask: 1 | 2 | 4 | 3 | null;
+        msgMask: 4 | 1 | 2 | 3 | null;
     }[]>;
     history(scene: {
         account: string;

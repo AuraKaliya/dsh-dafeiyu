@@ -7,6 +7,7 @@ import { MEMORY_VERSION } from './types.js';
 import { MemoryCompaction } from './compaction.js';
 import { evidenceSelectionSchema } from './execution-memory-state.js';
 import { personaScope, uniqueSources } from './persona-digest.js';
+import { QqExpressionPreferences, QqExpressionSaveSchema } from './qq-expression.js';
 const auditSchema = z.strictObject({ id: z.uuid(), type: z.string(), scope: ExecutionScopeSchema, runId: z.uuid(), origin: RunOriginSchema, operationId: z.string(), causedBy: z.string().nullable(), producer: z.string(), at: z.iso.datetime(), data: z.record(z.string(), z.json()) });
 const proposal = z.strictObject({ requestId: PersonaRequestIdSchema, kind: PersonaKindSchema, text: z.string().trim().min(1).max(8000), sources: z.array(z.string().max(300)).max(16).default([]),
     counters: z.array(z.string().max(300)).max(16).default([]), applicability: z.string().trim().min(1).max(1000), reason: z.string().trim().min(1).max(1000) });
@@ -18,6 +19,7 @@ export class GrowthService {
     tasks;
     agentId;
     ready;
+    qqExpression;
     experiences;
     store;
     sources;
@@ -33,6 +35,7 @@ export class GrowthService {
         this.tasks = tasks;
         this.agentId = agentId;
         this.ready = ready;
+        this.qqExpression = new QqExpressionPreferences(ctx, memory, agentId, ready);
         this.experiences = memory.experienceStore((access, ref) => this.resolve(access, ref));
         this.sources = memory.executionSources((access, ref) => this.resolve(access, ref));
         this.store = memory.personaStore((access, ref) => this.resolve(access, ref));
@@ -40,6 +43,12 @@ export class GrowthService {
         const compact = compaction ? new MemoryCompaction(ctx, compaction, scope => ({ epoch: String(memory.generation(scope)), taskId: null, versions: { memory: memory.generation(scope) } }), { inbound: () => [], context: () => [], tool: () => [], validate: () => false }) : null;
         const port = { ready, resourceEpoch: access => ctx.dafeiyu.capabilityResourceEpoch({ agentId: access.view.scope.agentId, route: personaScope(access.view.scope) }), validate: (access, ref) => !!this.resolve(access, ref),
             ...(maintenanceEnabled ? { recordLifecycle: (event) => { this.experiences.recordLifecycle(event); } } : {}),
+            recordAssessment: (access, assessment) => { try {
+                return this.sources.selfReport(access, 'task-assessment:' + access.view.runId, JSON.stringify({ kind: 'model-result-assessment', assessment, evidenceStatus: 'model-judgment', instructionAuthority: false }), access.admittedSources);
+            }
+            finally {
+                this.flush();
+            } },
             operationSources: (access, id) => uniqueSources([...this.sources.operationSources(access, id), ...this.executionState.operationSources(access, id), ...memory.capabilities.operationSources(access, id)]),
             outcomeSources: (access, refs) => refs.map(ref => { const source = this.sources.reference(access, ref.id) ?? memory.capabilities.reference({ agentId, route: personaScope(access.view.scope) }, ref.id); if (!source || source.scopeKey !== ref.scopeKey || source.version !== ref.version || source.contentHash !== ref.contentHash || !this.resolve(access, source))
                 throw new Error('SOURCE_STALE'); return source; }),
@@ -65,7 +74,7 @@ export class GrowthService {
             } },
             ...(compact ? { compactionPolicy: compact.policy, summarize: compact.summarize.bind(compact), summarizeFragments: compact.summarizeFragments.bind(compact), rewrite: compact.rewrite.bind(compact) } : { summarize: async () => { throw new Error('COMPACTION_NOT_CONFIGURED'); } }) };
         this.unbindExecution = ctx.dafeiyu.bindExecutionMemory(port);
-        this.unbind = ctx.dafeiyu.bindGrowthProvider({ ready, prepare: access => this.store.prepare(access), validate: (access, entry) => this.ready() && this.store.validate(access, entry),
+        this.unbind = ctx.dafeiyu.bindGrowthProvider({ ready, expressionPreferences: scene => this.qqExpression.prepare(scene), prepare: access => this.store.prepare(access), validate: (access, entry) => this.ready() && this.store.validate(access, entry),
             validateHistoricalTrial: (access, dependency) => this.ready() && this.store.validateHistoricalTrial(access, dependency),
             trialAdmitted: (input, authority) => { try {
                 return this.store.admitTrial(ctx.dafeiyu.personaTrialAccess(authority, input), input);
@@ -296,6 +305,8 @@ export class GrowthService {
                 }
             } });
         return [
+            make('dafeiyu_qq_expression_status', '读取当前QQ场景已长期保存的表达规则和版本；这是表达偏好，不是身份或事实权限。', z.strictObject({}), false, c => this.qqExpression.status(this.ctx.dafeiyu.quoteReplySource(c, 'memory-persona').target)),
+            make('dafeiyu_qq_expression_save', '保存或调整当前QQ场景的长期表达偏好／可调整表达规则。自主选择tone/length/structure/pacing/address/other；首次expectedVersion=0，修改先status。自选用self-preference，真实用户要求用user-request；空text撤下。保存到既有Memory，由Growth管理并自动装配QQ回复、阶段反馈、任务结果。不是已采用人格，不能传递任务事实、系统指令或权限；临时要求直接遵循，不必都永久保存。', QqExpressionSaveSchema, true, (c, i) => this.qqExpression.save(c, this.access(c, 'memory-persona', true), i)),
             make('dafeiyu_persona_propose', '提出暂定候选。text是自述，不是世界事实，也不证明已经试行。sources/counters只接受当前已曝光的task-link输入、execution-source:来源ID或memory:记忆ID:修订号。不改底色或直接形成稳定偏好。', proposal, true, (context, input) => this.propose(context, input), true),
             make('dafeiyu_persona_review', '复核候选并选择held、trial或rejected。设为trial只是准备试行；之后须trial_select，由真实后续Run装入并闭合，再作采用评审。状态切换、评分和自述都不能代替实际使用结果。', z.strictObject({ ...control, state: z.enum(['held', 'trial', 'rejected']) }), true, (context, input) => this.review(context, input)),
             make('dafeiyu_persona_trial_select', '选择下一轮实际使用的精确trial候选及适用、退出条件。它仍是暂定认识，不会成为已采用人格；空数组撤下本范围试行选择。实际使用和闭合结果由核心记录，不可自行声明完成试行。', PersonaTrialSelectInputSchema, true, (context, input) => this.selectTrial(context, input)),

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ReadProgressSchema } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import { ConversationSchema,MediaAttachmentSchema,ResourceProofSchema,PersonaSourceRefSchema,messageParts } from '@dafeiyu/contracts';
@@ -42,7 +43,7 @@ export class QqMedia {
     const target=input.target??inbound?.message.conversation;if(!target)throw new Error('RESOURCE_TARGET_REQUIRED');this.ctx.dafeiyu.authorizeCapabilityResource(context,QQ_MEDIA_PROVIDER,target);
     if(!this.host.allowed(target)||this.controller.signal.aborted)throw new Error('TARGET_NOT_ALLOWED');const messageId=input.messageId??inbound?.message.id;if(!messageId)throw new Error('MESSAGE_REQUIRED');
     const messageIds=!input.messageId&&inbound?.message.batch?messageParts(inbound.message).map(part=>part.id):[messageId];
-    const data={target,messageId,messageIds,media:messageIds.flatMap(id=>this.host.store.media.list(target,id)),coverage:'仅实际收到的至多8个媒体段；未取得内容，不包含离线历史'};
+    const data={target,messageId,messageIds,media:messageIds.flatMap(id=>this.host.store.media.list(target,id)),readProgress:ReadProgressSchema.parse({state:'unread',subject:'reference',completeness:'unknown'}),coverage:'仅实际收到的至多8个媒体段；未取得内容，不包含离线历史'};
     if(!data.media.length)return data;const detail={kind:'media-list',messageId,messageIds,parts:data.media.map(d=>d.origin)},hash=digest(detail);
     const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,QQ_MEDIA_PROVIDER,{requestId:'list:'+digest([context.runId,context.operationId,hash]),proof:{provider:QQ_MEDIA_PROVIDER,scene:target,key:'list:'+hash,version:1,hash,roots:messageIds.map(id=>`qq:${target.account}:${target.kind}:${target.id}:message:${id}`),detail},
       text:JSON.stringify(data),occurredAt:new Date().toISOString(),coverage:['只曝光媒体元信息，未处理任何媒体正文'],counts:{received:data.media.length,processed:0}});

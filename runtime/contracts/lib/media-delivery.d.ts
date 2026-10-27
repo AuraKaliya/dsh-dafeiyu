@@ -193,9 +193,9 @@ export declare const MediaReplyDraftInputSchema: z.ZodObject<{
             mime: z.ZodString;
         }, z.core.$strict>;
         as: z.ZodOptional<z.ZodEnum<{
-            image: "image";
             record: "record";
             file: "file";
+            image: "image";
         }>>;
     }, z.core.$strict>, z.ZodObject<{
         kind: z.ZodLiteral<"final-voice">;

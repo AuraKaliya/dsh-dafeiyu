@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { DeliveryResult, Reply, TaskResultAnchor, ReplyMediaManifest } from '#dafeiyu/contracts';
 import { z } from 'zod';
 export { qqReplyDelayMs } from './reply-delay.js';
+export { QQ_PROGRESS_ACTIONS } from './progress.js';
 export { QQ_STICKER_ACTIONS } from './stickers.js';
 export { QqBatchConfigSchema } from './batch.js';
 export { QqStickersConfigSchema } from './sticker-store.js';
@@ -101,11 +102,6 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         maxReadBytes: z.ZodDefault<z.ZodNumber>;
         voiceDirectives: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>>;
-    stickers: z.ZodPrefault<z.ZodObject<{
-        enabled: z.ZodDefault<z.ZodBoolean>;
-        maxBytes: z.ZodDefault<z.ZodNumber>;
-        maxEntries: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strict>>;
     botId: z.ZodString;
     ownerId: z.ZodString;
     groupIds: z.ZodArray<z.ZodString>;
@@ -130,6 +126,11 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         quietMs: z.ZodDefault<z.ZodNumber>;
         maxWaitMs: z.ZodDefault<z.ZodNumber>;
         maxMessages: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    stickers: z.ZodPrefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        maxBytes: z.ZodDefault<z.ZodNumber>;
+        maxEntries: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     tasks: z.ZodPrefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -178,6 +179,8 @@ export declare class QqChannel extends Service {
     private readonly batches;
     private readonly stickers;
     private readonly sourceSignals;
+    private readonly tails;
+    private progress;
     private readonly token;
     private socket;
     private retry;
@@ -245,7 +248,7 @@ export declare class QqChannel extends Service {
             enabled: boolean;
             registered: boolean;
             deliverResults: boolean;
-            actions: ("qq_task_submit" | "qq_task_status" | "qq_task_control")[];
+            actions: ("qq_task_submit" | "qq_task_status" | "qq_task_control" | "qq_explore")[];
         };
         capabilities: {
             enabled: boolean;
@@ -284,6 +287,7 @@ export declare class QqChannel extends Service {
     deliverMedia(reply: Reply & {
         media: ReplyMediaManifest;
     }, signal: AbortSignal, authority: () => void, bytes: (position: number) => Promise<Uint8Array>): Promise<DeliveryResult>;
+    private tailLease;
     deliverTaskResult(reply: Reply, raw: TaskResultAnchor, signal: AbortSignal, authority: () => void): Promise<DeliveryResult>;
     deliveryStatus(replyId: string): import("./delivery.js").QqDeliveryProgress | import("./media-delivery.js").QqMediaDeliveryProgress | null;
     private checkDelivery;

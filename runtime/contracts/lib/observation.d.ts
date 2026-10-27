@@ -1,4 +1,22 @@
 import { z } from 'zod';
+export declare const ReadProgressSchema: z.ZodObject<{
+    state: z.ZodEnum<{
+        failed: "failed";
+        unread: "unread";
+        observed: "observed";
+        unavailable: "unavailable";
+    }>;
+    subject: z.ZodEnum<{
+        reference: "reference";
+        "provided-page": "provided-page";
+        "source-range": "source-range";
+    }>;
+    completeness: z.ZodEnum<{
+        unknown: "unknown";
+        complete: "complete";
+        partial: "partial";
+    }>;
+}, z.core.$strict>;
 import type { Conversation } from './index.js';
 export declare const MemoryObservationSchema: z.ZodObject<{
     requestId: z.ZodString;
@@ -173,8 +191,8 @@ export declare const ObservationSourceReadSchema: z.ZodObject<{
     }, z.core.$strict>;
     ref: z.ZodString;
     mode: z.ZodDefault<z.ZodEnum<{
-        deleted: "deleted";
         normal: "normal";
+        deleted: "deleted";
     }>>;
     offset: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;

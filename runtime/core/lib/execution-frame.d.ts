@@ -12,6 +12,7 @@ export interface NativeAction {
     metadata?(value: Json): ExecutionToolReceipt | undefined;
 }
 export interface TaskExecutionFrame {
+    assessmentTimeoutMs?: number;
     mode: 'task';
     sessionId: string;
     view: ExecutionView;

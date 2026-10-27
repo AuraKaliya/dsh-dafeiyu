@@ -33,10 +33,10 @@ declare const snapshotSchema: z.ZodObject<{
         state: z.ZodEnum<{
             disabled: "disabled";
             failed: "failed";
-            configured: "configured";
             ready: "ready";
             degraded: "degraded";
             stopped: "stopped";
+            configured: "configured";
             starting: "starting";
             "not-configured": "not-configured";
         }>;
@@ -55,8 +55,8 @@ declare const snapshotSchema: z.ZodObject<{
             }>;
             analysis: z.ZodObject<{
                 state: z.ZodEnum<{
-                    paused: "paused";
                     failed: "failed";
+                    paused: "paused";
                     ready: "ready";
                     stopped: "stopped";
                     "not-configured": "not-configured";
@@ -277,7 +277,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
         plugins: {
             id: string;
             required: boolean;
-            state: "disabled" | "failed" | "configured" | "ready" | "degraded" | "stopped" | "starting" | "not-configured";
+            state: "disabled" | "failed" | "ready" | "degraded" | "stopped" | "configured" | "starting" | "not-configured";
             version: string | null;
             code: string | null;
         }[];
@@ -286,7 +286,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
             memory: {
                 lifecycle: "active" | "registered" | "recovered" | "quiescing" | "closed";
                 analysis: {
-                    state: "paused" | "failed" | "ready" | "stopped" | "not-configured";
+                    state: "failed" | "paused" | "ready" | "stopped" | "not-configured";
                     active: boolean;
                 };
                 retrieval: "configured" | "not-configured";
@@ -404,7 +404,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
         };
         schemas: {
             journal: 2;
-            memory: 8 | 9 | 10 | 11 | 12;
+            memory: 8 | 12 | 9 | 10 | 11;
             runtime: 3 | 4 | 2;
             activity?: 1 | null | undefined;
             media?: 2 | null | undefined;

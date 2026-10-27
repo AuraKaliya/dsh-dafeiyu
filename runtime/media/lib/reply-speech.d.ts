@@ -36,7 +36,7 @@ export declare class ReplySpeech {
             roots: string[];
             detail: z.core.util.JSONType;
         };
-        kind: "audio" | "image" | "video" | "document";
+        kind: "image" | "audio" | "video" | "document";
         name: string | null;
         mimeHint: string | null;
         bytesHint: number | null;
@@ -64,7 +64,7 @@ export declare class ReplySpeech {
             roots: string[];
             detail: z.core.util.JSONType;
         };
-        kind: "audio" | "image" | "video" | "document";
+        kind: "image" | "audio" | "video" | "document";
         name: string | null;
         mimeHint: string | null;
         bytesHint: number | null;
@@ -77,7 +77,7 @@ export declare class ReplySpeech {
             schemaVersion: 1;
             id: string;
             version: number;
-            kind: "audio" | "image" | "video" | "document";
+            kind: "image" | "audio" | "video" | "document";
             sha256: string;
             bytes: number;
             mime: string;
@@ -101,7 +101,7 @@ export declare class ReplySpeech {
                 roots: string[];
                 detail: z.core.util.JSONType;
             };
-            kind: "audio" | "image" | "video" | "document";
+            kind: "image" | "audio" | "video" | "document";
             name: string | null;
             mimeHint: string | null;
             bytesHint: number | null;
@@ -129,7 +129,7 @@ export declare class ReplySpeech {
             roots: string[];
             detail: z.core.util.JSONType;
         };
-        kind: "audio" | "image" | "video" | "document";
+        kind: "image" | "audio" | "video" | "document";
         name: string | null;
         mimeHint: string | null;
         bytesHint: number | null;

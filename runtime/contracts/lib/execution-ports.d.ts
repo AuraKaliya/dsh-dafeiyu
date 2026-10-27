@@ -74,8 +74,8 @@ export interface RunRef {
     readonly id: string;
 }
 export declare const ExistingTaskRequestSchema: z.ZodObject<{
-    policyId: z.ZodString;
     requestId: z.ZodString;
+    policyId: z.ZodString;
     inputRefs: z.ZodDefault<z.ZodArray<z.ZodString>>;
     data: z.ZodOptional<z.ZodJSONSchema>;
     taskId: z.ZodUUID;
@@ -89,8 +89,8 @@ export declare const ExecutionRequestSchema: z.ZodUnion<readonly [z.ZodObject<{
     inputRefs: z.ZodDefault<z.ZodArray<z.ZodString>>;
     data: z.ZodOptional<z.ZodJSONSchema>;
 }, z.core.$strict>, z.ZodObject<{
-    policyId: z.ZodString;
     requestId: z.ZodString;
+    policyId: z.ZodString;
     inputRefs: z.ZodDefault<z.ZodArray<z.ZodString>>;
     data: z.ZodOptional<z.ZodJSONSchema>;
     taskId: z.ZodUUID;
@@ -102,8 +102,8 @@ export declare const RunControlSchema: z.ZodObject<{
     reason: z.ZodString;
 }, z.core.$strict>;
 export declare const ResumeRunSchema: z.ZodObject<{
-    policyId: z.ZodString;
     requestId: z.ZodString;
+    policyId: z.ZodString;
     inputRefs: z.ZodDefault<z.ZodArray<z.ZodString>>;
     data: z.ZodOptional<z.ZodJSONSchema>;
     taskId: z.ZodUUID;
@@ -112,8 +112,8 @@ export declare const ResumeRunSchema: z.ZodObject<{
     checkpointId: z.ZodUUID;
 }, z.core.$strict>;
 export declare const WakeRequestSchema: z.ZodObject<{
-    policyId: z.ZodString;
     requestId: z.ZodString;
+    policyId: z.ZodString;
     inputRefs: z.ZodDefault<z.ZodArray<z.ZodString>>;
     data: z.ZodOptional<z.ZodJSONSchema>;
     taskId: z.ZodUUID;

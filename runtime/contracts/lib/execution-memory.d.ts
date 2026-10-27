@@ -74,6 +74,7 @@ export interface ExecutionMemoryPort {
     ready(): boolean;
     /** Optional durable consumer; core acknowledges its event only after this returns. */
     recordLifecycle?(event: import('./memory-maintenance.js').MaintenanceLifecycle): void;
+    recordAssessment?(access: PersonaAccess, assessment: import('./task-assessment.js').TaskAssessment): PersonaSourceRef;
     resourceEpoch?(access: PersonaAccess): string;
     validate(access: PersonaAccess, ref: PersonaSourceRef): boolean;
     operationSources(access: PersonaAccess, operationId: string): readonly PersonaSourceRef[];
@@ -187,11 +188,11 @@ export declare const TaskResolutionSchema: z.ZodObject<{
 }, z.core.$strict>;
 export declare const ExecutionMotivationSchema: z.ZodObject<{
     kind: z.ZodEnum<{
-        unknown: "unknown";
-        maintenance: "maintenance";
         "explicit-task": "explicit-task";
         "self-exploration": "self-exploration";
+        unknown: "unknown";
         "conversation-invitation": "conversation-invitation";
+        maintenance: "maintenance";
         mixed: "mixed";
     }>;
     basis: z.ZodDefault<z.ZodArray<z.ZodString>>;

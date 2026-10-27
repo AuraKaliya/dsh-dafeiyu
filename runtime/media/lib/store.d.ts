@@ -210,7 +210,7 @@ export declare class MediaStore {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "staging" | "evicted" | "deleted" | "failed";
+        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -280,7 +280,7 @@ export declare class MediaStore {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "staging" | "evicted" | "deleted" | "failed";
+        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -536,7 +536,7 @@ export declare class MediaStore {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "staging" | "evicted" | "deleted" | "failed";
+        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;

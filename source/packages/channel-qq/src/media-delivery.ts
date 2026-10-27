@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { ConversationSchema,TaskResultAnchorSchema,ReplyMediaManifestSchema,ReplyMediaPartSchema } from '@dafeiyu/contracts';
+import { ConversationSchema,TaskResultAnchorSchema,ReplyMediaManifestSchema,ReplyMediaPartSchema,qqMessageSequence } from '@dafeiyu/contracts';
 import type { Reply } from '@dafeiyu/contracts';
 import { splitQqText } from './delivery.js';
 
@@ -10,7 +10,7 @@ export const qqMediaHash=(value:unknown)=>createHash('sha256').update(canonical(
 export const qqTextHash=(text:string)=>createHash('sha256').update(text).digest('hex');
 const state=z.enum(['pending','sending','sent','unknown']);
 const part=z.union([z.strictObject({kind:z.literal('text'),text:z.string().min(1).max(4000)}),ReplyMediaPartSchema]);
-const planSchema=z.strictObject({version:z.literal(2),replyId:z.string(),target:ConversationSchema,sourceMessageId:z.string(),textHash:z.string().length(64),manifest:ReplyMediaManifestSchema,parts:z.array(part).min(1).max(72)});
+const planSchema=z.strictObject({version:z.literal(2),replyId:z.string(),target:ConversationSchema,sourceMessageId:z.string(),textHash:z.string().length(64),manifest:ReplyMediaManifestSchema,parts:z.array(part).min(1).max(72),originalText:z.string().max(32000).optional()});
 export type QqMediaDeliveryPlan=z.infer<typeof planSchema>;
 const progressPart=z.strictObject({position:z.number().int().nonnegative(),state,receipt:z.string().nullable(),code:z.string().nullable()});
 export interface QqMediaDeliveryProgress {replyId:string;planHash:string;state:'ready'|'sending'|'partial'|'uncertain'|'sent';total:number;confirmed:number;pending:number;unknown:number;parts:z.infer<typeof progressPart>[]}
@@ -20,14 +20,15 @@ export function qqMediaDeliveryPlan(reply:Reply):QqMediaDeliveryPlan {const mani
   if(manifest.replyId!==reply.id||qqMediaHash(manifest.target)!==qqMediaHash(reply.conversation)||manifest.sourceMessageId!==reply.sourceMessageId||manifest.textHash!==qqTextHash(reply.text))throw new Error('DELIVERY_MANIFEST_MISMATCH');
   if(reply.taskResult){const anchor=TaskResultAnchorSchema.parse(reply.taskResult);if(manifest.anchor.kind!=='task-result'||qqMediaHash(anchor)!==qqMediaHash(manifest.anchor)||manifest.runId!==anchor.runId)throw new Error('DELIVERY_MANIFEST_MISMATCH');}
   else if(manifest.anchor.kind!=='reply'||reply.id!==manifest.anchor.inboundId+':reply')throw new Error('DELIVERY_MANIFEST_MISMATCH');
-  return planSchema.parse({version:2,replyId:reply.id,target:reply.conversation,sourceMessageId:reply.sourceMessageId,textHash:manifest.textHash,manifest,parts:[...(reply.text?splitQqText(reply.text):[]).map(text=>({kind:'text' as const,text})),...manifest.parts]});
+  const sequence=qqMessageSequence(reply.text),before=sequence.messages.slice(0,sequence.mediaAt).flatMap(splitQqText).map(text=>({kind:'text' as const,text})),after=sequence.messages.slice(sequence.mediaAt).flatMap(splitQqText).map(text=>({kind:'text' as const,text}));
+  return planSchema.parse({version:2,replyId:reply.id,target:reply.conversation,sourceMessageId:reply.sourceMessageId,textHash:manifest.textHash,manifest,parts:[...before,...manifest.parts,...after],...(sequence.structured?{originalText:reply.text}:{})});
 }
 export class QqMediaDeliveryLedger {
   constructor(private readonly db:DatabaseSync){}
   private atomic<T>(work:()=>T):T{this.db.exec('BEGIN IMMEDIATE');try{const result=work();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   plan(id:string){const row=this.db.prepare('SELECT body,plan_hash FROM qq_media_deliveries WHERE reply_id=?').get(id);if(!row)return null;const plan=planSchema.parse(JSON.parse(String(row.body)));
     if(plan.replyId!==id||qqMediaHash(plan)!==row.plan_hash)throw new Error('DELIVERY_LEDGER_CORRUPT');
-    const expected=qqMediaDeliveryPlan({id:plan.replyId,conversation:plan.target,sourceMessageId:plan.sourceMessageId,text:plan.parts.filter(p=>p.kind==='text').map(p=>p.text).join(''),media:plan.manifest,...(plan.manifest.anchor.kind==='task-result'?{taskResult:plan.manifest.anchor}:{})});
+    const expected=qqMediaDeliveryPlan({id:plan.replyId,conversation:plan.target,sourceMessageId:plan.sourceMessageId,text:plan.originalText??plan.parts.filter(p=>p.kind==='text').map(p=>p.text).join(''),media:plan.manifest,...(plan.manifest.anchor.kind==='task-result'?{taskResult:plan.manifest.anchor}:{})});
     if(qqMediaHash(plan)!==qqMediaHash(expected))throw new Error('DELIVERY_LEDGER_CORRUPT');return plan;}
   prepare(reply:Reply){const plan=qqMediaDeliveryPlan(reply);return this.atomic(()=>{const old=this.plan(reply.id);if(old){if(qqMediaHash(old)!==qqMediaHash(plan))throw new Error('DELIVERY_PLAN_CONFLICT');return old;}
     if(this.db.prepare('SELECT 1 FROM qq_delivery_plans WHERE reply_id=?').get(reply.id)||this.db.prepare('SELECT 1 FROM receipts WHERE reply_id=?').get(reply.id))throw new Error('DELIVERY_PROTOCOL_CONFLICT');

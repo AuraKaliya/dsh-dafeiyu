@@ -40,7 +40,7 @@ export class TaskDelivery {
     const item=this.host.journal.get(material.inboundId),channel=this.host.channel(item),persona=this.host.persona();
     if(!channel||channel.capability.taskDelivery!=='simulated')throw new Error('Task delivery requires an explicitly simulated channel');
     if(this.host.journal.latestMessageId(item.route)!==material.inboundId)throw new Error('delivery_late_result');
-    if(!['delivered','failed'].includes(item.state))throw new Error('delivery_question_not_settled');
+    if(!['delivered','handled','failed'].includes(item.state))throw new Error('delivery_question_not_settled');
     const binding:DeliveryBinding={material,route:item.route,sessionId:item.sessionId,extensionId:channel.id,extensionVersion:channel.version,personaVersion:persona.version,modelHash:deliveryDigest(this.host.model())};
     if(material.jobId!==input.jobId||conversationKey(this.host.agentId,material.target)!==item.route||conversationKey(this.host.agentId,input.target)!==item.route||input.target.channel!==channel.capability.channel||input.target.account!==channel.capability.account)throw new Error('delivery_target_mismatch');
     const record=this.store.create(taskId,input,binding);this.store.flush();

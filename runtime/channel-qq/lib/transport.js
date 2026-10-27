@@ -1,4 +1,4 @@
-const safeCode = (error, fallback) => error instanceof Error && ['CHANNEL_OFFLINE', 'TARGET_NOT_ALLOWED', 'IDENTITY_UNAVAILABLE', 'SOURCE_MESSAGE_NOT_FOUND', 'SOURCE_STALE', 'DELIVERY_CANCELLED', 'DELIVERY_AUTHORITY_REVOKED', 'DELIVERY_PLAN_CONFLICT', 'TEXT_SIZE_UNSUPPORTED', 'INVALID_TEXT_ENCODING'].includes(error.message) ? error.message : fallback;
+const safeCode = (error, fallback) => error instanceof Error && ['CHANNEL_OFFLINE', 'TARGET_NOT_ALLOWED', 'IDENTITY_UNAVAILABLE', 'SOURCE_MESSAGE_NOT_FOUND', 'SOURCE_STALE', 'DELIVERY_CANCELLED', 'DELIVERY_AUTHORITY_REVOKED', 'DELIVERY_PLAN_CONFLICT', 'TEXT_SIZE_UNSUPPORTED', 'INVALID_TEXT_ENCODING', 'QQ_MESSAGE_SEQUENCE_INVALID'].includes(error.message) ? error.message : fallback;
 function result(progress, code) {
     if (progress.state === 'sent')
         return { status: 'sent', receiptId: progress.segments[0].receipt };
@@ -27,7 +27,7 @@ export class QqSegmentedTransport {
         if (!plan || progress.state === 'sent' || progress.unknown || progress.state === 'sending')
             return Promise.resolve(result(progress, 'DELIVERY_NOT_RESUMABLE'));
         const { messageId, ...anchor } = plan.anchor;
-        const snapshot = Object.freeze({ id: plan.replyId, conversation: Object.freeze({ ...plan.target }), sourceMessageId: messageId, text: plan.segments.join(''), ...(anchor.kind === 'task-result' ? { taskResult: Object.freeze({ ...anchor, target: Object.freeze({ ...anchor.target }) }) } : {}) });
+        const snapshot = Object.freeze({ id: plan.replyId, conversation: Object.freeze({ ...plan.target }), sourceMessageId: messageId, text: plan.originalText ?? plan.segments.join(''), ...(anchor.kind === 'task-result' ? { taskResult: Object.freeze({ ...anchor, target: Object.freeze({ ...anchor.target }) }) } : {}) });
         const work = this.execute(snapshot, plan, signal, authority).finally(() => this.active.delete(snapshot.id));
         this.active.set(snapshot.id, work);
         return work;
@@ -54,6 +54,8 @@ export class QqSegmentedTransport {
                     await this.host.beforeSend?.(reply, signal);
                     delayed = true;
                 }
+                else if (progress.confirmed > 0)
+                    await this.host.betweenMessages?.(signal);
                 guard();
                 await this.host.check(reply, signal);
                 guard();

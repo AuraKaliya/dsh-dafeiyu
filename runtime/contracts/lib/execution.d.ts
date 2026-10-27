@@ -91,8 +91,8 @@ export interface ExecutionSourceRef {
 export declare const ActionOutcomeSchema: z.ZodObject<{
     status: z.ZodEnum<{
         unknown: "unknown";
-        partial: "partial";
         failed: "failed";
+        partial: "partial";
         cancelled: "cancelled";
         succeeded: "succeeded";
     }>;

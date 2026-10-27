@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
 export declare const name = "dsh-dafeiyu";
+export declare const inject: string[];
 export interface Config {
     settingsFile: string;
     nodePath: string;

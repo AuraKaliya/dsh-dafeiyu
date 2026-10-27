@@ -24,6 +24,7 @@ import { NativeRuntime } from './native-runtime.js';
 import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame } from './execution-frame.js';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { conversationHistory } from './history-frame.js';
+import { assessTask } from './task-assessment.js';
 
 interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime;delivery?:RuntimeDelivery;lastRequest?:GenerateOptions }
 export interface RuntimeDelivery {id:string;guard:()=>void;finalize:(result:RunResult,guard:()=>void)=>Promise<void>}
@@ -178,6 +179,7 @@ export class DshRuntime {
     await this.native.close();
   }
   runExecution(frame:TaskExecutionFrame){return this.runFrame(frame);}
+  assessExecution(frame:TaskExecutionFrame,draft:Awaited<ReturnType<DshRuntime['runExecution']>>,facts:Json){return assessTask(this.ctx,this.model,this.cwd,frame,draft,facts);}
   readResult(ref:import('./runtime-store.js').RunResultRef){return readPersistedResult(this.ctx,ref);}
   summaryCommitted(sessionId:string,id:string,text:string):boolean {
     const session=this.handles.get(sessionId)?.handle.agent.session;

@@ -29,8 +29,8 @@ export declare const ExternalTaskSourceSchema: z.ZodDiscriminatedUnion<[z.ZodObj
     }, z.core.$strict>;
     senderId: z.ZodString;
     modality: z.ZodEnum<{
-        text: "text";
         voice: "voice";
+        text: "text";
     }>;
     sourceHash: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
@@ -86,11 +86,11 @@ export declare const ExternalTaskAuthorizationSchema: z.ZodObject<{
     goal: z.ZodString;
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
-            unknown: "unknown";
-            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
+            unknown: "unknown";
             "conversation-invitation": "conversation-invitation";
+            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -126,8 +126,8 @@ export declare const ExternalTaskAuthorizationSchema: z.ZodObject<{
         }, z.core.$strict>;
         senderId: z.ZodString;
         modality: z.ZodEnum<{
-            text: "text";
             voice: "voice";
+            text: "text";
         }>;
         sourceHash: z.ZodString;
     }, z.core.$strict>, z.ZodObject<{

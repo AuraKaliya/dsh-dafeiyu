@@ -62,10 +62,11 @@ export class ConversationRuns {
                     }
                     // Read persisted DSH facts, without creating an Agent or running a model.
                     await readPersistedResult(this.ctx, ref);
-                    this.journal.transition(item.id, 'processing', 'reply-ready', { ...eventFor(this.agentId, item, 'turn.completed', 'core', CORE_VERSION, item.id, projection.startedEventId, { runId: run.id }),
+                    const operations = this.store.operations(run.id), delegated = operations.some(op => op.plugin === 'qq-tasks' && op.action === 'qq_task_submit' && op.outcome?.status === 'succeeded' && op.outcome.effects === 'confirmed'), media = operations.some(op => ['qq_sticker_use', 'dafeiyu_media_reply'].includes(op.action) && op.outcome?.status === 'succeeded' && z.object({ selected: z.number().positive() }).safeParse(op.outcome.data).success);
+                    this.journal.transition(item.id, 'processing', !projection.reply.text && delegated && !media ? 'handled' : 'reply-ready', { ...eventFor(this.agentId, item, 'turn.completed', 'core', CORE_VERSION, item.id, projection.startedEventId, { runId: run.id, ...(!projection.reply.text && delegated && !media ? { replySuppressed: 'accepted-task' } : {}) }),
                         sources: projection.sources.map(source => ({ kind: source.kind, id: source.id, ...(source.seq === undefined ? {} : { seq: source.seq }), ...(source.route === undefined ? {} : { route: source.route }) })) }, projection.reply);
                 }
-                else if (!['reply-ready', 'sending', 'delivered', 'uncertain'].includes(item.state))
+                else if (!['reply-ready', 'sending', 'delivered', 'handled', 'uncertain'].includes(item.state))
                     throw new Error('RESULT_PROJECTION_CONFLICT');
             }
             else {

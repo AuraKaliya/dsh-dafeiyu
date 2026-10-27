@@ -28,6 +28,9 @@ export * from './memory-maintenance.js';
 export * from './activity.js';
 export * from './media.js';
 export * from './media-delivery.js';
+export * from './dsh-tools.js';
+export * from './qq-expression.js';
+export * from './task-assessment.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI, TaskWorkspaceProvider } from './task-workspace.js';
@@ -285,7 +288,7 @@ export interface Extension {
     readonly taskMemoryProvider?: TaskMemoryProvider;
     readonly taskExpressionProvider?: TaskExpressionProvider;
 }
-export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'failed' | 'uncertain';
+export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'handled' | 'failed' | 'uncertain';
 export interface Receipt {
     readonly id: string;
     readonly duplicate: boolean;

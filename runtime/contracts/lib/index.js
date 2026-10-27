@@ -29,6 +29,9 @@ export * from './memory-maintenance.js';
 export * from './activity.js';
 export * from './media.js';
 export * from './media-delivery.js';
+export * from './dsh-tools.js';
+export * from './qq-expression.js';
+export * from './task-assessment.js';
 export const API_VERSION = 2;
 const id = z.string().min(1).max(160);
 export const MessagePartSchema = z.strictObject({

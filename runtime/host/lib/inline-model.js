@@ -28,7 +28,7 @@ export function inlineDeepSeekAdapter(dependencies) {
 }
 export async function installInlineDeepSeek(ctx, input) {
     const settings = InlineModelSettingsSchema.parse(input.settings), effort = z.enum(['off', 'low', 'high', 'max']).parse(input.route.reasoningEffort);
-    if (input.route.provider !== 'deepseek-official')
+    if (input.route.provider !== (input.auth === 'dsh-account' ? 'deepseek-account' : 'deepseek-official'))
         throw new Error('HOST_INLINE_MODEL_ROUTE_INVALID');
     const base = resolveAdapterOptions({ baseURL: input.baseURL, thinking: effort === 'off' ? 'disabled' : 'enabled', reasoningEffort: effort,
         maxTokens: settings.maxOutputTokens, streamIdleTimeoutMs: settings.streamIdleTimeoutMs,
@@ -46,6 +46,18 @@ export async function installInlineDeepSeek(ctx, input) {
             throw new LlmError('Fixed model route changed', 'HOST_INLINE_MODEL_ROUTE_INVALID'); },
         resolveAuth: async () => {
             input.credentialGuard();
+            if (input.auth === 'dsh-account') {
+                const account = ctx.get('deepseekAccount'), token = await account?.resolveToken(input.baseURL);
+                if (!token)
+                    throw new LlmError('Sign in to the configured DSH account', 'ACCOUNT_SIGN_IN_REQUIRED');
+                return { headers: { 'x-dsh-auth-token': token }, onRequestError: async (error) => { if (error instanceof LlmError && error.failure.status === 401) {
+                        try {
+                            await account?.rejectToken(token);
+                        }
+                        catch { }
+                        return new LlmError('DSH account sign-in expired', 'ACCOUNT_TOKEN_INVALID', { ...error.failure, cause: error });
+                    } return error; } };
+            }
             const service = ctx.get('credentials');
             if (!service)
                 throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');

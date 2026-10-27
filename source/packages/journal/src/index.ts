@@ -14,7 +14,7 @@ import { z } from 'zod';
 import type { EventRecord, InboundMessage, Json, MessageState, PendingMessage, Receipt, Reply, SourceRef } from '@dafeiyu/contracts';
 
 export type NewEvent = Omit<EventRecord, 'seq' | 'id' | 'recordedAt' | 'visibility' | 'schemaVersion'>;
-const states = new Set<MessageState>(['accepted', 'processing', 'reply-ready', 'sending', 'delivered', 'failed', 'uncertain']);
+const states = new Set<MessageState>(['accepted', 'processing', 'reply-ready', 'sending', 'delivered', 'handled', 'failed', 'uncertain']);
 function text(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Invalid persisted string');
   return value;

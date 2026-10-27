@@ -21,6 +21,7 @@ export declare class InlineOnlyDeepSeekFiles extends DeepSeekFileStore {
 /** Public official adapter seam; no replacement protocol, model loop, global fetch patch or Files upload. */
 export declare function inlineDeepSeekAdapter(dependencies: Omit<DeepSeekAdapterOptions, 'resolveFiles'>): DeepSeekAdapter;
 export declare function installInlineDeepSeek(ctx: Context, input: {
+    auth?: 'api-key' | 'dsh-account';
     baseURL: string;
     credentialName: 'DEEPSEEK_API_KEY';
     route: {

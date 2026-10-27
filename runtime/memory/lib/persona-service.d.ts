@@ -6,6 +6,7 @@ import type { TaskWorkspace } from './task-workspace.js';
 import type { PersonaMaterial } from './persona-store.js';
 import type { compactionConfigSchema } from './compaction.js';
 import type { ExperienceStore } from './experience-store.js';
+import { QqExpressionPreferences } from './qq-expression.js';
 /** Sole owner of stage-personality proposals, preferences and relationship state. */
 export declare class GrowthService {
     private readonly ctx;
@@ -13,6 +14,7 @@ export declare class GrowthService {
     private readonly tasks;
     private readonly agentId;
     private readonly ready;
+    readonly qqExpression: QqExpressionPreferences;
     readonly experiences: ExperienceStore;
     private readonly store;
     private readonly sources;

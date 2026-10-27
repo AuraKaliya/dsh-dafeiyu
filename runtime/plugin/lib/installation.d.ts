@@ -59,6 +59,12 @@ export declare function installationProfile(settings: InstallationSettings, meta
         maxConcurrentPerSession: 1;
         maxPendingRuns: number;
         turnTimeoutMs: number;
+        phaseTimeouts: {
+            assessment: number;
+            render: number;
+            verification: number;
+            feedback: number;
+        };
         shutdownGraceMs: number;
     };
     persona: {
@@ -90,7 +96,7 @@ export declare function installationProfile(settings: InstallationSettings, meta
         resources: {
             channel: string;
             account: string;
-            kind: "private" | "local" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         }[];
         externalActions?: {
@@ -108,9 +114,11 @@ export declare function prepareInstallation(settingsFile: string, options?: Inst
         schemaVersion: 1;
         dataDir: string;
         instanceName: string;
+        dshTools: boolean;
         model: {
             model: string;
             credentialStore: string;
+            auth?: "api-key" | "dsh-account" | undefined;
             reasoningEffort?: string | undefined;
             baseURL?: string | undefined;
             inlineTransport?: Record<string, z.core.util.JSONType> | undefined;

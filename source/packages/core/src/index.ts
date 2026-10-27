@@ -2,6 +2,7 @@ import { Context, Service } from '@deepseek-ai/cordis';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { PhaseTimeoutsSchema } from '@dafeiyu/contracts';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
 import { API_VERSION, MessageSchema, ObservationSchema, conversationKey,ToolFeedbackSchema,FeedbackMetaSchema,FeedbackWitnessSchema,FEEDBACK_RETIRED_TEXT,FeedbackCaptureError } from '@dafeiyu/contracts';
 import type { FeedbackDelivery } from '@dafeiyu/contracts';
@@ -35,6 +36,7 @@ import { RunScheduler } from './run-scheduler.js';
 import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
+import { renderPublicProgress } from './target-renderer.js';
 import type { PersonaTrialCompletionStatus } from './persona-runtime.js';
 export type { PersonaTrialCompletionStatus } from './persona-runtime.js';
 export { readFoundation } from './foundation.js';
@@ -58,7 +60,8 @@ const ConfigSchema = z.strictObject({
   reasoningEffort: z.string().min(1).optional(),
   lifecycleMode: LifecycleModeSchema.default('legacy'),
   turnTimeoutMs: z.number().int().min(50).max(3_600_000).default(600_000),
-  deliveryTimeoutMs: z.number().int().min(50).max(60_000).default(15_000),
+  deliveryTimeoutMs: z.number().int().min(50).max(60_000).default(30_000),
+  phaseTimeouts:PhaseTimeoutsSchema,
   context:contextConfigSchema.default({maxBytes:16000,requestMaxBytes:1000000,outputReserveBytes:16000,prepareTimeoutMs:5000,regions:{}}),
 });
 export type Config = z.input<typeof ConfigSchema>;
@@ -67,10 +70,14 @@ declare module '@deepseek-ai/cordis' { interface Context { dafeiyu: DafeiyuServi
 
 /** Owns a logical persona and its independent conversations; extensions own platform-specific work. */
 export class DafeiyuService extends Service {
+  private expressionPreferences:{read:NonNullable<MemoryGrowthProvider['expressionPreferences']>}|undefined;
   private nativeTaskDelivery:NativeTaskDelivery|undefined;
+  phaseTimeouts(){return this.config.phaseTimeouts;}
   private closedNativeDelivery:ReturnType<RuntimeStore['nativeDeliveries']['counts']>|null=null;
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
+  taskDeliveryBusy(){return !!this.nativeTaskDelivery?.pending;}
+  reconcileCapabilityChange(raw:unknown){if(!this.executions||this.taskDeliveryBusy())return {accepted:false,resumedRunId:null};return this.executions.reconcileCapabilityChange(raw);}
   private nativeExpressionPort:NativeExpressionPort|undefined;
   private mediaPort:MediaPort|undefined;
   private readonly mediaReplyAccesses=new WeakSet<MediaReplyAccess>();
@@ -115,13 +122,17 @@ export class DafeiyuService extends Service {
   ownsMediaReplyAccess(access:MediaReplyAccess){return this.mediaReplyAccesses.has(access);}
   private targetPersona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void){const foundation=this.persona(),scope={kind:'conversation' as const,agentId:this.config.agentId,route:item.route};
     const access:PersonaAccess={view:{runId:id,taskId:null,scope,origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},signal},producer:'core-target-persona',operationId:id,startedEventId:null,intentVersion:0,motivation:{kind:'conversation-invitation',basis:[`task-result:${item.id}`]},inputs:[],admittedSources:[],guard};
-    const target=this.personas.prepareTarget(access);return {text:foundation.text,foundationHash:foundation.version,stamp:target.stamp,items:target.items,guard:()=>{if(this.persona().version!==foundation.version)throw new Error('SOURCE_STALE');target.guard();}};}
+    const target=this.personas.prepareTarget(access),provider=this.expressionPreferences,expression=provider?.read(item.message.conversation)??[],expressionHash=runtimeHash(expression);return {text:foundation.text,foundationHash:foundation.version,stamp:runtimeHash([target.stamp,expressionHash]),items:[...target.items,...expression],guard:()=>{if(this.persona().version!==foundation.version||this.expressionPreferences!==provider||runtimeHash(provider?.read(item.message.conversation)??[])!==expressionHash)throw new Error('SOURCE_STALE');target.guard();}};}
   private async prepareNativeMediaReplyAccess(facts:ReturnType<ExecutionCoordinator['mediaReplyFacts']>,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>{
     const native=await this.executions!.nativeResultAccess(facts.run.id),row=this.runStore!.nativeDeliveries.get(facts.run.id),provider=this.nativeExpressionPort;
     if(!row?.material||!row.renderRef||!provider?.ready()||!native.media||row.material.mediaStamp!==native.media.sourceStamp||!['ready','sending'].includes(row.state)||reply.id!=='native-delivery:'+row.id||!reply.taskResult||runtimeHash(reply.taskResult)!==runtimeHash(row.anchor)||runtimeHash(native.anchor)!==runtimeHash(row.anchor)||runtimeHash(reply.conversation)!==runtimeHash(row.anchor.target))throw new Error('DELIVERY_BINDING_CONFLICT');
     const item=this.journal.get(row.anchor.inboundId),text=this.runStore!.nativeDeliveries.verifyCredential(facts.run.id);if(text!==reply.text||reply.sourceMessageId!==item.message.id)throw new Error('DELIVERY_BODY_MISMATCH');
     this.validateNativeMediaReplyAuthority(facts.authority,native);const packet=provider.open(native,row.material.packetId);if(packet.sourceStamp!==row.material.sourceStamp||runtimeHash(packet.media)!==runtimeHash(native.media))throw new Error('SOURCE_STALE');
-    const basis=()=>{signal.throwIfAborted();facts.guard();native.guard();if(this.nativeExpressionPort!==provider||provider.open(native,packet.id).sourceStamp!==packet.sourceStamp||this.runStore!.nativeDeliveries.verifyCredential(facts.run.id)!==text||!['ready','sending'].includes(this.runStore!.nativeDeliveries.get(facts.run.id)!.state))throw new Error('SOURCE_STALE');};
+    // Full task evidence is checked above and by NativeTaskDelivery before each external part.
+    // Byte readers keep the live scope, media-root fences and immutable approved credential,
+    // instead of rebuilding every task dependency for each local read or nested guard.
+    const basis=()=>{signal.throwIfAborted();facts.guard();native.execution.guard();const current=this.runStore!.nativeDeliveries.get(facts.run.id);
+      if(this.nativeExpressionPort!==provider||!provider.ready()||current?.material?.sourceStamp!==packet.sourceStamp||this.runStore!.nativeDeliveries.verifyCredential(facts.run.id)!==text||!current||!['ready','sending'].includes(current.state))throw new Error('SOURCE_STALE');};
     const persona=this.targetPersona(item,row.id,signal,basis);if(persona.stamp!==row.material.personaHash||persona.foundationHash!==row.material.foundationHash||runtimeHash(this.analysisModelRoute())!==row.material.modelHash)throw new Error('SOURCE_STALE');
     let access:MediaReplyAccess,checking=false;const guard=()=>{if(checking)throw new Error('MEDIA_REPLY_AUTHORITY_CYCLE');checking=true;try{if(!this.mediaReplyAccesses.has(access)||Date.parse(native.anchor.expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');persona.guard();}finally{checking=false;}};
     const scopeGuard=()=>{signal.throwIfAborted();if(!this.mediaReplyAccesses.has(access))throw new Error('SCOPE_DENIED');facts.guard();native.execution.guard();};
@@ -227,7 +238,7 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.mediaPort?['media.assets.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.assessment.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1','delivery.status-feedback.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.mediaPort?['media.assets.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   bindMessageTasks(binding:MessageTaskBinding){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const channel=this.extensions.get(binding.channelExtensionId);
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
@@ -249,7 +260,7 @@ export class DafeiyuService extends Service {
       readState:port.readState.bind(port),readSelectedInputs:port.readSelectedInputs.bind(port),update:port.update.bind(port)});this.repositoryPort=bound;
     return ()=>{if(this.repositoryPort===bound)this.repositoryPort=undefined;};
   }
-  bindGrowthProvider(provider:MemoryGrowthProvider):()=>void{this.assertOpen();const unbind=this.personas.bind(provider),unpin=this.contexts.pinRegion('memory:growth');return ()=>{unbind();unpin();};}
+  bindGrowthProvider(provider:MemoryGrowthProvider):()=>void{this.assertOpen();const unbind=this.personas.bind(provider),unpin=this.contexts.pinRegion('memory:growth'),expression=provider.expressionPreferences?{read:provider.expressionPreferences.bind(provider)}:undefined;this.expressionPreferences=expression;return ()=>{unbind();unpin();if(this.expressionPreferences===expression)this.expressionPreferences=undefined;};}
   /** @deprecated Compatibility alias; both names bind the same single provider. */
   bindPersonaProvider(provider:PersonaProvider):()=>void{return this.bindGrowthProvider(provider);}
   assertPersonaTrialAuthority(authority:unknown,input:unknown):void{this.personas.assertTrialAuthority(authority,input);}
@@ -262,6 +273,7 @@ export class DafeiyuService extends Service {
       prepareContext:port.prepareContext.bind(port),validateContext:port.validateContext.bind(port),captureContinuity:port.captureContinuity.bind(port),checkpoint:port.checkpoint.bind(port),bindResult:port.bindResult.bind(port),
       generation:port.generation.bind(port),acceptIntent:port.acceptIntent.bind(port),intent:port.intent.bind(port),resolveIntent:port.resolveIntent.bind(port),summarize:port.summarize.bind(port),
       ...(port.recordLifecycle?{recordLifecycle:port.recordLifecycle.bind(port)}:{}),
+      ...(port.recordAssessment?{recordAssessment:port.recordAssessment.bind(port)}:{}),
       ...(port.compactionPolicy?{compactionPolicy:Object.freeze({...port.compactionPolicy})}:{}),...(port.summarizeFragments?{summarizeFragments:port.summarizeFragments.bind(port)}:{}),...(port.rewrite?{rewrite:port.rewrite.bind(port)}:{})});
     this.executionMemoryPort=bound;return ()=>{if(this.executionMemoryPort===bound)this.executionMemoryPort=undefined;};}
   personaAccess(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'):PersonaAccess {
@@ -278,6 +290,22 @@ export class DafeiyuService extends Service {
   }
   capabilityResources(context:ExecutionContextV3,pluginId:string):readonly Conversation[]{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.resources(context,pluginId);}
   quoteReplySource(context:ExecutionContextV3,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.quoteReplySource(context,pluginId);}
+  async deliverPublicProgress(context:ExecutionContextV3,pluginId:string,raw:unknown):Promise<import('@dafeiyu/contracts').DeliveryResult>{
+    if(!this.runStore||!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');
+    const input=z.strictObject({kind:z.enum(['intent','progress','blocked']),text:z.string().trim().min(1).max(1000)}).parse(raw),authority=this.authorizeExternalTask(context,pluginId);
+    const source=this.quoteReplySource(context,pluginId),item=this.journal.get(source.inboundId),channel=this.deliveryChannel(item);
+    if(!channel||item.message.conversation.channel!=='qq')throw new Error('DEPENDENCY_UNAVAILABLE');
+    const facts=this.runStore.operations(context.runId).filter(operation=>operation.id!==context.operationId&&operation.state==='finished'&&operation.outcome?.effects!=='unknown'&&['succeeded','partial'].includes(operation.outcome?.status??'')&&!['qq_progress','dsh_tool_list'].includes(operation.action)).slice(-6);
+    if(input.kind==='progress'&&!facts.length)throw new Error('PROGRESS_EVIDENCE_REQUIRED');
+    const signal=AbortSignal.any([context.signal,channel.signal]),guard=()=>{signal.throwIfAborted();authority.guard();if(this.deliveryChannel(item)?.identity!==channel.identity)throw new Error('SOURCE_STALE');};guard();
+    return this.enqueueTaskDelivery(item.route,async()=>{let invoked=false;try{guard();const persona=this.targetPersona(item,context.operationId,signal,guard),model={provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})};
+      const result=await renderPublicProgress(this.ctx,model,this.config.dataDir,context.operationId,persona.text,persona.items,{target:item.message.conversation,taskId:context.taskId!,runId:context.runId,inboundId:item.id,question:authority.authorization.goal,taskState:'running',
+        evidence:[{id:'intent',kind:'inference',text:JSON.stringify({requestedPublicFeedback:input,note:'仅公开反馈草稿，不是完成事实。'})},...facts.map((operation,index)=>({id:'P'+index,kind:'reported' as const,text:JSON.stringify({action:operation.action,outcome:operation.outcome}).slice(0,8000)}))]},signal,()=>{guard();persona.guard();},this.config.context.requestMaxBytes-this.config.context.outputReserveBytes);
+      guard();persona.guard();const reply:Reply={id:'qq-progress:'+context.operationId,conversation:item.message.conversation,sourceMessageId:item.message.id,text:result.text};
+      invoked=true;return await channel.capability.deliver(reply,signal,()=>{guard();persona.guard();});
+      }catch{return {status:invoked?'unknown' as const:'not-sent' as const,code:invoked?'QQ_PROGRESS_RESULT_UNKNOWN':'QQ_PROGRESS_NOT_SENT'};}
+    });
+  }
   authorizeCapabilityResource(context:ExecutionContextV3,pluginId:string,raw:unknown):Conversation {
     if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const scene=ConversationSchema.parse(raw);this.executions.authorizeResource(context,pluginId,scene);return scene;
   }
@@ -316,9 +344,10 @@ export class DafeiyuService extends Service {
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,personas:this.personas,
       repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
-      turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),settled:id=>{void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
-    this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:this.config.turnTimeoutMs*2+this.config.deliveryTimeoutMs,
+      turnTimeoutMs:this.config.turnTimeoutMs,assessmentTimeoutMs:this.config.phaseTimeouts.assessment,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),progress:id=>this.nativeTaskDelivery?.progress(id)??Promise.resolve(null),settled:id=>{if(this.runStore?.get(id).state==='failed')void this.nativeTaskDelivery?.progress(id).catch(()=>{});else void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
+    this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
+      feedbackSource:id=>this.executions!.feedbackSource(id),
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
       channel:item=>this.deliveryChannel(item),
       enqueue:(route,work)=>this.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire(false),
@@ -690,7 +719,7 @@ export class DafeiyuService extends Service {
         started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const nativeActions=run?this.executions?.conversationActions(run,source.extension.id,signal,()=>{if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');})??[]:[];
-        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description,undefined,nativeActions,()=>!!(run&&this.mediaPort?.replyDraft?.(run.id)?.selected&&this.runStore?.operations(run.id).some(op=>op.action==='qq_sticker_use'&&op.plugin==='qq-stickers'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed')));
+        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description,undefined,nativeActions,()=>!!(run&&this.runStore?.operations(run.id).some(op=>op.plugin==='qq-tasks'&&op.action==='qq_task_submit'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'))||!!(run&&this.mediaPort?.replyDraft?.(run.id)?.selected&&this.runStore?.operations(run.id).some(op=>op.action==='qq_sticker_use'&&op.plugin==='qq-stickers'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed')));
         signal.throwIfAborted();
         if(run)this.personas.current(run.id)?.guard();
       } catch (error) {
@@ -740,7 +769,7 @@ export class DafeiyuService extends Service {
       try{if(mediaAccess&&mediaManifestId&&activeMedia?.settleReply&&(result?.status==='sent'||result?.status==='unknown')){
         try{activeMedia.settleReply(mediaAccess,mediaManifestId,result.status==='sent'?'sent':'unknown');}catch{mediaSettlementPending=true;}
       }}finally{if(mediaAccess)activeMedia?.releaseReply?.(mediaAccess);mediaAccess?.release();release();}}
-    const next = result.status === 'sent' ? 'delivered' : result.status === 'not-sent' ? 'reply-ready' : 'uncertain';
+    const next = result.status === 'sent' ? 'delivered' : result.status === 'not-sent' ? ['QQ_MESSAGE_SEQUENCE_INVALID','DELIVERY_PLAN_INVALID','TEXT_SIZE_UNSUPPORTED','INVALID_TEXT_ENCODING'].includes(result.code)?'failed':'reply-ready' : 'uncertain';
     this.journal.transition(id, 'sending', next, deliveryEvent(`delivery.${result.status}`, result.status === 'sent' ? { receiptId: result.receiptId } : { code: result.code }, sending.id));
     if(mediaSettlementPending)this.journal.append(deliveryEvent('delivery.media-settlement-pending',{manifestId:mediaManifestId!,state:result.status},sending.id));
   }

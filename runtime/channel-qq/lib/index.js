@@ -1,5 +1,5 @@
 import { Service } from '@deepseek-ai/cordis';
-import { API_VERSION, LifecycleModeSchema, conversationKey, TaskResultAnchorSchema, messageParts } from '#dafeiyu/contracts';
+import { API_VERSION, LifecycleModeSchema, conversationKey, TaskResultAnchorSchema, messageParts, QQ_EXPRESSION_DEFAULTS, QQ_SEQUENCE_INSTRUCTIONS } from '#dafeiyu/contracts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import WebSocket from 'ws';
@@ -7,8 +7,8 @@ import { z } from 'zod';
 import { loopbackURL, OneBot, platformId } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
-import { readRecentQqHistory } from './history.js';
-import { waitForQqReply } from './reply-delay.js';
+import { readRecentQqHistory, QQ_HISTORY_WINDOW_MS } from './history.js';
+import { waitForQqReply, waitBetweenQqMessages } from './reply-delay.js';
 import { forwardHandles, recentForwardNodes } from './forward.js';
 export { qqReplyDelayMs } from './reply-delay.js';
 import { naturallyAddressed } from './trigger.js';
@@ -25,6 +25,8 @@ import { QqMessageBatches, QqBatchConfigSchema } from './batch.js';
 import { qqTaskDirective } from './tasks.js';
 import { QqStickers, QQ_STICKER_ACTIONS } from './stickers.js';
 import { QqStickersConfigSchema } from './sticker-store.js';
+import { bindQqProgress, QQ_PROGRESS_ACTIONS } from './progress.js';
+export { QQ_PROGRESS_ACTIONS } from './progress.js';
 export { QQ_STICKER_ACTIONS } from './stickers.js';
 export { QqBatchConfigSchema } from './batch.js';
 export { QqStickersConfigSchema } from './sticker-store.js';
@@ -85,6 +87,8 @@ export class QqChannel extends Service {
     batches;
     stickers;
     sourceSignals = new Map();
+    tails = new Map();
+    progress;
     token;
     socket = null;
     retry = null;
@@ -126,7 +130,7 @@ export class QqChannel extends Service {
         try {
             this.store.delivery.recover();
             this.store.mediaDelivery.recover();
-            this.transport = new QqSegmentedTransport({ ledger: this.store.delivery, ...(this.config.replyDelay ? { beforeSend: (reply, signal) => waitForQqReply(reply.text, signal) } : {}), check: (reply, signal) => this.checkDelivery(reply, signal), send: (reply, text, signal) => this.sendSegment(reply, text, signal),
+            this.transport = new QqSegmentedTransport({ ledger: this.store.delivery, ...(this.config.replyDelay ? { beforeSend: (reply, signal) => waitForQqReply(reply.text, signal), betweenMessages: waitBetweenQqMessages } : {}), check: (reply, signal) => this.checkDelivery(reply, signal), send: (reply, text, signal) => this.sendSegment(reply, text, signal),
                 confirmed: (reply, text, receipt) => {
                     this.counters.segmentsConfirmed++;
                     if (this.store.delivery.progress(reply.id)?.state === 'sent')
@@ -136,7 +140,7 @@ export class QqChannel extends Service {
                     else
                         this.store.remember(this.cacheRoute(reply.conversation), receipt, this.config.botId, text);
                 } });
-            this.mediaTransport = new QqMediaTransport({ ledger: this.store.mediaDelivery, ...(this.config.replyDelay ? { beforeSend: (reply, signal) => waitForQqReply(reply.text, signal) } : {}), legacyProgress: id => this.store.delivery.progress(id), check: (reply, signal) => this.checkDelivery(reply, signal), send: (reply, part, data, signal) => this.sendMediaPart(reply, part, data, signal), confirmed: (reply, part, receipt) => {
+            this.mediaTransport = new QqMediaTransport({ ledger: this.store.mediaDelivery, ...(this.config.replyDelay ? { beforeSend: (reply, signal) => waitForQqReply(reply.text, signal), betweenMessages: waitBetweenQqMessages } : {}), legacyProgress: id => this.store.delivery.progress(id), check: (reply, signal) => this.checkDelivery(reply, signal), send: (reply, part, data, signal) => this.sendMediaPart(reply, part, data, signal), confirmed: (reply, part, receipt) => {
                     if (part.kind === 'image' && this.config.stickers.enabled)
                         this.store.stickers.used(reply.conversation, part.asset, reply.id);
                     this.counters.segmentsConfirmed++;
@@ -151,7 +155,7 @@ export class QqChannel extends Service {
             this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
                 channels: [{ channel: 'qq', account: this.config.botId, deliveryValidation: 'per-segment',
                         processingSignal: message => this.processingSignal(message),
-                        description: (this.config.capabilities.enabled ? '可用qq_browse回看本会话聊天；需要近期平台历史时首轮传includeRecentHistory:true，仅追加观察前24小时内消息，不重放为新入站。回答依赖历史内容时先实际浏览，再说明范围与缺口；不要把未查询说成无法查询。qq_reply_quote可选择实际浏览到、观察前24小时内的消息作为本轮回复的QQ引用，有兴趣时可自主选择。合并转发可用qq_forward_read读取；链接文本不代表已经访问网页。' : '') + (this.config.media.enabled ? 'QQ包含受控媒体引用。需要理解图片、语音、视频或文件时，先qq_media_list取得实际引用，再dafeiyu_media_acquire/read读取；缺少处理器或读取失败时如实报告，不猜测。' + (this.config.media.sendEnabled ? '媒体输出由dafeiyu_media_reply准备并交付。' : this.config.stickers.enabled ? '可用qq_sticker_list/collect/use自主挑选收录与使用本地表情；每轮通常最多一张，允许配文字或纯表情。默认收录仅本会话可用，主人用qq_sticker_manage管理；不能发送库外图片、语音或文件。' : '当前回复使用文字。') : '当前媒体处理未启用，无法读取图片、语音、视频和文件正文。'),
+                        description: QQ_EXPRESSION_DEFAULTS + '\n' + QQ_SEQUENCE_INSTRUCTIONS + '\n' + JSON.stringify({ kind: 'channel-capabilities', channel: 'qq', observation: { enabled: this.config.capabilities.enabled, scope: 'current-authorized-conversation', historyWindowMs: QQ_HISTORY_WINDOW_MS, historyTriggersReplies: false, forwardReadable: this.config.capabilities.enabled }, media: { input: this.config.media.enabled, output: this.config.media.sendEnabled, localStickers: this.config.stickers.enabled }, note: '内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。' }),
                         ...(this.config.media.enabled && (this.config.media.sendEnabled || this.config.stickers.enabled) ? { mediaDelivery: 'parts-v1', deliverMedia: (reply, signal, authority, bytes) => this.deliverMedia(reply, signal, authority, bytes) } : {}),
                         deliver: (reply, signal, authority) => this.deliver(reply, signal, authority), deliverTaskResult: (reply, anchor, signal, authority) => this.deliverTaskResult(reply, anchor, signal, authority) }] });
             this.batches = this.store.batches(this.config.messageBatch, { current: message => { try {
@@ -167,12 +171,15 @@ export class QqChannel extends Service {
                     allowed: scene => this.allowed(scene), available: () => !this.stopped && this.verified && (this.state === 'online' || this.quiescing), readHistory: (scene, signal) => this.readHistory(scene, signal), readForward: (scene, messageId, index, signal) => this.readForward(scene, messageId, index, signal) });
             if (this.config.tasks.enabled)
                 this.tasks = new QqTaskCapabilities(ctx, { agentId: this.config.agentId, botId: this.config.botId, ownerId: this.config.ownerId, policyId: this.config.tasks.policyId, deliverResults: this.config.tasks.deliverResults, naturalNames: this.config.naturalNames, voiceDirectives: this.config.media.voiceDirectives, ...(this.config.tasks.explorationResources ? { explorationResources: this.config.tasks.explorationResources } : {}), ...(this.config.tasks.expressionPolicy ? { expressionPolicy: this.config.tasks.expressionPolicy } : {}) });
+            if (this.config.tasks.enabled)
+                this.progress = bindQqProgress(ctx, this.config.agentId);
             if (this.config.media.enabled)
                 this.media = new QqMedia(ctx, { agentId: this.config.agentId, store: this.store, api: this.api, settings: this.config.media, allowed: scene => this.allowed(scene), available: () => !this.stopped && this.verified && this.state === 'online', sourceEpoch: () => JSON.stringify([this.state === 'rejected', this.groups.effective()]), rejectIdentity: () => { this.verified = false; this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
             if (this.config.stickers.enabled)
                 this.stickers = new QqStickers(ctx, { agentId: this.config.agentId, botId: this.config.botId, ownerId: this.config.ownerId, store: this.store.stickers, allowed: scene => this.allowed(scene) });
         }
         catch (error) {
+            this.progress?.dispose();
             this.stickers?.close();
             this.media?.close();
             this.tasks?.close();
@@ -412,8 +419,12 @@ export class QqChannel extends Service {
             this.counters.ignored++;
             return;
         }
+        const tailContinuation = [...this.tails.values()].some(tail => tail.route === route && tail.sender === message.user_id);
+        for (const tail of this.tails.values())
+            if (tail.route === route && tail.sender === message.user_id)
+                tail.controller.abort();
         const continuation = this.config.messageBatch.enabled && this.batches.has({ id: message.message_id, occurredAt: new Date(message.time * 1000).toISOString(), conversation, sender: { id: message.user_id, displayName: '' }, text: '[pending]' });
-        if (!triggered && !continuation) {
+        if (!triggered && !continuation && !tailContinuation) {
             this.store.acknowledge(route, message.message_id);
             this.counters.ignored++;
             return;
@@ -441,7 +452,7 @@ export class QqChannel extends Service {
         if (control)
             this.batches.discard(inbound);
         if (this.config.messageBatch.enabled && !control) {
-            this.batches.enqueue(inbound, triggered);
+            this.batches.enqueue(inbound, triggered || tailContinuation);
             this.store.acknowledge(route, message.message_id);
             return;
         }
@@ -491,9 +502,9 @@ export class QqChannel extends Service {
             return Promise.resolve({ status: 'not-sent', code: 'MEDIA_DELIVERY_AUTHORITY_REQUIRED' });
         if (reply.taskResult && typeof authority !== 'function')
             return Promise.resolve({ status: 'not-sent', code: 'TARGET_NOT_ALLOWED' });
-        const task = this.transport.deliver(reply, AbortSignal.any([signal, this.controller.signal]), authority);
+        const lease = this.tailLease(reply, signal), task = this.transport.deliver(reply, lease.signal, authority);
         this.sending.add(task);
-        void task.finally(() => this.sending.delete(task)).catch(() => { });
+        void task.finally(() => { this.sending.delete(task); lease.release(); }).catch(() => { });
         return task;
     }
     deliverMedia(reply, signal, authority, bytes) {
@@ -501,11 +512,17 @@ export class QqChannel extends Service {
             return Promise.resolve({ status: 'not-sent', code: 'CHANNEL_OFFLINE' });
         const guarded = () => { authority(); if (!this.config.media.sendEnabled && reply.media.parts.some(part => part.kind !== 'image' || !this.store.stickers.permits(reply.conversation, part.asset)))
             throw new Error('STICKER_SCOPE_DENIED'); };
-        const work = this.mediaTransport.deliver(reply, AbortSignal.any([signal, this.controller.signal]), guarded, bytes);
+        const lease = this.tailLease(reply, signal), work = this.mediaTransport.deliver(reply, lease.signal, guarded, bytes);
         this.sending.add(work);
-        void work.finally(() => this.sending.delete(work)).catch(() => { });
+        void work.finally(() => { this.sending.delete(work); lease.release(); }).catch(() => { });
         return work;
     }
+    tailLease(reply, signal) { let lease = this.tails.get(reply.id); if (!lease) {
+        const source = this.ctx.dafeiyu.journal.messageFor({ agentId: this.config.agentId, route: conversationKey(this.config.agentId, reply.conversation) }, reply.sourceMessageId);
+        lease = { route: this.cacheRoute(reply.conversation), sender: source?.message.sender.id ?? this.config.ownerId, controller: new AbortController() };
+        this.tails.set(reply.id, lease);
+    } const captured = lease; return { signal: AbortSignal.any([signal, this.controller.signal, lease.controller.signal]), release: () => { if (this.tails.get(reply.id) === captured)
+            this.tails.delete(reply.id); } }; }
     deliverTaskResult(reply, raw, signal, authority) {
         const anchor = TaskResultAnchorSchema.parse(raw);
         if (typeof authority !== 'function' || conversationKey(this.config.agentId, anchor.target) !== conversationKey(this.config.agentId, reply.conversation))
@@ -575,7 +592,7 @@ export class QqChannel extends Service {
             throw new Error('SOURCE_MESSAGE_NOT_FOUND');
     }
     async sendSegment(reply, text, signal) {
-        const conversation = reply.conversation, quote = this.store.replyQuote(quoteKey(reply), this.cacheRoute(conversation)), message = [...(quote || conversation.kind === 'group' ? [{ type: 'reply', data: { id: quote ?? reply.sourceMessageId } }] : []), { type: 'text', data: { text } }];
+        const conversation = reply.conversation, quote = this.store.replyQuote(quoteKey(reply), this.cacheRoute(conversation)), message = [...((quote || conversation.kind === 'group') && (this.store.delivery.progress(reply.id)?.confirmed ?? 0) === 0 ? [{ type: 'reply', data: { id: quote ?? reply.sourceMessageId } }] : []), { type: 'text', data: { text } }];
         const action = conversation.kind === 'private' ? 'send_private_msg' : 'send_group_msg';
         const params = { [conversation.kind === 'private' ? 'user_id' : 'group_id']: Number(conversation.id), message };
         const result = z.object({ message_id: platformId }).parse(await this.api.call(action, params, signal));
@@ -584,7 +601,7 @@ export class QqChannel extends Service {
     async sendMediaPart(reply, part, data, signal) {
         const value = part.kind === 'text' ? { type: 'text', data: { text: part.text } } : { type: part.kind, data: { file: 'base64://' + Buffer.from(data).toString('base64'), ...(part.kind === 'file' ? { name: part.name } : {}) } };
         const quote = this.store.replyQuote(quoteKey(reply), this.cacheRoute(reply.conversation));
-        const message = [...((quote || reply.conversation.kind === 'group') && (part.kind === 'text' || part.kind === 'image') ? [{ type: 'reply', data: { id: quote ?? reply.sourceMessageId } }] : []), value], action = reply.conversation.kind === 'private' ? 'send_private_msg' : 'send_group_msg';
+        const message = [...((quote || reply.conversation.kind === 'group') && (this.store.mediaDelivery.progress(reply.id)?.confirmed ?? 0) === 0 && (part.kind === 'text' || part.kind === 'image') ? [{ type: 'reply', data: { id: quote ?? reply.sourceMessageId } }] : []), value], action = reply.conversation.kind === 'private' ? 'send_private_msg' : 'send_group_msg';
         return z.object({ message_id: platformId }).parse(await this.api.call(action, { [reply.conversation.kind === 'private' ? 'user_id' : 'group_id']: Number(reply.conversation.id), message }, signal)).message_id;
     }
     async close() {
@@ -595,6 +612,8 @@ export class QqChannel extends Service {
         this.controller.abort();
         this.batches.pause();
         this.sourceSignals.clear();
+        this.tails.clear();
+        this.progress?.dispose();
         this.capabilities?.close();
         this.stickers?.close();
         this.media?.close();

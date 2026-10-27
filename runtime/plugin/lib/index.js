@@ -2,7 +2,10 @@ import Schema from '@deepseek-ai/schemastery';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute } from 'node:path';
+import { attachDshBridge } from './bridge-parent.js';
+import { readInstallationSettings } from './settings.js';
 export const name = 'dsh-dafeiyu';
+export const inject = ['agents', 'tools', 'sessions', 'sessionPersistence'];
 export const Config = Schema.object({
     settingsFile: Schema.string().default('').description('大肥鱼配置文件的绝对路径。请复制随包提供的配置样例，填写模型、主人QQ、机器人QQ和OneBot连接。'),
     nodePath: Schema.string().default('node').description('Node.js 24.13+可执行文件；已加入PATH时保持node。'),
@@ -15,8 +18,17 @@ export function apply(ctx, config) {
     }
     if (!isAbsolute(config.settingsFile))
         throw new Error('INSTALL_SETTINGS_ABSOLUTE_PATH_REQUIRED');
+    let bridgeEnabled = false;
+    try {
+        bridgeEnabled = readInstallationSettings(config.settingsFile).dshTools;
+    }
+    catch {
+        ctx.logger.warn('INSTALL_CONFIGURATION_REQUIRED：请检查大肥鱼配置文件。');
+        return;
+    }
     return ctx.effect(() => {
-        const child = spawn(config.nodePath, [fileURLToPath(new URL('../bin/dafeiyu.mjs', import.meta.url)), 'start', '--settings', config.settingsFile], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+        const child = spawn(config.nodePath, [fileURLToPath(new URL('../bin/dafeiyu.mjs', import.meta.url)), 'start', '--settings', config.settingsFile], { windowsHide: true, env: { ...process.env, DAFEIYU_DSH_BRIDGE: bridgeEnabled ? '1' : '' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+        const closeBridge = bridgeEnabled ? attachDshBridge(ctx, child, config.settingsFile) : async () => { };
         let closed = false;
         const finished = new Promise(resolve => { child.once('close', () => { closed = true; resolve(); }); child.once('error', () => { ctx.logger.error('INSTALL_NODE_UNAVAILABLE：请检查Node.js路径与版本。'); closed = true; resolve(); }); });
         child.on('message', (value) => {
@@ -30,8 +42,10 @@ export function apply(ctx, config) {
             }
         });
         return async () => {
-            if (closed)
+            if (closed) {
+                await closeBridge();
                 return;
+            }
             if (child.connected)
                 child.send({ type: 'stop' });
             let timer;
@@ -45,6 +59,7 @@ export function apply(ctx, config) {
             finally {
                 if (timer)
                     clearTimeout(timer);
+                await closeBridge();
             }
         };
     });

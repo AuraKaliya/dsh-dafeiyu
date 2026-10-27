@@ -138,11 +138,11 @@ export declare const MediaAssetRecordSchema: z.ZodObject<{
         document: "document";
     }>;
     state: z.ZodEnum<{
+        failed: "failed";
+        deleted: "deleted";
         staging: "staging";
         ready: "ready";
         evicted: "evicted";
-        deleted: "deleted";
-        failed: "failed";
     }>;
     sha256: z.ZodNullable<z.ZodString>;
     bytes: z.ZodNullable<z.ZodNumber>;
@@ -315,9 +315,9 @@ export declare const NativeMediaMaterialSchema: z.ZodObject<{
     parts: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"asset">;
         delivery: z.ZodEnum<{
-            image: "image";
             record: "record";
             file: "file";
+            image: "image";
         }>;
         asset: z.ZodObject<{
             schemaVersion: z.ZodLiteral<1>;

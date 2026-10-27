@@ -18,6 +18,14 @@ test('owner and bot must be supplied separately; no provider credentials or priv
   assert.equal(InstallationSettingsSchema.safeParse({}).success,false);
   assert.equal(InstallationSettingsSchema.safeParse({schemaVersion:1,dataDir:'data',model:{model:'fixture',credentialStore:'file'},qq:{botId:'12345678',ownerId:'12345678',tokenFile:'file',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'}}).success,false);
 });
+
+test('DSH account installation selects the official account route without changing API-key installations',()=>{
+  const base={schemaVersion:1,dataDir:'data',model:{model:'deepseek-flash',credentialStore:'credentials.yaml'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'}};
+  for(const auth of [undefined,'dsh-account'] as const){const settings=InstallationSettingsSchema.parse({...base,model:{...base.model,...(auth?{auth}:{})}});
+    const config=installationProfile(settings,{schemaVersion:1,instanceId:'11111111-1111-4111-8111-111111111111',profileId:'fixture',agentId:'fish',createdAt:'2026-10-27T00:00:00.000Z',identityHash:'0'.repeat(64),biliOwner:null},'persona.md','settings.json');
+    assert.equal(config.modelRoutes.chat.provider,auth?'deepseek-account':'deepseek-official');assert.equal(config.plugins.find(plugin=>plugin.id==='model-deepseek')?.config.auth,auth);
+  }
+});
 test('allowlisted and joined installations both use the one verified group directory',()=>{
   for(const joinedGroups of [false,true]){
     const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'data',model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/',groupIds:['11223344'],joinedGroups}});

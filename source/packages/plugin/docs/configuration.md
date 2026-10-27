@@ -21,8 +21,9 @@
 | 配置 | 必填 | 用途 |
 |---|---|---|
 | `dataDir` | 是 | 当前实例独立的数据目录，初次必须为空 |
-| `model.model` | 是 | 已授权API账号可用的DeepSeek模型名 |
-| `model.credentialStore` | 是 | DSH版本1凭据文件，其中包含DEEPSEEK_API_KEY条目 |
+| `model.model` | 是 | 已授权API或DSH账号可用的DeepSeek模型名 |
+| `model.auth` | 否 | 默认api-key；dsh-account使用官方DSH账号提供器与已有登录 |
+| `model.credentialStore` | 是 | DSH版本1凭据文件；按auth使用DEEPSEEK_API_KEY或本机已有官方账号登录 |
 | `model.reasoningEffort` | 否 | 该模型支持的推理档位 |
 | `model.baseURL` | 否 | 默认为官方API；自定义时须是HTTPS或本机回环HTTP |
 | `qq.botId` / `qq.ownerId` | 是 | 机器人QQ / 主人QQ，必须主动配置且不同 |
@@ -33,6 +34,7 @@
 | `qq.stickers` | 否 | 默认关闭；enabled:true启用本地表情，默认512MiB/1000项，依赖媒体配置 |
 | `qq.replyDelay` | 否 | 普通安装默认true；生成后按文本量延迟2—10秒，非文本不增加时间 |
 | `foundationFile` | 否 | 自选底色文件；默认使用随包提供的通用大肥鱼底色 |
+| `dshTools` | 否 | 默认false；true通过DSH桌面的cordis组合和官方工具管线执行主人任务、有效计划唤醒，使用danger-full-access权限，不另配命令模板；无桌面端口的独立CLI拒绝启动 |
 | `activity.enabled` | 否 | 默认启用调度能力，计划由核心决定 |
 
 启用媒体时，`media` 接受公共媒体接口配置：`ffmpeg`、`ffprobe` 必填；视觉使用 `vision: {provider,model,reasoningEffort?}`，provider与聊天路由一致。视觉还需配置 `model.inlineTransport: {contextWindow,maxOutputTokens}` 和模型支持的 `reasoningEffort`，上下文/输出上限按所用模型填写。音频语音识别使用 `audio.whisper`（node、moduleDirectory、moduleVersion为1.1.3、model），声音理解使用 `audio.events`（python、model、labels、onnxruntimeVersion、numpyVersion）；模型与标签对象为 `{path,sha256}`。准确字段以 `source/packages/media/src/audio.ts` 导出的配置schema为准；使用时会校验文件及哈希。

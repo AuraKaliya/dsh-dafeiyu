@@ -5,9 +5,9 @@ declare const segmentSchema: z.ZodObject<{
     position: z.ZodNumber;
     state: z.ZodEnum<{
         unknown: "unknown";
-        sending: "sending";
         sent: "sent";
         pending: "pending";
+        sending: "sending";
     }>;
     receipt: z.ZodNullable<z.ZodString>;
     code: z.ZodNullable<z.ZodString>;
@@ -52,6 +52,7 @@ declare const planSchema: z.ZodObject<{
     }, z.core.$strict>], "kind">;
     bodyHash: z.ZodString;
     segments: z.ZodArray<z.ZodString>;
+    originalText: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export type QqDeliveryPlan = z.infer<typeof planSchema>;
 export interface QqDeliveryProgress {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export const ReadProgressSchema = z.strictObject({ state: z.enum(['unread', 'observed', 'unavailable', 'failed']), subject: z.enum(['reference', 'provided-page', 'source-range']), completeness: z.enum(['complete', 'partial', 'unknown']) });
 import { ConversationSchema } from './conversation.js';
 import { MemoryBoundaryPolicySchema } from './memory-boundary.js';
 import { redactText } from './redaction.js';

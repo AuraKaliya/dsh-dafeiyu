@@ -11,7 +11,9 @@ import type { StoredRun } from './runtime-store.js';
 import type { DshRuntime } from './runtime.js';
 import type { CapabilityRegistryV3,BoundActionV3 } from './registry-v3.js';
 import type { RunScheduler } from './run-scheduler.js';
-import type { NativeAction } from './execution-frame.js';
+import type { NativeAction,TaskExecutionFrame } from './execution-frame.js';
+import { TaskAssessmentSchema } from '@dafeiyu/contracts';
+import { DshCapabilityChangeSchema } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
 import { SourceDependencySchema,MaintenanceLifecycleSchema,ActivityAnchorSchema,TaskCreateSchema } from '@dafeiyu/contracts';
@@ -37,9 +39,11 @@ interface Dependencies {
   memory:()=>ExecutionMemoryPort|undefined;
   accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
   turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number;maxBytes:number;prepareTimeoutMs:number};signal:AbortSignal;
+  assessmentTimeoutMs?:number;
   projectConversation?:()=>Promise<void>;
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
   settled?:(runId:string)=>void;
+  progress?:(runId:string)=>Promise<Json>;
   media?:()=>import('@dafeiyu/contracts').MediaPort|undefined;
 }
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null}
@@ -76,9 +80,9 @@ export class ExecutionCoordinator {
     const request=this.d.store.request(run.requestKey),source=savedSchema.parse(request.payload).messageSource;if(source)this.validateMessageSource(source);
     return (source?.resources??this.policy(request.producer,run.definition.policyId).resources).map(scene=>({...scene}));}
   quoteReplySource(context:ExecutionContextV3,pluginId:string){this.authority(context,pluginId);const run=this.d.store.get(context.runId);
-    if(run.definition.origin.kind==='message'){const item=this.d.journal.get(run.definition.origin.inboundId);return {key:item.id+':reply',target:item.message.conversation};}
+    if(run.definition.origin.kind==='message'){const item=this.d.journal.get(run.definition.origin.inboundId);return {key:item.id+':reply',target:item.message.conversation,inboundId:item.id};}
     const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;if(!source)throw new Error('MESSAGE_REQUIRED');this.validateMessageSource(source);
-    return {key:'task:'+run.id,target:source.conversation};}
+    return {key:'task:'+run.id,target:source.conversation,inboundId:source.inboundId};}
   bindMessageTasks(binding:MessageTaskBinding):()=>void{if(this.messageBindings.has(binding.id))throw new Error('DUPLICATE_PROVIDER');const policy=this.policy(binding.id,binding.policyId);
     if(binding.explorationResources?.some(scene=>!policy.resources.some(allowed=>runtimeHash(allowed)===runtimeHash(scene))))throw new Error('EXPLORATION_RESOURCE_DENIED');
     const captured=Object.freeze({...binding,classify:binding.classify.bind(binding),active:binding.active.bind(binding),...(binding.voice?{voice:Object.freeze({version:binding.voice.version,resolve:binding.voice.resolve.bind(binding.voice),current:binding.voice.current.bind(binding.voice)})}:{})});this.messageBindings.set(binding.id,captured);return ()=>{if(this.messageBindings.get(binding.id)===captured)this.messageBindings.delete(binding.id);};}
@@ -129,6 +133,7 @@ export class ExecutionCoordinator {
     const access=this.d.personas.access(run,inputs,this.d.signal,structuralGuard),evidence=this.evidenceFor(run,access);
     const guard=()=>{structuralGuard();if(this.d.store.get(run.id).state!==run.state||run.state==='waiting'&&this.d.store.list().some(next=>next.definition.parentRunId===run.id)||!evidence.validate(proof)||run.state==='completed'&&this.d.memory()?.intent(access).blocking)throw new Error('SOURCE_STALE');const persona=this.d.store.personaBinding(run.id);if(persona.kind==='bound')this.d.personas.validateStored(run,persona.manifest,inputs,this.d.signal,structuralGuard);};guard();
     const intent=this.d.memory()?.intent(access),output=run.state==='completed'?await this.d.runtime.readResult(run.result!):(intent?.events.filter(event=>event.kind==='objection'&&event.blocking&&!intent.events.some(resolved=>resolved.resolves===event.id)).map(event=>`${event.category}：${event.reason}`).join('\n')||'任务处于等待状态，尚未完成。');guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=source.kind==='self-exploration',derivedInputComplete=!opaque;
+    const wake=this.wakeOrigins(run)[0],operationalEvidence:import('@dafeiyu/contracts').NativeExpressionPacket['evidence']=wake?[{id:'WAKE',kind:'reported',text:JSON.stringify({kind:'scheduled-wake',goal:task.goal,dueAt:wake.dueAt,note:'由真实计划触发的新一次唤醒；只向原QQ会话整理本次安排，不把旧聊天当成新命令或补回复。'})}]:[];
     const add=(ref:PersonaSourceRef)=>{const key=runtimeHash(ref);candidates.set(key,{source:ref,view:views.get(key)??null});};
     const visit=(dependencies:readonly SourceDependency[])=>{for(const dependency of dependencies){const key=runtimeHash(dependency);if(visited.has(key))continue;if(visited.size>=4096)throw new Error('CAPACITY_EXCEEDED');visited.add(key);
       if(dependency.kind==='execution-source')add(dependency.ref);
@@ -142,7 +147,12 @@ export class ExecutionCoordinator {
         const media=z.object({text:z.string(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
         if(media.success&&operation.plugin==='media'&&operation.action==='dafeiyu_media_read'){const key=runtimeHash(media.data.observation.source);views.set(key,media.data.text);add(media.data.observation.source);}
         else if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
-          if(operation.plugin!=='qq-capabilities'||!['qq_browse','qq_forward_read'].includes(operation.action))opaque=true;}
+          if(!(operation.plugin==='qq-capabilities'&&['qq_browse','qq_forward_read'].includes(operation.action))&&!(operation.plugin==='dsh-tools'&&['dsh_tool_call','dsh_result_read'].includes(operation.action)))opaque=true;}
+        else if(operation.plugin==='dsh-tools'&&operation.action==='dsh_tool_list'){/* Capability schemas are operational, not evidence about the task result. */}
+        else if(outcome?.status==='succeeded'&&outcome.effects!=='unknown'&&(operation.plugin==='qq-progress'&&operation.action==='qq_progress'||operation.plugin==='memory-persona'&&operation.action==='dafeiyu_qq_expression_save'||operation.plugin==='activity'&&['dafeiyu_activity_plan','dafeiyu_activity_update'].includes(operation.action))){
+          const body=z.record(z.string(),z.json()).parse(outcome.data),allowed=new Set(['id','version','slot','saved','removed','status','receiptId','state']);
+          operationalEvidence.push({id:'O'+operationalEvidence.length,kind:'reported',text:JSON.stringify({action:operation.action,status:outcome.status,effects:outcome.effects,data:Object.fromEntries(Object.entries(body).filter(([key,value])=>allowed.has(key)&&(typeof value==='string'||typeof value==='number'||typeof value==='boolean'))),note:'程序保存的实际操作回执；不由此推断未返回的内容。'})});
+        }
         else if(!(operation.plugin==='qq-capabilities'&&['qq_observe_select','qq_reply_quote'].includes(operation.action))&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action))){opaque=true;derivedInputComplete=false;}
         if(!outcome||outcome.effects==='unknown'||outcome.status==='unknown'){opaque=true;derivedInputComplete=false;}
         if(operation.plugin==='memory-execution'&&operation.action==='dafeiyu_task_object'){const refs=z.object({evidence:z.array(PersonaSourceRefSchema)}).safeParse(outcome?.data);if(refs.success)refs.data.evidence.forEach(add);}
@@ -150,7 +160,8 @@ export class ExecutionCoordinator {
         if(dependency.id==='persona:availability'){opaque=true;continue;}
         const body=z.object({item:z.object({text:z.string()})}).safeParse(this.d.store.findContext(`context:${runtimeHash(dependency)}`));let selected:ReturnType<typeof PersonaSourceRefSchema.safeParse>|undefined;
         if(body.success){try{selected=PersonaSourceRefSchema.safeParse(z.object({source:z.unknown()}).parse(JSON.parse(body.data.item.text)).source);}catch{/* Unsupported context cannot grant expression. */}}
-        if(dependency.owner==='memory'&&dependency.region==='execution'&&selected?.success)add(selected.data);else {opaque=true;
+        if(dependency.owner==='dsh-tools'&&dependency.region==='capabilities'){/* Operational declarations do not become world evidence. */}
+        else if(dependency.owner==='memory'&&dependency.region==='execution'&&selected?.success)add(selected.data);else {opaque=true;
           // Growth contexts already carry Core-verified content/dependency refs alongside this record.
           if(!(dependency.owner==='memory'&&dependency.region==='growth'))derivedInputComplete=false;}
       }else {opaque=true;derivedInputComplete=false;}
@@ -158,14 +169,43 @@ export class ExecutionCoordinator {
     if(candidates.size>64)throw new Error('CAPACITY_EXCEEDED');
     const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
     const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
-    const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),guard};
+    const progress=this.d.store.readInput(run.id,'automatic-progress'),retention=this.d.store.readInput(run.id,'assessment-retention');
+    if(progress)operationalEvidence.push({id:'PROGRESS',kind:'reported',text:JSON.stringify({kind:'program-feedback-receipt',receipt:progress})});
+    if(retention)operationalEvidence.push({id:'RETENTION',kind:'reported',text:JSON.stringify({kind:'assessment-retention',result:retention,note:'保存的是有来源的模型评价；经历整理和人格采用仍有独立流程。'})});
+    if(run.state==='waiting')operationalEvidence.push({id:'STATE',kind:'reported',text:JSON.stringify({state:run.state,error:run.error,note:'程序等待状态，不表示目标已经满足。'})});
+    const reviewed=z.object({assessment:TaskAssessmentSchema}).safeParse(this.d.store.readInput(run.id,'task-assessment'));
+    const selectedSourceIds=reviewed.success?reviewed.data.assessment.evidenceIds.flatMap(id=>this.d.store.operation(id).outcome?.sources.map(ref=>ref.id)??[]):[];
+    const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),...(reviewed.success?{assessment:reviewed.data.assessment}:{}),...(selectedSourceIds.length?{selectedSourceIds}:{}),guard};
     const media=this.d.media?.()?.nativeMaterial?.(expression);return media?{...expression,media}:expression;
   }
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
-      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',phase:this.d.store.phaseStatus(run.id),assessment:this.assessmentStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+  feedbackSource(runId:string){const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
+    if(!source||source.kind!=='explicit-task'||source.conversation.channel!=='qq'||run.definition.scope.kind!=='task')return null;
+    const {item}=this.validateMessageSource(source),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
+    if(task.epoch!==run.definition.intentVersion||task.status!=='active')return null;
+    return {item,taskId:task.id,state:run.state,error:run.error,operations:this.d.store.operations(run.id).map(op=>({state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null}))};
+  }
+  private assessmentStatus(runId:string){const value=z.object({assessment:TaskAssessmentSchema,at:z.string()}).safeParse(this.d.store.readInput(runId,'task-assessment'));return value.success?{goalStatus:value.data.assessment.goalStatus,next:value.data.assessment.next,at:value.data.at}:null;}
+  reconcileCapabilityChange(raw:unknown){
+    const change=DshCapabilityChangeSchema.parse(raw),authorization=change.authorization;
+    if(change.id!==authorization.operationId||!this.externalTaskSourceCurrent(authorization,'dsh-tools'))return {accepted:false,resumedRunId:null};
+    const run=this.d.store.get(authorization.runId);if(run.state!=='waiting'||run.error!=='TASK_CAPABILITY_CHANGE_PENDING')return {accepted:false,resumedRunId:null};
+    const reviewed=z.object({assessment:TaskAssessmentSchema}).parse(this.d.store.readInput(run.id,'task-assessment'));
+    const facts={id:change.id,state:change.state,catalogVersion:change.catalogVersion,runtimeReloaded:change.runtimeReloaded,available:reviewed.assessment.requiredCapabilities.filter(name=>change.toolNames.includes(name))};
+    if(this.d.store.bindCapabilityReceipt(run.id,change.id,facts)){this.d.store.appendExecutionEvent(run.id,'task.capability-change',facts);this.flushEvents();}
+    if(!['applied','restart-required'].includes(change.state)||change.state==='restart-required'&&!change.runtimeReloaded||reviewed.assessment.requiredCapabilities.some(name=>!change.toolNames.includes(name)))return {accepted:true,resumedRunId:null};
+    if(this.d.store.list().some(next=>next.definition.parentRunId===run.id))return {accepted:true,resumedRunId:null};
+    const memory=this.d.memory(),task=this.repository().readState(this.d.agentId,authorization.taskId),access=this.d.personas.access(run,this.inputsFor(run),this.d.signal,()=>this.validateMessageAncestors(run));
+    if(memory?.intent(access).blocking)return {accepted:true,resumedRunId:null};
+    const checkpoint=this.d.store.checkpoints(run.id).at(-1);if(!checkpoint)return {accepted:true,resumedRunId:null};
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),request=this.d.store.request(run.requestKey);
+    const resumed=this.submit(request.producer,ExecutionRequestSchema.parse({requestId:runtimeHash(['capability-resume',run.id,change.id]),taskId:task.id,expectedVersion:task.version,policyId:run.definition.policyId,inputRefs:saved.input.inputRefs,data:{capabilityChange:facts}}),{kind:'continuation',parentRunId:run.id,checkpointId:checkpoint},run.id,checkpoint,this.motivation(run),saved.messageSource);
+    return {accepted:true,resumedRunId:resumed.run.id};
+  }
   controlMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskControlSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
-    if(item.message.sender.id!==binding.ownerId||directive.kind!==input.action)throw new Error('TASK_DIRECTIVE_REQUIRED');
+    if(item.message.sender.id!==binding.ownerId||directive.kind!==input.action&&directive.kind!=='submit'&&!(input.action==='resume'&&directive.kind==='resolve'))throw new Error('TASK_DIRECTIVE_REQUIRED');
     if(redactJson(z.json().parse(directive)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
     const latest=this.findMessageTask(binding,item.message.conversation,input.taskId),requestId=runtimeHash([item.id,input.taskId,input.action,input.objectionId??null]),producer=`message-control:${binding.id}`,old=this.d.store.findRequest(producer,requestId);
     const run=old?this.d.store.get(z.object({runId:z.uuid()}).parse(old.payload).runId):latest;
@@ -173,7 +213,15 @@ export class ExecutionCoordinator {
     const receiptId=`message-control:${control.id}`,receipt=this.d.store.readInput(context.runId,receiptId);if(receipt)return z.record(z.string(),z.json()).parse(receipt);
     const port=this.producer(binding.id),taskRef=port.openTask(input.taskId);let resumed:{task:TaskRef;run:RunRef;state:string}|undefined,changed=false;
     try {
-    if(input.action==='resolve'){
+    if(input.action==='resume'){
+      const task=this.repository().readState(this.d.agentId,input.taskId);if(task.version!==input.expectedVersion||task.status!=='active'||task.epoch!==run.definition.intentVersion)throw new Error('VERSION_CONFLICT');
+      if(!['waiting','failed','interrupted'].includes(run.state))throw new Error('RUN_NOT_QUIESCENT');
+      if(this.d.store.operations(run.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('OPERATION_UNCERTAIN');
+      if(this.messageIntent(run)?.blocking)throw new Error('TASK_OBJECTION_UNRESOLVED');
+      const checkpoint=this.d.store.checkpoints(run.id).at(-1),parent=savedSchema.parse(this.d.store.request(run.requestKey).payload).messageSource;if(!checkpoint||!parent)throw new Error('SOURCE_STALE');
+      const source=MessageTaskSourceSchema.parse({...parent,control:{inboundId:item.id,messageHash:runtimeHash(item.message),...(voice?{voice}:{})}});this.validateMessageSource(source);
+      resumed=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([control.id,'resume']),taskId:task.id,expectedVersion:task.version,policyId:binding.policyId}),{kind:'continuation',parentRunId:run.id,checkpointId:checkpoint},run.id,checkpoint,this.motivation(run),source);
+    }else if(input.action==='resolve'){
       const task=this.repository().readState(this.d.agentId,input.taskId);if(task.version!==input.expectedVersion||task.status!=='active'||run.definition.intentVersion!==task.epoch)throw new Error('VERSION_CONFLICT');
       if(run.state!=='waiting')throw new Error('RUN_NOT_QUIESCENT');
       if(this.d.store.operations(run.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('OPERATION_UNCERTAIN');
@@ -213,7 +261,7 @@ export class ExecutionCoordinator {
   private externalTaskSource(run:StoredRun):ExternalTaskSource {
     if(run.definition.scope.kind!=='task'||!run.definition.taskId)throw new Error('TASK_REQUIRED');
     const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),motivation=this.motivation(run);
-    if(saved.messageSource){
+    if(saved.messageSource&&!this.wakeOrigins(run).length){
       const source=saved.messageSource;
       if(source.kind!=='explicit-task'||motivation.kind!=='explicit-task')throw new Error('EXTERNAL_TASK_SOURCE_REQUIRED');
       this.validateMessageAncestors(run);const {binding,item}=this.validateMessageSource(source);
@@ -312,11 +360,19 @@ export class ExecutionCoordinator {
         return this.submit(producer,request,{kind:'continuation',parentRunId,checkpointId},parentRunId,checkpointId,declared?.motivation??this.motivation(parent),savedSchema.parse(this.d.store.request(parent.requestKey).payload).messageSource);},
       acceptWake:(raw:unknown,task:TaskRef)=>{const input=WakeRequestSchema.parse(raw),{origin,...request}=input;if(this.resolveTask(producer,task)!==input.taskId)throw new Error('SCOPE_DENIED');
         if(origin.producerId!==producer||request.requestId!==origin.occurrenceId)throw new Error('SCOPE_DENIED');
-        return this.submit(producer,request,origin,null,null,declared?.motivation??{kind:'unknown',basis:[]});},
+        return this.submit(producer,request,origin,null,null,declared?.motivation??{kind:'unknown',basis:[]},this.messageSourceForWake(origin,this.repository().readState(this.d.agentId,input.taskId)));},
     });
   }
   bindWake(provider:WakeAuthorityProvider):()=>void{const producer=ProducerSchema.parse(provider.producerId);if(this.wakes.has(producer))throw new Error('DUPLICATE_PROVIDER');
     const bound={producerId:producer,validate:provider.validate.bind(provider),...(provider.sourceAnchor?{sourceAnchor:provider.sourceAnchor.bind(provider)}:{})};this.wakes.set(producer,bound);return ()=>{if(this.wakes.get(producer)===bound)this.wakes.delete(producer);};}
+  /** An explicitly planned wake may return to its original QQ conversation; it is a new wake, never a replayed inbound. */
+  private messageSourceForWake(origin:Extract<RunOrigin,{kind:'wake'}>,task:import('@dafeiyu/contracts').TaskState):MessageTaskSource|undefined{
+    if(origin.producerId!=='activity')return undefined;const provider=this.wakes.get(origin.producerId);if(!provider?.validate(origin,task))return undefined;
+    const anchor=provider.sourceAnchor?.(origin,task);if(!anchor||anchor.kind!=='execution'||this.activityAnchorStatus(anchor).state!=='valid')return undefined;
+    const parent=this.d.store.get(anchor.runId),source=savedSchema.parse(this.d.store.request(parent.requestKey).payload).messageSource;
+    if(!source||source.kind!=='explicit-task')return undefined;this.validateMessageSource(source);
+    const {voice:_voice,...targetSource}=source;return MessageTaskSourceSchema.parse({...targetSource,kind:'self-exploration',resources:[source.conversation]});
+  }
   private wakeOrigins(run:StoredRun){const origins:Extract<RunOrigin,{kind:'wake'}>[]=[],seen=new Set<string>();let current:StoredRun|null=run;
     while(current){if(seen.has(current.id)||seen.size>=64)throw new Error('WAKE_NOT_AUTHORIZED');seen.add(current.id);if(current.definition.origin.kind==='wake')origins.push(current.definition.origin);
       current=current.definition.parentRunId?this.d.store.get(current.definition.parentRunId):null;}return origins;
@@ -463,7 +519,7 @@ export class ExecutionCoordinator {
         const inputs=repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules),inputHash=runtimeHash(inputs),authorityVersion=runtimeHash(policy);
         trialInputs=inputs;
         const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&(action.effects==='external-write'?this.externalActionAllowed(run,policy,action):action.effects!=='local-write'||policy.allowLocalWrite));
-        const contributors=this.d.registry.contributors(),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
+        const contributors=this.d.registry.contributors().filter(entry=>entry.owner!=='dsh-tools'||actions.some(action=>action.owner==='dsh-tools'&&action.id==='dsh_tool_call')),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
         const messageSignal=saved.messageSource?this.d.messageSignal?.(saved.messageSource.inboundId):run.definition.origin.kind==='message'?this.d.messageSignal?.(run.definition.origin.inboundId):undefined;
@@ -485,31 +541,61 @@ export class ExecutionCoordinator {
         this.d.personas.admitTrial(this.d.store,id,inputs,signal,guard);
         this.d.store.checkpoint(id,{kind:'run-start',intentVersion:task.epoch});this.flushEvents();
         const view=Object.freeze({runId:id,taskId:task.id,scope:Object.freeze({...run.definition.scope}),origin:Object.freeze({...run.definition.origin}),signal});
-        const contexts:NativeContext[]=runPersona.items.map(item=>({owner:'memory',region:'growth',item}));let contextBytes=Buffer.byteLength(JSON.stringify(contexts),'utf8'),omitted=0;
+        const contexts:NativeContext[]=runPersona.items.map(item=>({owner:'memory',region:'growth',item})),operationalCapabilities:Json[]=[];let contextBytes=Buffer.byteLength(JSON.stringify(contexts),'utf8'),omitted=0;
         const add=(owner:string,region:string,item:unknown)=>{const parsed=ContextItemSchema.parse(item),bytes=Buffer.byteLength(JSON.stringify(parsed),'utf8');if(Date.parse(parsed.expiresAt)<=Date.now()||contextBytes+bytes>this.d.context.maxBytes){omitted++;return;}contextBytes+=bytes;contexts.push({owner,region,item:parsed});};
         for(const item of memory?.prepareContext(access)??[])add('memory','execution',item);
         for(const contributor of contributors){const prepared=await Promise.race([contributor.context.prepare(view),new Promise<never>((_resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('CONTEXT_PREPARE_TIMEOUT')),this.d.context.prepareTimeoutMs);timer.unref();})]);guard();
-          for(const item of prepared)if(contributor.context.validate(view,item))add(contributor.owner,contributor.context.id,item);else omitted++;}
+          for(const item of prepared)if(contributor.context.validate(view,item)){
+            if(contributor.owner==='dsh-tools'&&contributor.context.id==='capabilities')operationalCapabilities.push(z.json().parse(JSON.parse(item.text)));
+            else add(contributor.owner,contributor.context.id,item);
+          }else omitted++;}
         evidence.setContexts(contexts);
         const trigger=saved.messageSource?this.validateMessageSource(saved.messageSource).item:null;
-        const intent=memory?.intent(access),program=z.json().parse({goal:task.goal,inputs,...(saved.input.data===undefined?{}:{providedData:{producer:request.producer,content:saved.input.data,note:'本轮提交的数据，不改变任务目标或授予额外权限'}}),motivation:access.motivation,intent:intent??null,
-          trigger:trigger?redactJson(z.json().parse({conversation:trigger.message.conversation,messageId:trigger.message.id,replyTo:trigger.message.replyTo??null,mainText:messageMainText(trigger.message),note:'仅为实际触发来源与资料，不改变任务目标或授予额外权限'})).value:null,
+        const intent=memory?.intent(access),program=z.json().parse({goal:task.goal,inputs,operationalCapabilities,...(saved.input.data===undefined?{}:{providedData:{producer:request.producer,content:saved.input.data,note:'本轮提交的数据，不改变任务目标或授予额外权限'}}),motivation:access.motivation,intent:intent??null,
+          trigger:trigger?redactJson(z.json().parse({conversation:trigger.message.conversation,messageId:trigger.message.id,occurredAt:trigger.message.occurredAt,replyTo:trigger.message.replyTo??null,mainText:messageMainText(trigger.message),wake:run.definition.origin.kind==='wake'?run.definition.origin:null,note:'仅为实际触发来源与资料，不改变任务目标或授予额外权限'})).value:null,
           continuation:saved.parentRunId?{parentRunId:saved.parentRunId,checkpoint:this.d.store.readCheckpoint(saved.parentRunId,saved.checkpointId!),operations:this.d.store.operations(saved.parentRunId).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))}:null,
           continuity:prior?{checkpointId:prior.id,previousRunId:prior.runId,sessionChanged:prior.sessionId!==sessionId,completedOperations:prior.completedOperations,unknownOperations:prior.unknownOperations,summary:prior.summary,gaps:prior.gaps}:null,
           gaps:[...(omitted?[`${omitted}项上下文未进入本轮，不能猜测其内容`]:[]),...(!prior?['未取得可核验接续检查点；不据此虚构过去']:[])]});
         evidence.recordInput(program,inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),prior?{id:prior.id,hash:runtimeHash(prior)}:null,this.wakeSources(run,task));
         const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validate(evidence.exposed()))throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
-        const result=await this.d.runtime.runExecution({mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:task.goal,inputs,actions:bound,guard:admittedGuard,program,contexts,evidence,
-          audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
-          checkpoint:(session,seq,deps,text)=>this.captureContinuity(run,access,session,seq,deps,text,omitted),...this.d.context});
-        admittedGuard();run=this.d.store.get(id);this.d.store.bindInput(id,'result-sources',evidence.exposed());
-        if(memory?.intent(access).blocking)this.d.store.transition(id,run.version,'waiting','TASK_OBJECTION_UNRESOLVED');else this.d.store.complete(id,run.version,result.resultRef);
+        let stage=0,previousAssessment:import('@dafeiyu/contracts').TaskAssessment|undefined;
+        for(;;){
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'exploration',stage,deadlineAt:new Date(Date.parse(run.updatedAt)+this.d.turnTimeoutMs).toISOString()});this.flushEvents();
+          let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
+          const frame:TaskExecutionFrame={mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:task.goal,inputs,actions:bound,guard:admittedGuard,...(this.d.assessmentTimeoutMs?{assessmentTimeoutMs:this.d.assessmentTimeoutMs}:{}),
+            program:z.json().parse({...z.record(z.string(),z.json()).parse(program),stage:{kind:'exploration',index:stage,previousAssessment:previousAssessment??null}}),contexts,evidence,
+            audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
+            checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
+          const result=await this.d.runtime.runExecution(frame);admittedGuard();this.d.store.bindInput(id,`draft-result:${stage}`,result.resultRef);
+          const operations=this.d.store.operations(id).map(op=>({id:op.id,action:op.action,state:op.state,outcome:op.outcome}));
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'assessment',stage,deadlineAt:new Date(Math.min(Date.parse(run.updatedAt)+this.d.turnTimeoutMs,Date.now()+(this.d.assessmentTimeoutMs??60000))).toISOString()});this.flushEvents();
+          let reviewed:Awaited<ReturnType<DshRuntime['assessExecution']>>;
+            try{reviewed=await this.d.runtime.assessExecution(frame,result,z.json().parse({operations,programFeedback:this.d.store.readInput(id,'automatic-progress'),blocking:memory?.intent(access).blocking??false,coverage:{complete:true}}));
+            if(reviewed.assessment.evidenceIds.some(ref=>!operations.some(op=>op.id===ref)))throw new Error('TASK_ASSESSMENT_EVIDENCE_INVALID');
+          }catch(e){admittedGuard();if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
+            this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.checkpoint(id,{kind:'assessment-pending',draft:result.resultRef});
+            this.d.store.transition(id,this.d.store.get(id).version,'waiting',safeCode(e));return;}
+          const record={schemaVersion:1,assessment:reviewed.assessment,model:this.d.model,resultRef:reviewed.resultRef,draftRef:result.resultRef,basisHash:runtimeHash(operations),at:new Date().toISOString()};
+          this.d.store.bindInput(id,`task-assessment:${stage}`,record);
+          if(reviewed.assessment.next==='continue'){previousAssessment=reviewed.assessment;stage++;continue;}
+          this.d.store.bindInput(id,'task-assessment',record);
+          if(reviewed.assessment.retainExperience&&memory?.recordAssessment){try{
+            const judgmentAccess=evidence.access({...access,producer:'core-result-assessment',admittedSources:[...access.admittedSources,...evidence.sourceRefs()]});
+            const ref=memory.recordAssessment(judgmentAccess,reviewed.assessment);this.d.store.bindInput(id,'assessment-source',ref);this.d.store.bindInput(id,'assessment-retention',{state:'selected-for-experience',sourceId:ref.id});
+          }catch(e){this.d.store.bindInput(id,'assessment-retention',{state:'failed',code:safeCode(e)});this.d.store.appendExecutionEvent(id,'task.assessment-retention-failed',{code:safeCode(e)});}}
+          if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
+          admittedGuard();run=this.d.store.get(id);this.d.store.bindInput(id,'result-sources',evidence.exposed());
+          const waiting=memory?.intent(access).blocking||['wait','capability-change'].includes(reviewed.assessment.next);
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:waiting?'waiting':'delivery',stage,goalStatus:reviewed.assessment.goalStatus,at:new Date().toISOString()});
+          if(waiting)this.d.store.transition(id,run.version,'waiting',memory?.intent(access).blocking?'TASK_OBJECTION_UNRESOLVED':reviewed.assessment.next==='capability-change'?'TASK_CAPABILITY_CHANGE_PENDING':'TASK_WAITING');
+          else this.d.store.complete(id,run.version,result.resultRef);break;
+        }
       }catch(error){run=this.d.store.get(id);
         if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
-      }finally{this.evidence.delete(id);try{this.d.personas.completeTrial(this.d.store,id,trialInputs,this.d.signal);}finally{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
+      }finally{this.evidence.delete(id);try{this.d.personas.completeTrial(this.d.store,id,trialInputs,this.d.signal);}finally{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting','failed'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
     }finally{release();}
   }
   private previousContinuity(run:StoredRun,access:PersonaAccess,foundationHash:string){const memory=this.d.memory();if(!memory)return null;
@@ -560,7 +646,10 @@ export class ExecutionCoordinator {
         origin:freezeOrigin(run.definition.origin),scope:Object.freeze({...run.definition.scope}),intentVersion:run.definition.intentVersion,grant,signal:AbortSignal.any([signal,toolSignal,action.signal])});
       this.grants.set(context,{action,runId:run.id,guard,commitGuard});this.flushEvents();
       try{if(run.definition.scope.kind==='conversation')await this.d.projectConversation?.();guard();const outcome=await action.execute(input,context);
-        this.d.store.finishOperation(operation.id,outcome);this.flushEvents();let value:Json;try{value=result(operation.id,callId,outcome);}catch(error){this.evidence.get(run.id)?.invalidate();throw error;}guard();return value;
+        this.d.store.finishOperation(operation.id,outcome);this.flushEvents();let value:Json;try{value=result(operation.id,callId,outcome);}catch(error){this.evidence.get(run.id)?.invalidate();throw error;}guard();
+        if(run.definition.scope.kind==='task'&&action.owner!=='qq-progress'&&Date.now()-Date.parse(run.createdAt)>30000&&this.d.progress&&!this.d.store.readInput(run.id,'automatic-progress-attempt')&&!this.d.store.operations(run.id).some(op=>op.plugin==='qq-progress'&&op.outcome?.effects==='confirmed')){
+          this.d.store.bindInput(run.id,'automatic-progress-attempt',{at:new Date().toISOString()});try{this.d.store.bindInput(run.id,'automatic-progress',await this.d.progress(run.id));}catch{/* A status failure never changes the actual tool result. */}guard();}
+        return value;
       }catch(error){if(this.d.store.operation(operation.id).state==='started')this.d.store.finishOperation(operation.id,{status:'unknown',effects:action.effects==='read'?'none':'unknown',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:safeCode(error)});
         throw new Error(safeCode(error));
       }finally{this.grants.delete(context);this.flushEvents();}
@@ -617,6 +706,7 @@ export class ExecutionCoordinator {
         const operations=type==='run.running'?[]:this.d.store.operations(run.id);
         const entry=MaintenanceLifecycleSchema.parse({id:event.id,scope:run.definition.scope,runId:run.id,taskEpoch:run.definition.intentVersion,
           origin:run.definition.origin,motivation:this.motivation(run),type,goal,at:event.at,
+          ...(this.d.store.readInput(run.id,'assessment-source')?{assessmentSource:PersonaSourceRefSchema.parse(this.d.store.readInput(run.id,'assessment-source'))}:{}),
           operations:operations.slice(0,256).map(op=>({id:op.id,action:op.action,status:op.outcome?.status??(op.state==='started'?'started':'unknown'),
             effects:op.outcome?.effects??'unknown',completeness:op.outcome?.completeness??'unknown'})),omittedOperations:Math.max(0,operations.length-256)});
         lifecycle?.(entry);for(const observer of this.lifecycleObservers.values())observer(structuredClone(entry));

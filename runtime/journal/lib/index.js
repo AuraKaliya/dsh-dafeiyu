@@ -9,7 +9,7 @@ import { configureSqlite } from './sqlite.js';
 export { inspectJournal, JOURNAL_APPLICATION_ID } from './schema.js';
 export { configureSqlite } from './sqlite.js';
 import { z } from 'zod';
-const states = new Set(['accepted', 'processing', 'reply-ready', 'sending', 'delivered', 'failed', 'uncertain']);
+const states = new Set(['accepted', 'processing', 'reply-ready', 'sending', 'delivered', 'handled', 'failed', 'uncertain']);
 function text(value) {
     if (typeof value !== 'string')
         throw new Error('Invalid persisted string');

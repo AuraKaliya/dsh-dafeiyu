@@ -10,6 +10,7 @@ export interface ExpressionModelInput {
 export declare function verifyPersonaDelivery(ctx: Context, input: ExpressionModelInput, answer: string, signal: AbortSignal, guard: () => void, bounds?: {
     maxAnswerChars: number;
     maxInputBytes: number;
+    timeoutMs?: number;
 }): Promise<void>;
 /** Two fresh, tool-free DSH transport requests. No host prompt, task text, history or previous answer is inherited. */
 export declare function rebuildExpression(ctx: Context, input: ExpressionModelInput, signal: AbortSignal, guard: () => void): Promise<{

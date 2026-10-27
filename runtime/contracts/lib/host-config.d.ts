@@ -41,6 +41,12 @@ export declare const HostConfigSchema: z.ZodObject<{
         maxConcurrentPerSession: z.ZodDefault<z.ZodLiteral<1>>;
         maxPendingRuns: z.ZodDefault<z.ZodNumber>;
         turnTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        phaseTimeouts: z.ZodPrefault<z.ZodObject<{
+            assessment: z.ZodDefault<z.ZodNumber>;
+            render: z.ZodDefault<z.ZodNumber>;
+            verification: z.ZodDefault<z.ZodNumber>;
+            feedback: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         shutdownGraceMs: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     persona: z.ZodObject<{

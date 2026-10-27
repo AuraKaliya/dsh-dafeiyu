@@ -236,6 +236,8 @@ export class ActivityScheduler {
             }
             if (status.state !== 'waiting')
                 continue;
+            if (status.error === 'TASK_CAPABILITY_CHANGE_PENDING')
+                continue; // The installer/loading handoff owns this continuation; keep its wake authority live.
             const pause = this.store.pausedBy(occurrence.body.id, occurrence.runId);
             if (!pause) {
                 this.store.block(current.body.id, 'ACTIVITY_WAITING_DISCUSSION', now);

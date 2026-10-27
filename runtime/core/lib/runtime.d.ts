@@ -59,6 +59,24 @@ export declare class DshRuntime {
             textHash: string;
         };
     }>;
+    assessExecution(frame: TaskExecutionFrame, draft: Awaited<ReturnType<DshRuntime['runExecution']>>, facts: Json): Promise<{
+        assessment: {
+            goalStatus: "met" | "partial" | "unmet" | "uncertain";
+            summary: string;
+            evidenceIds: string[];
+            limitations: string[];
+            unfinished: string[];
+            requiredCapabilities: string[];
+            retainExperience: boolean;
+            next: "deliver" | "continue" | "wait" | "capability-change";
+        };
+        resultRef: {
+            sessionId: string;
+            messageSeq: import("@deepseek-ai/dsh-session").SessionSeq;
+            turnEndSeq: import("@deepseek-ai/dsh-session").SessionSeq;
+            textHash: string;
+        };
+    }>;
     readResult(ref: import('./runtime-store.js').RunResultRef): Promise<string>;
     summaryCommitted(sessionId: string, id: string, text: string): boolean;
     summarySourcesCurrent(sessionId: string, dependencies: readonly import('#dafeiyu/contracts').SourceDependency[]): boolean;
@@ -274,7 +292,7 @@ export declare class DshRuntime {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+                        kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -322,7 +340,7 @@ export declare class DshRuntime {
             };
             fragments: {
                 ref: string;
-                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+                kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;

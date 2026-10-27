@@ -9,15 +9,15 @@ export declare const RuntimeIdentitySchema: z.ZodObject<{
 }, z.core.$strict>;
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
 export declare const RunStateSchema: z.ZodEnum<{
-    running: "running";
-    completed: "completed";
-    interrupted: "interrupted";
-    cancelled: "cancelled";
     accepted: "accepted";
-    waiting: "waiting";
     queued: "queued";
+    running: "running";
+    waiting: "waiting";
     cancelling: "cancelling";
+    completed: "completed";
     failed: "failed";
+    cancelled: "cancelled";
+    interrupted: "interrupted";
 }>;
 export type RunState = z.infer<typeof RunStateSchema>;
 export declare const RunDefinitionSchema: z.ZodObject<{
@@ -437,7 +437,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "unknown" | "cancelled" | "partial" | "failed" | "succeeded";
+            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;
@@ -467,7 +467,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "unknown" | "cancelled" | "partial" | "failed" | "succeeded";
+            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;
@@ -486,10 +486,20 @@ export declare class RuntimeStore {
     };
     bindInput(runId: string, id: string, body: unknown): void;
     readInput(runId: string, id: string): Json | null;
+    /** Core-only immutable receipt for a deferred capability change; never model supplied run output. */
+    bindCapabilityReceipt(runId: string, id: string, body: unknown): boolean;
     /** A program-only maintenance authority record, never new model output in a finished Run. */
     bindMaintenanceAnchor(runId: string, id: string, body: unknown): void;
     findContext(id: string): Json | null;
     appendExecutionEvent(runId: string, type: string, data: Record<string, Json>): string;
+    phaseStatus(runId: string): {
+        phase: z.core.util.JSONType | undefined;
+        startedAt: string;
+        deadlineAt: string | number | boolean | z.core.util.JSONType[] | {
+            [key: string]: z.core.util.JSONType;
+        } | null;
+        elapsedMs: number;
+    } | null;
     /** Reads the immutable lifecycle fact, even after its outbox delivery was acknowledged. */
     latestRunEvent(runId: string, state: RunState): {
         id: string;
@@ -513,7 +523,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "unknown" | "cancelled" | "partial" | "failed" | "succeeded";
+            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;
@@ -543,7 +553,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "unknown" | "cancelled" | "partial" | "failed" | "succeeded";
+            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;

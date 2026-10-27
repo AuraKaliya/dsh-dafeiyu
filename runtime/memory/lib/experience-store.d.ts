@@ -47,7 +47,7 @@ export declare class ExperienceStore {
             reason: string;
             goal: string;
             motivation: {
-                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
+                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
                 basis: string[];
             };
             sources: ({
@@ -269,7 +269,7 @@ export declare class ExperienceStore {
                     requestId: string;
                 };
                 motivation: {
-                    kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
+                    kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
                     basis: string[];
                 };
                 type: "run.running" | "run.completed" | "run.waiting" | "run.failed" | "run.cancelled" | "run.interrupted" | "evidence.changed";
@@ -283,6 +283,35 @@ export declare class ExperienceStore {
                     completeness: "unknown" | "complete" | "partial";
                 }[];
                 omittedOperations: number;
+                assessmentSource?: {
+                    kind: "memory";
+                    revision: number;
+                    id: string;
+                    agentId: string;
+                    scopeKey: string;
+                    version: number;
+                    contentHash: string;
+                    authorization?: {
+                        taskId: string;
+                        taskEpoch: number;
+                        grantId: string;
+                        grantVersion: number;
+                        policyId: string;
+                        policyVersion: number;
+                    } | undefined;
+                    selectionId?: string | undefined;
+                    range?: {
+                        start: number;
+                        end: number;
+                    } | undefined;
+                } | {
+                    kind: "execution-source";
+                    id: string;
+                    agentId: string;
+                    scopeKey: string;
+                    version: number;
+                    contentHash: string;
+                } | undefined;
             } | null;
             watermark: string;
             createdAt: string;
@@ -324,7 +353,7 @@ export declare class ExperienceStore {
             reason: string;
             goal: string;
             motivation: {
-                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
+                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
                 basis: string[];
             };
             sources: ({
@@ -546,7 +575,7 @@ export declare class ExperienceStore {
                     requestId: string;
                 };
                 motivation: {
-                    kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
+                    kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
                     basis: string[];
                 };
                 type: "run.running" | "run.completed" | "run.waiting" | "run.failed" | "run.cancelled" | "run.interrupted" | "evidence.changed";
@@ -560,6 +589,35 @@ export declare class ExperienceStore {
                     completeness: "unknown" | "complete" | "partial";
                 }[];
                 omittedOperations: number;
+                assessmentSource?: {
+                    kind: "memory";
+                    revision: number;
+                    id: string;
+                    agentId: string;
+                    scopeKey: string;
+                    version: number;
+                    contentHash: string;
+                    authorization?: {
+                        taskId: string;
+                        taskEpoch: number;
+                        grantId: string;
+                        grantVersion: number;
+                        policyId: string;
+                        policyVersion: number;
+                    } | undefined;
+                    selectionId?: string | undefined;
+                    range?: {
+                        start: number;
+                        end: number;
+                    } | undefined;
+                } | {
+                    kind: "execution-source";
+                    id: string;
+                    agentId: string;
+                    scopeKey: string;
+                    version: number;
+                    contentHash: string;
+                } | undefined;
             } | null;
             watermark: string;
             createdAt: string;

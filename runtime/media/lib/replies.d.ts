@@ -67,12 +67,12 @@ export declare class MediaReplies {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "image" | "record" | "file";
+            delivery: "image" | "file" | "record";
             asset: {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -129,7 +129,7 @@ export declare class MediaReplies {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -140,7 +140,7 @@ export declare class MediaReplies {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -151,7 +151,7 @@ export declare class MediaReplies {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;

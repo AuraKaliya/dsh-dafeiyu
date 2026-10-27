@@ -127,14 +127,20 @@ export class CapabilityRegistryV3 {
                         throw new Error('TASK_REQUIRED');
                     const parsed = validateInput(raw);
                     const result = ActionOutcomeSchema.parse(await execute(parsed, context));
-                    if (result.data !== null)
-                        result.data = z.json().parse(parseOutput(result.data));
+                    result.receipts = result.receipts.filter(receipt => !redactJson(receipt).redacted);
+                    try {
+                        if (result.data !== null)
+                            result.data = z.json().parse(parseOutput(result.data));
+                    }
+                    catch {
+                        return { ...result, status: 'partial', completeness: 'unknown', data: null, sources: [], errorCode: 'ACTION_RESULT_INVALID' };
+                    }
                     // Preserve a returned receipt even if cancellation/unload arrived while the operation ran.
                     // The coordinator persists the fact before checking continued admission.
                     if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 128000)
-                        throw new Error('ACTION_RESULT_TOO_LARGE');
+                        return { ...result, status: 'partial', completeness: 'partial', data: null, sources: [], errorCode: 'ACTION_RESULT_TOO_LARGE' };
                     if (redactJson(z.json().parse(result)).redacted)
-                        return { status: 'partial', effects: result.effects, completeness: 'partial', data: null, sources: [], receipts: [], errorCode: 'PRIVATE_CONTENT_OMITTED' };
+                        return { status: 'partial', effects: result.effects, completeness: 'partial', data: null, sources: [], receipts: result.receipts, errorCode: 'PRIVATE_CONTENT_OMITTED' };
                     return result;
                 } }));
         }

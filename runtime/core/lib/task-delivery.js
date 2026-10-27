@@ -49,7 +49,7 @@ export class TaskDelivery {
             throw new Error('Task delivery requires an explicitly simulated channel');
         if (this.host.journal.latestMessageId(item.route) !== material.inboundId)
             throw new Error('delivery_late_result');
-        if (!['delivered', 'failed'].includes(item.state))
+        if (!['delivered', 'handled', 'failed'].includes(item.state))
             throw new Error('delivery_question_not_settled');
         const binding = { material, route: item.route, sessionId: item.sessionId, extensionId: channel.id, extensionVersion: channel.version, personaVersion: persona.version, modelHash: deliveryDigest(this.host.model()) };
         if (material.jobId !== input.jobId || conversationKey(this.host.agentId, material.target) !== item.route || conversationKey(this.host.agentId, input.target) !== item.route || input.target.channel !== channel.capability.channel || input.target.account !== channel.capability.account)

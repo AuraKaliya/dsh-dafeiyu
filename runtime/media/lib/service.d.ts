@@ -101,7 +101,7 @@ export declare class MediaService extends Service implements MediaPort {
         schemaVersion: 1;
         id: string;
         version: number;
-        kind: "audio" | "image" | "video" | "document";
+        kind: "image" | "audio" | "video" | "document";
         sha256: string;
         bytes: number;
         mime: string;
@@ -124,8 +124,8 @@ export declare class MediaService extends Service implements MediaPort {
         taskEpoch: number | null;
         sourceId: string;
         sourceVersion: number;
-        kind: "audio" | "image" | "video" | "document";
-        state: "deleted" | "staging" | "ready" | "evicted" | "failed";
+        kind: "image" | "audio" | "video" | "document";
+        state: "deleted" | "failed" | "staging" | "ready" | "evicted";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -133,7 +133,7 @@ export declare class MediaService extends Service implements MediaPort {
             schemaVersion: 1;
             id: string;
             version: number;
-            kind: "audio" | "image" | "video" | "document";
+            kind: "image" | "audio" | "video" | "document";
             sha256: string;
             bytes: number;
             mime: string;
@@ -142,10 +142,10 @@ export declare class MediaService extends Service implements MediaPort {
         coverage: {
             acquiredBytes: number;
             processed: {
-                kind: "audio" | "image" | "frame" | "page" | "paragraph" | "row";
+                kind: "image" | "audio" | "frame" | "page" | "paragraph" | "row";
                 start: number;
                 end: number;
-                unit: "milliseconds" | "index" | "whole-image";
+                unit: "index" | "milliseconds" | "whole-image";
             }[];
             exposed: boolean;
             gaps: string[];
@@ -165,20 +165,25 @@ export declare class MediaService extends Service implements MediaPort {
         coverage: {
             acquiredBytes: number;
             processed: {
-                kind: "audio" | "image" | "frame" | "page" | "paragraph" | "row";
+                kind: "image" | "audio" | "frame" | "page" | "paragraph" | "row";
                 start: number;
                 end: number;
-                unit: "milliseconds" | "index" | "whole-image";
+                unit: "index" | "milliseconds" | "whole-image";
             }[];
             exposed: boolean;
             gaps: string[];
+            completeness: "unknown" | "complete" | "partial";
+        };
+        readProgress: {
+            state: "failed" | "observed" | "unread" | "unavailable";
+            subject: "source-range" | "reference" | "provided-page";
             completeness: "unknown" | "complete" | "partial";
         };
         assets: {
             schemaVersion: 1;
             id: string;
             version: number;
-            kind: "audio" | "image" | "video" | "document";
+            kind: "image" | "audio" | "video" | "document";
             sha256: string;
             bytes: number;
             mime: string;
@@ -212,7 +217,7 @@ export declare class MediaService extends Service implements MediaPort {
         understood: boolean;
     } | {
         metadata: {
-            kind: "audio" | "image" | "video" | "unknown";
+            kind: "image" | "audio" | "video" | "unknown";
             width: number | null;
             height: number | null;
             durationMs: number | null;
@@ -258,7 +263,7 @@ export declare class MediaService extends Service implements MediaPort {
                 roots: string[];
                 detail: z.core.util.JSONType;
             };
-            kind: "audio" | "image" | "video" | "document";
+            kind: "image" | "audio" | "video" | "document";
             name: string | null;
             mimeHint: string | null;
             bytesHint: number | null;
@@ -333,7 +338,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -344,7 +349,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -355,7 +360,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -376,12 +381,12 @@ export declare class MediaService extends Service implements MediaPort {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "image" | "record" | "file";
+            delivery: "image" | "file" | "record";
             asset: {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -438,7 +443,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -447,7 +452,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "audio" | "image" | "video" | "document";
+                kind: "image" | "audio" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;

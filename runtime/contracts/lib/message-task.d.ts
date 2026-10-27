@@ -13,6 +13,17 @@ export declare const MessageTaskSubmitSchema: z.ZodObject<{
     goal: z.ZodOptional<z.ZodString>;
     voiceExposureId: z.ZodOptional<z.ZodUUID>;
 }, z.core.$strict>;
+export declare const MessageInstructionSubmitSchema: z.ZodObject<{
+    requestId: z.ZodString;
+    title: z.ZodOptional<z.ZodString>;
+    kind: z.ZodOptional<z.ZodLiteral<"explicit-task">>;
+    voiceExposureId: z.ZodOptional<z.ZodUUID>;
+}, z.core.$strict>;
+export declare const MessageExplorationSubmitSchema: z.ZodObject<{
+    requestId: z.ZodString;
+    title: z.ZodOptional<z.ZodString>;
+    goal: z.ZodString;
+}, z.core.$strict>;
 export declare const MessageTaskStatusSchema: z.ZodObject<{
     taskId: z.ZodUUID;
 }, z.core.$strict>;
@@ -24,6 +35,7 @@ export declare const MessageTaskControlSchema: z.ZodObject<{
         cancel: "cancel";
         revise: "revise";
         resolve: "resolve";
+        resume: "resume";
     }>;
     objectionId: z.ZodOptional<z.ZodUUID>;
     voiceExposureId: z.ZodOptional<z.ZodUUID>;

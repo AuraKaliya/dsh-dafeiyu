@@ -29,7 +29,7 @@ export class QqMediaTransport {
         const progress = this.host.ledger.progress(reply.id);
         if (progress.state === 'sent' || progress.unknown || progress.state === 'sending')
             return Promise.resolve(result(progress, 'DELIVERY_NOT_RESUMABLE'));
-        const snapshot = { id: plan.replyId, conversation: plan.target, sourceMessageId: plan.sourceMessageId, text: plan.parts.filter(p => p.kind === 'text').map(p => p.text).join(''), media: plan.manifest, ...(plan.manifest.anchor.kind === 'task-result' ? { taskResult: plan.manifest.anchor } : {}) };
+        const snapshot = { id: plan.replyId, conversation: plan.target, sourceMessageId: plan.sourceMessageId, text: plan.originalText ?? plan.parts.filter(p => p.kind === 'text').map(p => p.text).join(''), media: plan.manifest, ...(plan.manifest.anchor.kind === 'task-result' ? { taskResult: plan.manifest.anchor } : {}) };
         const work = this.execute(snapshot, plan, signal, authority, bytes).finally(() => this.active.delete(reply.id));
         this.active.set(reply.id, work);
         return work;
@@ -64,6 +64,8 @@ export class QqMediaTransport {
                     await this.host.beforeSend?.(reply, signal);
                     delayed = true;
                 }
+                else if (progress.confirmed > 0)
+                    await this.host.betweenMessages?.(signal);
                 guard();
                 await this.host.check(reply, signal);
                 guard();

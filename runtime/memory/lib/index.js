@@ -158,7 +158,9 @@ export class MemoryService extends Service {
                         throw new Error('Memory unavailable'); return this.store.observations.open(authority, input); },
                     change: (authority, input) => { if (this.closed)
                         throw new Error('Memory unavailable'); const receipt = this.store.observations.change(authority, input); return { ...receipt, auditPending: this.flush() }; } },
-                agentId: this.config.agentId, actions: this.actions(), contexts: [...(this.working?.contributors() ?? []), ...(this.config.lifecycleMode === 'managed' ? [{ id: 'growth', kind: 'working-state',
+                agentId: this.config.agentId, actions: this.actions(), contexts: [...(this.working?.contributors() ?? []), ...(this.config.lifecycleMode === 'managed' ? [{ id: 'qq-expression', kind: 'working-state',
+                            prepare: async (request) => { ctx.dafeiyu.scopeForContext(request); return this.growth?.qqExpression.prepare(request.conversation) ?? []; },
+                            validate: (request, item) => { ctx.dafeiyu.scopeForContext(request); return this.growth?.qqExpression.prepare(request.conversation).some(current => JSON.stringify(current) === JSON.stringify(item)) ?? false; } }, { id: 'growth', kind: 'working-state',
                             prepare: async (request) => ctx.dafeiyu.personaContext(request),
                             validate: (request, item) => ctx.dafeiyu.personaContext(request).some(current => JSON.stringify(current) === JSON.stringify(item)) }] : []), { id: 'task-workspace', kind: 'working-state',
                         prepare: async (request) => this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)),

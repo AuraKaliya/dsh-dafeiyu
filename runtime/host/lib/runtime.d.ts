@@ -12,8 +12,10 @@ import type { ServerExecutorDependencies } from '#dafeiyu/server-executor';
 import { BILI_OWNER_SCHEMA_VERSION } from '#dafeiyu/bilibili/channel';
 import type { BiliOwnerChannel, BiliOwnerPorts } from '#dafeiyu/bilibili/channel';
 import type { PreparedHostConfig } from './configuration.js';
+import type { DshToolsPort } from '#dafeiyu/contracts';
 export type HostPhase = 'created' | 'inspected' | 'opening' | 'binding' | 'recovering' | 'ready' | 'degraded' | 'draining' | 'failed' | 'stopped';
 export interface HostRuntimeOptions {
+    readonly dshTools?: DshToolsPort;
     readonly mode?: 'daemon' | 'single-run';
     readonly coordination?: string;
     readonly signal?: AbortSignal;

@@ -12,6 +12,7 @@ interface Host {
         state: string;
     } | null;
     beforeSend?(reply: Reply, signal: AbortSignal): Promise<void>;
+    betweenMessages?(signal: AbortSignal): Promise<void>;
     check(reply: Reply, signal: AbortSignal): Promise<void>;
     send(reply: MediaReply, part: Part, data: Uint8Array | null, signal: AbortSignal): Promise<string>;
     confirmed(reply: MediaReply, part: Part, receipt: string): void;

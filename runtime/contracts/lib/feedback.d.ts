@@ -6,16 +6,16 @@ export declare const ToolFeedbackSchema: z.ZodObject<{
     schemaVersion: z.ZodLiteral<1>;
     outcome: z.ZodEnum<{
         unknown: "unknown";
-        partial: "partial";
         failed: "failed";
+        partial: "partial";
         succeeded: "succeeded";
         running: "running";
     }>;
     effects: z.ZodEnum<{
         unknown: "unknown";
-        partial: "partial";
         none: "none";
         applied: "applied";
+        partial: "partial";
     }>;
     completeness: z.ZodEnum<{
         unknown: "unknown";
@@ -38,8 +38,8 @@ export declare const FeedbackWitnessSchema: z.ZodObject<{
     version: z.ZodNumber;
     hash: z.ZodString;
     mode: z.ZodEnum<{
-        deleted: "deleted";
         normal: "normal";
+        deleted: "deleted";
         history: "history";
     }>;
     view: z.ZodEnum<{
@@ -74,8 +74,8 @@ export declare const FeedbackMetaSchema: z.ZodObject<{
         version: z.ZodNumber;
         hash: z.ZodString;
         mode: z.ZodEnum<{
-            deleted: "deleted";
             normal: "normal";
+            deleted: "deleted";
             history: "history";
         }>;
         view: z.ZodEnum<{

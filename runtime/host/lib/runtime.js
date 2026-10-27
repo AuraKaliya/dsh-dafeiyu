@@ -20,11 +20,12 @@ import * as Media from '#dafeiyu/media';
 import * as Bili from '#dafeiyu/bilibili';
 import { ServerExecutorService, EXECUTOR_SCHEMA_VERSION } from '#dafeiyu/server-executor';
 import { reconcileMedia } from './media-recovery.js';
+import { installAccountModel } from './account-model.js';
 import * as Timeline from '#dafeiyu/timeline';
 import * as QQ from '#dafeiyu/qq';
-import { openBiliOwnerChannel, BILI_OWNER_SCHEMA_VERSION } from '#dafeiyu/bilibili/channel';
+import { openBiliOwnerChannel, BILI_OWNER_SCHEMA_VERSION, BILI_OWNER_TASK_ACTIONS } from '#dafeiyu/bilibili/channel';
 import * as Simulator from '#dafeiyu/channel-simulator';
-import { ExecutionRequestSchema } from '#dafeiyu/contracts';
+import { ExecutionRequestSchema, TaskAssessmentSchema } from '#dafeiyu/contracts';
 import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -35,6 +36,7 @@ import { loadHostConfig, assertPaths, pluginConfig } from './configuration.js';
 import { inspectHost, bindMigratedProfile, packageVersion } from './profile.js';
 import { claim } from './coordination.js';
 import { installInlineDeepSeek } from './inline-model.js';
+import { bindDshTools } from './dsh-tools.js';
 const importedHome = process.env.DSH_HOME;
 class FixedModel extends LlmAdapter {
     response;
@@ -43,7 +45,14 @@ class FixedModel extends LlmAdapter {
         this.response = response;
     }
     async resolveModel(provider, model) { return { provider, id: model, name: model, systemPromptUpdate: 'in-history', toolUpdate: 'in-history', reasoning: { efforts: [{ id: ReasoningEffortId('max'), name: 'Max' }] } }; }
-    async *stream(options) { options.signal?.throwIfAborted(); yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'text-delta', index: 0, text: this.response }; yield { type: 'block-end', index: 0, block: { type: 'text', text: this.response } }; yield { type: 'finish', reason: { kind: 'stop' } }; }
+    async *stream(options) {
+        options.signal?.throwIfAborted();
+        const text = String(options.sessionId).startsWith('dafeiyu-assessment-') ? JSON.stringify(TaskAssessmentSchema.parse({ goalStatus: 'uncertain', summary: '离线脚本模型的固定阶段评价，仅验证程序流程。', evidenceIds: [], limitations: ['未作真实模型质量验收'], unfinished: [], next: 'deliver' })) : this.response;
+        yield { type: 'block-start', index: 0, blockType: 'text' };
+        yield { type: 'text-delta', index: 0, text };
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } };
+        yield { type: 'finish', reason: { kind: 'stop' } };
+    }
 }
 const stableCode = (error, fallback = 'HOST_FAILED') => error instanceof Error && /^[A-Z][A-Z0-9_]{0,99}$/.test(error.message) ? error.message : fallback;
 const hashFile = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -136,16 +145,20 @@ export class ManagedHost {
             const doc = parseDocument(readFileSync(deepseek.credentialStore, 'utf8'), { logLevel: 'silent' });
             if (doc.errors.length || doc.get('version') !== 1)
                 throw new Error('HOST_CREDENTIAL_STORE_UNSUPPORTED');
-            this.credentials = { file: deepseek.credentialStore, hash: hashFile(deepseek.credentialStore) };
-            await ctx.plugin(Credentials, { path: deepseek.credentialStore, watch: false });
-            if (!(await ctx.credentials.describe(credentialRef(deepseek.credentialName))).configured)
-                throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');
-            if (deepseek.inlineTransport)
-                await installInlineDeepSeek(ctx, { baseURL: deepseek.baseURL, credentialName: deepseek.credentialName, route: this.config.config.modelRoutes.chat, settings: deepseek.inlineTransport,
-                    credentialGuard: () => { if (!this.credentials || hashFile(this.credentials.file) !== this.credentials.hash)
-                        throw new Error('HOST_CREDENTIAL_STORE_CHANGED'); } });
-            else
-                await ctx.plugin(DeepSeek, { baseURL: deepseek.baseURL, apiKeyEnv: deepseek.credentialName });
+            await ctx.plugin(Credentials, { path: deepseek.credentialStore, watch: deepseek.auth === 'dsh-account' });
+            if (deepseek.auth === 'dsh-account')
+                await installAccountModel(ctx, { baseURL: deepseek.baseURL, route: this.config.config.modelRoutes.chat, ...(deepseek.inlineTransport ? { inlineTransport: deepseek.inlineTransport } : {}), guard: () => assertPaths(this.config) });
+            else {
+                this.credentials = { file: deepseek.credentialStore, hash: hashFile(deepseek.credentialStore) };
+                if (!(await ctx.credentials.describe(credentialRef(deepseek.credentialName))).configured)
+                    throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');
+                if (deepseek.inlineTransport)
+                    await installInlineDeepSeek(ctx, { baseURL: deepseek.baseURL, credentialName: deepseek.credentialName, route: this.config.config.modelRoutes.chat, settings: deepseek.inlineTransport,
+                        credentialGuard: () => { if (!this.credentials || hashFile(this.credentials.file) !== this.credentials.hash)
+                            throw new Error('HOST_CREDENTIAL_STORE_CHANGED'); } });
+                else
+                    await ctx.plugin(DeepSeek, { baseURL: deepseek.baseURL, apiKeyEnv: deepseek.credentialName });
+            }
             this.plugin('model-deepseek', 'ready');
         }
         else if (scripted) {
@@ -177,7 +190,7 @@ export class ManagedHost {
             throw new Error('HOST_REASONING_ROUTE_UNSUPPORTED');
         await ctx.plugin(Query, { path: this.config.paths.query, openAt: 'first-search' });
         const { compactionInputTokens: inputTokens, ...context } = this.config.config.context;
-        await ctx.plugin(Core, { agentId: this.config.config.agent.id, dataDir: this.config.paths.core, personaFile: this.config.paths.foundation, ...route, lifecycleMode: 'managed', turnTimeoutMs: this.config.config.runtime.turnTimeoutMs,
+        await ctx.plugin(Core, { agentId: this.config.config.agent.id, dataDir: this.config.paths.core, personaFile: this.config.paths.foundation, ...route, lifecycleMode: 'managed', turnTimeoutMs: this.config.config.runtime.turnTimeoutMs, phaseTimeouts: this.config.config.runtime.phaseTimeouts,
             context: { ...context, regions: { ...context.regions, 'memory:growth': { ...this.config.config.persona.growthRegion, required: false } } } });
         this.coreValue = ctx.dafeiyu;
         this.mark('binding');
@@ -192,6 +205,11 @@ export class ManagedHost {
             this.memoryValue = ctx.dafeiyuMemory;
             this.plugin('memory', 'ready');
             this.core.configureExecution({ profileId: this.config.config.profileId, policies: this.config.config.authorityPolicies, createStore: false, maxPendingRuns: this.config.config.runtime.maxPendingRuns, maxConcurrentRuns: this.config.config.runtime.maxConcurrentRuns });
+        }
+        if (this.options.dshTools) {
+            await this.options.dshTools.catalog(this.options.signal ?? new AbortController().signal);
+            const handle = bindDshTools(ctx, this.config.config.agent.id, this.options.dshTools, join(this.config.paths.core, 'dsh-tool-receipts'));
+            ctx.effect(() => () => handle.dispose());
         }
         const executor = pluginConfig(this.config, 'server-executor');
         if (executor) {
@@ -272,7 +290,7 @@ export class ManagedHost {
         if (this.mode === 'daemon' && biliOwner && !this.biliOwnerValue && this.biliOwnerPendingWork())
             throw new Error('HOST_BILI_OWNER_PENDING_WORK_REQUIRES_CHANNEL');
         const producerActive = (producer) => producer === 'activity' ? !!this.activityValue && this.mode === 'daemon' : producer === 'channel-qq' ? !!this.qqValue : producer === 'qq-tasks' ? !!this.qqValue?.getStatus().tasks.registered : producer === 'channel-bili-owner' ? !!this.biliOwnerValue : producer === 'bili-owner-tasks' ? !!this.biliOwnerValue && !!biliOwner?.tasks.enabled : producer === 'channel-simulator' ? !!simulator && this.mode === 'daemon' : true;
-        const absentChannelActions = new Set([...(!this.qqValue && qq ? [...QQ.QQ_ACTIONS, ...QQ.QQ_TASK_ACTIONS, ...QQ.QQ_MEDIA_ACTIONS] : []), ...(!this.biliOwnerValue && biliOwner ? ['bili_owner_task_submit', 'bili_owner_task_status', 'bili_owner_task_control'] : [])]);
+        const absentChannelActions = new Set([...(!this.qqValue && qq ? [...QQ.QQ_ACTIONS, ...QQ.QQ_TASK_ACTIONS, ...QQ.QQ_MEDIA_ACTIONS, ...QQ.QQ_PROGRESS_ACTIONS] : []), ...(!this.biliOwnerValue && biliOwner ? [...BILI_OWNER_TASK_ACTIONS] : [])]);
         if (this.config.config.authorityPolicies.filter(policy => policy.producers.some(producerActive)).some(policy => policy.actions.some(action => !this.core.capabilityManifest().actions.some(actual => actual.id === action) && !absentChannelActions.has(action))))
             throw new Error('HOST_POLICY_ACTION_UNAVAILABLE');
         this.mark('recovering');

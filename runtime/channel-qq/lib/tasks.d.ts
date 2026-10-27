@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import type { InboundMessage, Conversation } from '#dafeiyu/contracts';
-export declare const QQ_TASK_ACTIONS: readonly ["qq_task_submit", "qq_task_status", "qq_task_control"];
+export declare const QQ_TASK_ACTIONS: readonly ["qq_task_submit", "qq_task_status", "qq_task_control", "qq_explore"];
 export declare const QqTasksConfigSchema: z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
     deliverResults: z.ZodDefault<z.ZodBoolean>;

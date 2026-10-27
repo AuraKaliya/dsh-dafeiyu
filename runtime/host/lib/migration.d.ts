@@ -83,37 +83,37 @@ export declare const MigrationPlanSchema: z.ZodObject<{
     }, z.core.$strict>;
     files: z.ZodArray<z.ZodObject<{
         kind: z.ZodEnum<{
-            runtime: "runtime";
             memory: "memory";
-            qq: "qq";
-            bilibili: "bilibili";
             activity: "activity";
             media: "media";
-            analysis: "analysis";
+            bilibili: "bilibili";
+            runtime: "runtime";
             feedback: "feedback";
+            qq: "qq";
+            analysis: "analysis";
             retrieval: "retrieval";
-            journal: "journal";
-            delivery: "delivery";
-            working: "working";
             executor: "executor";
+            delivery: "delivery";
+            journal: "journal";
+            working: "working";
             "bili-owner": "bili-owner";
         }>;
         file: z.ZodString;
         before: z.ZodObject<{
             kind: z.ZodEnum<{
-                runtime: "runtime";
                 memory: "memory";
-                qq: "qq";
-                bilibili: "bilibili";
                 activity: "activity";
                 media: "media";
-                analysis: "analysis";
+                bilibili: "bilibili";
+                runtime: "runtime";
                 feedback: "feedback";
+                qq: "qq";
+                analysis: "analysis";
                 retrieval: "retrieval";
-                journal: "journal";
-                delivery: "delivery";
-                working: "working";
                 executor: "executor";
+                delivery: "delivery";
+                journal: "journal";
+                working: "working";
                 "bili-owner": "bili-owner";
             }>;
             exists: z.ZodBoolean;

@@ -116,7 +116,7 @@ export class ExperienceStore {
         const selected = this.db.prepare("SELECT json_extract(body,'$.data.version') AS version FROM execution_memory_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')='execution.evidence.selected' AND json_extract(body,'$.at')<=? ORDER BY rowid DESC LIMIT 1").get(event.runId, event.at);
         const receipt = selected ? this.db.prepare("SELECT receipt FROM execution_memory_requests WHERE scope_key=? AND json_extract(receipt,'$.kind')='execution-selection' AND json_extract(receipt,'$.version')=? LIMIT 1").get(personaScope(event.scope), selected.version) : null;
         const entries = receipt ? z.object({ entries: z.array(PersonaSourceRefSchema).max(16) }).parse(JSON.parse(String(receipt.receipt))).entries : [];
-        const refs = uniqueSources([...entries, ...rows.map(row => PersonaSourceRefSchema.parse({ kind: 'memory', agentId: event.scope.agentId, scopeKey: personaScope(event.scope), id: row.id, version: row.version, revision: row.head,
+        const refs = uniqueSources([...(event.assessmentSource ? [event.assessmentSource] : []), ...entries, ...rows.map(row => PersonaSourceRefSchema.parse({ kind: 'memory', agentId: event.scope.agentId, scopeKey: personaScope(event.scope), id: row.id, version: row.version, revision: row.head,
                 contentHash: z.object({ contentHash: z.string() }).parse(JSON.parse(String(row.body))).contentHash }))]);
         return refs.length > 32 ? { refs: [], omitted: refs.length } : { refs, omitted: 0 };
     }

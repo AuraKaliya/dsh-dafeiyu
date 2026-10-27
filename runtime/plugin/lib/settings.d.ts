@@ -4,7 +4,12 @@ export declare const InstallationSettingsSchema: z.ZodObject<{
     dataDir: z.ZodString;
     instanceName: z.ZodDefault<z.ZodString>;
     foundationFile: z.ZodOptional<z.ZodString>;
+    dshTools: z.ZodDefault<z.ZodBoolean>;
     model: z.ZodObject<{
+        auth: z.ZodOptional<z.ZodEnum<{
+            "api-key": "api-key";
+            "dsh-account": "dsh-account";
+        }>>;
         model: z.ZodString;
         reasoningEffort: z.ZodOptional<z.ZodString>;
         credentialStore: z.ZodString;
