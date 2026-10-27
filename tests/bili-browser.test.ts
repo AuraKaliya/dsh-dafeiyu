@@ -101,6 +101,14 @@ test('browser discovery validates identity and emits only visible public listing
   },new AbortController().signal);assert.equal(checks,2);assert.equal(value.bvid,null);assert.equal(value.truncated,true);
 });
 
+test('video frame capture is position-bound, identity-checked and refuses protected or inaccessible pixels',async()=>{
+  const i={...input(),section:'frame' as const,positionMs:1000},frame={dataUrl:'data:image/jpeg;base64,/9j/AA==',positionMs:1000,durationMs:9000};let checks=0;
+  const value=await readBiliBrowser(i,'42',async(name,args)=>{if(name==='dsh_browser_open')return {url:args.url};if(isIdentity(args)){checks++;return identity(i,['42']);}
+    assert.match(String(args.script),/drawImage/);assert.doesNotMatch(String(args.script),/cookie|localStorage|fetch\(/);return result({...content,frame});
+  },new AbortController().signal);assert.equal(checks,2);assert.equal(value.frame?.positionMs,1000);
+  for(const error of ['BILI_RESTRICTED_MEDIA','BILI_BROWSER_FRAME_UNAVAILABLE'])await assert.rejects(readBiliBrowser(i,'42',async(name,args)=>name==='dsh_browser_open'?{url:args.url}:isIdentity(args)?identity(i,['42']):result({error}),new AbortController().signal),new RegExp(error));
+});
+
 test('browser identity mismatch enters a persistent condition wait instead of repeated page reads',async()=>{const root=await mkdtemp(join(testTempDir(),'bili-browser-hold-')),store=new BiliStore(join(root,'b.sqlite'),{agentId:'fish',profileId:'test'},true),c=new BiliClient(BiliConfigSchema.parse({browser:{expectedUid:'42'}}),store);let calls=0;const port={read:async()=>{calls++;throw new Error('BILI_BROWSER_ACCOUNT_MISMATCH');}};try{await assert.rejects(c.browserRead(port,input(),new AbortController().signal,()=>{}),/ACCOUNT_MISMATCH/);assert.equal(store.diagnostics.state.held,true);assert.equal(store.diagnostics.recent()[0]!.kind,'login');assert.equal(store.diagnostics.recent()[0]!.networkSent,null);await assert.rejects(c.browserRead(port,input(),new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);assert.equal(calls,1);}finally{store.close();}});
 
 test('identity loading timeout records its actual error without creating a login hold or automatic retry',async()=>{
