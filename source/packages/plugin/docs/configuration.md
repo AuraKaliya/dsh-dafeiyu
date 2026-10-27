@@ -60,3 +60,18 @@ QQ历史工具 `qq_browse` 首轮使用 `includeRecentHistory:true` 按需补取
 同时配置 `media`。公开读取可不登录；需要登录时配置 `bilibili.session: {file,expectedUid}`。私信配置为 `bilibili.channel: {accountUid,ownerUid,sessionFile}`，账号值没有默认值；公开能力与私信同时使用登录态时，预期账号必须一致。私信生产连接当前支持Windows。
 
 公开读取和私信共用一个B站插件；每种接口按实际来源与已配置权限工作。频道账号变更、实例目录冲突、缺失必要库或未知库版本都会停止启动并报告原因，不自动清空或迁移。
+
+## 依赖隔离与启动
+
+DSH内的组合包使用隔离依赖布局，避免插件SDK在profile顶层形成第二套注册作用域。Windows可将虚拟依赖目录放在该机器的短路径中，数据目录继续独立保留。使用DSH自带pnpm，并先备份当前profile配置与实例数据。pnpm 11的项目布局设置写入当前profile的 `pnpm-workspace.yaml`，不要放入 `.npmrc`；参见[pnpm官方配置说明](https://pnpm.io/cli/config)。
+
+```yaml
+nodeLinker: isolated
+hoist: false
+shamefullyHoist: false
+autoInstallPeers: false
+virtualStoreDirMaxLength: 45
+ignoreWorkspaceRootCheck: true
+```
+
+`virtualStoreDir` 可另设为该机器上的独立短路径；后续更新沿用相同目录。仅改变依赖安装布局，不移动或重新初始化 `dataDir`。入口等待DSH应用就绪后才加载运行模块与创建独立进程；启动故障只记录阶段、异常类型、标准错误码和有限模块元数据。插件入口已加载不代表独立实例已就绪，应检查实际状态。
