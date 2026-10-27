@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,mkdir,writeFile,readFile,copyFile } from 'node:fs/promises';
+import { mkdtemp,mkdir,writeFile,readFile,copyFile,realpath } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join,resolve,dirname } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -22,7 +23,13 @@ for(const installer of ['npm','pnpm'] as const)test(`a publishable package insta
   await mkdir(consumer);await writeFile(join(consumer,'package.json'),JSON.stringify({name:'isolated-public-install',private:true,type:'module'}));
   if(installer==='npm')await execute(process.execPath,[npm,'install',join(root,pack.filename),'--ignore-scripts','--no-audit','--no-fund','--registry=https://registry.npmjs.org'],{cwd:consumer,env,windowsHide:true,timeout:180000,maxBuffer:200000});
   // Keep native Windows package-scope reads below MAX_PATH while retaining every artifact in this managed Run.
-  else await execute(process.execPath,[process.env.DAFEIYU_TEST_PNPM!,'add',join(root,pack.filename),'--ignore-scripts','--prod','--config.auto-install-peers=false','--config.hoist=false','--config.shamefully-hoist=false','--config.node-linker=isolated','--virtual-store-dir',join(process.env.DAFEIYU_TEST_RUN!,'pnpm-v-'+randomUUID().slice(0,8)),'--config.virtual-store-dir-max-length=45','--store-dir',join(root,'pnpm-store'),'--cache-dir',join(root,'pnpm-cache'),'--config.state-dir='+join(root,'pnpm-state'),'--registry=https://registry.npmjs.org','--reporter=append-only'],{cwd:consumer,env,windowsHide:true,timeout:180000,maxBuffer:200000});
+  else {
+    const virtualStoreDir=join(process.env.DAFEIYU_TEST_RUN!,'pnpm-v-'+randomUUID().slice(0,8));
+    await writeFile(join(consumer,'pnpm-workspace.yaml'),JSON.stringify({nodeLinker:'isolated',hoist:false,shamefullyHoist:false,autoInstallPeers:false,virtualStoreDir,virtualStoreDirMaxLength:45,ignoreWorkspaceRootCheck:true}));
+    await execute(process.execPath,[process.env.DAFEIYU_TEST_PNPM!,'add',join(root,pack.filename),'--ignore-scripts','--prod','--store-dir',join(root,'pnpm-store'),'--cache-dir',join(root,'pnpm-cache'),'--config.state-dir='+join(root,'pnpm-state'),'--registry=https://registry.npmjs.org','--reporter=append-only'],{cwd:consumer,env,windowsHide:true,timeout:180000,maxBuffer:200000});
+    assert.ok((await realpath(join(consumer,'node_modules/dsh-dafeiyu'))).startsWith(virtualStoreDir));
+    assert.equal(existsSync(join(consumer,'node_modules/@deepseek-ai/dsh-scope')),false);
+  }
   await copyFile(resolve('build-tests/test-temp.js'),join(consumer,'test-temp.js'));
   await copyFile(resolve('build-tests/qq-group-packet-fixture.js'),join(consumer,'qq-group-packet-fixture.js'));
   let fixture=await readFile(resolve('build-tests/installation-runtime-fixture.js'),'utf8');

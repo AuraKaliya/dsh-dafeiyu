@@ -5,10 +5,14 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp,access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { deferPluginStart } from '../packages/plugin/lib/startup.js';
+import { deferPluginStart,startupFailure } from '../packages/plugin/lib/startup.js';
 import { testTempDir } from './test-temp.js';
 
 const tick=()=>new Promise<void>(done=>setImmediate(done));
+test('unexpected startup failures retain actionable metadata without leaking error text or private paths',()=>{
+  const error=Object.assign(new TypeError('Cannot find package \'@fictional/absent\' imported from C:/private-owner/TOKEN_SECRET/index.js'),{code:'ERR_MODULE_NOT_FOUND'});error.stack='TypeError: TOKEN_SECRET\n at file:///C:/private-owner/startup.js:12:3';
+  const record=startupFailure('bridge-import',error);assert.equal(record.code,'ERR_MODULE_NOT_FOUND');assert.equal(record.missingPackage,'@fictional/absent');assert.deepEqual(record.frames,[{file:'startup.js',line:12}]);assert.ok(!JSON.stringify(record).includes('TOKEN_SECRET'));assert.ok(!JSON.stringify(record).includes('private-owner'));assert.equal(startupFailure('child-spawn',{code:'SECRET_TOKEN'}).name,'UnknownError');
+});
 function readiness(){const listeners=new Set<()=>void>();return {onReady(listener:()=>void){listeners.add(listener);return ()=>{listeners.delete(listener);};},commit(){for(const listener of [...listeners])listener();},get pending(){return listeners.size;}};}
 
 test('the real child starts only after host commit, starts once, and is reaped on plugin disposal',async()=>{
