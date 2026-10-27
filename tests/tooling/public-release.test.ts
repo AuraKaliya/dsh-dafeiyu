@@ -6,11 +6,12 @@ import { join,resolve,dirname } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { buildPublicRelease } from '../../scripts/build-public-release.mjs';
 import { inspectPublicRelease } from '../../scripts/check-public-release.mjs';
 
 const execute=promisify(execFile);
-test('a publishable package installs without private workspaces and runs the same cold-start/restart checks',async()=>{
+for(const installer of ['npm','pnpm'] as const)test(`a publishable package installs with ${installer} without private workspaces and runs the same cold-start/restart checks`,{skip:installer==='pnpm'&&!process.env.DAFEIYU_TEST_PNPM},async()=>{
   const root=await mkdtemp(join(tmpdir(),'public-release-')),release=join(root,'release'),consumer=join(root,'consumer');
   const result=buildPublicRelease(release);assert.ok(result.files>500);assert.equal(inspectPublicRelease(release).passed,true);
   const npm=process.env.npm_execpath??join(dirname(process.execPath),'node_modules/npm/bin/npm-cli.js');
@@ -19,11 +20,14 @@ test('a publishable package installs without private workspaces and runs the sam
   const [pack]=JSON.parse(packed.stdout) as {filename:string;files:{path:string}[]}[];assert.ok(pack);
   assert.ok(!pack.files.some(file=>file.path.startsWith('source/')||file.path.startsWith('.runtime/')||file.path.includes('node_modules/')));
   await mkdir(consumer);await writeFile(join(consumer,'package.json'),JSON.stringify({name:'isolated-public-install',private:true,type:'module'}));
-  await execute(process.execPath,[npm,'install',join(root,pack.filename),'--ignore-scripts','--no-audit','--no-fund','--registry=https://registry.npmjs.org'],{cwd:consumer,env,windowsHide:true,timeout:180000,maxBuffer:200000});
+  if(installer==='npm')await execute(process.execPath,[npm,'install',join(root,pack.filename),'--ignore-scripts','--no-audit','--no-fund','--registry=https://registry.npmjs.org'],{cwd:consumer,env,windowsHide:true,timeout:180000,maxBuffer:200000});
+  // Keep native Windows package-scope reads below MAX_PATH while retaining every artifact in this managed Run.
+  else await execute(process.execPath,[process.env.DAFEIYU_TEST_PNPM!,'add',join(root,pack.filename),'--ignore-scripts','--prod','--config.auto-install-peers=false','--config.hoist=false','--config.shamefully-hoist=false','--config.node-linker=isolated','--virtual-store-dir',join(process.env.DAFEIYU_TEST_RUN!,'pnpm-v-'+randomUUID().slice(0,8)),'--config.virtual-store-dir-max-length=45','--store-dir',join(root,'pnpm-store'),'--cache-dir',join(root,'pnpm-cache'),'--config.state-dir='+join(root,'pnpm-state'),'--registry=https://registry.npmjs.org','--reporter=append-only'],{cwd:consumer,env,windowsHide:true,timeout:180000,maxBuffer:200000});
   await copyFile(resolve('build-tests/test-temp.js'),join(consumer,'test-temp.js'));
   await copyFile(resolve('build-tests/qq-group-packet-fixture.js'),join(consumer,'qq-group-packet-fixture.js'));
   let fixture=await readFile(resolve('build-tests/installation-runtime-fixture.js'),'utf8');
   fixture=fixture.replace("resolve('profiles/persona.foundation.md')","resolve('node_modules/dsh-dafeiyu/runtime/plugin/assets/foundation.md')");
+  fixture=fixture.replace("import { WebSocketServer } from 'ws';","import {createRequire as packageRequire} from 'node:module';import {realpathSync as packageRealpath} from 'node:fs';const {WebSocketServer}=packageRequire(packageRealpath('node_modules/dsh-dafeiyu/package.json'))('ws');");
   await writeFile(join(consumer,'check.mjs'),fixture);
   // Refuse fallback to the development workspace even though test scratch is below it.
   const blocked=[resolve('packages').replaceAll('\\','/').toLowerCase(),resolve('node_modules').replaceAll('\\','/').toLowerCase()];

@@ -1,5 +1,5 @@
 {
-  "name": "dsh-dafeiyu", "version": "0.22.0", "type": "module", "private": true,
+  "name": "dsh-dafeiyu", "version": "0.22.2", "type": "module", "private": true,
   "description": "大肥鱼：可成长的自主智能体，整合记忆与成长、QQ、B站、多媒体与自主活动。",
   "license": "MIT", "main": "./lib/index.js", "types": "./lib/index.d.ts",
   "exports": {".": "./lib/index.js", "./settings": "./lib/settings.js", "./installation": "./lib/installation.js"},
