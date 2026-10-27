@@ -88,6 +88,14 @@
       "serverAccess": false
     }
   ],
-  "githubPublished": false,
-  "serverDeployed": false
+  "githubPublished": true,
+  "serverDeployed": true,
+  "completedAt": "2026-10-27T16:35:03.699Z",
+  "finalRelease": {
+    "version": "0.22.3",
+    "url": "https://github.com/AuraKaliya/dsh-dafeiyu/releases/tag/v0.22.3",
+    "commit": "c2406206432cec61e16ff8ed1a1d9aba3236a25c",
+    "sha256": "dace401fc49e1eeb9d546d544cb65e3b2bf4a94390530ebb1eb75254f99596a8"
+  },
+  "finalRecord": "server-release-final-20261028.results.json"
 }

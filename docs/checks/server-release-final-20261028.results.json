@@ -1,0 +1,547 @@
+{
+  "schemaVersion": 1,
+  "completedAt": "2026-10-27T16:35:03.699Z",
+  "release": {
+    "version": "0.22.3",
+    "commit": "c2406206432cec61e16ff8ed1a1d9aba3236a25c",
+    "sha256": "dace401fc49e1eeb9d546d544cb65e3b2bf4a94390530ebb1eb75254f99596a8",
+    "bytes": 756388,
+    "at": "2026-10-27T16:24:37.918Z",
+    "phase": "download-verified",
+    "id": 425710178,
+    "url": "https://github.com/AuraKaliya/dsh-dafeiyu/releases/tag/v0.22.3",
+    "tag": "v0.22.3",
+    "prerelease": true,
+    "draft": false,
+    "downloadUrl": "https://github.com/AuraKaliya/dsh-dafeiyu/releases/download/v0.22.3/dsh-dafeiyu-0.22.3.tgz",
+    "downloadBytes": 756388,
+    "downloadSha256": "dace401fc49e1eeb9d546d544cb65e3b2bf4a94390530ebb1eb75254f99596a8",
+    "verified": true,
+    "publicCommit": "c2406206432cec61e16ff8ed1a1d9aba3236a25c",
+    "privateHistoryIncluded": false,
+    "sourceFreeze": "9176aec"
+  },
+  "localChecks": [
+    {
+      "id": "6371b974-f06e-4860-99c7-923210c3401a",
+      "counts": {
+        "tests": 8,
+        "failed": 0,
+        "passed": 8,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 8,
+        "suites": 0
+      },
+      "reason": null,
+      "cleanupBlocked": [],
+      "sha256": "cd29d6637d09734c69c05469464564f500b17e7a1e403519109d448c05a2164c"
+    },
+    {
+      "id": "425a27fd-71ec-4d70-a6d3-fecc258ecd08",
+      "counts": {
+        "tests": 11,
+        "failed": 0,
+        "passed": 11,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 11,
+        "suites": 0
+      },
+      "reason": null,
+      "cleanupBlocked": [],
+      "sha256": "9e501c41e1f6d8fa8279be9b92f5101039df3b6e89a33e29993430ba09c8e55b"
+    },
+    {
+      "id": "a9b5128b-5c80-4cb3-a6cd-3d725b1d4d3d",
+      "counts": {
+        "tests": 3,
+        "failed": 0,
+        "passed": 3,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 3,
+        "suites": 0
+      },
+      "reason": null,
+      "cleanupBlocked": [],
+      "sha256": "a6b58f05a7fc4d717812c52830444c70beed5e242456f463377ce16233b14606"
+    }
+  ],
+  "server": {
+    "at": "2026-10-27T16:34:08.4355560+00:00",
+    "version": "0.22.3",
+    "runningVersion": "0.22.3",
+    "runningVersionMatchesInstalled": true,
+    "online": true,
+    "code": null,
+    "phase": "ready",
+    "error": null,
+    "instanceId": "4f22108c-cd69-4700-8c73-ed95982d3062",
+    "counts": {
+      "activeRuns": 0,
+      "queuedRuns": 0,
+      "queuedRoutes": 0,
+      "pendingMessages": 0,
+      "outbox": 0
+    },
+    "schemas": {
+      "journal": 2,
+      "memory": 12,
+      "runtime": 4,
+      "activity": 1,
+      "media": 2,
+      "bilibili": 1
+    },
+    "plugins": [
+      {
+        "version": "0.2.1-rc.2",
+        "code": null,
+        "id": "model-deepseek",
+        "state": "ready"
+      },
+      {
+        "version": "0.8.0",
+        "code": null,
+        "id": "timeline",
+        "state": "ready"
+      },
+      {
+        "version": "0.15.0",
+        "code": null,
+        "id": "memory",
+        "state": "ready"
+      },
+      {
+        "version": "0.3.0",
+        "code": null,
+        "id": "channel-qq",
+        "state": "ready"
+      },
+      {
+        "version": "0.1.0",
+        "code": null,
+        "id": "activity",
+        "state": "ready"
+      },
+      {
+        "version": "0.1.0",
+        "code": null,
+        "id": "media",
+        "state": "ready"
+      },
+      {
+        "version": "0.1.0",
+        "code": null,
+        "id": "bilibili",
+        "state": "ready"
+      }
+    ],
+    "qq": {
+      "connection": {
+        "state": "online",
+        "groupSync": "current",
+        "groupError": null,
+        "effectiveGroups": 5,
+        "lastGroupSync": "2026-10-27T16:33:58.478Z",
+        "capabilities": true,
+        "tasks": {
+          "enabled": true,
+          "registered": true,
+          "deliverResults": true
+        },
+        "delivery": {
+          "plans": 0,
+          "pending": 0,
+          "unknown": 0
+        }
+      },
+      "ownerId": "756013063",
+      "botId": "2384779075",
+      "login": {
+        "status": "ok",
+        "userId": "2384779075",
+        "retcode": 0
+      }
+    },
+    "taskDelivery": {
+      "total": 0,
+      "pending": 0,
+      "sent": 0,
+      "partial": 0,
+      "uncertain": 0,
+      "blocked": 0
+    },
+    "model": {
+      "provider": "deepseek-account",
+      "model": "deepseek-flash",
+      "auth": "dsh-account"
+    },
+    "dshTools": true,
+    "biliOwnerConfigured": false,
+    "processes": [
+      {
+        "pid": 7388,
+        "owner": "NT AUTHORITY\\SYSTEM",
+        "core": false,
+        "parentPid": 4156,
+        "name": "node.exe",
+        "executable": "C:\\DSH\\DaFeiYu\\services\\snowluma\\node.exe",
+        "loadedVersion": null,
+        "entryPoint": null
+      },
+      {
+        "pid": 12260,
+        "owner": "NT AUTHORITY\\SYSTEM",
+        "core": false,
+        "parentPid": 7388,
+        "name": "node.exe",
+        "executable": "C:\\DSH\\DaFeiYu\\services\\snowluma\\node.exe",
+        "loadedVersion": null,
+        "entryPoint": null
+      },
+      {
+        "pid": 11156,
+        "owner": "10_2_0_10\\Administrator",
+        "core": false,
+        "parentPid": 7636,
+        "name": "DSH NEXT.exe",
+        "executable": "C:\\DSH\\DSH NEXT\\DSH NEXT.exe",
+        "loadedVersion": null,
+        "entryPoint": null
+      },
+      {
+        "pid": 3944,
+        "owner": "10_2_0_10\\Administrator",
+        "core": false,
+        "parentPid": 11156,
+        "name": "DSH NEXT.exe",
+        "executable": "C:\\DSH\\DSH NEXT\\DSH NEXT.exe",
+        "loadedVersion": null,
+        "entryPoint": null
+      },
+      {
+        "pid": 11616,
+        "owner": "10_2_0_10\\Administrator",
+        "core": false,
+        "parentPid": 11156,
+        "name": "DSH NEXT.exe",
+        "executable": "C:\\DSH\\DSH NEXT\\DSH NEXT.exe",
+        "loadedVersion": null,
+        "entryPoint": null
+      },
+      {
+        "pid": 5632,
+        "owner": "10_2_0_10\\Administrator",
+        "core": false,
+        "parentPid": 11156,
+        "name": "DSH NEXT.exe",
+        "executable": "C:\\DSH\\DSH NEXT\\DSH NEXT.exe",
+        "loadedVersion": null,
+        "entryPoint": null
+      },
+      {
+        "pid": 10844,
+        "owner": "10_2_0_10\\Administrator",
+        "core": false,
+        "parentPid": 11156,
+        "name": "DSH NEXT.exe",
+        "executable": "C:\\DSH\\DSH NEXT\\DSH NEXT.exe",
+        "loadedVersion": null,
+        "entryPoint": null
+      },
+      {
+        "pid": 7480,
+        "owner": "10_2_0_10\\Administrator",
+        "core": true,
+        "parentPid": 10844,
+        "name": "node.exe",
+        "executable": "C:\\DSH\\DSH NEXT\\runtime\\node-v24.22.0-win-x64\\node.exe",
+        "loadedVersion": "0.22.3",
+        "entryPoint": "C:\\DSH\\DaFeiYu\\dependencies\\dsh-sdk\\dsh-dafeiyu@_056da8e5f43f627027f06d8eab2485b2\\node_modules\\dsh-dafeiyu\\runtime\\plugin\\bin\\dafeiyu.mjs"
+      }
+    ],
+    "tasks": [
+      {
+        "runLevel": "Highest",
+        "principal": "Administrator",
+        "name": "DaFeiYu-DSH",
+        "state": "Running"
+      },
+      {
+        "runLevel": "Highest",
+        "principal": "SYSTEM",
+        "name": "DaFeiYu-SnowLuma",
+        "state": "Running"
+      },
+      {
+        "runLevel": "Highest",
+        "principal": "SYSTEM",
+        "name": "DaFeiYu-UpdateGuard",
+        "state": "Disabled"
+      },
+      {
+        "runLevel": "Highest",
+        "principal": "Administrator",
+        "name": "DSH-Desktop-Whale",
+        "state": "Disabled"
+      }
+    ],
+    "integrity": {
+      "at": "2026-10-27T16:34:53.4954639+00:00",
+      "tokens": [
+        {
+          "loadedVersion": "0.22.3",
+          "entryPoint": "C:\\DSH\\DaFeiYu\\dependencies\\dsh-sdk\\dsh-dafeiyu@_056da8e5f43f627027f06d8eab2485b2\\node_modules\\dsh-dafeiyu\\runtime\\plugin\\bin\\dafeiyu.mjs",
+          "dshHostElevated": true,
+          "pid": 7480,
+          "parentPid": 10844,
+          "childElevated": true
+        }
+      ],
+      "oldLayoutExists": false,
+      "identityBackups": [
+        {
+          "identityUnchanged": true,
+          "name": "before-v0221"
+        },
+        {
+          "identityUnchanged": true,
+          "name": "before-v0222"
+        },
+        {
+          "identityUnchanged": true,
+          "name": "before-v0223-rc1"
+        },
+        {
+          "identityUnchanged": true,
+          "name": "before-short-sdk"
+        },
+        {
+          "identityUnchanged": true,
+          "name": "before-short-sdk-explicit"
+        }
+      ],
+      "inspectorClosed": true,
+      "snowlumaSourceSha256": "E23ED3D4AA7E01E7F45400A7FFE6B0C4B67BB6D011F776F2FD04B959510435E6"
+    },
+    "dependencyLayout": {
+      "nodeLinker": "isolated",
+      "virtualStoreDir": "C:/DSH/DaFeiYu/dependencies/dsh-sdk",
+      "included": {
+        "dependencies": true,
+        "devDependencies": false,
+        "optionalDependencies": true
+      },
+      "packageManager": "pnpm@11.8.0",
+      "packageRoot": "C:\\DSH\\DaFeiYu\\dependencies\\dsh-sdk\\dsh-dafeiyu@_056da8e5f43f627027f06d8eab2485b2\\node_modules\\dsh-dafeiyu",
+      "npmrcKeys": [],
+      "shortStoreExists": true,
+      "profileSdkShadow": false
+    },
+    "startup": {
+      "start": "2026-10-27T16:32:18.994Z",
+      "records": 405,
+      "phases": [
+        {
+          "time": "2026-10-27T16:32:19.841Z",
+          "phase": "starting"
+        },
+        {
+          "time": "2026-10-27T16:33:21.184Z",
+          "phase": "ready"
+        }
+      ],
+      "diagnostics": [
+        {
+          "time": "2026-10-27T16:32:18.989Z",
+          "event": "run.previous-unclean",
+          "level": "warn",
+          "source": "electron",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [
+            "previousRunId",
+            "previousStarted"
+          ],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:32:20.954Z",
+          "event": "output",
+          "level": "info",
+          "source": "host.stderr",
+          "codes": [
+            "DIRECT"
+          ],
+          "errorCodes": [],
+          "fieldKeys": [],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:33:13.664Z",
+          "event": "log",
+          "level": "info",
+          "source": "host.kernel.hmr",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [
+            "hostTime",
+            "hostSequence",
+            "pluginId"
+          ],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:33:18.092Z",
+          "event": "output",
+          "level": "info",
+          "source": "host.stdout",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:33:19.290Z",
+          "event": "log",
+          "level": "warn",
+          "source": "host.kernel.root",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [
+            "hostTime",
+            "hostSequence"
+          ],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:33:19.547Z",
+          "event": "process.ready",
+          "level": "info",
+          "source": "host",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:33:22.610Z",
+          "event": "console",
+          "level": "warn",
+          "source": "renderer",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [
+            "webContentsId"
+          ],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:33:24.406Z",
+          "event": "output",
+          "level": "info",
+          "source": "host.stdout",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [],
+          "codesInFields": []
+        },
+        {
+          "time": "2026-10-27T16:33:28.434Z",
+          "event": "log",
+          "level": "info",
+          "source": "host.kernel.dsh-dafeiyu",
+          "codes": [],
+          "errorCodes": [],
+          "fieldKeys": [
+            "hostTime",
+            "hostSequence",
+            "pluginId"
+          ],
+          "codesInFields": []
+        }
+      ],
+      "agentChanges": [
+        {
+          "time": "2026-10-27T16:33:03.369Z",
+          "module": "@deepseek-ai/dsh-agent-preset",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:24.964Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:25.035Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:25.764Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:25.857Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:25.932Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:26.015Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:26.674Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:26.742Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:27.352Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:27.388Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:27.431Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        },
+        {
+          "time": "2026-10-27T16:33:27.481Z",
+          "module": "@deepseek-ai/dsh-agent-loop",
+          "phase": "active"
+        }
+      ]
+    }
+  },
+  "limits": {
+    "realModelSemanticTest": false,
+    "qqTestMessageSent": false,
+    "serverRegressionRun": false,
+    "biliPrivateChannelConfigured": false,
+    "finalRuntimeSameAsColdStartedCandidate": true,
+    "finalAssetAppliedThroughOfficialHmr": false,
+    "baseStartupNearDesktopTimeLimit": true,
+    "finalAssetLoadedAfterNormalRestart": true
+  }
+}
