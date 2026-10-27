@@ -42,7 +42,7 @@ const config={schemaVersion:1,profileId:'executor-host-fixture',agent:{id:'dafei
   persona:{fixedFile:'./persona.md',kind:'test'},modelRoutes:{chat:{provider:'local-test',model:'scripted'}},runtime:{turnTimeoutMs:10000,shutdownGraceMs:scenario==='cancel'?50:3000},diagnostics:{snapshotIntervalMs:100},
   plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{sourceTracking:true}},
     {id:'server-executor',required:true,config:{command,route,budgetAuthorizationId:'fictional-parent-ledger',resultOwner:{account:bot,ownerId:owner},maxExecutionMs:10000}},
-    {id:'channel-qq',required:true,config:{botId:bot,ownerId:owner,groupIds:[group],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile:'./token',requestTimeoutMs:500,reconnectMs:100,capabilities:{enabled:true},tasks:{enabled:true,deliverResults:true}}}],
+    {id:'channel-qq',required:true,config:{botId:bot,ownerId:owner,groupIds:[group],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile:'./token',requestTimeoutMs:5000,reconnectMs:100,capabilities:{enabled:true},tasks:{enabled:true,deliverResults:true}}}],
   authorityPolicies:[{id:'conversation',producers:['channel-qq'],actions:[...QQ_ACTIONS,...QQ_TASK_ACTIONS],allowLocalWrite:true},
     {id:'qq-task',producers:['qq-tasks'],actions:[action,statusAction,resultAction,'dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true,externalActions:external,resources:[resource]},
     {id:'local',producers:['host-cli'],actions:[action,statusAction,resultAction],allowLocalWrite:true,externalActions:external,resources:[resource]}]};

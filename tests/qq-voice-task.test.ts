@@ -73,7 +73,7 @@ test('runtime v3 requires an explicit protocol upgrade and preserves existing re
 });
 
 test('voice objection resolution preserves the parent source and binds the new control recording',async()=>{
-  const h=await qqCapabilityFixture({media:true,audio:true,tasks:true,voiceDirectives:true});try{let chat=0,task=0;h.setResponse(request=>native(request)?++task===1?call('dafeiyu_task_object',{requestId:'object',category:'missing-information',blocking:true,reason:'需要虚构补充信息',actions:[]}):textReply('保持等待'):++chat===1?call('qq_task_submit',{requestId:'waiting'}):textReply('已受理'));
+  const h=await qqCapabilityFixture({media:true,audio:true,tasks:true,turnTimeoutMs:30000,voiceDirectives:true});try{let chat=0,task=0;h.setResponse(request=>native(request)?++task===1?call('dafeiyu_task_object',{requestId:'object',category:'missing-information',blocking:true,reason:'需要虚构补充信息',actions:[]}):textReply('保持等待'):++chat===1?call('qq_task_submit',{requestId:'waiting'}):textReply('已受理'));
     await h.message('请核对指定信息',{target:privateScene,id:'820'});const first=runs(h)[0]!;assert.equal(first.state,'waiting');let statusStep=0;h.setResponse(()=>++statusStep===1?call('qq_task_status',{taskId:first.taskId}):textReply('查看异议'));await h.message('状态',{target:privateScene,id:'821'});
     const statuses=h.adapter.requests.flatMap(outcomes).flatMap(o=>{const value=z.object({objections:z.array(z.object({id:z.string()}))}).safeParse(o.data);return value.success?[value.data]:[];});const objectionId=statuses.at(-1)!.objections[0]!.id;
     h.platform.transcript='确认继续任务：补充信息已经明确';flow(h,id=>call('qq_task_control',{requestId:'resolve-voice',taskId:first.taskId,expectedVersion:1,action:'resolve',objectionId,voiceExposureId:id}));await voice(h,822);const latest=runs(h).at(-1)!;

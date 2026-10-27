@@ -1,0 +1,93 @@
+{
+  "at": "2026-10-27T13:56:48.020Z",
+  "codeCommit": "8a6c811",
+  "coverage": {
+    "files": 182,
+    "uniqueTests": 1391,
+    "passed": 1390,
+    "skipped": 1,
+    "method": "three complete batches with affected-file rechecks",
+    "duplicateExecutorCases": 6,
+    "recheckedFinalCases": 18
+  },
+  "reports": [
+    {
+      "id": "1b60ad38-4288-4882-9068-3dcfa92338bc",
+      "counts": {
+        "tests": 448,
+        "failed": 1,
+        "passed": 447,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 448,
+        "suites": 0
+      },
+      "reason": "TEST_STAGE_FAILED",
+      "sha256": "437a8ec2738f839a1a73d014c8754810911f1def0e9a2e84df6e4f50ed56bf75",
+      "cleanupBlocked": [],
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "id": "ce9546b7-dbbc-4a0f-9ab4-684f86df1291",
+      "counts": {
+        "tests": 363,
+        "failed": 0,
+        "passed": 362,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0,
+        "topLevel": 363,
+        "suites": 0
+      },
+      "reason": null,
+      "sha256": "c2de2f6c1a69362da51a26d35608dce92f7ff7018c69276dcaf1b9d47ad49990",
+      "cleanupBlocked": [],
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "id": "1ef3dfef-f759-47a7-afbb-9c8f470ac591",
+      "counts": {
+        "tests": 586,
+        "failed": 3,
+        "passed": 583,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 554,
+        "suites": 0
+      },
+      "reason": "TEST_STAGE_FAILED",
+      "sha256": "45de9f1684316acb01c17f7f6de0b9023ade58f6274e1ca61e91c75cd03d6182",
+      "cleanupBlocked": [],
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    },
+    {
+      "id": "a59d3e4c-208c-466d-b7d6-c5f2ba0719d0",
+      "counts": {
+        "tests": 18,
+        "failed": 0,
+        "passed": 18,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 18,
+        "suites": 0
+      },
+      "reason": null,
+      "sha256": "ad669a8b6a74286c1d536d787c04a3bcd8b5dcbc62a9441933946e1acd59db69",
+      "cleanupBlocked": [],
+      "realModel": false,
+      "realPlatform": false,
+      "serverAccess": false
+    }
+  ],
+  "githubPublished": false,
+  "serverDeployed": false
+}
