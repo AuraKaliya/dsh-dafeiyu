@@ -76,7 +76,7 @@ test('Bili exploration uses its own generic Task binding and delivers verified p
 });
 
 test('self-exploration keeps its own goal and motivation rather than relabelling it as an owner instruction',async()=>{
-  const h=await biliOwnerChannelFixture({tasks:true});try{let chat=0;h.setResponse(request=>native(request.sessionId)?textReply('虚构兴趣探索已结束'):render(request.sessionId)?textReply('只说明当前探索范围'):verify(request.sessionId)?textReply('{"faithful":true,"issues":[]}'):++chat===1?call(BILI_OWNER_TASK_ACTIONS[0],{requestId:'interest',kind:'self-exploration',goal:'自主了解虚构视频结构'}):textReply('这是我的兴趣探索'));
+  const h=await biliOwnerChannelFixture({tasks:true});try{let chat=0;h.setResponse(request=>native(request.sessionId)?textReply('虚构兴趣探索已结束'):render(request.sessionId)?textReply('只说明当前探索范围'):verify(request.sessionId)?textReply('{"faithful":true,"issues":[]}'):++chat===1?call(BILI_OWNER_TASK_ACTIONS[3],{requestId:'interest',goal:'自主了解虚构视频结构'}):textReply('这是我的兴趣探索'));
     await h.message('随便聊聊虚构视频');const rows=tasks(h);assert.equal(rows.length,1);const saved=JSON.parse(String(rows[0]!.payload));assert.equal(saved.motivation.kind,'self-exploration');assert.equal(saved.input.goal,'自主了解虚构视频结构');assert.equal(saved.messageSource.kind,'self-exploration');
   }finally{await h.close();}
 });
@@ -109,10 +109,10 @@ test('restart validates old Task sources before online verification and only res
     const port=ctx.dafeiyu.executionProducer('bili-owner-tasks');assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(port.status(port.restoreRun(pending)).state,'accepted');assert.equal(adapter.requests.length,0);
   }});
   try{assert.equal(h.adapter.requests.length,0);assert.equal(tasks(h)[1]!.state,'accepted');h.setResponse(request=>{assert.equal(native(request.sessionId),true);return textReply('RESUMED_BILI_TASK_RESULT');});
-    h.core.activate();await h.core.whenIdle();assert.deepEqual(tasks(h).map(row=>row.state),['completed','completed']);assert.equal(h.adapter.requests.length,1);
+    h.core.activate();await h.core.whenIdle();assert.deepEqual(tasks(h).map(row=>row.state),['completed','completed']);assert.equal(h.adapter.requests.filter(request=>native(request.sessionId)).length,1);assert.equal(h.adapter.requests.filter(request=>String(request.sessionId).startsWith('dafeiyu-assessment-')).length,1);
     const port=h.core.executionProducer('bili-owner-tasks');assert.equal(await port.readResult(port.restoreRun(pending)),'RESUMED_BILI_TASK_RESULT');assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');
     backend.state.beforeVerify=async()=>{throw new Error('BILI_OWNER_NETWORK_UNAVAILABLE');};h.advance();await h.poll();assert.equal(h.channel.getStatus().verified,false);assert.equal(h.channel.getStatus().bindingFault,null);
-    assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(h.adapter.requests.length,1);assert.equal(h.channel.store.source('101')?.state,'accepted');
+    assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(h.adapter.requests.length,2);assert.equal(h.channel.store.source('101')?.state,'accepted');
   }finally{await h.close();}
 });
 

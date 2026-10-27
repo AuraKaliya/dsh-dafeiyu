@@ -24,7 +24,7 @@ let host=await ManagedHost.start(prepared,{mode:'single-run',coordination,adapte
 try{const result=await host.run(request);assert.equal(result.result,'HOST_MEDIA_RESULT');const status=host.snapshot();assert.equal(status.schemas.media,2);assert.equal(status.services.media?.counts.jobs.completed,1);assert.equal(status.services.media?.modalities.documents,true);assert.equal(status.counts.outbox,0);
   assert.ok(!JSON.stringify(status).includes('HOST_MEDIA_DOCUMENT'));assert.equal(readHostStatus(prepared,coordination).snapshot?.services.media?.counts.exports,0);
   unbind();await host.close();closed=true;assert.equal(host.snapshot().services.media?.lifecycle,'closed');const firstCalls=adapter.requests.length;
-  const next=new ScriptedModel(()=>{throw new Error('MUST_NOT_REPLAY');});host=await ManagedHost.start(prepared,{mode:'single-run',coordination,adapter:next});closed=false;unbind=bind(host.ctx);assert.equal((await host.run(request)).runId,result.runId);assert.equal(next.requests.length,0);assert.equal(firstCalls,4);
+  const next=new ScriptedModel(()=>{throw new Error('MUST_NOT_REPLAY');});host=await ManagedHost.start(prepared,{mode:'single-run',coordination,adapter:next});closed=false;unbind=bind(host.ctx);assert.equal((await host.run(request)).runId,result.runId);assert.equal(next.requests.length,0);assert.equal(firstCalls,5);
   const db=new DatabaseSync(join(root,'data/core/media.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) AS n FROM media_outbox WHERE delivered=0').get()?.n,0);}finally{db.close();}
 }finally{if(!closed){unbind();await host.close();}}
 process.stdout.write(JSON.stringify({passed:true,actualLocalHost:true,realModel:false,realPlatform:false,serverAccess:false})+'\n');

@@ -34,6 +34,6 @@ test('document core action records actual located text and stable continuation w
   }});
   try{const run=h.port.submitTask({requestId:'document',title:'文档检查',goal:'按需读取同一片段并验证回执',policyId:'test-policy'});await h.core.whenIdle();assert.ok(h.port.status(run.run).operations.every(o=>o.status==='succeeded'),JSON.stringify(h.adapter.requests));
     const db=new DatabaseSync(join(dataDir,'media.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) AS n FROM media_exposures').get()?.n,1);const body=JSON.parse(String(db.prepare('SELECT body FROM media_exposures').get()?.body));assert.equal(body.detail.next.textOffset,50);assert.match(body.text,/line:1/);}finally{db.close();}
-    assert.equal(h.adapter.requests.length,3);
+    assert.equal(h.adapter.requests.filter(request=>String(request.sessionId).startsWith('dafeiyu-task-')).length,3);assert.equal(h.adapter.requests.filter(request=>String(request.sessionId).startsWith('dafeiyu-assessment-')).length,1);
   }finally{await h.ctx.dafeiyuMedia.close();await h.close();}
 });

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { conversationKey } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,privateScene,bot,group,otherGroup,lastPage,outcomes,until } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
+const lastWork=(h:Awaited<ReturnType<typeof qqCapabilityFixture>>)=>h.adapter.requests.findLast(request=>!String(request.sessionId).startsWith('dafeiyu-assessment-'))!;
 
 for(const mode of ['none','original','fragment','summary'] as const)test(`QQ actual page ${mode} selection uses current exposure and retains one decision`,async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);const passive=await h.message('PASSIVE_QQ_SENTINEL：观察到的虚构内容',{media:true});
@@ -12,8 +13,8 @@ for(const mode of ['none','original','fragment','summary'] as const)test(`QQ act
     case 2:case 3:{const page=lastPage(request);pageText=JSON.stringify(page.page);return call('qq_observe_select',{requestId:'choice',snapshotId:page.snapshotId,mode,reason:'虚构选择',...(mode==='fragment'?{start:0,end:16}:mode==='summary'?{text:'推断：虚构讨论需要进一步核实。'}:{})});}
     default:return textReply('按实际回执结束');}});
   await h.message('请查看本会话',{trigger:true});const rows=h.rows();assert.equal(rows.decisions.length,1);assert.equal(rows.memories.length,mode==='none'?0:1);
-  assert.match(JSON.stringify(outcomes(h.adapter.requests.at(-1)!)),/"duplicate":true/);assert.ok(!JSON.stringify(rows.observations).includes('PASSIVE_QQ_SENTINEL'));
-  const page=lastPage(h.adapter.requests.at(-1)!);assert.ok(!JSON.stringify(page).includes('UNBOUND_CACHE_SENTINEL'));
+  assert.match(JSON.stringify(outcomes(lastWork(h))),/"duplicate":true/);assert.ok(!JSON.stringify(rows.observations).includes('PASSIVE_QQ_SENTINEL'));
+  const page=lastPage(lastWork(h));assert.ok(!JSON.stringify(page).includes('UNBOUND_CACHE_SENTINEL'));
   assert.equal(page.page.messages.find(m=>m.text.includes('PASSIVE'))?.occurredAt,new Date(passive.event.time*1000).toISOString());assert.deepEqual(page.page.messages.find(m=>m.text.includes('PASSIVE'))?.unsupported,['image']);
   if(mode!=='none'){const body=JSON.parse(String(rows.memories[0]!.body)),boundary=JSON.parse(String(rows.memories[0]!.boundary));
     assert.equal(body.claimType,mode==='summary'?'inference':'reported_claim');assert.equal(boundary.externalExpression.kind,'conversation');
@@ -23,16 +24,16 @@ for(const mode of ['none','original','fragment','summary'] as const)test(`QQ act
 test('QQ lists only current conversation or native resource whitelist, never all joined groups',async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);
   for(const target of [privateScene,scene]){let step=0;h.setResponse(()=>++step===1?call('qq_groups',{}):textReply('查询完成'));await h.message('列表',{target,trigger:true});
-    const result=outcomes(h.adapter.requests.at(-1)!).at(-1)!;assert.equal(result.status,'succeeded');assert.deepEqual((result.data as {resources:{scene:unknown}[]}).resources.map(r=>r.scene),[target]);}
+    const result=outcomes(lastWork(h)).at(-1)!;assert.equal(result.status,'succeeded');assert.deepEqual((result.data as {resources:{scene:unknown}[]}).resources.map(r=>r.scene),[target]);}
   let step=0;h.setResponse(()=>++step===1?call('qq_groups',{}):textReply('完成'));const run=await h.native('list');assert.equal(run.status.operations[0]?.status,'succeeded');
-  assert.deepEqual((outcomes(h.adapter.requests.at(-1)!).at(-1)!.data as {resources:{scene:unknown}[]}).resources.map(r=>r.scene),[scene]);
+  assert.deepEqual((outcomes(lastWork(h)).at(-1)!.data as {resources:{scene:unknown}[]}).resources.map(r=>r.scene),[scene]);
 });
 
 test('the same assistant filter removes browse targets and stops observation of their retained cache',async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);await h.message('ASSISTANT_HIDDEN_CACHE_SENTINEL');
   h.platform.groups[0]!.msgMask=2;await h.ctx.dafeiyuQQ.refreshGroups();let step=0;
   h.setResponse(()=>++step===1?call('qq_groups',{}):step===2?call('qq_browse',{requestId:'ignored',target:scene}):textReply('按实际拒绝结果结束'));
-  await h.native('assistant-scope');const seen=outcomes(h.adapter.requests.at(-1)!);
+  await h.native('assistant-scope');const seen=outcomes(lastWork(h));
   assert.deepEqual(z.object({resources:z.array(z.unknown())}).parse(seen.find(value=>value.status==='succeeded')?.data).resources,[]);
   assert.ok(seen.some(value=>value.status==='failed'&&value.errorCode==='TARGET_NOT_ALLOWED'));
   assert.ok(!JSON.stringify(h.adapter.requests).includes('ASSISTANT_HIDDEN_CACHE_SENTINEL'));assert.equal(h.rows().memories.length,0);
@@ -47,9 +48,9 @@ test('native QQ browsing makes task-only memory without fake inbound messages or
 
 test('QQ rejects foreign targets, forged cursors and selection tickets borrowed across tasks',async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);await h.message('SCOPE_QQ_SENTINEL');
-  for(const target of [{...scene,id:otherGroup},{...scene,account:'99887766'}]){let step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'forbidden',target}):textReply('拒绝'));await h.message('跨范围',{trigger:true});assert.equal(outcomes(h.adapter.requests.at(-1)!).at(-1)?.errorCode,'RESOURCE_SCOPE_DENIED');}
-  let step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'forged',cursor:crypto.randomUUID()}):textReply('拒绝'));await h.message('伪造游标',{trigger:true});assert.equal(outcomes(h.adapter.requests.at(-1)!).at(-1)?.errorCode,'SNAPSHOT_UNAVAILABLE');
-  step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'first'}):textReply('完成'));await h.native('first');const snapshotId=lastPage(h.adapter.requests.at(-1)!).snapshotId;
+  for(const target of [{...scene,id:otherGroup},{...scene,account:'99887766'}]){let step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'forbidden',target}):textReply('拒绝'));await h.message('跨范围',{trigger:true});assert.equal(outcomes(lastWork(h)).at(-1)?.errorCode,'RESOURCE_SCOPE_DENIED');}
+  let step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'forged',cursor:crypto.randomUUID()}):textReply('拒绝'));await h.message('伪造游标',{trigger:true});assert.equal(outcomes(lastWork(h)).at(-1)?.errorCode,'SNAPSHOT_UNAVAILABLE');
+  step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'first'}):textReply('完成'));await h.native('first');const snapshotId=lastPage(lastWork(h)).snapshotId;
   step=0;h.setResponse(()=>++step===1?call('qq_observe_select',{requestId:'stolen',snapshotId,mode:'original',reason:'不能借用'}):textReply('拒绝'));const stolen=await h.native('second');assert.equal(stolen.status.operations[0]?.status,'failed');assert.equal(h.rows().memories.length,0);
 });
 
@@ -64,13 +65,13 @@ test('recall invalidates actual views and derived memory; wrong-account notice a
   await h.message('RECALLED_QQ_SENTINEL',{id:passive.id});assert.equal(h.adapter.requests.length,calls);
   step=0;h.setResponse(()=>++step===1?call('dafeiyu_memory_search',{query:'RECALLED_QQ_SENTINEL',limit:'5'}):textReply('旧来源不可用'));await h.message('查找有效记忆',{trigger:true});
   // Query text intentionally names the sentinel; no old body should remain in any tool result.
-  const latest=h.adapter.requests.at(-1)!;assert.ok(!JSON.stringify(outcomes(latest)).includes('RECALLED_QQ_SENTINEL'));assert.match(JSON.stringify(latest),/\\?"items\\?":\s*\[\]/);
+  const latest=lastWork(h);assert.ok(!JSON.stringify(outcomes(latest)).includes('RECALLED_QQ_SENTINEL'));assert.match(JSON.stringify(latest),/\\?"items\\?":\s*\[\]/);
 });
 
 test('QQ reload retires selection tickets and membership loss denies new access while late recalls still tombstone known sources',async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);const passive=await h.message('RELOAD_QQ_SENTINEL');let step=0;
-  h.setResponse(()=>++step===1?call('qq_browse',{requestId:'read'}):textReply('完成'));await h.message('读取',{trigger:true});const snapshotId=lastPage(h.adapter.requests.at(-1)!).snapshotId;
-  await h.reload();step=0;h.setResponse(()=>++step===1?call('qq_observe_select',{requestId:'old',snapshotId,mode:'original',reason:'旧快照'}):textReply('拒绝'));await h.message('继续选择',{trigger:true});assert.equal(outcomes(h.adapter.requests.at(-1)!).at(-1)?.errorCode,'SNAPSHOT_UNAVAILABLE');
+  h.setResponse(()=>++step===1?call('qq_browse',{requestId:'read'}):textReply('完成'));await h.message('读取',{trigger:true});const snapshotId=lastPage(lastWork(h)).snapshotId;
+  await h.reload();step=0;h.setResponse(()=>++step===1?call('qq_observe_select',{requestId:'old',snapshotId,mode:'original',reason:'旧快照'}):textReply('拒绝'));await h.message('继续选择',{trigger:true});assert.equal(outcomes(lastWork(h)).at(-1)?.errorCode,'SNAPSHOT_UNAVAILABLE');
   h.platform.groups=[];await h.ctx.dafeiyuQQ.refreshGroups();step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'left',target:scene}):textReply('拒绝'));const run=await h.native('after-leave');assert.equal(run.status.operations[0]?.status,'failed');
   h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:Number(passive.id)});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);assert.equal(h.rows().memories.length,0);
 });
@@ -79,8 +80,8 @@ test('QQ pages are repeatable within a Run and cursor cannot be borrowed by anot
   const h=await qqCapabilityFixture();t.after(h.close);await h.message('第一页旧消息');await h.message('第二页旧消息');let step=0,first='',second='',cursor='';
   h.setResponse(request=>{switch(++step){case 1:return call('qq_browse',{requestId:'same',limit:1});case 2:first=lastPage(request).snapshotId;return call('qq_browse',{requestId:'same',limit:1});
     case 3:second=lastPage(request).snapshotId;cursor=lastPage(request).nextCursor!;return call('qq_browse',{requestId:'next',limit:1,cursor});default:return textReply('完成');}});
-  await h.message('分页',{trigger:true});assert.equal(first,second);assert.ok(cursor);assert.equal(lastPage(h.adapter.requests.at(-1)!).page.messages[0]?.text,'第二页旧消息');assert.equal(h.rows().observations.length,2);
-  step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'borrowed',limit:1,cursor}):textReply('拒绝'));await h.message('跨群游标',{target:{...scene,id:otherGroup},trigger:true});assert.equal(outcomes(h.adapter.requests.at(-1)!).at(-1)?.errorCode,'SNAPSHOT_UNAVAILABLE');
+  await h.message('分页',{trigger:true});assert.equal(first,second);assert.ok(cursor);assert.equal(lastPage(lastWork(h)).page.messages[0]?.text,'第二页旧消息');assert.equal(h.rows().observations.length,2);
+  step=0;h.setResponse(()=>++step===1?call('qq_browse',{requestId:'borrowed',limit:1,cursor}):textReply('拒绝'));await h.message('跨群游标',{target:{...scene,id:otherGroup},trigger:true});assert.equal(outcomes(lastWork(h)).at(-1)?.errorCode,'SNAPSHOT_UNAVAILABLE');
 });
 
 test('friend recall invalidates the bound private source without waking a new model turn',async t=>{

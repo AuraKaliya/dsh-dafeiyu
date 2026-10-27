@@ -65,7 +65,9 @@ test('QQ private text flows through real DSH and keeps target and receipt',async
   assert.equal(h.platform.sent[0]?.user_id,Number(owner));
   assert.equal(h.core.journal.list()[0]?.state,'delivered');
   assert.equal(h.ctx.dafeiyuQQ.getStatus().counters.accepted,1);
-  assert.match(JSON.stringify(h.adapter.requests[0]),/即使模型本身支持看图/);
+  const input=h.adapter.requests[0]!.messages.flatMap(message=>message.content.filter(block=>block.type==='text').map(block=>block.text)).join('\n');
+  const declarations=input.split('\n').flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}});
+  const capabilities=declarations.find(value=>value.kind==='channel-capabilities');assert.ok(capabilities);assert.deepEqual(capabilities.media,{input:false,output:false,localStickers:false});assert.equal(capabilities.observation.enabled,false);
 });
 test('QQ rejects other self IDs, private senders, groups and self messages before model input',async t=>{
   const h=await setup();t.after(h.stop);

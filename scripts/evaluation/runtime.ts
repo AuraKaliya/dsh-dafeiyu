@@ -29,7 +29,9 @@ export class EvaluationScriptedAdapter extends LlmAdapter {
   response:EvaluationResponse;readonly requests:GenerateOptions[]=[];
   constructor(response:EvaluationResponse){super();this.response=response;}
   override async resolveModel(provider:string,id:string):Promise<LlmResolvedModelInfo>{return {provider,id,name:id,context:{contextWindow:65536},defaultMaxTokens:8192,systemPromptUpdate:'in-history',toolUpdate:'in-history'};}
-  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{options.signal?.throwIfAborted();this.requests.push(options);const chunks=await this.response(options);yield {type:'block-start',index:100,blockType:'reasoning'};yield {type:'reasoning-delta',index:100,text:PRIVATE_STREAM_SENTINEL};yield {type:'block-end',index:100,block:{type:'reasoning',text:PRIVATE_STREAM_SENTINEL}};
+  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{options.signal?.throwIfAborted();this.requests.push(options);
+    const chunks=String(options.sessionId).startsWith('dafeiyu-assessment-')?evaluationText(JSON.stringify({goalStatus:'uncertain',summary:'离线传输测试的固定阶段评价，仅验证程序流程。',evidenceIds:[],limitations:['未作真实模型语义验收'],unfinished:[],next:'deliver'})):await this.response(options);
+    yield {type:'block-start',index:100,blockType:'reasoning'};yield {type:'reasoning-delta',index:100,text:PRIVATE_STREAM_SENTINEL};yield {type:'block-end',index:100,block:{type:'reasoning',text:PRIVATE_STREAM_SENTINEL}};
     for(const chunk of chunks){options.signal?.throwIfAborted();if(chunk.type==='finish'){yield {type:'usage',usage:{inputTokens:Math.ceil(Buffer.byteLength(JSON.stringify(options.messages))/4),outputTokens:Math.ceil(Buffer.byteLength(JSON.stringify(chunks))/4)}};yield {...chunk,replayState:{response:PRIVATE_STREAM_SENTINEL}};}else yield chunk;}}
 }
 export async function openEvaluationRuntime(options:{root:string;foundationFile:string;ledger:EvaluationLedger;attemptId:string;response:EvaluationResponse;create?:boolean;compaction?:Memory.Config['compaction'];

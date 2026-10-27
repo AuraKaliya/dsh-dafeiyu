@@ -21,7 +21,7 @@ export function b05TestResponse(mode:'normal'|'omit-submit'|'omit-continuation'|
       if(mode==='omit-continuation'||!taskId)return evaluationText('未执行续办的虚构回答');
       if(step===1)return evaluationCall('evaluation_message_status',{taskId});
       if(step===2){if(taskVersion===undefined)throw new Error('Missing task status version');return evaluationCall('evaluation_message_control',{requestId:'fixture-revise',taskId:mode==='wrong-task'?'11111111-1111-4111-8111-111111111111':taskId,expectedVersion:taskVersion,action:'revise'});}
-    }else if(step===1&&mode!=='omit-submit')return evaluationCall('evaluation_message_submit',{requestId:'fixture-submit',kind:'explicit-task'});
+    }else if(step===1&&mode!=='omit-submit'&&mainText.startsWith('请你只整理'))return evaluationCall('evaluation_message_submit',{requestId:'fixture-submit',kind:'explicit-task'});
     return evaluationText('根据实际回执整理两条公开虚构事实和引文；未发布。');
   };
 }

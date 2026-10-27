@@ -25,7 +25,7 @@ async function fixture(){const root=await mkdtemp(join(tmpdir(),'dafeiyu-host-cl
 test('CLI supports offline inspect, explicit init, one-shot run and idempotent result recovery',async()=>{const f=await fixture();
   const before=await command(['inspect','--config',f.file]);assert.equal(before.code,2);assert.equal(before.values[0].networkChecked,false);assert.equal(before.values[0].canInitialize,true);
   assert.equal((await command(['init','--config',f.file])).code,0);assert.equal((await command(['inspect','--config',f.file])).values[0].ready,true);
-  const first=await command(['run','--config',f.file,'--request',f.request]);assert.equal(first.code,0);assert.equal(first.values[0].modelKind,'scripted');assert.equal(first.values[0].modelRequests.started,1);
+  const first=await command(['run','--config',f.file,'--request',f.request]);assert.equal(first.code,0);assert.equal(first.values[0].modelKind,'scripted');assert.equal(first.values[0].modelRequests.started,2);assert.equal(first.values[0].state,'completed');
   const second=await command(['run','--config',f.file,'--request',f.request]);assert.equal(second.code,0);assert.equal(second.values[0].runId,first.values[0].runId);assert.equal(second.values[0].modelRequests.started,0);
   const status=await command(['status','--config',f.file]);assert.equal(status.values[0].online,false);assert.equal(status.values[0].snapshot.phase,'stopped');assert.equal(status.values[0].snapshot.schemas.memory,MEMORY_SCHEMA_VERSION);assert.ok(!status.stdout.includes('PRIVATE_GOAL_SENTINEL'));assert.ok(!status.stdout.includes('PRIVATE_FOUNDATION_SENTINEL'));
 });

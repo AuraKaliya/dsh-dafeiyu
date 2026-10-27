@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-credentials';
+import type {} from '@deepseek-ai/dsh-deepseek-account';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { getOrCreateAnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id';
 import { assertUsableApiKey,LlmError,resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm';
@@ -33,10 +34,10 @@ export function inlineDeepSeekAdapter(dependencies:Omit<DeepSeekAdapterOptions,'
   return new DeepSeekAdapter({...dependencies,resolveFiles:()=>files});
 }
 
-export async function installInlineDeepSeek(ctx:Context,input:{baseURL:string;credentialName:'DEEPSEEK_API_KEY';
+export async function installInlineDeepSeek(ctx:Context,input:{auth?:'api-key'|'dsh-account';baseURL:string;credentialName:'DEEPSEEK_API_KEY';
   route:{provider:string;model:string;reasoningEffort?:string|undefined};settings:InlineModelSettings;credentialGuard:()=>void}):Promise<void>{
   const settings=InlineModelSettingsSchema.parse(input.settings),effort=z.enum(['off','low','high','max']).parse(input.route.reasoningEffort);
-  if(input.route.provider!=='deepseek-official')throw new Error('HOST_INLINE_MODEL_ROUTE_INVALID');
+  if(input.route.provider!==(input.auth==='dsh-account'?'deepseek-account':'deepseek-official'))throw new Error('HOST_INLINE_MODEL_ROUTE_INVALID');
   const base=resolveAdapterOptions({baseURL:input.baseURL,thinking:effort==='off'?'disabled':'enabled',reasoningEffort:effort,
     maxTokens:settings.maxOutputTokens,streamIdleTimeoutMs:settings.streamIdleTimeoutMs,
     maxInlineRequestImageBytes:settings.maxInlineImageBytes,maxRequestFilesBytes:settings.maxInlineImageBytes,maxImagesPerRequest:settings.maxImages,
@@ -49,7 +50,13 @@ export async function installInlineDeepSeek(ctx:Context,input:{baseURL:string;cr
   const ref=credentialRef(input.credentialName);
   const adapter=inlineDeepSeekAdapter({options:()=>connection,providerName:'DeepSeek',
     admit:(_connection,model)=>{input.credentialGuard();if(model!==input.route.model)throw new LlmError('Fixed model route changed','HOST_INLINE_MODEL_ROUTE_INVALID');},
-    resolveAuth:async()=>{input.credentialGuard();const service=ctx.get('credentials');
+    resolveAuth:async()=>{input.credentialGuard();
+      if(input.auth==='dsh-account'){
+        const account=ctx.get('deepseekAccount'),token=await account?.resolveToken(input.baseURL);
+        if(!token)throw new LlmError('Sign in to the configured DSH account','ACCOUNT_SIGN_IN_REQUIRED');
+        return {headers:{'x-dsh-auth-token':token},onRequestError:async(error)=>{if(error instanceof LlmError&&error.failure.status===401){try{await account?.rejectToken(token);}catch{}return new LlmError('DSH account sign-in expired','ACCOUNT_TOKEN_INVALID',{...error.failure,cause:error});}return error;}};
+      }
+      const service=ctx.get('credentials');
       if(!service)throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');const metadata=await service.describe(ref);
       if(!metadata.configured||metadata.source!=='file')throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');
       const hit=await service.resolve(ref);if(!hit)throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');

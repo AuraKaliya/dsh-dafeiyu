@@ -143,7 +143,7 @@ test('real core, memory and scripted DSH admit trial only on the next Run, keep 
     opened.phase('use');const requestCount=opened.h.adapter.requests.length;
     const next=opened.h.port.submitTask({requestId:'actual-trial-use',taskId:first.task.id,expectedVersion:1,policyId:'test-policy'},first.task);useRunId=next.run.id;
     await opened.h.core.whenIdle();assert.equal(opened.h.port.status(next.run).state,'completed');
-    const actualRequests=opened.h.adapter.requests.slice(requestCount);assert.equal(actualRequests.length,1);
+    const stageRequests=opened.h.adapter.requests.slice(requestCount),actualRequests=stageRequests.filter(value=>String(value.sessionId).startsWith('dafeiyu-task-'));assert.equal(actualRequests.length,1);assert.equal(stageRequests.filter(value=>String(value.sessionId).startsWith('dafeiyu-assessment-')).length,1);
     assert.ok(actualRequests.some(value=>JSON.stringify(value.messages).includes(marker)));assertClosedChain(root,useRunId,trial,source);
     opened.phase('other');const otherStart=opened.h.adapter.requests.length;
     const other=opened.h.port.submitTask({...request,requestId:'independent-task',goal:'另一个隔离的虚构任务'});await opened.h.core.whenIdle();assert.equal(opened.h.port.status(other.run).state,'completed');

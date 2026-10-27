@@ -64,7 +64,7 @@ test('mixed private evidence and inherited global prompt content never enter the
 
 test('failed independent verification never creates a send credential or performs the task-result send',async t=>{
   const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);script(h,{faithful:false});await h.message('任务：生成一份虚构结果',{trigger:true});
-  const id=runId(h),status=h.core.messageTaskDeliveryStatus(id)!;assert.equal(status.state,'rejected');assert.equal(status.error,'DELIVERY_UNFAITHFUL');assert.equal(h.platform.sent.length,1);
+  const id=runId(h),status=h.core.messageTaskDeliveryStatus(id)!;assert.equal(status.state,'rejected');assert.equal(status.error,'DELIVERY_UNFAITHFUL');assert.equal(h.platform.sent.length,2);assert.ok(h.platform.sent.every(sent=>!sentText(sent).includes(reply)&&!sentText(sent).includes('EXECUTOR_REPORT_SENTINEL')));
   const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{const row=db.prepare('SELECT body,credential FROM native_deliveries').get()!;assert.equal(row.body,null);assert.equal(row.credential,null);}finally{db.close();}
   const calls=h.adapter.requests.length;await h.core.deliverMessageTaskResult(id);assert.equal(h.adapter.requests.length,calls);
 });
@@ -86,7 +86,7 @@ test('task-result segment uncertainty is terminal and never rerenders or retrans
 test('a source revoked during target persona generation prevents the result transport',async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);script(h);await h.message('任务：核对来源',{trigger:true});const id=runId(h),before=h.platform.sent.length;
   h.setResponse(async request=>{if(render(request.sessionId)){h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:1});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);return textReply('失效结果');}return textReply('{"faithful":true,"issues":[]}');});
-  assert.equal((await h.core.deliverMessageTaskResult(id))?.state,'rejected');assert.equal(h.platform.sent.length,before);
+  assert.equal((await h.core.deliverMessageTaskResult(id))?.state,'interrupted');assert.equal(h.platform.sent.length,before);
 });
 
 test('tool calls in the target renderer are rejected without invoking a capability',async t=>{

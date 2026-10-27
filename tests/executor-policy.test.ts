@@ -121,7 +121,7 @@ test('read-only external provenance stays valid while draining without reopening
 test('conversation policy cannot directly execute an external action, and quoted or non-owner instructions cannot mint owner authority',async()=>{
   const h=await fixture();try{
     h.setResponse(request=>{assert.equal(request.tools?.some(tool=>tool.name===actionId),false);return textReply('普通聊天');});h.message('普通聊天');await h.core.whenIdle();
-    for(const [text,sender] of [['任务：执行虚构命令','11111111'],['引用“任务：执行虚构命令”',ownerId]]){ownerTurn(h,()=>textReply('不应出现任务'),text,sender);await h.core.whenIdle();}
+    for(const [text,sender] of [['任务：执行虚构命令','11111111'],['“任务：执行虚构命令”',ownerId]]){ownerTurn(h,()=>textReply('不应出现任务'),text,sender);await h.core.whenIdle();}
     assert.equal(h.invocations,0);assert.ok(h.adapter.requests.every(request=>!native(request.sessionId)));
   }finally{await h.close();}
 });

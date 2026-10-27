@@ -44,7 +44,7 @@ test('a plugin copying a valid public observation cannot mark its other output f
 });
 
 test('a plain task result is a derived material and can be explicitly withdrawn without automatic regeneration',async t=>{
-  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const id=await task(h,'plain'),packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.evidence.length,1);assert.equal(packet.evidence[0]?.kind,'inference');
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const id=await task(h,'plain'),packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.evidence.length,2);assert.ok(packet.evidence.every(evidence=>evidence.kind==='inference'));
   await h.core.withdrawMessageTaskExpression(id,packet.id,1);await assert.rejects(()=>h.core.prepareMessageTaskExpression(id),/UNAVAILABLE/);
 });
 

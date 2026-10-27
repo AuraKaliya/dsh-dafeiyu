@@ -61,7 +61,7 @@ test('lost execution outbox acknowledgement is repaired with one event identity 
   const directory=await root();let h=await executionHarness(directory);const original=RuntimeStore.prototype.acknowledgeEvent;
   try{RuntimeStore.prototype.acknowledgeEvent=function(){throw new Error('FIXTURE_ACK_LOST');};assert.throws(()=>h.port.submitTask(request),/FIXTURE_ACK_LOST/);}
   finally{RuntimeStore.prototype.acknowledgeEvent=original;await h.close();}
-  h=await executionHarness(directory,undefined,undefined,false);try{await h.core.whenIdle();const accepted=h.port.submitTask(request);const events=h.core.journal.executionEvents('dafeiyu',accepted.task.id);assert.equal(events.filter(event=>event.type==='run.accepted').length,1);assert.equal(h.port.status(accepted.run).state,'completed');assert.equal(h.adapter.requests.length,1);}finally{await h.close();}
+  h=await executionHarness(directory,undefined,undefined,false);try{await h.core.whenIdle();const accepted=h.port.submitTask(request);const events=h.core.journal.executionEvents('dafeiyu',accepted.task.id);assert.equal(events.filter(event=>event.type==='run.accepted').length,1);assert.equal(h.port.status(accepted.run).state,'completed');assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-assessment-')).length,1);}finally{await h.close();}
 });
 
 test('restored result content is verified and a later task epoch cannot read the old result as current',async()=>{

@@ -21,8 +21,9 @@
 | 配置 | 必填 | 用途 |
 |---|---|---|
 | `dataDir` | 是 | 当前实例独立的数据目录，初次必须为空 |
-| `model.model` | 是 | 已授权API账号可用的DeepSeek模型名 |
-| `model.credentialStore` | 是 | DSH版本1凭据文件，其中包含DEEPSEEK_API_KEY条目 |
+| `model.model` | 是 | 已授权API或DSH账号可用的DeepSeek模型名 |
+| `model.auth` | 否 | 默认api-key；dsh-account使用官方DSH账号提供器与已有登录 |
+| `model.credentialStore` | 是 | DSH版本1凭据文件；按auth使用DEEPSEEK_API_KEY或本机已有官方账号登录 |
 | `model.reasoningEffort` | 否 | 该模型支持的推理档位 |
 | `model.baseURL` | 否 | 默认为官方API；自定义时须是HTTPS或本机回环HTTP |
 | `qq.botId` / `qq.ownerId` | 是 | 机器人QQ / 主人QQ，必须主动配置且不同 |

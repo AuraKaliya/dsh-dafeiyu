@@ -22,12 +22,13 @@ import * as Bili from '@dafeiyu/bilibili';
 import { ServerExecutorService,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor';
 import type { ServerExecutorDependencies } from '@dafeiyu/server-executor';
 import { reconcileMedia } from './media-recovery.js';
+import { installAccountModel } from './account-model.js';
 import * as Timeline from '@dafeiyu/timeline';
 import * as QQ from '@dafeiyu/qq';
-import { openBiliOwnerChannel,BILI_OWNER_SCHEMA_VERSION } from '@dafeiyu/bilibili/channel';
+import { openBiliOwnerChannel,BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_TASK_ACTIONS } from '@dafeiyu/bilibili/channel';
 import type { BiliOwnerChannel,BiliOwnerPorts } from '@dafeiyu/bilibili/channel';
 import * as Simulator from '@dafeiyu/channel-simulator';
-import { ExecutionRequestSchema } from '@dafeiyu/contracts';
+import { ExecutionRequestSchema,TaskAssessmentSchema } from '@dafeiyu/contracts';
 import { readFileSync,existsSync,writeFileSync,renameSync } from 'node:fs';
 import { join,resolve } from 'node:path';
 import { randomUUID,createHash } from 'node:crypto';
@@ -73,7 +74,9 @@ export interface HostRunResult {taskId:string;runId:string;state:string;error:st
 class FixedModel extends LlmAdapter {
   constructor(private readonly response:string){super();}
   override async resolveModel(provider:string,model:string):Promise<LlmResolvedModelInfo>{return {provider,id:model,name:model,systemPromptUpdate:'in-history',toolUpdate:'in-history',reasoning:{efforts:[{id:ReasoningEffortId('max'),name:'Max'}]}};}
-  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{options.signal?.throwIfAborted();yield {type:'block-start',index:0,blockType:'text'};yield {type:'text-delta',index:0,text:this.response};yield {type:'block-end',index:0,block:{type:'text',text:this.response}};yield {type:'finish',reason:{kind:'stop'}};}
+  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{options.signal?.throwIfAborted();
+    const text=String(options.sessionId).startsWith('dafeiyu-assessment-')?JSON.stringify(TaskAssessmentSchema.parse({goalStatus:'uncertain',summary:'离线脚本模型的固定阶段评价，仅验证程序流程。',evidenceIds:[],limitations:['未作真实模型质量验收'],unfinished:[],next:'deliver'})):this.response;
+    yield {type:'block-start',index:0,blockType:'text'};yield {type:'text-delta',index:0,text};yield {type:'block-end',index:0,block:{type:'text',text}};yield {type:'finish',reason:{kind:'stop'}};}
 }
 const stableCode=(error:unknown,fallback='HOST_FAILED')=>error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:fallback;
 const hashFile=(path:string)=>createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -114,11 +117,13 @@ export class ManagedHost {
     await ctx.plugin(Persistence,{root:this.config.paths.sessions,compression:'none'});await ctx.plugin(AgentLoop,{agents:[]});
     const deepseek=pluginConfig(this.config,'model-deepseek'),scripted=pluginConfig(this.config,'model-scripted');
     if(deepseek){const doc=parseDocument(readFileSync(deepseek.credentialStore,'utf8'),{logLevel:'silent'});if(doc.errors.length||doc.get('version')!==1)throw new Error('HOST_CREDENTIAL_STORE_UNSUPPORTED');
-      this.credentials={file:deepseek.credentialStore,hash:hashFile(deepseek.credentialStore)};await ctx.plugin(Credentials,{path:deepseek.credentialStore,watch:false});
+      await ctx.plugin(Credentials,{path:deepseek.credentialStore,watch:deepseek.auth==='dsh-account'});
+      if(deepseek.auth==='dsh-account')await installAccountModel(ctx,{baseURL:deepseek.baseURL,route:this.config.config.modelRoutes.chat,...(deepseek.inlineTransport?{inlineTransport:deepseek.inlineTransport}:{}),guard:()=>assertPaths(this.config)});
+      else {this.credentials={file:deepseek.credentialStore,hash:hashFile(deepseek.credentialStore)};
       if(!(await ctx.credentials.describe(credentialRef(deepseek.credentialName))).configured)throw new Error('HOST_CREDENTIAL_REFERENCE_MISSING');
       if(deepseek.inlineTransport)await installInlineDeepSeek(ctx,{baseURL:deepseek.baseURL,credentialName:deepseek.credentialName,route:this.config.config.modelRoutes.chat,settings:deepseek.inlineTransport,
         credentialGuard:()=>{if(!this.credentials||hashFile(this.credentials.file)!==this.credentials.hash)throw new Error('HOST_CREDENTIAL_STORE_CHANGED');}});
-      else await ctx.plugin(DeepSeek,{baseURL:deepseek.baseURL,apiKeyEnv:deepseek.credentialName});this.plugin('model-deepseek','ready');
+      else await ctx.plugin(DeepSeek,{baseURL:deepseek.baseURL,apiKeyEnv:deepseek.credentialName});}this.plugin('model-deepseek','ready');
     }else if(scripted){ctx.llm.registerAdapter(['local-test'],this.options.adapter??new FixedModel(scripted.response));this.plugin('model-scripted','ready');}
     await this.options.installModelAdmission?.(ctx,this.config);this.options.signal?.throwIfAborted();
     const observe=this.options.onModelCall;ctx.on('llm/stream',async function*(options,next){const call={provider:options.provider??'',model:options.model??'',purpose:options.purpose??'task'};observe?.({...call,status:'started'});let okay=true;
@@ -152,7 +157,7 @@ export class ManagedHost {
     }else if(biliOwner)this.plugin('channel-bili-owner','disabled','HOST_SINGLE_RUN');
     if(this.mode==='daemon'&&biliOwner&&!this.biliOwnerValue&&this.biliOwnerPendingWork())throw new Error('HOST_BILI_OWNER_PENDING_WORK_REQUIRES_CHANNEL');
     const producerActive=(producer:string)=>producer==='activity'?!!this.activityValue&&this.mode==='daemon':producer==='channel-qq'?!!this.qqValue:producer==='qq-tasks'?!!this.qqValue?.getStatus().tasks.registered:producer==='channel-bili-owner'?!!this.biliOwnerValue:producer==='bili-owner-tasks'?!!this.biliOwnerValue&&!!biliOwner?.tasks.enabled:producer==='channel-simulator'?!!simulator&&this.mode==='daemon':true;
-    const absentChannelActions=new Set<string>([...(!this.qqValue&&qq?[...QQ.QQ_ACTIONS,...QQ.QQ_TASK_ACTIONS,...QQ.QQ_MEDIA_ACTIONS,...QQ.QQ_PROGRESS_ACTIONS]:[]),...(!this.biliOwnerValue&&biliOwner?['bili_owner_task_submit','bili_owner_task_status','bili_owner_task_control']:[])]);
+    const absentChannelActions=new Set<string>([...(!this.qqValue&&qq?[...QQ.QQ_ACTIONS,...QQ.QQ_TASK_ACTIONS,...QQ.QQ_MEDIA_ACTIONS,...QQ.QQ_PROGRESS_ACTIONS]:[]),...(!this.biliOwnerValue&&biliOwner?[...BILI_OWNER_TASK_ACTIONS]:[])]);
     if(this.config.config.authorityPolicies.filter(policy=>policy.producers.some(producerActive)).some(policy=>policy.actions.some(action=>!this.core.capabilityManifest().actions.some(actual=>actual.id===action)&&!absentChannelActions.has(action))))throw new Error('HOST_POLICY_ACTION_UNAVAILABLE');
     this.mark('recovering');this.memoryValue?.recover();this.memoryValue?.activate();this.executorValue?.recover();this.executorValue?.activate();this.executorHealth();this.activityValue?.recover();this.activityValue?.activate();await this.mediaValue?.recover();this.mediaValue?.activate();this.biliValue?.recover();this.biliValue?.activate();this.biliOwnerValue?.recover();this.biliOwnerValue?.activate();if(memory)await this.core.recoverExecutions();this.core.recover();
     if(this.mediaValue){const recovered=reconcileMedia(this.core,this.mediaValue,this.config.paths.channels['channel-qq']);if(recovered.conflicts)this.plugin('media','degraded','HOST_MEDIA_SETTLEMENT_CONFLICT');}

@@ -147,8 +147,8 @@ test('a provider that becomes unavailable prevents new acceptance without a fals
 
 test('managed QQ connects only after explicit start and core readiness', async t => {
   const root = await rootDirectory(), token = 'fictional-managed-qq-token-12345678901234567890';
-  const tokenFile = join(root, 'fixture.token'); await writeFile(tokenFile, token); let calls = 0;
-  const server = createServer((req, res) => { calls++; res.setHeader('Content-Type', 'application/json');
+  const tokenFile = join(root, 'fixture.token'); await writeFile(tokenFile, token); let calls = 0;const endpoints:string[]=[];
+  const server = createServer((req, res) => { calls++; endpoints.push(req.url!);res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ status: 'ok', retcode: 0, data: req.url === '/get_login_info' ? { user_id: 1994142241 } : { online: true } })); });
   const ws = new WebSocketServer({ server }); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture port missing');
@@ -157,6 +157,6 @@ test('managed QQ connects only after explicit start and core readiness', async t
     dataDir: join(root, 'qq'), httpURL: `http://127.0.0.1:${address.port}/`, wsURL: `ws://127.0.0.1:${address.port}/`, lifecycleMode: 'managed' });
   t.after(async () => { await qq.dispose(); await h.close(); for (const client of ws.clients) client.terminate(); await new Promise<void>(resolve => ws.close(() => resolve())); await new Promise<void>(resolve => server.close(() => resolve())); });
   await tick(); assert.equal(calls, 0); await assert.rejects(h.ctx.dafeiyuQQ.start(), /HOST_NOT_READY/);
-  h.core.recover(); h.core.activate(); await h.ctx.dafeiyuQQ.start(); assert.equal(calls, 2);
+  h.core.recover(); h.core.activate(); await h.ctx.dafeiyuQQ.start(); assert.ok(endpoints.includes('/get_login_info'));assert.ok(endpoints.includes('/get_status'));assert.ok(endpoints.every(path=>['/get_login_info','/get_status','/get_group_list','/send_packet'].includes(path)));
   h.ctx.dafeiyuQQ.quiesce(); await assert.rejects(h.ctx.dafeiyuQQ.start(), /CHANNEL_STOPPING/);
 });
