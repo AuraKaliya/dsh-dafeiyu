@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExternalTaskAuthority,ExternalTaskAuthorization } from './external-execution.js';
 import { ExternalTaskAuthorizationSchema } from './external-execution.js';
+import { BiliBrowserRequestSchema } from './bili-browser.js';
 import type { Json } from './index.js';
 
 export const DSH_TOOL_ACTIONS=['dsh_tool_list','dsh_tool_call','dsh_result_read'] as const;
@@ -19,6 +20,7 @@ export interface DshToolsPort {
 export const DshBridgeRequestSchema=z.discriminatedUnion('type',[
   z.strictObject({type:z.literal('dsh.catalog'),id:z.uuid(),taskId:z.uuid().optional()}),
   z.strictObject({type:z.literal('dsh.call'),id:z.uuid(),call:DshToolCallSchema,authorization:z.json()}),
+  z.strictObject({type:z.literal('dsh.bili-read'),id:z.uuid(),request:BiliBrowserRequestSchema}),
   z.strictObject({type:z.literal('dsh.cancel'),id:z.uuid()}),
 ]);
 export const DshBridgeResponseSchema=z.strictObject({type:z.literal('dsh.result'),id:z.uuid(),value:z.json(),error:z.string().regex(/^[A-Z0-9_]{1,100}$/).optional()});

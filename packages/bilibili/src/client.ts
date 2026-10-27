@@ -10,6 +10,8 @@ import { biliUrl,nativeTransport,boundedBytes,boundedJson } from './http.js';
 import type { HttpTransport,HttpResponse } from './http.js';
 import { parseRetryAfter } from './diagnostics.js';
 import type { BiliAttempt,BiliFailureKind } from './diagnostics.js';
+import { BiliBrowserResultSchema } from '@dafeiyu/contracts';
+import type { BiliBrowserPort,BiliBrowserRequest } from '@dafeiyu/contracts';
 
 const page=z.number().int().min(1).max(1000),size=z.number().int().min(1).max(20);
 const endpoints={
@@ -34,21 +36,30 @@ export class BiliClient {
   constructor(readonly config:BiliConfig,private readonly store:BiliStore,private readonly transport:HttpTransport=nativeTransport){}
   withContext<T>(context:{taskId:string|null;runId:string;operationId:string},work:()=>T):T{return this.context.run({taskId:context.taskId,runId:context.runId,operationId:context.operationId},work);}
   accountStamp(){return createHash('sha256').update(this.session()?.hash??'anonymous').digest('hex');}
+  async browserRead(port:BiliBrowserPort,request:BiliBrowserRequest,signal:AbortSignal,guard:()=>void){
+    if(!this.config.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');
+    const record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint:request.section==='video'?'video':'comments',transport:'dsh-browser',auth:'configured-session',origin:'task',taskId:request.taskId,runId:request.runId,operationId:request.operationId,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
+    try{await this.slot(record.id,signal,guard);record.sentAt=Date.now();record.networkSent=true;const value=BiliBrowserResultSchema.parse(await port.read(request,signal));guard();signal.throwIfAborted();
+      if(value.accountUid!==this.config.browser.expectedUid||value.bvid!==request.bvid||value.section!==request.section||value.url!==`https://www.bilibili.com/video/${request.bvid}/`)throw new Error('BILI_BROWSER_BINDING_MISMATCH');record.outcome='success';return value;
+    }catch(error){record.errorCode=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_READ_FAILED';record.kind=record.networkSent?'response':'local';if(!record.networkSent){record.outcome='blocked';record.retryAt=this.store.clock.blockedUntil||null;record.waitSource='existing-state';}throw error;}
+    finally{record.endedAt=Date.now();this.store.diagnostics.release(record.id);this.store.diagnostics.record(record);}
+  }
   private session(){const setting=this.config.session;if(!setting)return null;try{if(!/^[a-zA-Z]:[\\/][^:\x00]+$/.test(setting.file))throw new Error('BILI_SESSION_INVALID');const stat=lstatSync(setting.file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16384)throw new Error('BILI_SESSION_INVALID');const bytes=readFileSync(setting.file);if(bytes.length>16384)throw new Error('BILI_SESSION_INVALID');
     const value=z.strictObject({uid:NumberIdSchema,SESSDATA:z.string().min(1).max(4096).regex(/^[^;\s\x00-\x1f\x7f]+$/),bili_jct:z.string().regex(/^[a-fA-F0-9]{32}$/).optional(),buvid3:z.string().max(200).regex(/^[a-zA-Z0-9_-]+$/).optional()}).parse(boundedJson(bytes));if(value.uid!==setting.expectedUid)throw new Error('BILI_ACCOUNT_MISMATCH');
     return {hash:createHash('sha256').update(bytes).digest('hex'),cookie:'SESSDATA='+value.SESSDATA+(value.buvid3?'; buvid3='+value.buvid3:'')};
   }catch(e){throw new Error(e instanceof Error&&e.message==='BILI_ACCOUNT_MISMATCH'?e.message:'BILI_SESSION_INVALID');}}
   private async slot(id:string,signal:AbortSignal,guard:()=>void){guard();signal.throwIfAborted();this.store.diagnostics.assertAvailable();const wait=this.store.reserveRequest(Date.now(),this.config.minIntervalMs,this.config.timeoutMs);if(wait)await setTimeout(wait,undefined,{signal});guard();signal.throwIfAborted();this.store.diagnostics.acquireProbe(id,Date.now(),this.config.timeoutMs);}
   private async request<T>(endpoint:BiliAttempt['endpoint'],url:URL,cookie:string|null,signal:AbortSignal,guard:()=>void,consume:(response:HttpResponse,record:BiliAttempt,reject:(kind:BiliFailureKind,code:string,backoff?:boolean)=>never)=>Promise<T>,extra:Readonly<Record<string,string>>={},allowWhole=false):Promise<T>{
-    const context=this.context.getStore(),record:BiliAttempt={id:randomUUID(),at:Date.now(),endedAt:Date.now(),endpoint,auth:cookie?'configured-session':'anonymous',origin:context?'task':'maintenance',taskId:context?.taskId??null,runId:context?.runId??null,operationId:context?.operationId??null,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
+    const context=this.context.getStore(),record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint,transport:'http',auth:cookie?'configured-session':'anonymous',origin:context?'task':'maintenance',taskId:context?.taskId??null,runId:context?.runId??null,operationId:context?.operationId??null,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
     let response:HttpResponse|undefined;
     const reject=(kind:BiliFailureKind,code:string,backoff=false):never=>{record.kind=kind;record.errorCode=code;
       if(backoff){const supplied=parseRetryAfter(response?.headers['retry-after'],Date.now()),policy={...this.config.retry,...(this.config.backoffMs===undefined?{}:{riskDelayMs:this.config.backoffMs,rateDelaysMs:[this.config.backoffMs]})};
         const retry=this.store.diagnostics.failure(endpoint,kind,Date.now(),policy,supplied?.at??null);record.retryAt=retry.at;record.waitSource=retry.source;}
       throw new Error(code);};
-    try{await this.slot(record.id,signal,guard);record.networkSent=true;response=await this.transport(url,{...headers,...extra,...(cookie?{Cookie:cookie}:{})},signal);
+    try{await this.slot(record.id,signal,guard);record.networkSent=true;record.sentAt=Date.now();response=await this.transport(url,{...headers,...extra,...(cookie?{Cookie:cookie}:{})},signal);
       record.httpStatus=response.status;const mime=response.headers['content-type']?.split(';')[0]?.trim().toLowerCase();record.contentType=mime&&/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mime)&&mime.length<=100?mime:null;
       record.retryAfter=parseRetryAfter(response.headers['retry-after'],Date.now())?.raw??null;guard();signal.throwIfAborted();
+      if(response.status>=400&&record.contentType==='application/json'){try{const body=z.object({code:z.number().int().safe()}).safeParse(boundedJson(await boundedBytes(response,16384,signal,guard)));if(body.success)record.platformCode=body.data.code;}catch{/* HTTP status remains evidence even when an error body is absent or malformed. */}}
       if(response.status===412||response.status===429)reject(response.status===429?'rate-limit':'risk','BILI_BACKOFF',true);
       if(response.status===401||response.status===403)reject(response.status===401?'login':'permission','BILI_ACCESS_DENIED',true);
       const expected=extra.Range?206:200;if(response.status!==expected&&!(extra.Range&&allowWhole&&response.status===200))reject(response.status>=500?'network':'response',response.status>=300&&response.status<400?'BILI_REDIRECT_DENIED':'BILI_HTTP_FAILED',response.status>=500);

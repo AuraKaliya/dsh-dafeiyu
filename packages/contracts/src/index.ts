@@ -31,6 +31,7 @@ export * from './activity.js';
 export * from './media.js';
 export * from './media-delivery.js';
 export * from './dsh-tools.js';
+export * from './bili-browser.js';
 export * from './qq-expression.js';
 export * from './task-assessment.js';
 import type { TaskExpressionProvider } from './expression.js';

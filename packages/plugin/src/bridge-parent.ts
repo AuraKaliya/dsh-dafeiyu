@@ -6,10 +6,11 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-tools';
 import type {} from '@deepseek-ai/dsh-session-persistence';
 import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools';
-import { createHash } from 'node:crypto';
+import { createHash,randomUUID } from 'node:crypto';
 import { dirname,join } from 'node:path';
 import { DeferredPluginChanges } from './deferred-plugins.js';
 import { readInstallationSettings } from './settings.js';
+import {readBiliBrowser} from './bili-browser.js';
 import { z } from 'zod';
 import { DshBridgeRequestSchema,DshToolCatalogSchema,ExternalTaskAuthorizationSchema,DshCapabilityChangeSchema,redactJson } from '@dafeiyu/contracts';
 import type { DshToolCatalog,Json } from '@dafeiyu/contracts';
@@ -73,6 +74,15 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
     if(controllers.has(message.id))return;const controller=new AbortController();controllers.set(message.id,controller);
     const work=(async()=>{try{
       if(message.type==='dsh.catalog'){send(message.id,z.json().parse(await catalog(await handle(message.taskId??'catalog'),controller.signal,message.taskId)));return;}
+      if(message.type==='dsh.bili-read'){
+        if(!settings.bilibili?.capabilities||!settings.bilibili.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');
+        const h=await handle('bili:'+message.request.taskId);
+        const value=await readBiliBrowser(message.request,settings.bilibili.browser.expectedUid,async(name,args,signal)=>{
+          if(!['dsh_browser_open','dsh_browser_execute','dsh_browser_scroll'].includes(name))throw new Error('BILI_BROWSER_ACTION_DENIED');
+          const result=await owner.agents.withInitiator(h.agent,()=>owner.tools.execute({callId:ToolCallId(randomUUID()),name,arguments:args,agent:h.agent,signal}));
+          if(result.isError)throw new Error('BILI_BROWSER_READ_FAILED');return result.value;
+        },controller.signal);send(message.id,z.json().parse(value));return;
+      }
       const authorization=ExternalTaskAuthorizationSchema.parse(message.authorization);
       if(authorization.action.owner!=='dsh-tools'||authorization.action.id!=='dsh_tool_call'||authorization.source.kind==='owner-message'&&(authorization.source.senderId!==settings.qq.ownerId||authorization.source.conversation.account!==settings.qq.botId))throw new Error('DSH_AUTHORITY_INVALID');
       const h=await handle(authorization.taskId),current=await catalog(h,controller.signal,authorization.taskId),tool=current.tools.find(tool=>tool.name===message.call.name);

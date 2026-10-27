@@ -9,9 +9,9 @@ export type BiliRetryPolicy=z.infer<typeof BiliRetryPolicySchema>;
 export type BiliFailureKind='rate-limit'|'risk'|'login'|'permission'|'network'|'response'|'cancelled'|'local';
 const controlSchema=z.strictObject({failures:z.number().int().nonnegative(),kind:z.string().max(40).nullable(),endpoint:z.string().max(40).nullable(),held:z.boolean(),probeId:z.string().nullable(),probeUntil:z.number().nonnegative()});
 const initial=()=>({failures:0,kind:null,endpoint:null,held:false,probeId:null,probeUntil:0});
-export const AttemptSchema=z.strictObject({id:z.uuid(),at:z.number().int().nonnegative(),endedAt:z.number().int().nonnegative(),
+export const AttemptSchema=z.strictObject({id:z.uuid(),at:z.number().int().nonnegative(),sentAt:z.number().int().nonnegative().nullable().default(null),endedAt:z.number().int().nonnegative(),
   endpoint:z.enum(['nav','discover','search','video','comments','replies','player','play','danmaku','media','subtitle']),
-  auth:z.enum(['anonymous','configured-session']),origin:z.enum(['task','maintenance']),taskId:z.uuid().nullable(),runId:z.uuid().nullable(),operationId:z.uuid().nullable(),
+  transport:z.enum(['http','dsh-browser']).default('http'),auth:z.enum(['anonymous','configured-session']),origin:z.enum(['task','maintenance']),taskId:z.uuid().nullable(),runId:z.uuid().nullable(),operationId:z.uuid().nullable(),
   networkSent:z.boolean(),httpStatus:z.number().int().min(100).max(599).nullable(),platformCode:z.number().int().safe().nullable(),
   contentType:z.string().max(100).nullable(),retryAfter:z.string().max(80).nullable(),retryAt:z.number().nonnegative().nullable(),
   waitSource:z.enum(['platform','local-policy','existing-state']).nullable(),outcome:z.enum(['success','headers-received','failed','blocked']),

@@ -32,7 +32,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   const resources=bili?.capabilities?[BILI_PUBLIC_SCENE]:[];
   const enabledMediaActions=settings.qq.media?.sendEnabled?MEDIA_ACTIONS:mediaActions;
   const stickerActions=settings.qq.stickers.enabled?[...QQ_STICKER_ACTIONS]:[];
-  const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...QQ_PROGRESS_ACTIONS,...stickerActions,...(settings.dshTools?DSH_TOOL_ACTIONS:[]),...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?BILI_ACTIONS:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
+  const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...QQ_PROGRESS_ACTIONS,...stickerActions,...(settings.dshTools?DSH_TOOL_ACTIONS:[]),...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?[...BILI_ACTIONS,...(bili.browser?['bili_browser_read']:[])]:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
   const conversation=[...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
   const plugins:unknown[]=[{id:options.scripted?'model-scripted':'model-deepseek',required:true,config:options.scripted?{}:{credentialStore:settings.model.credentialStore,...(settings.model.auth?{auth:settings.model.auth}:{}),...(settings.model.baseURL?{baseURL:settings.model.baseURL}:{}),...(settings.model.inlineTransport?{inlineTransport:settings.model.inlineTransport}:{})}},
     {id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true,config:{sourceTracking:true,context:{},maintenance:{}}},
@@ -45,7 +45,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
       for(const key of ['node','python','moduleDirectory'])if(value[key])value[key]=absolute(value[key]) as string;
       for(const key of ['model','labels']){const nested=value[key];if(nested&&typeof nested==='object'&&!Array.isArray(nested)&&nested.path)nested.path=absolute(nested.path) as string;}}}
     plugins.push({id:'media',required:true,config:media});}
-  if(bili)plugins.push({id:'bilibili',required:true,config:{...(bili.capabilities?{capabilities:{...bili.requestPolicy,...(bili.session?{session:bili.session}:{})}}:{}),...(bili.channel?{channel:{accountUid:bili.channel.accountUid,ownerUid:bili.channel.ownerUid,tasks:{enabled:bili.capabilities}}}:{})}});
+  if(bili)plugins.push({id:'bilibili',required:true,config:{...(bili.capabilities?{capabilities:{...bili.requestPolicy,...(bili.browser?{browser:bili.browser}:{}),...(bili.session?{session:bili.session}:{})}}:{}),...(bili.channel?{channel:{accountUid:bili.channel.accountUid,ownerUid:bili.channel.ownerUid,tasks:{enabled:bili.capabilities}}}:{})}});
   const policies:unknown[]=[{id:'conversation',producers:['channel-qq',...(bili?.channel?['channel-bili-owner']:[])],actions:conversation,allowLocalWrite:true},
     {id:'qq-task',producers:['qq-tasks'],actions,allowLocalWrite:true,resources},
     {id:'local-task',producers:['host-cli'],actions,allowLocalWrite:true,resources:[...resources,{channel:'qq',account:settings.qq.botId,kind:'private',id:settings.qq.ownerId}]}];

@@ -16,6 +16,7 @@ export const InstallationSettingsSchema=z.strictObject({
     groupIds:z.array(qq).max(10).default([]),joinedGroups:z.boolean().default(false),replyDelay:z.boolean().default(true),naturalNames:z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
     media:z.strictObject({cacheRoots:z.array(path).max(8).default([]),httpsHosts:z.array(z.string()).max(16).default([]),sendEnabled:z.boolean().default(false),voiceDirectives:z.boolean().default(false)}).optional()}).refine(value=>value.botId!==value.ownerId,'Bot and owner must differ'),
   bilibili:z.strictObject({capabilities:z.boolean().default(true),
+    browser:z.strictObject({expectedUid:uid}).optional(),
     requestPolicy:z.strictObject({minIntervalMs:z.number().int().min(100).max(60000).optional(),retry:BiliRetryPolicySchema.optional()}).optional(),
     session:z.strictObject({file:path,expectedUid:uid}).optional(),
     channel:z.strictObject({accountUid:uid,ownerUid:uid,sessionFile:path}).refine(value=>value.accountUid!==value.ownerUid,'Account and owner must differ').optional()}).optional(),
@@ -23,6 +24,7 @@ export const InstallationSettingsSchema=z.strictObject({
   activity:z.strictObject({enabled:z.boolean().default(true),timeZone:z.string().default('Asia/Shanghai'),
     dailyActiveMs:z.number().int().min(100).max(86400000).default(3600000)}).prefault({}),
 }).superRefine((value,ctx)=>{
+  if(value.bilibili?.browser&&!value.dshTools)ctx.addIssue({code:'custom',path:['dshTools'],message:'Bilibili browser reads require the desktop bridge'});
   if(value.bilibili&&!value.bilibili.capabilities&&!value.bilibili.channel)ctx.addIssue({code:'custom',path:['bilibili'],message:'Enable a platform interface or omit the plugin'});
   if(value.qq.media&&!value.media)ctx.addIssue({code:'custom',path:['media'],message:'QQ media interfaces require media configuration'});
   if(value.qq.stickers.enabled&&!value.media)ctx.addIssue({code:'custom',path:['qq','stickers'],message:'Stickers require media configuration'});

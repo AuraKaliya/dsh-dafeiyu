@@ -7,6 +7,7 @@ export const BiliConfigSchema=z.strictObject({
   maxMediaReadBytes:z.number().int().min(1024).max(256*1024**2).default(64*1024**2),
   maxPages:z.number().int().min(256).max(65536).default(4096),
   session:z.strictObject({file:z.string().min(1),expectedUid:z.string().regex(/^[1-9]\d{0,19}$/)}).optional(),
+  browser:z.strictObject({expectedUid:z.string().regex(/^[1-9]\d{0,19}$/)}).optional(),
   topics:z.array(z.strictObject({id:z.string().regex(/^[a-zA-Z0-9_-]{1,60}$/),text:z.string().trim().min(1).max(100)})).max(32).default([])
 }).refine(c=>new Set(c.topics.map(t=>t.id)).size===c.topics.length,'Duplicate topics');
 export type BiliConfig=z.output<typeof BiliConfigSchema>;

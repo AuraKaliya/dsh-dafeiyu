@@ -15,7 +15,7 @@ const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileI
 function canonical(value:unknown):string{const v=z.json().parse(value);return v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';}
 export const biliHash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest('hex');
 export const biliOwner=(context:Pick<ExecutionContextV3,'scope'|'intentVersion'>)=>biliHash([context.scope,context.intentVersion]);
-export const BiliPageSchema=z.strictObject({id:z.uuid(),owner:z.string().length(64),kind:z.enum(['discover','search','video','comments','subtitles','danmaku','media']),
+export const BiliPageSchema=z.strictObject({id:z.uuid(),owner:z.string().length(64),kind:z.enum(['discover','search','video','comments','subtitles','danmaku','media','browser']),
   sourceKey:z.string().min(1).max(240),sourceVersion:z.number().int().positive(),fetchedAt:z.iso.datetime(),data:z.json(),coverage:z.array(z.string().max(500)).max(24),
   fields:z.array(z.strictObject({id:z.string().max(80),text:z.string().min(1).max(1000)})).max(100),parents:z.array(ResourceProofSchema).max(4).optional()});
 export type BiliPage=z.infer<typeof BiliPageSchema>;
