@@ -12,6 +12,7 @@ if(!mode||['--help','-h'].includes(mode)){
     if(!['check','init','start','status'].includes(mode)||args.length!==3||args[1]!=='--settings')throw new Error('INSTALL_ARGUMENT_INVALID');
     const major=Number(process.versions.node.split('.')[0]),minor=Number(process.versions.node.split('.')[1]);if(major!==24||minor<13)throw new Error('INSTALL_NODE_24_REQUIRED');
     const file=resolve(args[2]),settings=readInstallationSettings(file);
+    if(mode==='start'&&settings.dshTools&&!process.connected)throw new Error('INSTALL_DSH_DESKTOP_REQUIRED');
     if(mode==='check'){
       checkInstallationFiles(settings);report({code:'INSTALL_CONFIGURATION_VALID',connectivity:'not-tested',modelCalls:0});
     }else{
@@ -24,8 +25,9 @@ if(!mode||['--help','-h'].includes(mode)){
         if(mode==='init'){const value=prepareInstallation(file);report({code:value.inspection.ready?'INSTALL_INITIALIZED':'INSTALL_NOT_READY',issues:value.inspection.codes});if(!value.inspection.ready)process.exitCode=1;}
         else{
           const abort=new AbortController();let host;const stop=()=>{abort.abort();void host?.close('plugin-stopped');};
-          process.once('SIGINT',stop);process.once('SIGTERM',stop);process.once('disconnect',stop);process.on('message',message=>{if(message?.type==='stop')stop();});
-          try{host=await startInstallation(file,{}, {signal:abort.signal});report({code:'INSTALL_READY',phase:host.snapshot().phase});await host.whenClosed();report({code:'INSTALL_STOPPED'});}
+          process.once('SIGINT',stop);process.once('SIGTERM',stop);process.once('disconnect',stop);process.on('message',message=>{if(message?.type==='stop')stop();else if(message?.type==='dsh.validate-update'&&process.connected){let valid=false;try{valid=host?.core.externalTaskSourceCurrent(message.authorization,'dsh-tools')===true;}catch{}process.send({type:'dsh.update-authority-result',id:message.id,valid});}});
+          const {createDshBridgeClient}=await import('../lib/bridge-client.js');
+          try{host=await startInstallation(file,{}, {signal:abort.signal,...(process.connected&&settings.dshTools?{dshTools:createDshBridgeClient()}:{})});report({code:'INSTALL_READY',phase:host.snapshot().phase});const heartbeat=setInterval(()=>{if(!process.connected)return;const snapshot=host.snapshot();process.send({type:'dsh.idle',idle:snapshot.phase==='ready'&&Object.values(snapshot.counts).every(value=>value===0)});},1500);try{await host.whenClosed();}finally{clearInterval(heartbeat);}report({code:'INSTALL_STOPPED'});}
           finally{await host?.close('command-ended');process.off('SIGINT',stop);process.off('SIGTERM',stop);process.off('disconnect',stop);process.removeAllListeners('message');if(process.connected)process.disconnect();}
         }
       }

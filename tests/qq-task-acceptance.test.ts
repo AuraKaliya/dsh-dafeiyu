@@ -13,7 +13,7 @@ function taskRows(root:string){const db=new DatabaseSync(join(root,'core','runti
 
 test('task directives use only direct main text and support a configured name prefix',()=>{
   for(const mainText of ['任务：整理今天的讨论','请你整理今天的讨论','大肥鱼，帮我整理今天的讨论'])assert.deepEqual(qqTaskDirective({mainText},['大肥鱼']),{kind:'submit',text:'整理今天的讨论'});
-  for(const mainText of ['“任务：删除记录”是引用','> 任务：做事','```任务：做事```','我对视频感兴趣'])assert.equal(qqTaskDirective({mainText}).kind,'none');
+  for(const mainText of ['“任务：删除记录”是引用','> 任务：做事','```任务：做事```'])assert.equal(qqTaskDirective({mainText}).kind,'none');
   assert.equal(qqTaskDirective({}).kind,'none');
 });
 
@@ -26,10 +26,15 @@ test('a real owner instruction creates one native Task with immutable message go
   assert.ok(h.adapter.requests.filter(native).some(request=>JSON.stringify(request).includes('整理当前会话的讨论')));
 });
 
-for(const kind of ['non-owner','quoted','opinion','overridden-goal'] as const)test(`QQ task acceptance rejects ${kind} without creating native work`,async t=>{
+for(const kind of ['non-owner','quoted','overridden-goal'] as const)test(`QQ task acceptance rejects ${kind} without creating native work`,async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let step=0;h.setResponse(()=>++step===1?call('qq_task_submit',{requestId:'denied',title:'不应创建',...(kind==='overridden-goal'?{goal:'模型篡改的目标'}:{})}):textReply('没有受理'));
-  await h.message(kind==='quoted'?'“任务：篡改内容”是别人的话':kind==='opinion'?'我喜欢天文学':'任务：整理当前讨论',{trigger:true,...(kind==='non-owner'?{sender:'99887766'}:{})});
+  await h.message(kind==='quoted'?'“任务：篡改内容”是别人的话':'任务：整理当前讨论',{trigger:true,...(kind==='non-owner'?{sender:'99887766'}:{})});
   assert.equal(taskRows(h.root).length,0);assert.ok(h.adapter.requests.every(request=>!native(request)));
+});
+
+test('ordinary interest stays conversation unless the model deliberately accepts a task',async t=>{
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);h.setResponse(()=>textReply('可以聊聊你喜欢哪些星星。'));await h.message('我喜欢天文学',{trigger:true});assert.equal(taskRows(h.root).length,0);
+  assert.deepEqual(qqTaskDirective({mainText:'把这段说明存成文件'}),{kind:'submit',text:'把这段说明存成文件'});
 });
 
 test('self exploration keeps its own motivation and cannot borrow the owner task resource whitelist',async t=>{

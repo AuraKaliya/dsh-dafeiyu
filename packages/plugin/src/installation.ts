@@ -3,10 +3,10 @@ import { dirname,join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash,randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { HostConfigSchema } from '@dafeiyu/contracts';
+import { HostConfigSchema,DSH_TOOL_ACTIONS } from '@dafeiyu/contracts';
 import { loadHostConfig,initializeProfile,inspectHost,ManagedHost,pluginConfig,BILI_OWNER_NATIVE_ACTIONS } from '@dafeiyu/host';
 import type { HostRuntimeOptions } from '@dafeiyu/host';
-import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS,QQ_STICKER_ACTIONS } from '@dafeiyu/qq';
+import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS,QQ_STICKER_ACTIONS,QQ_PROGRESS_ACTIONS } from '@dafeiyu/qq';
 import { BILI_ACTIONS } from '@dafeiyu/bilibili';
 import { BiliOwnerStore,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE,biliOwnerScene,createBiliOwnerProductionPorts } from '@dafeiyu/bilibili/channel';
 import { BILI_OWNER_AUTH_HASH } from '@dafeiyu/bilibili/channel/production-config';
@@ -19,7 +19,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const metadataSchema=z.strictObject({schemaVersion:z.literal(1),instanceId:z.uuid(),profileId:z.string(),agentId:z.string(),createdAt:z.iso.datetime(),identityHash:z.string().length(64),
   biliOwner:z.strictObject({accountUid:z.string(),ownerUid:z.string(),since:z.iso.datetime()}).nullable()});
 export type InstallationMetadata=z.infer<typeof metadataSchema>;
-const growthActions=['dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_trial_select','dafeiyu_persona_adoption_review','dafeiyu_persona_publish','dafeiyu_persona_select','dafeiyu_persona_withdraw','dafeiyu_persona_status'];
+const growthActions=['dafeiyu_qq_expression_save','dafeiyu_qq_expression_status','dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_trial_select','dafeiyu_persona_adoption_review','dafeiyu_persona_publish','dafeiyu_persona_select','dafeiyu_persona_withdraw','dafeiyu_persona_status'];
 const taskActions=['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_source_open','dafeiyu_execution_contribute','dafeiyu_execution_select','dafeiyu_execution_source_state','dafeiyu_execution_contribution_state'];
 const maintenanceActions=['dafeiyu_memory_maintenance_request','dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_experience_read','dafeiyu_experience_review','dafeiyu_memory_persona_candidate'];
 const mediaActions=['dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_read','dafeiyu_media_select'];
@@ -32,7 +32,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   const resources=bili?.capabilities?[BILI_PUBLIC_SCENE]:[];
   const enabledMediaActions=settings.qq.media?.sendEnabled?MEDIA_ACTIONS:mediaActions;
   const stickerActions=settings.qq.stickers.enabled?[...QQ_STICKER_ACTIONS]:[];
-  const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...stickerActions,...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?BILI_ACTIONS:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
+  const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...QQ_PROGRESS_ACTIONS,...stickerActions,...(settings.dshTools?DSH_TOOL_ACTIONS:[]),...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?BILI_ACTIONS:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
   const conversation=[...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
   const plugins:unknown[]=[{id:options.scripted?'model-scripted':'model-deepseek',required:true,config:options.scripted?{}:{credentialStore:settings.model.credentialStore,...(settings.model.baseURL?{baseURL:settings.model.baseURL}:{}),...(settings.model.inlineTransport?{inlineTransport:settings.model.inlineTransport}:{})}},
     {id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true,config:{sourceTracking:true,context:{},maintenance:{}}},
@@ -50,10 +50,11 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
     {id:'qq-task',producers:['qq-tasks'],actions,allowLocalWrite:true,resources},
     {id:'local-task',producers:['host-cli'],actions,allowLocalWrite:true,resources:[...resources,{channel:'qq',account:settings.qq.botId,kind:'private',id:settings.qq.ownerId}]}];
   if(activity)policies.push({id:'activity-explore',producers:['activity'],actions,allowLocalWrite:true,resources},{id:'activity-maintenance',producers:['activity'],actions:[...maintenanceActions,...growthActions],allowLocalWrite:true,resources});
+  for(const policy of policies){const entry=z.object({id:z.string()}).parse(policy);if(['qq-task','activity-explore'].includes(entry.id))Object.assign(policy!,{externalActions:[...(settings.dshTools?[{extensionId:'dsh-tools',actionId:'dsh_tool_call',actionVersion:'1'}]:[]),{extensionId:'qq-progress',actionId:'qq_progress',actionVersion:'1'}]});}
   if(bili?.channel&&bili.capabilities)policies.push({id:'bili-owner-task',producers:['bili-owner-tasks'],actions:[...BILI_OWNER_NATIVE_ACTIONS],allowLocalWrite:true,resources:[BILI_PUBLIC_SCENE,biliOwnerScene(bili.channel)]});
   return HostConfigSchema.parse(JSON.parse(JSON.stringify({schemaVersion:1,profileId:meta.profileId,agent:{id:meta.agentId},paths:{core:join(root,'core'),memory:join(root,'memory'),sessions:join(root,'sessions'),query:join(root,'query.sqlite'),channels:{qq:join(root,'qq')}},
     modelRoutes:{chat:options.scripted?{provider:'local-test',model:'scripted'}:{provider:'deepseek-official',model:settings.model.model,...(settings.model.reasoningEffort?{reasoningEffort:settings.model.reasoningEffort}:{})}},
-    persona:{fixedFile:foundationFile,kind:options.scripted?'test':'formal'},context:{compactionInputTokens:48000},plugins,authorityPolicies:policies})));
+    persona:{fixedFile:foundationFile,kind:options.scripted?'test':'formal'},context:{compactionInputTokens:48000,regions:{'memory:qq-expression':{maxBytes:6000,priority:420}}},plugins,authorityPolicies:policies})));
 }
 
 export function prepareInstallation(settingsFile:string,options:InstallationOptions={}) {

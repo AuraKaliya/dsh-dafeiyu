@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
-import { NativeExpressionPacketSchema,ContextItemSchema,conversationKey } from '@dafeiyu/contracts';
+import { NativeExpressionPacketSchema,ContextItemSchema,conversationKey,qqVisibleText } from '@dafeiyu/contracts';
 import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply } from '@dafeiyu/contracts';
 import type { ContextCoordinator } from './context.js';
 import type { RuntimeStore } from './runtime-store.js';
@@ -71,7 +71,7 @@ export class NativeTaskDelivery {
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
         const rendered=await renderTaskResult(this.host.ctx,model,this.host.cwd,record.id,persona.text,persona.items,packet,signal,guard,access.requestMaxBytes);guard();
         this.host.store.nativeDeliveries.rendered(runId,rendered.resultRef);this.host.flush();
-        await provider.verify(access,packet.id,rendered.text,signal,guard);guard();this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();
+        await provider.verify(access,packet.id,record.anchor.target.channel==='qq'?(qqVisibleText(rendered.text)||rendered.text):rendered.text,signal,guard);guard();this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();
       }
       record=this.host.store.nativeDeliveries.get(runId)!;if(record.state!=='ready'||nativeDeliveryHash(record.material)!==nativeDeliveryHash(material)||!record.renderRef)throw new Error('SOURCE_STALE');
       const body=this.host.store.nativeDeliveries.verifyCredential(runId);if(await readPersistedResult(this.host.ctx,record.renderRef)!==body)throw new Error('DELIVERY_BODY_MISMATCH');guard();

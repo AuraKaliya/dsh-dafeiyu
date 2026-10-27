@@ -40,10 +40,13 @@ import { inspectHost,bindMigratedProfile,packageVersion } from './profile.js';
 import { claim } from './coordination.js';
 import type { HostLease } from './coordination.js';
 import { installInlineDeepSeek } from './inline-model.js';
+import { bindDshTools } from './dsh-tools.js';
+import type { DshToolsPort } from '@dafeiyu/contracts';
 
 const importedHome=process.env.DSH_HOME;
 export type HostPhase='created'|'inspected'|'opening'|'binding'|'recovering'|'ready'|'degraded'|'draining'|'failed'|'stopped';
 export interface HostRuntimeOptions {
+  readonly dshTools?:DshToolsPort;
   readonly mode?:'daemon'|'single-run';readonly coordination?:string;
   readonly signal?:AbortSignal;
   /** Program-only test seam, forbidden for formal or real-provider profiles. */
@@ -129,6 +132,7 @@ export class ManagedHost {
     this.mark('binding');const timeline=pluginConfig(this.config,'timeline');if(timeline){await ctx.plugin(Timeline,{agentId:this.config.config.agent.id,...timeline});this.plugin('timeline','ready');}
     const memory=pluginConfig(this.config,'memory');if(memory){await ctx.plugin(Memory,{agentId:this.config.config.agent.id,dataDir:this.config.paths.memory,lifecycleMode:'managed',...memory,...(inputTokens?{compaction:{inputTokens}}:{})});this.memoryValue=ctx.dafeiyuMemory;this.plugin('memory','ready');
       this.core.configureExecution({profileId:this.config.config.profileId,policies:this.config.config.authorityPolicies,createStore:false,maxPendingRuns:this.config.config.runtime.maxPendingRuns,maxConcurrentRuns:this.config.config.runtime.maxConcurrentRuns});}
+    if(this.options.dshTools){await this.options.dshTools.catalog(this.options.signal??new AbortController().signal);const handle=bindDshTools(ctx,this.config.config.agent.id,this.options.dshTools,join(this.config.paths.core,'dsh-tool-receipts'));ctx.effect(()=>()=>handle.dispose());}
     const executor=pluginConfig(this.config,'server-executor');if(executor){const dependencies=this.options.serverExecutorDependencies;if(!dependencies)throw new Error('HOST_EXECUTOR_RUNTIME_PORT_REQUIRED');
       const offline=this.config.config.persona.kind==='test'&&!!pluginConfig(this.config,'model-scripted');
       this.executorValue=new ServerExecutorService(ctx,{agentId:this.config.config.agent.id,profileId:this.config.config.profileId,dataDir:this.config.paths.core,createStore:false,mode:offline?'offline':'production',settings:executor},dependencies);this.plugin('server-executor','starting');}
@@ -148,7 +152,7 @@ export class ManagedHost {
     }else if(biliOwner)this.plugin('channel-bili-owner','disabled','HOST_SINGLE_RUN');
     if(this.mode==='daemon'&&biliOwner&&!this.biliOwnerValue&&this.biliOwnerPendingWork())throw new Error('HOST_BILI_OWNER_PENDING_WORK_REQUIRES_CHANNEL');
     const producerActive=(producer:string)=>producer==='activity'?!!this.activityValue&&this.mode==='daemon':producer==='channel-qq'?!!this.qqValue:producer==='qq-tasks'?!!this.qqValue?.getStatus().tasks.registered:producer==='channel-bili-owner'?!!this.biliOwnerValue:producer==='bili-owner-tasks'?!!this.biliOwnerValue&&!!biliOwner?.tasks.enabled:producer==='channel-simulator'?!!simulator&&this.mode==='daemon':true;
-    const absentChannelActions=new Set<string>([...(!this.qqValue&&qq?[...QQ.QQ_ACTIONS,...QQ.QQ_TASK_ACTIONS,...QQ.QQ_MEDIA_ACTIONS]:[]),...(!this.biliOwnerValue&&biliOwner?['bili_owner_task_submit','bili_owner_task_status','bili_owner_task_control']:[])]);
+    const absentChannelActions=new Set<string>([...(!this.qqValue&&qq?[...QQ.QQ_ACTIONS,...QQ.QQ_TASK_ACTIONS,...QQ.QQ_MEDIA_ACTIONS,...QQ.QQ_PROGRESS_ACTIONS]:[]),...(!this.biliOwnerValue&&biliOwner?['bili_owner_task_submit','bili_owner_task_status','bili_owner_task_control']:[])]);
     if(this.config.config.authorityPolicies.filter(policy=>policy.producers.some(producerActive)).some(policy=>policy.actions.some(action=>!this.core.capabilityManifest().actions.some(actual=>actual.id===action)&&!absentChannelActions.has(action))))throw new Error('HOST_POLICY_ACTION_UNAVAILABLE');
     this.mark('recovering');this.memoryValue?.recover();this.memoryValue?.activate();this.executorValue?.recover();this.executorValue?.activate();this.executorHealth();this.activityValue?.recover();this.activityValue?.activate();await this.mediaValue?.recover();this.mediaValue?.activate();this.biliValue?.recover();this.biliValue?.activate();this.biliOwnerValue?.recover();this.biliOwnerValue?.activate();if(memory)await this.core.recoverExecutions();this.core.recover();
     if(this.mediaValue){const recovered=reconcileMedia(this.core,this.mediaValue,this.config.paths.channels['channel-qq']);if(recovered.conflicts)this.plugin('media','degraded','HOST_MEDIA_SETTLEMENT_CONFLICT');}

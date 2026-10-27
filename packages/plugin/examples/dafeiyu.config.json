@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "dataDir": "./dafeiyu-data",
   "instanceName": "dafeiyu",
+  "dshTools": false,
   "model": {
     "model": "",
     "credentialStore": ""

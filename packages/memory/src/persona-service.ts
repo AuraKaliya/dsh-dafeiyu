@@ -16,6 +16,7 @@ import { evidenceSelectionSchema } from './execution-memory-state.js';
 import type { ExecutionMemoryState } from './execution-memory-state.js';
 import { personaScope,uniqueSources } from './persona-digest.js';
 import type { ExperienceStore } from './experience-store.js';
+import { QqExpressionPreferences,QqExpressionSaveSchema } from './qq-expression.js';
 
 const auditSchema=z.strictObject({id:z.uuid(),type:z.string(),scope:ExecutionScopeSchema,runId:z.uuid(),origin:RunOriginSchema,operationId:z.string(),causedBy:z.string().nullable(),producer:z.string(),at:z.iso.datetime(),data:z.record(z.string(),z.json())});
 const proposal=z.strictObject({requestId:PersonaRequestIdSchema,kind:PersonaKindSchema,text:z.string().trim().min(1).max(8000),sources:z.array(z.string().max(300)).max(16).default([]),
@@ -23,6 +24,7 @@ const proposal=z.strictObject({requestId:PersonaRequestIdSchema,kind:PersonaKind
 const control={requestId:PersonaRequestIdSchema,id:z.uuid(),expectedVersion:z.number().int().positive(),reason:z.string().trim().min(1).max(1000)};
 /** Sole owner of stage-personality proposals, preferences and relationship state. */
 export class GrowthService {
+  readonly qqExpression:QqExpressionPreferences;
   readonly experiences:ExperienceStore;
   private readonly store:PersonaStore;
   private readonly sources:ExecutionSources;
@@ -33,6 +35,7 @@ export class GrowthService {
   private readonly executionHandle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly tasks:TaskWorkspace,private readonly agentId:string,private readonly ready:()=>boolean,compaction?:z.input<typeof compactionConfigSchema>,maintenanceEnabled=false){
+    this.qqExpression=new QqExpressionPreferences(ctx,memory,agentId,ready);
     this.experiences=memory.experienceStore((access,ref)=>this.resolve(access,ref));
     this.sources=memory.executionSources((access,ref)=>this.resolve(access,ref));this.store=memory.personaStore((access,ref)=>this.resolve(access,ref));
     this.executionState=memory.executionState(this.sources,(access,ref)=>this.resolve(access,ref));
@@ -48,7 +51,7 @@ export class GrowthService {
       resolveIntent:(access,input)=>{try{return this.executionState.resolveIntent(access,input);}finally{this.flush();}},
       ...(compact?{compactionPolicy:compact.policy,summarize:compact.summarize.bind(compact),summarizeFragments:compact.summarizeFragments.bind(compact),rewrite:compact.rewrite.bind(compact)}:{summarize:async()=>{throw new Error('COMPACTION_NOT_CONFIGURED');}})};
     this.unbindExecution=ctx.dafeiyu.bindExecutionMemory(port);
-    this.unbind=ctx.dafeiyu.bindGrowthProvider({ready,prepare:access=>this.store.prepare(access),validate:(access,entry)=>this.ready()&&this.store.validate(access,entry),
+    this.unbind=ctx.dafeiyu.bindGrowthProvider({ready,expressionPreferences:scene=>this.qqExpression.prepare(scene),prepare:access=>this.store.prepare(access),validate:(access,entry)=>this.ready()&&this.store.validate(access,entry),
       validateHistoricalTrial:(access,dependency)=>this.ready()&&this.store.validateHistoricalTrial(access,dependency),
       trialAdmitted:(input,authority)=>{try{return this.store.admitTrial(ctx.dafeiyu.personaTrialAccess(authority,input),input);}finally{this.flush();}},
       completeTrial:(input,authority)=>{try{return this.store.completeTrial(ctx.dafeiyu.personaTrialAccess(authority,input),input);}finally{this.flush();}}});
@@ -141,6 +144,8 @@ export class GrowthService {
           if(!['INVALID_INPUT','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT','SOURCE_STALE','SOURCE_STATE_CONFLICT','SCOPE_DENIED','SOURCE_NOT_EXPOSED','INSUFFICIENT_EVIDENCE','PRIVATE_INPUT_REJECTED','PERSONA_TRANSITION_FORBIDDEN','PERSONA_REVIEW_REQUIRED','PERSONA_TRIAL_EVIDENCE_REQUIRED','PERSONA_ADOPTION_REVIEW_REQUIRED','PERSONA_ADOPTION_HELD','TASK_REQUIRED','TASK_NOT_ACTIVE','DEPENDENCY_UNAVAILABLE'].includes(code))throw error;
           return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});
     return [
+      make('dafeiyu_qq_expression_status','读取当前QQ场景已长期保存的表达规则和版本；这是表达偏好，不是身份或事实权限。',z.strictObject({}),false,c=>this.qqExpression.status(this.ctx.dafeiyu.quoteReplySource(c,'memory-persona').target)),
+      make('dafeiyu_qq_expression_save','保存或调整当前QQ场景的长期表达偏好／可调整表达规则。自主选择tone/length/structure/pacing/address/other；首次expectedVersion=0，修改先status。自选用self-preference，真实用户要求用user-request；空text撤下。保存到既有Memory，由Growth管理并自动装配QQ回复、阶段反馈、任务结果。不是已采用人格，不能传递任务事实、系统指令或权限；临时要求直接遵循，不必都永久保存。',QqExpressionSaveSchema,true,(c,i)=>this.qqExpression.save(c,this.access(c,'memory-persona',true),i)),
       make('dafeiyu_persona_propose','提出暂定候选。text是自述，不是世界事实，也不证明已经试行。sources/counters只接受当前已曝光的task-link输入、execution-source:来源ID或memory:记忆ID:修订号。不改底色或直接形成稳定偏好。',proposal,true,(context,input)=>this.propose(context,input),true),
       make('dafeiyu_persona_review','复核候选并选择held、trial或rejected。设为trial只是准备试行；之后须trial_select，由真实后续Run装入并闭合，再作采用评审。状态切换、评分和自述都不能代替实际使用结果。',z.strictObject({...control,state:z.enum(['held','trial','rejected'])}),true,(context,input)=>this.review(context,input)),
       make('dafeiyu_persona_trial_select','选择下一轮实际使用的精确trial候选及适用、退出条件。它仍是暂定认识，不会成为已采用人格；空数组撤下本范围试行选择。实际使用和闭合结果由核心记录，不可自行声明完成试行。',PersonaTrialSelectInputSchema,true,(context,input)=>this.selectTrial(context,input)),
