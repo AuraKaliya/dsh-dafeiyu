@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "at": "2026-10-27T13:03:06.135Z",
+  "codeCommit": "b380ff4",
+  "checkpoints": {
+    "batchA": "88970b5",
+    "batchB": "79bf59c",
+    "batchC": "98cfacf",
+    "requiredCapabilityInput": "b380ff4"
+  },
+  "tests": {
+    "reports": [
+      {
+        "id": "c1fb71d1-f41e-4031-ab72-1f5ea245e5a0",
+        "passed": true,
+        "counts": {
+          "tests": 16,
+          "failed": 0,
+          "passed": 16,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 16,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "5b82f847d4fc737f1f47678d90ab14806fbf485099ea13d99eb425cea08a4c1f",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "612d40aa-0334-4997-a135-c0dde24a0f81",
+        "passed": true,
+        "counts": {
+          "tests": 34,
+          "failed": 0,
+          "passed": 34,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 34,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "ac8216885a8e92afaacc98cd557216b40ab30e7f07e1606c8c45b165f83ece81",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "0b5c8f1c-449b-4139-80b9-0e67a61685a2",
+        "passed": true,
+        "counts": {
+          "tests": 4,
+          "failed": 0,
+          "passed": 4,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 4,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "5ef401f1435d923d36deefb3fa9b96b75b1f2f2d4168fa00ec2cc8ef19add478",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "f9102a8b-f22e-4ba4-af43-dc7590e9a7fa",
+        "passed": true,
+        "counts": {
+          "tests": 53,
+          "failed": 0,
+          "passed": 53,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 53,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "4e7050d0dc34c62e3b07838f855eae6875193f69b5b0425d10adfb67dd471dd3",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "4f9a385e-0725-4249-955f-b58aaab1bbe7",
+        "passed": true,
+        "counts": {
+          "tests": 42,
+          "failed": 0,
+          "passed": 42,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 42,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "9b41d5c9f8b91cc439035b8824dcf9edb71fa4b0b8a76d4f8bd79f7c90d3d819",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "cf625ec6-1ee1-41a3-a0f3-3ac459f13344",
+        "passed": true,
+        "counts": {
+          "tests": 19,
+          "failed": 0,
+          "passed": 19,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 19,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "806d15d9f9c182c4507a82e49040af5f830df85ae5c36db28fa6b84101178510",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "27d9e7ff-6f77-4c44-9594-64b8044c29b9",
+        "passed": true,
+        "counts": {
+          "tests": 27,
+          "failed": 0,
+          "passed": 27,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 27,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "49ccd7f859c86a299e941cb60b1bb209ff0dd75c7907d87ec191ba3490bb9fa9",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "0ed956b8-aa99-4844-9109-496f29a3410d",
+        "passed": true,
+        "counts": {
+          "tests": 16,
+          "failed": 0,
+          "passed": 16,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 16,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "46cf69249533973e28d46de86b6784b195183c6340b316cbdab62001f044108d",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      },
+      {
+        "id": "903396cb-18d6-4591-af64-216632680798",
+        "passed": true,
+        "counts": {
+          "tests": 6,
+          "failed": 0,
+          "passed": 6,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0,
+          "topLevel": 6,
+          "suites": 0
+        },
+        "cleanupBlocked": [],
+        "sha256": "336b432021f78f2813925c3706015c6be77db09e3e92a5a63f17d7820e913b84",
+        "realModel": false,
+        "realPlatform": false,
+        "serverAccess": false
+      }
+    ],
+    "countsAreNotSummed": true,
+    "realModelCalls": 0,
+    "realPlatformMessages": 0,
+    "serverAccess": false,
+    "thirdPartyPluginInstallation": false
+  },
+  "deployment": {
+    "verifiedAt": "2026-10-27T12:59:26.445Z",
+    "passed": true,
+    "identity": true,
+    "foundation": true,
+    "oldSessions": {
+      "count": 8,
+      "preserved": true
+    },
+    "memoryUnchanged": true,
+    "journalOldEventsPreserved": true,
+    "originalJournalEvents": 789,
+    "settingsUnchanged": true,
+    "snowLumaUnchanged": true,
+    "oldStableFiles": 29,
+    "stableFilesPreserved": true,
+    "status": {
+      "at": "2026-10-27T12:59:26.031Z",
+      "pid": 25712,
+      "alive": true,
+      "phase": "ready",
+      "error": null,
+      "features": [
+        "core.registration.v1",
+        "lifecycle.managed.v1",
+        "context.conversation.v1",
+        "task.repository.v1",
+        "execution.task.v1",
+        "execution.assessment.v1",
+        "execution.source-anchor.v1",
+        "execution.wake-ingress.v1",
+        "context.task.v1",
+        "execution.resource-scope.v1",
+        "execution.message-task.v1",
+        "delivery.task-result.v1",
+        "delivery.status-feedback.v1",
+        "memory.execution.v1",
+        "continuity.checkpoint.v1",
+        "task.intent.v1",
+        "memory.capability-observation.v1",
+        "memory.native-expression.v1",
+        "media.assets.v1",
+        "persona.stage-state.v1",
+        "persona.growth-selection.v1",
+        "memory.maintenance.v1",
+        "dsh.tools.v1",
+        "dsh.results.v1",
+        "activity.plan.v1",
+        "activity.wakeup.v1",
+        "media.processing.v1",
+        "qq.browse.v1",
+        "qq.tasks.v1",
+        "qq.media.v1",
+        "qq.stickers.v1"
+      ],
+      "counts": {
+        "activeRuns": 0,
+        "queuedRuns": 0,
+        "queuedRoutes": 0,
+        "pendingMessages": 0,
+        "outbox": 0
+      },
+      "delivery": {
+        "total": 2,
+        "pending": 0,
+        "sent": 1,
+        "partial": 0,
+        "uncertain": 0,
+        "blocked": 1
+      },
+      "qq": "online",
+      "groups": 3,
+      "groupSync": "current"
+    },
+    "backup": "External instance deployment/process-refactor-20261027; private data excluded"
+  },
+  "capabilities": {
+    "dshRootTools": 94,
+    "bridgedTools": 59,
+    "modelInvocableSkills": 20,
+    "bundledDevelopmentGuides": 4
+  },
+  "sourceTree": {
+    "files": 246,
+    "sha256": "492a8e32f14b1456c1e6245db3cb8d527cb7ba47a05732902495e4ae4fa3e00b"
+  },
+  "protectedUserFile": {
+    "path": "docs/memory-phase-1.md",
+    "sha256": "cb9a2383531a39461c50d7ca8f58c6c1879cf12a0a0dafdf8cfa5b387911f730"
+  }
+}
