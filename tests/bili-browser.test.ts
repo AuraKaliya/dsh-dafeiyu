@@ -11,6 +11,7 @@ import {BiliConfigSchema} from '../packages/bilibili/lib/config.js';
 import {testTempDir} from './test-temp.js';
 import type {BiliBrowserRequest} from '@dafeiyu/contracts';
 import {runInNewContext} from 'node:vm';
+import {contentChallengeCheck} from '../packages/plugin/lib/bili-page-check.js';
 const input=():BiliBrowserRequest=>({taskId:randomUUID(),runId:randomUUID(),operationId:randomUUID(),bvid:'BV1xx411c7mD',section:'video'});
 const result=(value:unknown)=>({ok:true,value:JSON.stringify(value)});
 const content={title:'公开标题',text:'已加载简介',truncated:false};
@@ -119,6 +120,26 @@ test('video frame capture is position-bound, identity-checked and refuses protec
     assert.match(String(args.script),/drawImage/);assert.doesNotMatch(String(args.script),/cookie|localStorage|fetch\(/);return result({...content,frame});
   },new AbortController().signal);assert.equal(checks,2);assert.equal(value.frame?.positionMs,1000);
   for(const error of ['BILI_RESTRICTED_MEDIA','BILI_BROWSER_FRAME_UNAVAILABLE'])await assert.rejects(readBiliBrowser(i,'42',async(name,args)=>name==='dsh_browser_open'?{url:args.url}:isIdentity(args)?identity(i,['42']):result({error}),new AbortController().signal),new RegExp(error));
+});
+
+test('a generic wording hint requires a normal video and content-only wording, while real or ambiguous verification remains blocked',async()=>{
+  for(const scenario of ['content','widget','outside','unknown'] as const){const i=input(),time=clock();let checks=0;
+    const read=readBiliBrowser(i,'42',async(name,args)=>{if(name==='dsh_browser_open')return {url:args.url,challenge:{blocked:true,kind:'generic'}};
+      if(String(args.script).includes('outsideVerificationText')){checks++;return result({normalVideo:scenario!=='unknown',widget:scenario==='widget',outsideVerificationText:scenario==='outside',contentVerificationText:scenario==='content'});}
+      return isIdentity(args)?identity(i,['42']):result(content);
+    },new AbortController().signal,time);
+    if(scenario==='content'){assert.equal((await read).text,content.text);assert.equal(checks,2);}else await assert.rejects(read,/BILI_BROWSER_CHALLENGE/);
+  }
+});
+
+test('verification words in public video tags differ from an actual visible verification form even over a playing video',()=>{
+  for(const form of [false,true]){const box=()=>({width:100,height:30}),tag={tagName:'A',innerText:'人机验证 captcha',getBoundingClientRect:box,closest:(selector:string)=>selector.includes('.video-tag-container')?{}:null,matches:()=>false};
+    const dialog={tagName:'FORM',innerText:'请进行安全验证',getBoundingClientRect:box,closest:()=>null,matches:(selector:string)=>selector==='form,[role="dialog"]'};
+    const nodes=[{parentElement:tag,textContent:'人机验证 captcha'},...(form?[{parentElement:dialog,textContent:'请进行安全验证'}]:[])];
+    const document={body:{},querySelectorAll:()=>[tag,...(form?[dialog]:[])],querySelector:(selector:string)=>selector==='video'?{readyState:4,videoWidth:1280,duration:1442}:{innerText:'我是人类'},createTreeWalker:()=>{let i=0;return {nextNode:()=>nodes[i++]??null};}};
+    const value=runInNewContext(contentChallengeCheck,{document,NodeFilter:{SHOW_TEXT:4},getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})});
+    assert.equal(value.normalVideo,true);assert.equal(value.contentVerificationText,true);assert.equal(value.widget,form);assert.equal(value.outsideVerificationText,form);
+  }
 });
 
 test('browser identity mismatch enters a persistent condition wait instead of repeated page reads',async()=>{const root=await mkdtemp(join(testTempDir(),'bili-browser-hold-')),store=new BiliStore(join(root,'b.sqlite'),{agentId:'fish',profileId:'test'},true),c=new BiliClient(BiliConfigSchema.parse({browser:{expectedUid:'42'}}),store);let calls=0;const port={read:async()=>{calls++;throw new Error('BILI_BROWSER_ACCOUNT_MISMATCH');}};try{await assert.rejects(c.browserRead(port,input(),new AbortController().signal,()=>{}),/ACCOUNT_MISMATCH/);assert.equal(store.diagnostics.state.held,true);assert.equal(store.diagnostics.recent()[0]!.kind,'login');assert.equal(store.diagnostics.recent()[0]!.networkSent,null);await assert.rejects(c.browserRead(port,input(),new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);assert.equal(calls,1);}finally{store.close();}});

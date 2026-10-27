@@ -2,6 +2,7 @@ import {BiliBrowserRequestSchema,BiliBrowserResultSchema,BiliBrowserFrameSchema,
 import type {BiliBrowserRequest,BiliBrowserResult,Json} from '@dafeiyu/contracts';
 import {setTimeout} from 'node:timers/promises';
 import {z} from 'zod';
+import {contentChallengeCheck} from './bili-page-check.js';
 export type BrowserToolCall=(name:string,args:Record<string,Json>,signal:AbortSignal)=>Promise<unknown>;
 /** Internal clock seam for deterministic tests; never accepted from model/tool arguments. */
 export interface BrowserReadinessClock {
@@ -20,10 +21,10 @@ const commentsScript="(()=>{const host=document.querySelector('bili-comments'),r
 function evaluated(raw:unknown):unknown{const value=z.object({ok:z.literal(true),value:z.string()}).parse(raw);return JSON.parse(value.value) as unknown;}
 export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:string,call:BrowserToolCall,signal:AbortSignal,clock:BrowserReadinessClock=readinessClock):Promise<BiliBrowserResult>{
   const input=BiliBrowserRequestSchema.parse(request);z.string().regex(/^[1-9]\d{0,19}$/).parse(expectedUid);signal.throwIfAborted();const url=input.section==='discover'?(input.feed==='popular'?'https://www.bilibili.com/v/popular/all':'https://www.bilibili.com/'):`https://www.bilibili.com/video/${input.bvid}/`;
-  const opened=z.object({url:z.string(),challenge:z.object({blocked:z.boolean()}).optional()}).parse(await call('dsh_browser_open',{url},signal));
+  const opened=z.object({url:z.string(),challenge:z.object({blocked:z.boolean(),kind:z.string().max(40).optional()}).optional()}).parse(await call('dsh_browser_open',{url},signal));
   const verifyUrl=(value:string)=>{const actual=new URL(value);if(actual.origin!=='https://www.bilibili.com'||actual.pathname!==new URL(url).pathname)throw new Error('BILI_BROWSER_REDIRECT');};
   verifyUrl(opened.url);
-  if(opened.challenge?.blocked)throw new Error('BILI_BROWSER_CHALLENGE');
+  if(opened.challenge?.blocked&&opened.challenge.kind!=='generic')throw new Error('BILI_BROWSER_CHALLENGE');
   // One shared budget after navigation. Poll only the existing DOM, never reload or retry an API request.
   const deadline=clock.now()+readinessMs,readySignal=AbortSignal.any([signal,AbortSignal.timeout(readinessMs)]);
   const waitReady=async<T>(read:()=>Promise<T|null>,code:string):Promise<T>=>{
@@ -36,6 +37,12 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
     if(state.ids.some(id=>id!==expectedUid))throw new Error('BILI_BROWSER_ACCOUNT_MISMATCH');
     return state.ids.length?true:null;
   },'BILI_BROWSER_IDENTITY_UNAVAILABLE');
+  const checkReportedChallenge=async()=>{if(!opened.challenge?.blocked)return;try{await waitReady(async()=>{
+    const evidence=z.object({normalVideo:z.boolean(),widget:z.boolean(),outsideVerificationText:z.boolean(),contentVerificationText:z.boolean()}).parse(evaluated(await call('dsh_browser_execute',{script:contentChallengeCheck},readySignal)));
+    if(evidence.widget||evidence.outsideVerificationText)throw new Error('BILI_BROWSER_CHALLENGE');
+    return evidence.normalVideo&&evidence.contentVerificationText?true:null;
+  },'BILI_BROWSER_CHALLENGE');}catch{signal.throwIfAborted();throw new Error('BILI_BROWSER_CHALLENGE');}};
+  await checkReportedChallenge();
   await verify();
   if(input.section==='comments')await waitReady(async()=>{await call('dsh_browser_scroll',{deltaY:850},readySignal);return true;},'BILI_BROWSER_CONTENT_UNAVAILABLE');
   const content=await waitReady(async()=>{
@@ -44,5 +51,6 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
     const parsed=z.object({title:z.string().max(300),text:z.string().max(5000),truncated:z.boolean(),frame:BiliBrowserFrameSchema.optional()}).parse(value);if(input.section==='frame'&&!parsed.frame)throw new Error('BILI_BROWSER_FRAME_UNAVAILABLE');return parsed.text.trim()?parsed:null;
   },'BILI_BROWSER_CONTENT_UNAVAILABLE');
   await verify();
+  await checkReportedChallenge();
   return BiliBrowserResultSchema.parse({transport:'dsh-browser',accountUid:expectedUid,bvid:input.bvid??null,section:input.section,...(input.section==='discover'?{feed:input.feed??'home'}:{}),url,title:redactContent(content.title).value,text:redactContent(content.text).value,truncated:content.truncated,observedAt:new Date().toISOString(),...(content.frame?{frame:content.frame}:{})});
 }
