@@ -342,7 +342,7 @@ export class QqChannel extends Service {
     if(typeof authority!=='function'||reply.media)return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
     const check=async(value:Reply,workSignal:AbortSignal)=>{workSignal.throwIfAborted();authority();
       if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');
-      const scene=value.conversation;if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='private'||scene.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');
+      const scene=value.conversation;if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='local'||scene.id!==value.sourceMessageId||!/^local-owner:[a-f0-9-]{36}$/.test(scene.id))throw new Error('TARGET_NOT_ALLOWED');
       const source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},value.sourceMessageId);
       if(!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('SOURCE_MESSAGE_NOT_FOUND');
       if(value.taskResult&&(value.taskResult.inboundId!==source.id||conversationKey(this.config.agentId,value.taskResult.target)!==conversationKey(this.config.agentId,scene)||Date.parse(value.taskResult.expiresAt)<=Date.now()))throw new Error('SOURCE_STALE');
@@ -350,11 +350,11 @@ export class QqChannel extends Service {
     // Each invocation supplies its own authority; the transport only retains immutable ledger state.
     this.localOwnerTransport??=new QqSegmentedTransport({ledger:this.store.delivery,
       ...(this.config.replyDelay?{beforeSend:(value:Reply,workSignal:AbortSignal)=>waitForQqReply(value.text,workSignal),betweenMessages:waitBetweenQqMessages}:{}),
-      check:async(value,workSignal)=>{if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');if(value.conversation.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');await this.api.verify(workSignal);},
+      check:async(value,workSignal)=>{if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');if(value.conversation.channel!=='local-owner'||value.conversation.account!==this.config.botId||value.conversation.kind!=='local'||value.conversation.id!==value.sourceMessageId)throw new Error('TARGET_NOT_ALLOWED');await this.api.verify(workSignal);},
       send:async(_value,text,workSignal)=>z.object({message_id:platformId}).parse(await this.api.call('send_private_msg',{user_id:Number(this.config.ownerId),message:[{type:'text',data:{text}}]},workSignal)).message_id,
       confirmed:(value,text,receipt)=>{const target={channel:'qq',account:this.config.botId,kind:'private' as const,id:this.config.ownerId};this.store.remember(this.cacheRoute(target),receipt,this.config.botId,value.taskResult?'[本地主人委托的任务结果已交付；正文须经任务来源核验。]':text,{occurredAt:new Date().toISOString(),unsupported:value.taskResult?['task-result-body-withheld']:[]});}});
     const guarded=()=>{authority();const scene=reply.conversation,source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},reply.sourceMessageId);
-      if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='private'||scene.id!==this.config.ownerId||!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');};
+      if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='local'||scene.id!==reply.sourceMessageId||!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');};
     const work=check(reply,signal).then(()=>this.localOwnerTransport!.deliver(reply,signal,guarded)).catch(()=>({status:'not-sent' as const,code:'LOCAL_OWNER_DELIVERY_REJECTED'}));
     this.sending.add(work);void work.finally(()=>this.sending.delete(work));return work;
   }

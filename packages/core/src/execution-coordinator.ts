@@ -666,11 +666,12 @@ export class ExecutionCoordinator {
     }};
   }
   conversationActions(run:StoredRun,producer:string,signal:AbortSignal,guard:()=>void):NativeAction[]{
-    const policy=this.d.options.policies.find(policy=>policy.id==='conversation'&&policy.producers.includes(producer));if(!policy)return [];
+    const policy=this.conversationPolicy(producer);if(!policy)return [];
     return this.d.registry.actions().filter(action=>!action.requiresTask&&policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .map(action=>{const base=()=>{signal.throwIfAborted();guard();if(!action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');};return this.bindAction(run,action,signal,()=>{base();this.d.personas.current(run.id)?.guard();},base);});
   }
-  conversationSnapshot(producer:string){const policy=this.d.options.policies.find(policy=>policy.id==='conversation'&&policy.producers.includes(producer));
+  private conversationPolicy(producer:string){return this.d.options.policies.find(policy=>policy.id===`conversation-${producer}`&&policy.producers.includes(producer))??this.d.options.policies.find(policy=>policy.id==='conversation'&&policy.producers.includes(producer));}
+  conversationSnapshot(producer:string){const policy=this.conversationPolicy(producer);
     return {policyId:policy?.id??'conversation-v2',authority:policy??null,actions:this.d.registry.actions()
       .filter(action=>policy?.actions.includes(action.id)&&!action.requiresTask&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .map(action=>({id:action.id,owner:action.owner,version:action.version,input:action.input,effects:action.effects}))};}

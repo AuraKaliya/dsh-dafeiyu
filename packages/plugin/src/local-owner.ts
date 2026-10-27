@@ -26,7 +26,7 @@ export function attachLocalOwnerControl(ctx:Context,settings:InstallationSetting
         const value=LocalOwnerRequestSchema.parse(JSON.parse(readFileSync(file,'utf8')));
         if(value.id!==key||value.botId!==settings.qq.botId||value.ownerId!==settings.qq.ownerId)throw new Error('LOCAL_OWNER_IDENTITY_MISMATCH');
         const age=Date.now()-Date.parse(value.issuedAt);if(age< -60000||age>3600000)throw new Error('LOCAL_OWNER_REQUEST_EXPIRED');
-        const accepted=handle.ingest!({id:'local-owner:'+value.id,occurredAt:value.issuedAt,conversation:{channel:'local-owner',account:settings.qq.botId,kind:'private',id:settings.qq.ownerId},sender:{id:settings.qq.ownerId,displayName:'主人（本机明确委托）'},text:value.text,mainText:value.text});
+        const accepted=handle.ingest!({id:'local-owner:'+value.id,occurredAt:value.issuedAt,conversation:{channel:'local-owner',account:settings.qq.botId,kind:'local',id:'local-owner:'+value.id},sender:{id:settings.qq.ownerId,displayName:'主人（本机明确委托）'},text:value.text,mainText:value.text});
         writeFileSync(receipt,JSON.stringify({at:new Date().toISOString(),source:'local-owner-file',...accepted}),{flag:'wx'});
       }catch(error){if(existsSync(receipt))continue;writeFileSync(receipt,JSON.stringify({at:new Date().toISOString(),source:'local-owner-file',error:error instanceof Error&&/^LOCAL_OWNER_[A-Z_]+$/.test(error.message)?error.message:'LOCAL_OWNER_REQUEST_REJECTED'}),{flag:'wx'});}
     }
