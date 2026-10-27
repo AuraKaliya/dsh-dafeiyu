@@ -1,41 +1,52 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
-import { DSH_TOOL_ACTIONS,DshToolCallSchema,ResourceProofSchema } from '@dafeiyu/contracts';
-import type { DshToolsPort,ActionCapabilityV3,ResourceProof,Json,Conversation } from '@dafeiyu/contracts';
+import { DSH_TOOL_ACTIONS,DshToolCallSchema,DshResultReadSchema,ResourceProofSchema } from '@dafeiyu/contracts';
+import type { DshToolsPort,ActionCapabilityV3,ResourceProof,Json,Conversation,ExecutionContextV3,ActionOutcome } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import { mkdirSync,writeFileSync,readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DshResultStore } from './dsh-result-store.js';
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const execution=z.object({isError:z.boolean().optional(),effect:z.enum(['none','confirmed','unknown']).optional()});
+const errorCode=(e:unknown)=>e instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(e.message)?e.message:'DSH_RESULT_PROCESSING_FAILED';
 
-/** A tool dispatch port, never a second planner or a command-language parser. */
+/** DSH executes once. Result reads are separate, scoped observations of immutable sanitized material. */
 export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receiptDirectory:string){
-  mkdirSync(receiptDirectory,{recursive:true});
+  mkdirSync(receiptDirectory,{recursive:true});const results=new DshResultStore(receiptDirectory);
   const file=(id:string)=>join(receiptDirectory,z.uuid().parse(id)+'.json');
   const current=(raw:ResourceProof)=>{try{const proof=ResourceProofSchema.parse(raw),detail=z.object({operationId:z.uuid(),taskId:z.uuid(),textHash:z.string()}).parse(proof.detail),saved=z.object({proof:ResourceProofSchema,page:z.json()}).parse(JSON.parse(readFileSync(file(detail.operationId),'utf8')));
     return proof.provider==='dsh-tools'&&hash(proof)===hash(saved.proof)&&hash(saved.page)===detail.textHash;}catch{return false;}};
+  const scene=(context:ExecutionContextV3):Conversation|null=>{try{return ctx.dafeiyu.quoteReplySource(context,'dsh-tools').target;}catch(e){if(e instanceof Error&&e.message==='MESSAGE_REQUIRED')return null;throw e;}};
+  const observe=(context:ExecutionContextV3,target:Conversation|null,page:Json,receiptId:string,effect:ActionOutcome['effects'],failed=false):ActionOutcome=>{
+    let data:Json=page,sources:ActionOutcome['sources']=[];
+    try{if(target){const detail={operationId:context.operationId,taskId:context.taskId!,textHash:hash(page)},proof:ResourceProof={provider:'dsh-tools',scene:target,key:'operation:'+context.operationId,version:1,hash:hash(detail),roots:['dsh-operation:'+receiptId],detail};
+      writeFileSync(file(context.operationId),JSON.stringify({proof,page}),{flag:'wx'});
+      const observation=ctx.dafeiyu.recordCapabilityObservation(context,'dsh-tools',{requestId:context.operationId,proof,text:JSON.stringify(page),occurredAt:new Date().toISOString(),coverage:['DSH真实工具返回；仅覆盖本页实际内容，子结果须通过提供的读取入口继续','工具报告不是外部事实真实性担保'],counts:{received:1,processed:1}});
+      data=z.json().parse({page,observation});const ref=observation.source;sources=[{id:ref.id,scopeKey:ref.scopeKey,version:ref.version,contentHash:ref.contentHash}];}
+      return {status:failed?'failed':'succeeded',effects:effect,completeness:'complete',data,sources,receipts:[{kind:'dsh-operation',id:receiptId}],...(failed?{errorCode:'DSH_TOOL_FAILED'}:{})};
+    }catch(e){return {status:'partial',effects:effect,completeness:'unknown',data:{execution:{receiptId,effect,failed},processing:{state:'failed',code:errorCode(e)},resultId:receiptId},sources:[],receipts:[{kind:'dsh-operation',id:receiptId}],errorCode:errorCode(e)};}
+  };
   const actions:ActionCapabilityV3[]=[{
     id:DSH_TOOL_ACTIONS[0],version:'1',effects:'read',requiresTask:true,
-    description:'发现当前DSH基座实际可用的工具及精确参数。先查目录，再用dsh_tool_call直接调用；由你决定步骤，无额外执行器模型。唤醒统一使用dafeiyu_activity_plan，不另建DSH定时任务。',
+    description:'查看当前执行环境的实际能力、精确参数与可用说明。目录有版本，环境变化后重新取得当前声明。',
     inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_input,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');const data=await port.catalog(context.signal);ctx.dafeiyu.executionAuthority(context,'dsh-tools');return {status:'succeeded',effects:'none',completeness:'complete',data:z.json().parse(data),sources:[],receipts:[]};},
   },{
     id:DSH_TOOL_ACTIONS[1],version:'1',effects:'external-write',requiresTask:true,
-    description:'直接调用DSH已有工具，参数严格取自dsh_tool_list。需真实主人任务或既有授权活动唤醒；保留DSH执行策略和取消信号。不要用通用工具绕过QQ群助手、账号对象限制、记忆管理或单一唤醒机制；不猜测执行成功。修改自身插件由宿主在本轮结果交付、空闲后接管。',
+    description:'按当前能力声明直接执行操作。真实任务来源和DSH策略由程序检查；返回执行事实、结果引用及可继续读取的视图。',
     inputSchema:DshToolCallSchema,outputSchema:z.json(),execute:async(raw,context)=>{
       const authority=ctx.dafeiyu.authorizeExternalTask(context,'dsh-tools');authority.guard();
-      const call=DshToolCallSchema.parse(raw);let result:Json;try{result=await port.execute(call,authority,context.signal);}catch(error){if(error instanceof Error&&['DSH_CATALOG_CHANGED','DSH_TOOL_ARGUMENTS_INVALID','DSH_AUTHORITY_INVALID','PRIVATE_INPUT_REJECTED','DSH_PLUGIN_CHANGE_PENDING'].includes(error.message))return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:error.message};throw error;}authority.guard();
-      const failed=z.object({isError:z.literal(true)}).safeParse(result).success;
-      const page:Json=JSON.stringify(result).length<=7000?result:{isError:failed,preview:JSON.stringify(result).slice(0,6000),omitted:true,note:'仅前6000字预览，未返回的部分未知；用原工具分页或读取结果文件。'};
-      let data:Json=page,sources:{id:string;scopeKey:string;version:number;contentHash:string}[]=[];
-      let scene:Conversation|undefined;try{scene=ctx.dafeiyu.quoteReplySource(context,'dsh-tools').target;}catch(error){if(!(error instanceof Error&&error.message==='MESSAGE_REQUIRED'))throw error;}
-      if(scene){
-        const detail={operationId:context.operationId,taskId:context.taskId!,textHash:hash(page)},proof:ResourceProof={provider:'dsh-tools',scene,key:'operation:'+context.operationId,version:1,hash:hash(detail),roots:['dsh-operation:'+context.operationId],detail};
-        writeFileSync(file(context.operationId),JSON.stringify({proof,page}),{flag:'wx'});
-        const observation=ctx.dafeiyu.recordCapabilityObservation(context,'dsh-tools',{requestId:context.operationId,proof,text:JSON.stringify(page),occurredAt:new Date().toISOString(),coverage:['DSH真实工具返回，仅供原始主人会话整理；工具报告不担保外部内容真实','未调用额外规划模型'],counts:{received:1,processed:1}});
-        data=z.json().parse({page,observation});sources=[{id:observation.source.id,scopeKey:observation.source.scopeKey,version:observation.source.version,contentHash:observation.source.contentHash}];
-      }
-      const effect=z.object({effect:z.enum(['none','confirmed','unknown'])}).safeParse(result);
-      return {status:failed?'failed':'succeeded',effects:effect.success?effect.data.effect:failed?'unknown':'confirmed',completeness:'complete',data,sources,receipts:[],...(failed?{errorCode:'DSH_TOOL_FAILED'}:{})};
+      const call=DshToolCallSchema.parse(raw);let result:Json;try{result=await port.execute(call,authority,context.signal);}catch(e){if(e instanceof Error&&['DSH_CATALOG_CHANGED','DSH_TOOL_ARGUMENTS_INVALID','DSH_AUTHORITY_INVALID','PRIVATE_INPUT_REJECTED','DSH_PLUGIN_CHANGE_PENDING'].includes(e.message))return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:e.message};throw e;}
+      const fact=execution.safeParse(result),failed=fact.success&&fact.data.isError===true,effect=fact.success?fact.data.effect??(failed?'unknown':'confirmed'):'unknown';
+      const receipts=[{kind:'dsh-operation',id:context.operationId}];
+      try{const target=scene(context);results.save(context.operationId,context.taskId!,target,result);authority.guard();
+        return observe(context,target,results.read(context.taskId!,target,DshResultReadSchema.parse({resultId:context.operationId})),context.operationId,effect,failed);
+      }catch(e){return {status:'partial',effects:effect,completeness:'unknown',data:{resultId:context.operationId,execution:{receiptId:context.operationId,effect,failed},processing:{state:'failed',code:errorCode(e)}},sources:[],receipts,errorCode:errorCode(e)};}
     },
+  },{
+    id:DSH_TOOL_ACTIONS[2],version:'1',effects:'read',requiresTask:true,
+    description:'继续读取本Task的已有结果，不重新执行原工具。path与offset来自结果中的read/next入口；返回完整JSON值、明确的文字区间或子节点入口。',
+    inputSchema:DshResultReadSchema,outputSchema:z.json(),execute:async(raw,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');const input=DshResultReadSchema.parse(raw),target=scene(context);
+      try{return observe(context,target,results.read(context.taskId!,target,input),input.resultId,'none');}catch(e){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:errorCode(e)};}}
   }];
   return ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'dsh-tools',version:'1',agentId,provides:['dsh.tools.v1'],requires:['execution.task.v1','memory.capability-observation.v1'],actions,resourceProofs:{current,epoch:()=>'',targetView:(proof,view,target,scope)=>{
     if(!current(proof)||hash(proof.scene)!==hash(target)||scope.kind!=='task')return null;const detail=z.object({taskId:z.string(),operationId:z.uuid()}).parse(proof.detail),saved=z.object({page:z.json()}).parse(JSON.parse(readFileSync(file(detail.operationId),'utf8')));

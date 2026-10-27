@@ -335,7 +335,7 @@ export class DafeiyuService extends Service {
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,personas:this.personas,
       repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
       turnTimeoutMs:this.config.turnTimeoutMs,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),settled:id=>{void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
-    this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:this.config.turnTimeoutMs*2+this.config.deliveryTimeoutMs,
+    this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:Math.min(this.config.turnTimeoutMs,120000)+this.config.deliveryTimeoutMs,
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
       channel:item=>this.deliveryChannel(item),

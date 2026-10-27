@@ -26,7 +26,7 @@ async function renderTargetMessage(ctx:Context,model:AgentOptions,cwd:string,id:
       contexts:[...(growth.length?[{name:'target-stage-persona',text:JSON.stringify(growth),interpolate:false}]:[]),...(material.target.channel==='qq'?[{name:'qq-expression-rules',text:QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+(material.progress?'\n这次仅整理一条必要的阶段反馈，任务仍在运行。意图用将来语气；已经完成的进展必须有提供的实际操作回执支持。不把阶段反馈当最终交付，不输出内部思考或执行器报告。':''),interpolate:false}]:[])],tools:[],variables:{}}));
     scope.on('llm/stream',async function*(options,next){if(String(options.sessionId)!==sessionId){yield* next();return;}guard();signal.throwIfAborted();
       if(options.tools?.length)throw new Error('DELIVERY_TOOLS_FORBIDDEN');if(Buffer.byteLength(JSON.stringify(options.messages))>requestMaxBytes)throw new Error('DELIVERY_CAPACITY');let size=0;
-      for await(const chunk of visibleStream(next())){guard();signal.throwIfAborted();if(chunk.type==='block-start'&&chunk.blockType==='tool-call'||chunk.type==='tool-call-delta'||chunk.type==='block-end'&&chunk.block.type==='tool-call')throw new Error('DELIVERY_TOOLS_FORBIDDEN');
+      for await(const chunk of visibleStream(next())){signal.throwIfAborted();if(chunk.type==='block-start'&&chunk.blockType==='tool-call'||chunk.type==='tool-call-delta'||chunk.type==='block-end'&&chunk.block.type==='tool-call')throw new Error('DELIVERY_TOOLS_FORBIDDEN');
         if(chunk.type==='text-delta')size+=chunk.text.length;if(size>32000)throw new Error('DELIVERY_CAPACITY');yield chunk;}guard();
     });
   }});

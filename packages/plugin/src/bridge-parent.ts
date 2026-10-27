@@ -16,7 +16,7 @@ import type { DshToolCatalog,Json } from '@dafeiyu/contracts';
 
 interface Presets {mount(scope:Context,id:string):Promise<{id:string}>}
 interface Permissions {set(session:AgentHandle['agent']['session'],id:string):void}
-declare module '@deepseek-ai/dsh-session' {interface SessionEventMap {'plugin:dafeiyu/dsh-dispatch':{schemaVersion:1;runId:string;operationId:string;tool:string;source:Json}}}
+declare module '@deepseek-ai/dsh-session' {interface SessionEventMap {'plugin:dafeiyu/dsh-dispatch':{schemaVersion:1;runId:string;operationId:string;tool:string;source:Json};'plugin:dafeiyu/dsh-completed':{schemaVersion:1;runId:string;operationId:string;tool:string;isError:boolean;effect:'none'|'confirmed'|'unknown'}}}
 // These have dedicated Dafeiyu owners, or would escape the authenticated QQ source.
 const excluded=/^(?:schedule_|bili_|learn_|(?:send_message|interrupt_agent|list_agents|subagent|subagent_fork|workflow|ask_user_question|exit_plan_mode|voice_listen|voice_speak|dsh_browser_auth|dsh_browser_replay|create_goal|update_goal|get_goal)$)/;
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -74,9 +74,12 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
       h.agent.session.append('plugin:dafeiyu/dsh-dispatch',{schemaVersion:1,runId:authorization.runId,operationId:authorization.operationId,tool:tool.name,source:z.json().parse(authorization.source)});
       const result=await ctx.agents.withInitiator(h.agent,()=>ctx.tools.execute({callId:ToolCallId(message.id),name:tool.name,arguments:args,agent:h.agent,signal:controller.signal}));
       const readOnly=readTools.has(tool.name)||tool.name==='plugin_manager'&&management.success&&management.data.action.startsWith('list_');
-      const projected=redactJson(z.json().parse(result.isError?{isError:true,effect:readOnly?'none':'unknown',content:result.content}:{isError:false,effect:readOnly?'none':'confirmed',value:result.value,content:result.content})).value;
-      // The Core action result budget is 128 KiB, shared with provenance and metadata.
-      const value=Buffer.byteLength(JSON.stringify(projected))<=100000?projected:{isError:result.isError,omitted:true,reason:'DSH_RESULT_TOO_LARGE',note:'工具已结束；完整内容留在DSH工具自身的结果或文件中，请通过原工具分页读取。'};
+      const fact={schemaVersion:1 as const,runId:authorization.runId,operationId:authorization.operationId,tool:tool.name,isError:result.isError,effect:readOnly?'none' as const:result.isError?'unknown' as const:'confirmed' as const};
+      h.agent.session.append('plugin:dafeiyu/dsh-completed',fact);await ctx.sessions.flush(h.agent.session);
+      let value:Json;try{
+        const projected=redactJson(z.json().parse({isError:fact.isError,effect:fact.effect,value:result.value??result.content})).value;
+        value=Buffer.byteLength(JSON.stringify(projected))<=4*1024*1024?projected:{isError:fact.isError,effect:fact.effect,value:null,processing:{state:'unavailable',code:'DSH_RESULT_STORAGE_LIMIT'}};
+      }catch{value={isError:fact.isError,effect:fact.effect,value:null,processing:{state:'failed',code:'DSH_RESULT_PROJECTION_FAILED'}};}
       await ctx.sessions.flush(h.agent.session);send(message.id,value);
     }catch(error){send(message.id,null,code(error));}finally{controllers.delete(message.id);}})();
     jobs.add(work);void work.finally(()=>jobs.delete(work));
