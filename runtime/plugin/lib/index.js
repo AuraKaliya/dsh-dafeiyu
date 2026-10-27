@@ -2,7 +2,7 @@ import Schema from '@deepseek-ai/schemastery';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute } from 'node:path';
-import { deferPluginStart } from './startup.js';
+import { deferPluginStart, startupFailure } from './startup.js';
 export const name = 'dsh-dafeiyu';
 export const inject = ['agents', 'tools', 'sessions', 'sessionPersistence'];
 export const Config = Schema.object({
@@ -17,6 +17,7 @@ export function apply(ctx, config) {
     }
     if (!isAbsolute(config.settingsFile))
         throw new Error('INSTALL_SETTINGS_ABSOLUTE_PATH_REQUIRED');
+    let stage = 'settings-import';
     return ctx.effect(() => deferPluginStart(ctx.get('appReady'), async (signal) => {
         const { readInstallationSettings } = await import('./settings.js');
         signal.throwIfAborted();
@@ -28,11 +29,14 @@ export function apply(ctx, config) {
             ctx.logger.warn('INSTALL_CONFIGURATION_REQUIRED：请检查大肥鱼配置文件。');
             return () => { };
         }
+        stage = 'bridge-import';
         const bridge = bridgeEnabled ? await import('./bridge-parent.js') : undefined;
         signal.throwIfAborted();
+        stage = 'child-spawn';
         const child = spawn(config.nodePath, [fileURLToPath(new URL('../bin/dafeiyu.mjs', import.meta.url)), 'start', '--settings', config.settingsFile], { windowsHide: true, env: { ...process.env, DAFEIYU_DSH_BRIDGE: bridgeEnabled ? '1' : '' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
         let closed = false;
         const finished = new Promise(resolve => { child.once('close', () => { closed = true; resolve(); }); child.once('error', () => { ctx.logger.error('INSTALL_NODE_UNAVAILABLE：请检查Node.js路径与版本。'); closed = true; resolve(); }); });
+        stage = 'bridge-attach';
         let closeBridge;
         try {
             closeBridge = bridge ? bridge.attachDshBridge(ctx, child, config.settingsFile) : async () => { };
@@ -75,5 +79,5 @@ export function apply(ctx, config) {
                 await closeBridge();
             }
         };
-    }, error => ctx.logger.warn(error instanceof Error && /^[A-Z][A-Z0-9_]{0,99}$/.test(error.message) ? error.message : 'INSTALL_START_FAILED')));
+    }, error => ctx.logger.warn('INSTALL_START_FAILED ' + JSON.stringify(startupFailure(stage, error)))));
 }
