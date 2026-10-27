@@ -47,6 +47,20 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
       const bytes=readFileSync(file,'utf8').replaceAll('@dafeiyu/','#dafeiyu/');put(destination,'runtime/'+directory+'/'+portable(relative(root,file)),bytes);
     }
   }
+  // The child owns its SDK process: required SDK peers cannot rely on the profile's hoisted modules.
+  const lock=json(join(repository,'package-lock.json')),pending=Object.keys(dependencies).filter(name=>name.startsWith('@deepseek-ai/')),visitedSdk=new Set();
+  const sdk=name=>{
+    if(!/^@deepseek-ai\/[a-z0-9._-]+$/.test(name))throw new Error('RELEASE_SDK_NAME_INVALID');
+    const meta=json(join(repository,'node_modules',name,'package.json'));
+    if(meta.name!==name||typeof meta.version!=='string'||meta.version!==lock.packages?.['node_modules/'+name]?.version)throw new Error('RELEASE_SDK_LOCK_MISMATCH');
+    return meta;
+  };
+  while(pending.length){const name=pending.pop();if(visitedSdk.has(name))continue;visitedSdk.add(name);if(visitedSdk.size>512)throw new Error('RELEASE_SDK_GRAPH_LIMIT');const meta=sdk(name);
+    for(const dependency of Object.keys(meta.dependencies??{}))if(dependency.startsWith('@deepseek-ai/'))pending.push(dependency);
+    for(const peer of Object.keys(meta.peerDependencies??{}))if(peer.startsWith('@deepseek-ai/')&&meta.peerDependenciesMeta?.[peer]?.optional!==true){
+      const version=sdk(peer).version;if(dependencies[peer]&&dependencies[peer]!==version)throw new Error('RELEASE_SDK_VERSION_CONFLICT');dependencies[peer]=version;pending.push(peer);
+    }
+  }
   const plugin=json(join(repository,'packages/plugin/package.json'));
   const manifest={name:'dsh-dafeiyu',version:plugin.version,type:'module',description:plugin.description,license:'MIT',
     main:'./runtime/plugin/lib/index.js',types:'./runtime/plugin/lib/index.d.ts',
