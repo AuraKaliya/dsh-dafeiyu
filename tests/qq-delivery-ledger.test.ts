@@ -3,19 +3,27 @@ import assert from 'node:assert/strict';
 import { mkdtemp,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import {createHash} from 'node:crypto';
 import { QqStore,splitQqText,QQ_SCHEMA_VERSION } from '@dafeiyu/qq';
 import { inspectStorage } from '@dafeiyu/host';
 import type { Reply } from '@dafeiyu/contracts';
 import { testTempDir } from './test-temp.js';
-const reply:Reply={id:'fictional-reply',conversation:{channel:'qq',account:'12345678',kind:'group',id:'11223344'},sourceMessageId:'-123',text:'鱼'.repeat(8001)};
+const reply:Reply={id:'fictional-reply',conversation:{channel:'qq',account:'12345678',kind:'group',id:'11223344'},sourceMessageId:'-123',text:'鱼'.repeat(1601)};
 async function file(){return join(await mkdtemp(join(testTempDir(),'dafeiyu-qq-delivery-')),'qq.sqlite');}
 
 test('QQ splitting preserves newlines, CRLF and surrogate pairs without adding or dropping any characters',()=>{
-  for(const text of ['鱼','a'.repeat(4000),'a'.repeat(3999)+'🐟'+'中'.repeat(5000),'a'.repeat(3999)+'\r\n'+'b'.repeat(4000),('第一行\n'+'鱼'.repeat(3900)+'🐟\n').repeat(7),'a'.repeat(32000)]){
-    const parts=splitQqText(text);assert.equal(parts.join(''),text);assert.ok(parts.every(part=>part.length>0&&part.length<=4000));
+  for(const text of ['鱼','a'.repeat(4000),'a'.repeat(3999)+'🐟'+'中'.repeat(5000),'a'.repeat(3999)+'\r\n'+'b'.repeat(4000),('第一行\n'+'鱼'.repeat(3900)+'🐟\n').repeat(7),'a'.repeat(32000),('\n'+'a'.repeat(800)).repeat(40).slice(0,32000)]){
+    const parts=splitQqText(text);assert.equal(parts.join(''),text);assert.ok(parts.every(part=>part.length>0&&part.length<=800&&Buffer.byteLength(part)<=2400));assert.ok(parts.length<=64);
     assert.ok(parts.every(part=>!/[\uD800-\uDBFF]$/.test(part)&&!/^[\uDC00-\uDFFF]/.test(part)));}
   assert.equal(splitQqText('short\n'+'a'.repeat(4000))[0],'short\n');
   for(const text of ['', 'x'.repeat(32001),'bad\ud800','\udfff'])assert.throws(()=>splitQqText(text),/TEXT_SIZE_UNSUPPORTED|INVALID_TEXT_ENCODING/);
+});
+
+test('older stored segment boundaries remain immutable and unknown is never resegmented for retry',async()=>{
+  const path=await file(),store=new QqStore(path);try{const generated=store.delivery.prepare(reply)!;const old={...generated,segments:[reply.text]},db=new DatabaseSync(path);
+    try{db.prepare('DELETE FROM qq_delivery_segments WHERE reply_id=?').run(reply.id);db.prepare('UPDATE qq_delivery_plans SET body=?,plan_hash=? WHERE reply_id=?').run(JSON.stringify(old),createHash('sha256').update(JSON.stringify(old)).digest('hex'),reply.id);db.prepare("INSERT INTO qq_delivery_segments VALUES(?,0,'unknown',NULL,'PLATFORM_RESULT_UNKNOWN')").run(reply.id);}finally{db.close();}
+    const reopened=new QqStore(path);try{assert.deepEqual(reopened.delivery.prepare(reply),old);assert.equal(reopened.delivery.progress(reply.id)?.unknown,1);assert.equal(reopened.delivery.progress(reply.id)?.total,1);assert.throws(()=>reopened.delivery.begin(reply.id,0),/NOT_RESUMABLE/);}finally{reopened.close();}
+  }finally{store.close();}
 });
 
 test('QQ delivery fixes content, account, target and anchor, and rejects concurrent duplicate segment claims',async()=>{

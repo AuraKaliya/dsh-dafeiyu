@@ -18,11 +18,18 @@ async function storeFile(){return join(await mkdtemp(join(testTempDir(),'qq-medi
 
 test('v2 plans preserve final text exactly and fix image, audio and file order',()=>{
   const text='蓝鱼🐟\r\n'.repeat(900),reply=fixtureReply(text),plan=qqMediaDeliveryPlan(reply),segments=plan.parts.filter(p=>p.kind==='text');
-  assert.equal(segments.map(s=>s.text).join(''),text);assert.ok(segments.every(s=>s.text.length<=4000));assert.deepEqual(plan.parts.slice(segments.length).map(p=>p.kind),['image','record','file']);assert.equal(plan.version,2);
+  assert.equal(segments.map(s=>s.text).join(''),text);assert.ok(segments.every(s=>s.text.length<=800));assert.deepEqual(plan.parts.slice(segments.length).map(p=>p.kind),['image','record','file']);assert.equal(plan.version,2);
   assert.throws(()=>qqMediaDeliveryPlan({...reply,text:text+'改动'}),/MANIFEST_MISMATCH/);
   assert.throws(()=>qqMediaDeliveryPlan({...reply,conversation:{...reply.conversation,id:'foreign'}}),/MANIFEST_MISMATCH/);
   assert.throws(()=>ReplyMediaManifestSchema.parse({...reply.media,parts:[{kind:'file',asset:reply.media!.parts[0]!.asset,name:'../private'}]}));
   assert.throws(()=>ReplyMediaManifestSchema.parse({...reply.media,parts:[{kind:'image',asset:{...reply.media!.parts[0]!.asset,bytes:17*1024**2}}]}));
+});
+
+test('legacy media text boundaries remain fixed around the same attachments and an unknown part is not retried',async()=>{
+  const file=await storeFile(),store=new QqStore(file),reply=fixtureReply('鱼'.repeat(1601));try{const generated=store.mediaDelivery.prepare(reply),old={...generated,parts:[{kind:'text' as const,text:reply.text},...generated.manifest.parts]},db=new DatabaseSync(file);
+    try{db.prepare('DELETE FROM qq_media_parts WHERE reply_id=?').run(reply.id);db.prepare('UPDATE qq_media_deliveries SET body=?,plan_hash=? WHERE reply_id=?').run(JSON.stringify(old),qqMediaHash(old),reply.id);const insert=db.prepare('INSERT INTO qq_media_parts VALUES(?,?,?,NULL,?)');old.parts.forEach((_part,index)=>insert.run(reply.id,index,index===0?'unknown':'pending',index===0?'PLATFORM_RESULT_UNKNOWN':null));}finally{db.close();}
+    assert.deepEqual(store.mediaDelivery.prepare(reply),old);assert.equal(store.mediaDelivery.progress(reply.id)?.unknown,1);assert.throws(()=>store.mediaDelivery.begin(reply.id,1),/NOT_RESUMABLE|STATE_CONFLICT/);
+  }finally{store.close();}
 });
 
 test('durable media plan rejects replaced bytes, manifest identity and a different native anchor',async()=>{
