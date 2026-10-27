@@ -33,9 +33,12 @@ export class NativeExpression implements NativeExpressionPort {
         return this.store.capabilities.expressionView(access.execution,source,anchor.target,candidate.view!,!!media,(proof,view)=>this.ctx.dafeiyu.capabilityPublicView(proof,view),
           (proof,view)=>this.ctx.dafeiyu.capabilityTargetView(proof,view,anchor.target,scope));});material=observed?.text??null;fence=observed?.fence??null;
         if(observed?.target){kind=observed.target.kind;targetStamp=observed.target.stamp;}}
-      if(material===null){forbidden=true;continue;}if(evidence.length>=16)throw new Error('NATIVE_EXPRESSION_CAPACITY');
+      if(material===null){forbidden=true;continue;}
+      proofs.push({source,viewHash:hash(material),fence,...(mediaStamp?{mediaStamp}:{}),...(targetStamp?{targetStamp}:{})});
+      if(access.selectedSourceIds?.length&&!access.selectedSourceIds.includes(source.id))continue;
+      if(evidence.length>=16)throw new Error('NATIVE_EXPRESSION_CAPACITY');
       if(targetStamp&&kind==='inference')targetInferences.push(evidence.length);
-      evidence.push({id:`S${evidence.length+1}`,kind,text:material});proofs.push({source,viewHash:hash(material),fence,...(mediaStamp?{mediaStamp}:{}),...(targetStamp?{targetStamp}:{})});
+      evidence.push({id:`S${evidence.length+1}`,kind,text:material});
     }
     if(targetInferences.length&&(forbidden||access.derivedInputComplete!==true)){
       for(const index of targetInferences.reverse()){evidence.splice(index,1);proofs.splice(index,1);}evidence.forEach((item,index)=>{item.id=`S${index+1}`;});forbidden=true;
@@ -44,6 +47,7 @@ export class NativeExpression implements NativeExpressionPort {
     for(const receipt of access.operationalEvidence??[]){if(evidence.length>=16)throw new Error('NATIVE_EXPRESSION_CAPACITY');evidence.push({...receipt,id:'O'+evidence.length});}
     if(anchor.outcome==='waiting')evidence.push({id:'W',kind:'reported',text:'程序状态：任务仍在等待，尚未完成。只能讨论需要补充或确认的事项，不能把它描述为已经完成。'});
     if(resultIncluded)evidence.push({id:'R',kind:'inference',text:z.string().min(1).max(32000).parse(access.output)});
+    if(resultIncluded&&access.assessment)evidence.push({id:'A',kind:'inference',text:JSON.stringify({kind:'model-result-assessment',...access.assessment,note:'模型对目标满足程度和价值的判断，不是程序事实或发送回执。'})});
     if(access.media)evidence.push({id:'M',kind:'reported',text:JSON.stringify({note:'程序已核验可用于此目标的媒体部件。以下仅为字节／类型元信息，不表示读懂其内容；正文只据其他获准证据描述内容。',parts:access.media.parts})});
     if(!evidence.length)throw new Error('NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL');
     const question=z.string().min(1).max(2000).parse(access.question);if(Buffer.byteLength(JSON.stringify({question,evidence}))>128000)throw new Error('NATIVE_EXPRESSION_CAPACITY');

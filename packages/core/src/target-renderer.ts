@@ -12,11 +12,12 @@ declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {'dafeiyu-task
 
 /** A real, persisted DSH turn in a new target-persona session; no executor or chat transcript is inherited. */
 export async function renderTaskResult(ctx:Context,model:AgentOptions,cwd:string,id:string,foundation:string,growth:readonly ContextItem[],packet:NativeExpressionPacket,signal:AbortSignal,guard:()=>void,requestMaxBytes:number){
-  return renderTargetMessage(ctx,model,cwd,id,foundation,growth,{target:packet.anchor.target,taskId:packet.anchor.taskId,runId:packet.anchor.runId,inboundId:packet.anchor.inboundId,question:packet.question,evidence:packet.evidence,taskState:packet.anchor.outcome??'completed'},signal,guard,requestMaxBytes);
+  return renderTargetMessage(ctx,model,cwd,id,foundation,growth,{target:packet.anchor.target,taskId:packet.anchor.taskId,runId:packet.anchor.runId,inboundId:packet.anchor.inboundId,question:packet.question,evidence:packet.evidence,taskState:packet.anchor.outcome??'execution-ended'},signal,guard,requestMaxBytes);
 }
 interface TargetMaterial {target:Conversation;taskId:string;runId:string;inboundId:string;question:string;evidence:NativeExpressionPacket['evidence'];taskState:string;progress?:true}
 export async function renderPublicProgress(ctx:Context,model:AgentOptions,cwd:string,id:string,foundation:string,growth:readonly ContextItem[],material:TargetMaterial,signal:AbortSignal,guard:()=>void,requestMaxBytes:number){return renderTargetMessage(ctx,model,cwd,id,foundation,growth,{...material,progress:true},signal,guard,requestMaxBytes);}
 async function renderTargetMessage(ctx:Context,model:AgentOptions,cwd:string,id:string,foundation:string,growth:readonly ContextItem[],material:TargetMaterial,signal:AbortSignal,guard:()=>void,requestMaxBytes:number){
+  signal=AbortSignal.any([signal,AbortSignal.timeout(material.progress?ctx.dafeiyu.phaseTimeouts().feedback:ctx.dafeiyu.phaseTimeouts().render)]);
   const sessionId=`${material.progress?'dafeiyu-progress-v1':'dafeiyu-delivery-v3'}-${id}`;guard();
   if(await ctx.sessionPersistence.stat(SessionId(sessionId)))throw new Error('DELIVERY_RENDER_ALREADY_EXISTS');
   const handle=await ctx.agents.create({sessionId:SessionId(sessionId),meta:{cwd},agentOptions:model,setup:scope=>{

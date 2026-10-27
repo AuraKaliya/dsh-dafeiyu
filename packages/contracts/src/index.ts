@@ -32,6 +32,7 @@ export * from './media.js';
 export * from './media-delivery.js';
 export * from './dsh-tools.js';
 export * from './qq-expression.js';
+export * from './task-assessment.js';
 import type { TaskExpressionProvider } from './expression.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';

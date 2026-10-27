@@ -11,7 +11,8 @@ import type { StoredRun } from './runtime-store.js';
 import type { DshRuntime } from './runtime.js';
 import type { CapabilityRegistryV3,BoundActionV3 } from './registry-v3.js';
 import type { RunScheduler } from './run-scheduler.js';
-import type { NativeAction } from './execution-frame.js';
+import type { NativeAction,TaskExecutionFrame } from './execution-frame.js';
+import { TaskAssessmentSchema } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
 import { SourceDependencySchema,MaintenanceLifecycleSchema,ActivityAnchorSchema,TaskCreateSchema } from '@dafeiyu/contracts';
@@ -37,6 +38,7 @@ interface Dependencies {
   memory:()=>ExecutionMemoryPort|undefined;
   accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
   turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number;maxBytes:number;prepareTimeoutMs:number};signal:AbortSignal;
+  assessmentTimeoutMs?:number;
   projectConversation?:()=>Promise<void>;
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
   settled?:(runId:string)=>void;
@@ -156,7 +158,8 @@ export class ExecutionCoordinator {
         if(dependency.id==='persona:availability'){opaque=true;continue;}
         const body=z.object({item:z.object({text:z.string()})}).safeParse(this.d.store.findContext(`context:${runtimeHash(dependency)}`));let selected:ReturnType<typeof PersonaSourceRefSchema.safeParse>|undefined;
         if(body.success){try{selected=PersonaSourceRefSchema.safeParse(z.object({source:z.unknown()}).parse(JSON.parse(body.data.item.text)).source);}catch{/* Unsupported context cannot grant expression. */}}
-        if(dependency.owner==='memory'&&dependency.region==='execution'&&selected?.success)add(selected.data);else {opaque=true;
+        if(dependency.owner==='dsh-tools'&&dependency.region==='capabilities'){/* Operational declarations do not become world evidence. */}
+        else if(dependency.owner==='memory'&&dependency.region==='execution'&&selected?.success)add(selected.data);else {opaque=true;
           // Growth contexts already carry Core-verified content/dependency refs alongside this record.
           if(!(dependency.owner==='memory'&&dependency.region==='growth'))derivedInputComplete=false;}
       }else {opaque=true;derivedInputComplete=false;}
@@ -164,12 +167,15 @@ export class ExecutionCoordinator {
     if(candidates.size>64)throw new Error('CAPACITY_EXCEEDED');
     const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
     const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
-    const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),guard};
+    const reviewed=z.object({assessment:TaskAssessmentSchema}).safeParse(this.d.store.readInput(run.id,'task-assessment'));
+    const selectedSourceIds=reviewed.success?reviewed.data.assessment.evidenceIds.flatMap(id=>this.d.store.operation(id).outcome?.sources.map(ref=>ref.id)??[]):[];
+    const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),...(reviewed.success?{assessment:reviewed.data.assessment}:{}),...(selectedSourceIds.length?{selectedSourceIds}:{}),guard};
     const media=this.d.media?.()?.nativeMaterial?.(expression);return media?{...expression,media}:expression;
   }
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
-      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',assessment:this.assessmentStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+  private assessmentStatus(runId:string){const value=z.object({assessment:TaskAssessmentSchema,at:z.string()}).safeParse(this.d.store.readInput(runId,'task-assessment'));return value.success?{goalStatus:value.data.assessment.goalStatus,next:value.data.assessment.next,at:value.data.at}:null;}
   controlMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskControlSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
     if(item.message.sender.id!==binding.ownerId||directive.kind!==input.action&&directive.kind!=='submit')throw new Error('TASK_DIRECTIVE_REQUIRED');
     if(redactJson(z.json().parse(directive)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
@@ -477,7 +483,7 @@ export class ExecutionCoordinator {
         const inputs=repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules),inputHash=runtimeHash(inputs),authorityVersion=runtimeHash(policy);
         trialInputs=inputs;
         const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&(action.effects==='external-write'?this.externalActionAllowed(run,policy,action):action.effects!=='local-write'||policy.allowLocalWrite));
-        const contributors=this.d.registry.contributors(),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
+        const contributors=this.d.registry.contributors().filter(entry=>entry.owner!=='dsh-tools'||actions.some(action=>action.owner==='dsh-tools')),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
         const messageSignal=saved.messageSource?this.d.messageSignal?.(saved.messageSource.inboundId):run.definition.origin.kind==='message'?this.d.messageSignal?.(run.definition.origin.inboundId):undefined;
@@ -513,11 +519,34 @@ export class ExecutionCoordinator {
           gaps:[...(omitted?[`${omitted}项上下文未进入本轮，不能猜测其内容`]:[]),...(!prior?['未取得可核验接续检查点；不据此虚构过去']:[])]});
         evidence.recordInput(program,inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),prior?{id:prior.id,hash:runtimeHash(prior)}:null,this.wakeSources(run,task));
         const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validate(evidence.exposed()))throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
-        const result=await this.d.runtime.runExecution({mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:task.goal,inputs,actions:bound,guard:admittedGuard,program,contexts,evidence,
-          audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
-          checkpoint:(session,seq,deps,text)=>this.captureContinuity(run,access,session,seq,deps,text,omitted),...this.d.context});
-        admittedGuard();run=this.d.store.get(id);this.d.store.bindInput(id,'result-sources',evidence.exposed());
-        if(memory?.intent(access).blocking)this.d.store.transition(id,run.version,'waiting','TASK_OBJECTION_UNRESOLVED');else this.d.store.complete(id,run.version,result.resultRef);
+        let stage=0,previousAssessment:import('@dafeiyu/contracts').TaskAssessment|undefined;
+        for(;;){
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'exploration',stage,at:new Date().toISOString()});this.flushEvents();
+          let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
+          const frame:TaskExecutionFrame={mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:task.goal,inputs,actions:bound,guard:admittedGuard,...(this.d.assessmentTimeoutMs?{assessmentTimeoutMs:this.d.assessmentTimeoutMs}:{}),
+            program:z.json().parse({...z.record(z.string(),z.json()).parse(program),stage:{kind:'exploration',index:stage,previousAssessment:previousAssessment??null}}),contexts,evidence,
+            audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
+            checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
+          const result=await this.d.runtime.runExecution(frame);admittedGuard();this.d.store.bindInput(id,`draft-result:${stage}`,result.resultRef);
+          const operations=this.d.store.operations(id).map(op=>({id:op.id,action:op.action,state:op.state,outcome:op.outcome}));
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'assessment',stage,at:new Date().toISOString()});this.flushEvents();
+          let reviewed:Awaited<ReturnType<DshRuntime['assessExecution']>>;
+          try{reviewed=await this.d.runtime.assessExecution(frame,result,z.json().parse({operations,blocking:memory?.intent(access).blocking??false,coverage:{complete:true}}));
+            if(reviewed.assessment.evidenceIds.some(ref=>!operations.some(op=>op.id===ref)))throw new Error('TASK_ASSESSMENT_EVIDENCE_INVALID');
+          }catch(e){admittedGuard();if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
+            this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.checkpoint(id,{kind:'assessment-pending',draft:result.resultRef});
+            this.d.store.transition(id,this.d.store.get(id).version,'waiting',safeCode(e));return;}
+          const record={schemaVersion:1,assessment:reviewed.assessment,model:this.d.model,resultRef:reviewed.resultRef,draftRef:result.resultRef,basisHash:runtimeHash(operations),at:new Date().toISOString()};
+          this.d.store.bindInput(id,`task-assessment:${stage}`,record);
+          if(reviewed.assessment.next==='continue'){previousAssessment=reviewed.assessment;stage++;continue;}
+          this.d.store.bindInput(id,'task-assessment',record);
+          if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
+          admittedGuard();run=this.d.store.get(id);this.d.store.bindInput(id,'result-sources',evidence.exposed());
+          const waiting=memory?.intent(access).blocking||['wait','capability-change'].includes(reviewed.assessment.next);
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:waiting?'waiting':'delivery',stage,goalStatus:reviewed.assessment.goalStatus,at:new Date().toISOString()});
+          if(waiting)this.d.store.transition(id,run.version,'waiting',memory?.intent(access).blocking?'TASK_OBJECTION_UNRESOLVED':reviewed.assessment.next==='capability-change'?'TASK_CAPABILITY_CHANGE_PENDING':'TASK_WAITING');
+          else this.d.store.complete(id,run.version,result.resultRef);break;
+        }
       }catch(error){run=this.d.store.get(id);
         if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');

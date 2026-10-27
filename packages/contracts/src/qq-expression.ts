@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { outputContract } from './task-assessment.js';
 
 const part=z.discriminatedUnion('type',[
   z.strictObject({type:z.literal('text'),text:z.string().min(1).max(32000).refine(text=>text.trim().length>0)}),
@@ -6,8 +7,8 @@ const part=z.discriminatedUnion('type',[
 ]);
 export const QqMessageSequenceSchema=z.strictObject({qq_messages:z.array(part).min(1).max(12)})
   .refine(value=>value.qq_messages.filter(item=>item.type==='media').length<=1);
-export const QQ_EXPRESSION_DEFAULTS='QQ是即时聊天：按一个完整意思组织每条消息，通常每条几句话，一轮可发1—4条，也可一条或纯表情；这是软建议，不强拆句、不机械轮流、不制造错别字。普通闲聊少用标题、编号和报告口吻；需要详细解释、文档或代码时保留必要细节。长任务在有必要让对方知道时用qq_progress表达意图、已核验进展或阻碍，不公开内部思考、不每次工具调用都播报。临时表达要求立即遵循；值得长期保留的表达偏好用dafeiyu_qq_expression_save保存，随后自动装配，不能只口头说记住。';
-export const QQ_SEQUENCE_INSTRUCTIONS='需要分为多条QQ消息时，最终仅输出严格JSON：{"qq_messages":[{"type":"text","text":"第一条"},{"type":"text","text":"第二条"}]}。可在顺序中放一个{"type":"media"}表示已通过媒体／表情工具选定的部件发送位置，标记本身不发送；未写标记则媒体接在文字之后。普通单条可直接输出正文。不要把JSON包进代码围栏，不把尚未调用工具选定的图片写成已发送。';
+export const QQ_EXPRESSION_DEFAULTS='QQ是即时聊天：按一个完整意思组织每条消息，每条通常几句话，可以一条、多条或纯表情；不强拆句、不机械轮流、不制造错别字。普通闲聊少用标题、编号和报告口吻；需要详细解释、文档或代码时保留必要细节。阶段交流考虑对方的实际需要，说明有依据的进展和阻碍。临时表达要求与当前场景优先；有价值的长期偏好可以选择保存并继续调整。';
+export const QQ_SEQUENCE_INSTRUCTIONS='普通单条回复可以直接使用正文；需要有意安排多条消息或已选媒体的位置时，使用当前消息序列契约。媒体位置仅引用本轮实际选定的部件，未指定时放在文字之后。\n'+JSON.stringify({kind:'channel-output-contract',schema:outputContract(QqMessageSequenceSchema)});
 
 /** Only a complete, explicitly marked envelope changes transport semantics. Newlines remain prose. */
 export function qqMessageSequence(raw:string):{messages:string[];mediaAt:number;structured:boolean}{

@@ -127,7 +127,7 @@ export class ManagedHost {
     if(route.reasoningEffort&&!modelInfo.reasoning?.efforts.some(e=>e.id===route.reasoningEffort))throw new Error('HOST_REASONING_ROUTE_UNSUPPORTED');
     await ctx.plugin(Query,{path:this.config.paths.query,openAt:'first-search'});
     const {compactionInputTokens:inputTokens,...context}=this.config.config.context;
-    await ctx.plugin(Core,{agentId:this.config.config.agent.id,dataDir:this.config.paths.core,personaFile:this.config.paths.foundation,...route,lifecycleMode:'managed',turnTimeoutMs:this.config.config.runtime.turnTimeoutMs,
+    await ctx.plugin(Core,{agentId:this.config.config.agent.id,dataDir:this.config.paths.core,personaFile:this.config.paths.foundation,...route,lifecycleMode:'managed',turnTimeoutMs:this.config.config.runtime.turnTimeoutMs,phaseTimeouts:this.config.config.runtime.phaseTimeouts,
       context:{...context,regions:{...context.regions,'memory:growth':{...this.config.config.persona.growthRegion,required:false}}}});this.coreValue=ctx.dafeiyu;
     this.mark('binding');const timeline=pluginConfig(this.config,'timeline');if(timeline){await ctx.plugin(Timeline,{agentId:this.config.config.agent.id,...timeline});this.plugin('timeline','ready');}
     const memory=pluginConfig(this.config,'memory');if(memory){await ctx.plugin(Memory,{agentId:this.config.config.agent.id,dataDir:this.config.paths.memory,lifecycleMode:'managed',...memory,...(inputTokens?{compaction:{inputTokens}}:{})});this.memoryValue=ctx.dafeiyuMemory;this.plugin('memory','ready');

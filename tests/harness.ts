@@ -27,6 +27,8 @@ export function call(name: string, args: object): StreamChunk[] {
 }
 export class ScriptedModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = [];
+  /** Explicit fixture for the new program-owned phase; this is not a real semantic evaluation. */
+  assessmentResponse:Response=()=>textReply(JSON.stringify({goalStatus:'uncertain',summary:'脚本模型的固定阶段评价，仅验证程序流程。',evidenceIds:[],limitations:['未作真实模型质量验收'],unfinished:[],next:'deliver'}));
   constructor(private readonly response: Response) { super(); }
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     return { provider, id: model, name: model, systemPromptUpdate: 'in-history', toolUpdate: 'in-history',
@@ -34,7 +36,7 @@ export class ScriptedModel extends LlmAdapter {
   }
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options);
-    for (const chunk of await this.response(options)) { options.signal?.throwIfAborted(); yield chunk; }
+    for (const chunk of await (String(options.sessionId).startsWith('dafeiyu-assessment-')?this.assessmentResponse(options):this.response(options))) { options.signal?.throwIfAborted(); yield chunk; }
   }
 }
 export async function harness(root: string, response: Response = () => textReply('测试回复'), personaFile = resolve('profiles/persona.test.md'), timeout = 5000, reasoningEffort?: string,context?:Core.Config['context'],lifecycleMode:Core.Config['lifecycleMode']='legacy') {

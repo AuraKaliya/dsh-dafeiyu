@@ -135,7 +135,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     if(qqTasks?.enabled){if(!qqCapabilities)throw new Error('HOST_QQ_TASK_DEPENDENCY_REQUIRED');
       const conversation=config.authorityPolicies.find(policy=>policy.id==='conversation'&&policy.producers.includes('channel-qq'));
       const native=config.authorityPolicies.find(policy=>policy.id===qqTasks.policyId&&policy.producers.includes('qq-tasks'));
-      if(!conversation||QQ_TASK_ACTIONS.some(action=>!conversation.actions.includes(action))||!native?.allowLocalWrite||['dafeiyu_task_intent','dafeiyu_task_object'].some(action=>!native.actions.includes(action)))throw new Error('HOST_QQ_TASK_POLICY_REQUIRED');
+      if(!conversation||QQ_TASK_ACTIONS.slice(0,3).some(action=>!conversation.actions.includes(action))||!native?.allowLocalWrite||['dafeiyu_task_intent','dafeiyu_task_object'].some(action=>!native.actions.includes(action)))throw new Error('HOST_QQ_TASK_POLICY_REQUIRED');
       if(qqTasks.explorationResources?.some(scene=>!native.resources.some(allowed=>runtimeHash(scene)===runtimeHash(allowed))))throw new Error('HOST_QQ_EXPLORATION_RESOURCE_DENIED');
     }
     if(config.context.regions['memory:growth'])throw new Error('HOST_GROWTH_CONFIG_CONFLICT');

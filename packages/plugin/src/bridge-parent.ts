@@ -49,9 +49,12 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
       return await owner.sessionPersistence.stat(sessionId)?owner.agents.resume({resumeSessionId:sessionId,setup}):owner.agents.create({sessionId,meta:{cwd:dirname(settings.dataDir),agentPreset:'cordis'},setup});
     })();handles.set(key,promise);promise.catch(()=>handles.delete(key));}return promise;
   };
-  const catalog=(h:AgentHandle):DshToolCatalog=>{
+  const catalog=async(h:AgentHandle,signal:AbortSignal):Promise<DshToolCatalog>=>{
     const tools=ctx.tools.schemas(h.agent).filter(tool=>!excluded.test(tool.name));
-    return DshToolCatalogSchema.parse({version:hash(tools),tools,pluginChanges:changes.status()});
+    const registry=ctx.get('skills') as {snapshot(input:{scope:AgentHandle['agent'];cwd:string;signal:AbortSignal}):Promise<unknown>}|undefined;
+    const snapshot=registry&&tools.some(tool=>tool.name==='skill')?z.object({skills:z.array(z.object({name:z.string(),description:z.string(),invocation:z.object({modelInvocable:z.boolean()})})),complete:z.boolean()}).parse(await registry.snapshot({scope:h.agent,cwd:dirname(settings.dataDir),signal})):null;
+    const skills=snapshot?.skills.filter(item=>item.invocation.modelInvocable).map(item=>({name:item.name,description:item.description,load:{name:'skill',arguments:{name:item.name}}}));
+    return DshToolCatalogSchema.parse({version:hash({tools,skills:skills??null}),tools,...(skills?{skills,skillsComplete:snapshot?.complete}:{}),pluginChanges:changes.status()});
   };
   const receive=(raw:unknown)=>{
     const validation=z.object({type:z.literal('dsh.update-authority-result'),id:z.uuid(),valid:z.boolean()}).safeParse(raw);if(validation.success){validations.get(validation.data.id)?.(validation.data.valid);validations.delete(validation.data.id);return;}
@@ -60,10 +63,10 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
     if(message.type==='dsh.cancel'){controllers.get(message.id)?.abort();return;}
     if(controllers.has(message.id))return;const controller=new AbortController();controllers.set(message.id,controller);
     const work=(async()=>{try{
-      if(message.type==='dsh.catalog'){send(message.id,z.json().parse(catalog(await handle('catalog'))));return;}
+      if(message.type==='dsh.catalog'){send(message.id,z.json().parse(await catalog(await handle('catalog'),controller.signal)));return;}
       const authorization=ExternalTaskAuthorizationSchema.parse(message.authorization);
       if(authorization.action.owner!=='dsh-tools'||authorization.action.id!=='dsh_tool_call'||authorization.source.kind==='owner-message'&&(authorization.source.senderId!==settings.qq.ownerId||authorization.source.conversation.account!==settings.qq.botId))throw new Error('DSH_AUTHORITY_INVALID');
-      const h=await handle(authorization.taskId),current=catalog(h),tool=current.tools.find(tool=>tool.name===message.call.name);
+      const h=await handle(authorization.taskId),current=await catalog(h,controller.signal),tool=current.tools.find(tool=>tool.name===message.call.name);
       if(!tool||message.call.catalogVersion!==current.version)throw new Error('DSH_CATALOG_CHANGED');
       const args:unknown=JSON.parse(message.call.argumentsJson);if(validateJsonSchemaValue(tool.parameters,args).length)throw new Error('DSH_TOOL_ARGUMENTS_INVALID');controller.signal.throwIfAborted();
       const management=z.object({action:z.string()}).safeParse(args);

@@ -53,13 +53,13 @@ export class NativeTaskDelivery {
     if(automatic&&!description.autoDeliver)return Promise.resolve(null);if(!automatic&&!this.host.accepting())throw new Error('HOST_NOT_READY');
     const record=this.host.store.nativeDeliveries.create(description.anchor);this.host.flush();
     const pending=this.active.get(runId);if(pending)return pending;if(terminal.has(record.state)||!this.host.accepting())return Promise.resolve(this.host.store.nativeDeliveries.status(runId));
-    const work=this.execute(runId,description.item).finally(()=>this.active.delete(runId));this.active.set(runId,work);return work;
+    const work=this.execute(runId,description.item,automatic).finally(()=>this.active.delete(runId));this.active.set(runId,work);return work;
   }
   activate(){for(const runId of this.host.store.nativeDeliveryCandidates())if(this.host.describe(runId)?.autoDeliver)void this.request(runId,true).catch(()=>{});}
   async whenIdle(){while(this.active.size)await Promise.allSettled([...this.active.values()]);}
   get pending(){return this.active.size;}
   close(){this.unregister();}
-  private async execute(runId:string,item:PendingMessage){const release=await this.host.acquire();let invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
+  private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire();let invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
     try{let record=this.host.store.nativeDeliveries.get(runId)!;if(terminal.has(record.state))return this.host.store.nativeDeliveries.status(runId);
       const access=await this.host.access(runId),provider=this.host.expression(),channel=this.host.channel(item);
       if(!provider?.ready()||!channel?.capability.deliverTaskResult)throw new Error('DEPENDENCY_UNAVAILABLE');
@@ -83,17 +83,18 @@ export class NativeTaskDelivery {
       const reply=Object.freeze({id:`native-delivery:${record.id}`,conversation:Object.freeze({...record.anchor.target}),sourceMessageId:item.message.id,text:body,taskResult:record.anchor});
       let result:z.infer<typeof resultSchema>;
       if(packet.media){media=this.host.media();if(!media?.ready()||!media.replyDraft||!media.finalizeReply||!media.readReplyPart||!media.validateReply||!media.settleReply||channel.capability.mediaDelivery!=='parts-v1'||!channel.capability.deliverMedia)throw new Error('MEDIA_DELIVERY_NOT_CONFIGURED');
+        const sendMedia=channel.capability.deliverMedia.bind(channel.capability);
         const draft=media.replyDraft(runId);if(!draft||draft.id!==packet.media.draftId||draft.version!==packet.media.draftVersion)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaAccess=await this.host.mediaAccess(draft.authority,reply,signal);
         const manifest=await media.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaId=manifest.id;const authorized=()=>{guard();mediaAccess!.guard();if(this.host.media()!==media)throw new Error('SOURCE_STALE');media!.validateReply!(mediaAccess!,manifest.id);};authorized();
-        this.host.store.nativeDeliveries.sending(runId);this.host.flush();authorized();invoked=true;
-        result=resultSchema.parse(await channel.capability.deliverMedia(structuredClone({...reply,media:manifest}),signal,authorized,position=>{authorized();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));
+        result=await this.host.enqueue(item.route,async()=>{authorized();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
+          return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),signal,authorized,position=>{authorized();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));});
       }else{result=await this.host.enqueue(item.route,async()=>{guard();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;return resultSchema.parse(await sendTaskResult(reply,record.anchor,signal,guard));});}
       this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
     }catch(error){const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
     }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');}catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
       finally{if(mediaAccess)media?.releaseReply?.(mediaAccess);mediaAccess?.release();release();this.host.flush();}}
-    const status=this.host.store.nativeDeliveries.get(runId);if(status&&['rejected','interrupted','not-sent'].includes(status.state))await this.feedback(item,runId);
+    const status=this.host.store.nativeDeliveries.get(runId);if(notify&&status&&['rejected','interrupted','not-sent'].includes(status.state))await this.feedback(item,runId);
     return this.host.store.nativeDeliveries.status(runId);
   }
   private async feedback(item:PendingMessage,runId:string){

@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { loopbackURL, OneBot, platformId } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
-import { readRecentQqHistory } from './history.js';
+import { readRecentQqHistory,QQ_HISTORY_WINDOW_MS } from './history.js';
 import { waitForQqReply,waitBetweenQqMessages } from './reply-delay.js';
 import { forwardHandles,recentForwardNodes } from './forward.js';
 export { qqReplyDelayMs } from './reply-delay.js';
@@ -148,7 +148,7 @@ export class QqChannel extends Service {
       this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
         channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',
           processingSignal: message => this.processingSignal(message),
-          description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+(this.config.capabilities.enabled?'可用qq_browse回看本会话聊天；需要近期平台历史时首轮传includeRecentHistory:true，仅追加观察前24小时内消息，不重放为新入站。回答依赖历史内容时先实际浏览，再说明范围与缺口；不要把未查询说成无法查询。qq_reply_quote可选择实际浏览到、观察前24小时内的消息作为本轮回复的QQ引用，有兴趣时可自主选择。合并转发可用qq_forward_read读取；链接文本不代表已经访问网页。':'')+(this.config.media.enabled?'QQ包含受控媒体引用。需要理解图片、语音、视频或文件时，先qq_media_list取得实际引用，再dafeiyu_media_acquire/read读取；缺少处理器或读取失败时如实报告，不猜测。'+(this.config.media.sendEnabled?'媒体输出由dafeiyu_media_reply准备并交付。':this.config.stickers.enabled?'可用qq_sticker_list/collect/use自主挑选收录与使用本地表情；每轮通常最多一张，允许配文字或纯表情。默认收录仅本会话可用，主人用qq_sticker_manage管理；不能发送库外图片、语音或文件。':'当前回复使用文字。'):'当前媒体处理未启用，无法读取图片、语音、视频和文件正文。'),
+          description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority)=>this.deliverTaskResult(reply,anchor,signal,authority) }] });
       this.batches=this.store.batches(this.config.messageBatch,{current:message=>{try{this.processingSignal(message).throwIfAborted();return true;}catch{return false;}},submit:message=>{const receipt=this.handle.ingest(message);if(!receipt.duplicate)this.counters.accepted++;},failed:()=>{this.error='BATCH_SUBMISSION_FAILED';}});

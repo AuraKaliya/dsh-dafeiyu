@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
-import { DSH_TOOL_ACTIONS,DshToolCallSchema,DshResultReadSchema,ResourceProofSchema } from '@dafeiyu/contracts';
+import { DSH_TOOL_ACTIONS,DshToolCallSchema,DshResultReadSchema,ResourceProofSchema,ContextItemSchema } from '@dafeiyu/contracts';
 import type { DshToolsPort,ActionCapabilityV3,ResourceProof,Json,Conversation,ExecutionContextV3,ActionOutcome } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import { mkdirSync,writeFileSync,readFileSync } from 'node:fs';
@@ -13,6 +13,7 @@ const errorCode=(e:unknown)=>e instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(e.mes
 /** DSH executes once. Result reads are separate, scoped observations of immutable sanitized material. */
 export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receiptDirectory:string){
   mkdirSync(receiptDirectory,{recursive:true});const results=new DshResultStore(receiptDirectory);
+  const catalogs=new Map<string,import('@dafeiyu/contracts').ContextItem>();
   const file=(id:string)=>join(receiptDirectory,z.uuid().parse(id)+'.json');
   const current=(raw:ResourceProof)=>{try{const proof=ResourceProofSchema.parse(raw),detail=z.object({operationId:z.uuid(),taskId:z.uuid(),textHash:z.string()}).parse(proof.detail),saved=z.object({proof:ResourceProofSchema,page:z.json()}).parse(JSON.parse(readFileSync(file(detail.operationId),'utf8')));
     return proof.provider==='dsh-tools'&&hash(proof)===hash(saved.proof)&&hash(saved.page)===detail.textHash;}catch{return false;}};
@@ -35,7 +36,7 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
     description:'按当前能力声明直接执行操作。真实任务来源和DSH策略由程序检查；返回执行事实、结果引用及可继续读取的视图。',
     inputSchema:DshToolCallSchema,outputSchema:z.json(),execute:async(raw,context)=>{
       const authority=ctx.dafeiyu.authorizeExternalTask(context,'dsh-tools');authority.guard();
-      const call=DshToolCallSchema.parse(raw);let result:Json;try{result=await port.execute(call,authority,context.signal);}catch(e){if(e instanceof Error&&['DSH_CATALOG_CHANGED','DSH_TOOL_ARGUMENTS_INVALID','DSH_AUTHORITY_INVALID','PRIVATE_INPUT_REJECTED','DSH_PLUGIN_CHANGE_PENDING'].includes(e.message))return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:e.message};throw e;}
+      const call=DshToolCallSchema.parse(raw);let result:Json;try{result=await port.execute(call,authority,context.signal);}catch(e){if(e instanceof Error&&['DSH_CATALOG_CHANGED','DSH_TOOL_ARGUMENTS_INVALID','DSH_AUTHORITY_INVALID','PRIVATE_INPUT_REJECTED','DSH_PLUGIN_CHANGE_PENDING'].includes(e.message))return {status:'failed',effects:'none',completeness:'unknown',data:e.message==='DSH_CATALOG_CHANGED'?z.json().parse({currentCapabilities:await port.catalog(context.signal)}):null,sources:[],receipts:[],errorCode:e.message};throw e;}
       const fact=execution.safeParse(result),failed=fact.success&&fact.data.isError===true,effect=fact.success?fact.data.effect??(failed?'unknown':'confirmed'):'unknown';
       const receipts=[{kind:'dsh-operation',id:context.operationId}];
       try{const target=scene(context);results.save(context.operationId,context.taskId!,target,result);authority.guard();
@@ -48,7 +49,10 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
     inputSchema:DshResultReadSchema,outputSchema:z.json(),execute:async(raw,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');const input=DshResultReadSchema.parse(raw),target=scene(context);
       try{return observe(context,target,results.read(context.taskId!,target,input),input.resultId,'none');}catch(e){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:errorCode(e)};}}
   }];
-  return ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'dsh-tools',version:'1',agentId,provides:['dsh.tools.v1'],requires:['execution.task.v1','memory.capability-observation.v1'],actions,resourceProofs:{current,epoch:()=>'',targetView:(proof,view,target,scope)=>{
+  return ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'dsh-tools',version:'1',agentId,provides:['dsh.tools.v1'],requires:['execution.task.v1','memory.capability-observation.v1'],actions,
+    contexts:[{id:'capabilities',prepare:async view=>{const catalog=await port.catalog(view.signal),item=ContextItemSchema.parse({id:'dsh-capabilities',version:catalog.version,text:JSON.stringify({kind:'available-capabilities',instructionAuthority:false,version:catalog.version,tools:catalog.tools.map(tool=>({name:tool.name,purpose:Array.from(tool.description).slice(0,80).join('')})),skills:catalog.skills??[],skillsComplete:catalog.skillsComplete??true,details:{tool:DSH_TOOL_ACTIONS[0],arguments:{}}}),expiresAt:new Date(Date.now()+3600000).toISOString(),sources:[{ref:'dsh:capabilities',version:catalog.version,hash:hash(catalog)}]});
+      if(catalogs.size>=1024)catalogs.delete(catalogs.keys().next().value!);catalogs.set(view.runId,item);return [item];},validate:(view,item)=>hash(catalogs.get(view.runId))===hash(item)}],
+    resourceProofs:{current,epoch:()=>'',targetView:(proof,view,target,scope)=>{
     if(!current(proof)||hash(proof.scene)!==hash(target)||scope.kind!=='task')return null;const detail=z.object({taskId:z.string(),operationId:z.uuid()}).parse(proof.detail),saved=z.object({page:z.json()}).parse(JSON.parse(readFileSync(file(detail.operationId),'utf8')));
     return scope.taskId===detail.taskId&&view===JSON.stringify(saved.page)?{kind:'reported',stamp:hash([proof,view,target,scope])}:null;
   }}});
