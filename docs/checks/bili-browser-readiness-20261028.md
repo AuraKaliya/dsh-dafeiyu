@@ -22,6 +22,14 @@
 
 ## 正式激活
 
-最新停用数据备份 data-before 已建立，包含 72 份文件；正式重载、数据保存核验与运行状态将在激活后补记。未改动用户原 docs/memory-phase-1.md，其 SHA256 仍为 CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730。
+最新停用数据备份 data-before 已建立，包含 72 份文件。用户于 00:21:58 完整重启 DSH，00:22:08 启动同一正式实例；00:24:23 上线核验通过。实际包版本 0.22.2，修复提交 5994b431a35583b55502a274f9b799bfe39c3d19。
+
+DSH 的 dsh-dafeiyu 链接仍指向本机 packages/plugin，宿主和大肥鱼进程均为重启后新进程。浏览器适配器、桥接父端、B站客户端三个构建文件与激活前清单哈希完全一致，宿主启动时间晚于修复构建；入口在启动子进程前加载桥接模块。外置配置和专用浏览器绑定保持原样。
+
+正式状态持续 ready、accepting=true，7 个必需组件全部 ready，QQ online 且群列表正常刷新，B站 active；没有未到期冷却、诊断锁定或活动复检租约。活动运行、排队运行、排队路由、入站待办、outbox 均为 0。此结论不把此前匿名 HTTP 412 宣称为已经恢复；本轮上线核对没有新增平台请求。
+
+数据核对 10 份身份/底色/会话文件及 149 张既有表，原行全部保留，记忆、入站、运行记录完全一致，数据库 quick_check 均通过。唯一新增非动态数据为 channel-qq 的 connection.opened 事件（日志 1349 → 1350）。旧的 3 个待定交付段及 42 个已发送段保持原状，没有重放历史失败消息或已发内容。证据为 deployment/browser-ready-20261028 内的 preservation-after-activation.json、restart-processes.json 和 activation-check.json。
+
+未改动用户原 docs/memory-phase-1.md，其 SHA256 仍为 CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730。此次仅补充验收文档与本机使用说明，不在运行中修改或重新构建程序。
 
 本轮验证区分模拟平台/模型、真实本机 IPC 和真实浏览器组件；未发送真实 QQ 测试消息，也未声称完整真实模型 → 浏览器 → QQ 端到端交付已经验收。
