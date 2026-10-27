@@ -23,6 +23,7 @@ test('explicit local owner delegation keeps its real origin and delivers a verif
   assert.equal(h.core.journal.list()[0]!.message.conversation.id,'local-owner:'+id);
   const chatRequest=h.adapter.requests.find(request=>String(request.sessionId).startsWith('dafeiyu-')&&!String(request.sessionId).startsWith('dafeiyu-task-'))!;
   assert.ok(chatRequest.tools?.some(tool=>tool.name==='local_owner_task_submit'));assert.ok(!chatRequest.tools?.some(tool=>tool.name==='qq_task_submit'||tool.name==='qq_task_status'));
+  assert.deepEqual(chatRequest.tools?.map(tool=>tool.name),['local_owner_task_submit']);
   const before=h.adapter.requests.length;close();close=attachLocalOwnerControl(h.ctx,settings,'dafeiyu');await h.core.whenIdle();assert.equal(h.adapter.requests.length,before);assert.equal(h.platform.sent.length,2);
   assert.equal((await h.ctx.dafeiyuQQ.deliverLocalOwner({id:randomUUID(),sourceMessageId:'fake',conversation:{channel:'local-owner',account:bot,kind:'private',id:'99999999'},text:'MUST_NOT_SEND'},new AbortController().signal,()=>{})).status,'not-sent');assert.equal(h.platform.sent.length,2);
 });

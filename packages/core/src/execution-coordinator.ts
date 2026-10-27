@@ -585,7 +585,7 @@ export class ExecutionCoordinator {
           }catch(e){admittedGuard();if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
             this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.checkpoint(id,{kind:'assessment-pending',draft:result.resultRef});
             this.d.store.transition(id,this.d.store.get(id).version,'waiting',safeCode(e));return;}
-          const record={schemaVersion:1,assessment:reviewed.assessment,model:this.d.model,resultRef:reviewed.resultRef,draftRef:result.resultRef,basisHash:runtimeHash(operations),at:new Date().toISOString()};
+          const record={schemaVersion:1,assessment:reviewed.assessment,model:reviewed.model,resultRef:reviewed.resultRef,draftRef:result.resultRef,basisHash:runtimeHash(operations),at:new Date().toISOString()};
           this.d.store.bindInput(id,`task-assessment:${stage}`,record);
           if(reviewed.assessment.next==='continue'){previousAssessment=reviewed.assessment;stage++;continue;}
           this.d.store.bindInput(id,'task-assessment',record);
