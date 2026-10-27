@@ -73,8 +73,32 @@ test('mixed accounts are rejected immediately and duplicate links to the same ac
     if(ids[1]==='43')await assert.rejects(read,/ACCOUNT_MISMATCH/);else assert.equal((await read).accountUid,'42');assert.equal(time.waits,0);
   }
 });
-test('browser shares cooling gate, records its transport and does not clear HTTP risk by succeeding',async()=>{const root=await mkdtemp(join(testTempDir(),'bili-browser-')),store=new BiliStore(join(root,'b.sqlite'),{agentId:'fish',profileId:'test'},true),c=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100,browser:{expectedUid:'42'}}),store);let calls=0;const port={read:async(i:BiliBrowserRequest)=>{calls++;return {transport:'dsh-browser' as const,accountUid:'42',bvid:i.bvid,section:i.section,url:`https://www.bilibili.com/video/${i.bvid}/`,title:'标题',text:'简介',truncated:false,observedAt:new Date().toISOString()};}};
+test('browser shares cooling gate, records its transport and does not clear HTTP risk by succeeding',async()=>{const root=await mkdtemp(join(testTempDir(),'bili-browser-')),store=new BiliStore(join(root,'b.sqlite'),{agentId:'fish',profileId:'test'},true),c=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100,browser:{expectedUid:'42'}}),store);let calls=0;const port={read:async(i:BiliBrowserRequest)=>{calls++;return {transport:'dsh-browser' as const,accountUid:'42',bvid:i.bvid??null,section:i.section,url:`https://www.bilibili.com/video/${i.bvid}/`,title:'标题',text:'简介',truncated:false,observedAt:new Date().toISOString()};}};
   try{await c.browserRead(port,input(),new AbortController().signal,()=>{});assert.equal(store.diagnostics.recent()[0]!.transport,'dsh-browser');store.backoff(Date.now(),30000);await assert.rejects(c.browserRead(port,input(),new AbortController().signal,()=>{}),/BACKOFF/);assert.equal(calls,1);assert.equal(store.diagnostics.recent()[0]!.networkSent,false);}finally{store.close();}
+});
+
+test('anonymous HTTP hold preserves its evidence while a separately bound browser verifies after the shared wait',async()=>{
+  const root=await mkdtemp(join(testTempDir(),'bili-scoped-hold-')),file=join(root,'b.sqlite'),identity={agentId:'fish',profileId:'test'},store=new BiliStore(file,identity,true);
+  const realNow=Date.now;let now=realNow(),httpCalls=0,browserCalls=0;Date.now=()=>now;
+  const config=BiliConfigSchema.parse({minIntervalMs:100,retry:{riskDelayMs:1000},browser:{expectedUid:'42'}});
+  const c=new BiliClient(config,store,async()=>{httpCalls++;return {status:412,headers:{'content-type':'application/json'},body:(async function*(){yield Buffer.from('{"code":-412}');})(),close(){}};});
+  const i=input(),port={read:async()=>{browserCalls++;return {transport:'dsh-browser' as const,accountUid:'42',bvid:i.bvid!,section:i.section,url:`https://www.bilibili.com/video/${i.bvid}/`,...content,observedAt:new Date().toISOString()};}};
+  try{await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/BACKOFF/);now+=1100;
+    await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/BACKOFF/);assert.equal(store.diagnostics.state.held,true);
+    await assert.rejects(c.browserRead(port,i,new AbortController().signal,()=>{}),/BACKOFF/);assert.equal(browserCalls,0);now+=1100;
+    await c.browserRead(port,i,new AbortController().signal,()=>{});assert.equal(browserCalls,1);assert.equal(store.diagnostics.state.held,true);assert.equal(c.status().pause.scope,'anonymous-http');
+    await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);assert.equal(httpCalls,2);
+    now+=200;await assert.rejects(c.browserRead({read:async()=>{throw new Error('BILI_BROWSER_CHALLENGE');}},i,new AbortController().signal,()=>{}),/CHALLENGE/);now+=1100;
+    await assert.rejects(c.browserRead(port,i,new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);assert.equal(browserCalls,1);assert.equal(c.status().pause.scope,'shared-or-unknown');
+  }finally{Date.now=realNow;store.close();}
+});
+
+test('browser discovery validates identity and emits only visible public listing text',async()=>{
+  const i={taskId:randomUUID(),runId:randomUUID(),operationId:randomUUID(),section:'discover' as const},url='https://www.bilibili.com/v/popular/all';let checks=0;
+  const value=await readBiliBrowser(i,'42',async(name,args)=>{if(name==='dsh_browser_open'){assert.equal(args.url,url);return {url};}
+    assert.equal(name,'dsh_browser_execute');if(isIdentity(args)){checks++;return result({url,ids:['42']});}
+    assert.doesNotMatch(String(args.script),/cookie|localStorage|fetch\(/);return result({title:'热门列表',text:'样本 https://www.bilibili.com/video/BV1xx411c7mD/',truncated:true});
+  },new AbortController().signal);assert.equal(checks,2);assert.equal(value.bvid,null);assert.equal(value.truncated,true);
 });
 
 test('browser identity mismatch enters a persistent condition wait instead of repeated page reads',async()=>{const root=await mkdtemp(join(testTempDir(),'bili-browser-hold-')),store=new BiliStore(join(root,'b.sqlite'),{agentId:'fish',profileId:'test'},true),c=new BiliClient(BiliConfigSchema.parse({browser:{expectedUid:'42'}}),store);let calls=0;const port={read:async()=>{calls++;throw new Error('BILI_BROWSER_ACCOUNT_MISMATCH');}};try{await assert.rejects(c.browserRead(port,input(),new AbortController().signal,()=>{}),/ACCOUNT_MISMATCH/);assert.equal(store.diagnostics.state.held,true);assert.equal(store.diagnostics.recent()[0]!.kind,'login');assert.equal(store.diagnostics.recent()[0]!.networkSent,null);await assert.rejects(c.browserRead(port,input(),new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);assert.equal(calls,1);}finally{store.close();}});

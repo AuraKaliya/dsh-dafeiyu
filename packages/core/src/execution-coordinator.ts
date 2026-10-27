@@ -87,6 +87,10 @@ export class ExecutionCoordinator {
     if(binding.explorationResources?.some(scene=>!policy.resources.some(allowed=>runtimeHash(allowed)===runtimeHash(scene))))throw new Error('EXPLORATION_RESOURCE_DENIED');
     const captured=Object.freeze({...binding,classify:binding.classify.bind(binding),active:binding.active.bind(binding),...(binding.voice?{voice:Object.freeze({version:binding.voice.version,resolve:binding.voice.resolve.bind(binding.voice),current:binding.voice.current.bind(binding.voice)})}:{})});this.messageBindings.set(binding.id,captured);return ()=>{if(this.messageBindings.get(binding.id)===captured)this.messageBindings.delete(binding.id);};}
   private messageBindingHash(binding:MessageTaskBinding){const {classify:_classify,active:_active,autoDeliver:_auto,voice:_voice,...identity}=binding;return runtimeHash({identity,policy:this.policy(binding.id,binding.policyId)});}
+  messageCapabilities(message:import('@dafeiyu/contracts').InboundMessage){return {kind:'task-capability-catalog',
+    bindings:[...this.messageBindings.values()].filter(binding=>binding.active()&&binding.channel===message.conversation.channel&&binding.account===message.conversation.account).map(binding=>{
+      const policy=this.policy(binding.id,binding.policyId);return {id:binding.id,ownerTaskAuthorized:message.sender.id===binding.ownerId,actions:this.d.registry.actions().filter(action=>policy.actions.includes(action.id)).map(action=>({name:action.id,registered:true,ready:action.active(),requiresTask:action.requiresTask}))};}),
+    note:'这是任务阶段的真实能力目录，不是本轮直接调用的工具。普通聊天通过当前任务入口受理主人指示或形成自主探索；当前工具子集缺少某项不能推断插件未加载。ready只说明组件就绪，平台成功须以实际回执为准。'};}
   private messageDirective(binding:MessageTaskBinding,context:ExecutionContextV3,message:import('@dafeiyu/contracts').InboundMessage,exposureId?:string){
     const directive=binding.classify(message);if(messageMainText(message).trim()||exposureId===undefined)return {directive,voice:undefined};
     if(message.sender.id!==binding.ownerId)throw new Error('TASK_DIRECTIVE_REQUIRED');if(!binding.voice)throw new Error('VOICE_DIRECTIVES_NOT_CONFIGURED');

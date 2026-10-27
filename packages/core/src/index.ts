@@ -788,7 +788,8 @@ export class DafeiyuService extends Service {
         started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const nativeActions=run?this.executions?.conversationActions(run,source.extension.id,signal,()=>{if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');})??[]:[];
-        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description,undefined,nativeActions,()=>!!(run&&this.runStore?.operations(run.id).some(op=>op.plugin==='qq-tasks'&&op.action==='qq_task_submit'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'))||!!(run&&this.mediaPort?.replyDraft?.(run.id)?.selected&&this.runStore?.operations(run.id).some(op=>op.action==='qq_sticker_use'&&op.plugin==='qq-stickers'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed')));
+        const capabilityDescription=[channel?.description,this.executions?JSON.stringify(this.executions.messageCapabilities(item.message)):null].filter(Boolean).join('\n');
+        result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, capabilityDescription,undefined,nativeActions,()=>!!(run&&this.runStore?.operations(run.id).some(op=>op.plugin==='qq-tasks'&&op.action==='qq_task_submit'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'))||!!(run&&this.mediaPort?.replyDraft?.(run.id)?.selected&&this.runStore?.operations(run.id).some(op=>op.action==='qq_sticker_use'&&op.plugin==='qq-stickers'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed')));
         signal.throwIfAborted();
         if(run)this.personas.current(run.id)?.guard();
       } catch (error) {
