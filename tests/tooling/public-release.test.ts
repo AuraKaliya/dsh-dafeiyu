@@ -21,6 +21,7 @@ test('a publishable package installs without private workspaces and runs the sam
   await mkdir(consumer);await writeFile(join(consumer,'package.json'),JSON.stringify({name:'isolated-public-install',private:true,type:'module'}));
   await execute(process.execPath,[npm,'install',join(root,pack.filename),'--ignore-scripts','--no-audit','--no-fund','--registry=https://registry.npmjs.org'],{cwd:consumer,env,windowsHide:true,timeout:180000,maxBuffer:200000});
   await copyFile(resolve('build-tests/test-temp.js'),join(consumer,'test-temp.js'));
+  await copyFile(resolve('build-tests/qq-group-packet-fixture.js'),join(consumer,'qq-group-packet-fixture.js'));
   let fixture=await readFile(resolve('build-tests/installation-runtime-fixture.js'),'utf8');
   fixture=fixture.replace("resolve('profiles/persona.foundation.md')","resolve('node_modules/dsh-dafeiyu/runtime/plugin/assets/foundation.md')");
   await writeFile(join(consumer,'check.mjs'),fixture);

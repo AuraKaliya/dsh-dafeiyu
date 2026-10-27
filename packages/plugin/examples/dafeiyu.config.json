@@ -2,11 +2,34 @@
   "schemaVersion": 1,
   "dataDir": "./dafeiyu-data",
   "instanceName": "dafeiyu",
-  "model": {"model": "", "credentialStore": ""},
-  "qq": {
-    "botId": "", "ownerId": "", "tokenFile": "",
-    "httpURL": "http://127.0.0.1:13000/", "wsURL": "ws://127.0.0.1:13001/",
-    "naturalNames": ["大肥鱼"], "joinedGroups": false, "groupIds": []
+  "model": {
+    "model": "",
+    "credentialStore": ""
   },
-  "activity": {"enabled": true, "timeZone": "Asia/Shanghai", "dailyActiveMs": 3600000}
+  "qq": {
+    "botId": "",
+    "ownerId": "",
+    "tokenFile": "",
+    "httpURL": "http://127.0.0.1:13000/",
+    "wsURL": "ws://127.0.0.1:13001/",
+    "naturalNames": [
+      "大肥鱼"
+    ],
+    "joinedGroups": false,
+    "groupIds": [],
+    "messageBatch": {
+      "enabled": true,
+      "quietMs": 5000,
+      "maxWaitMs": 15000,
+      "maxMessages": 10
+    },
+    "stickers": {
+      "enabled": false
+    }
+  },
+  "activity": {
+    "enabled": true,
+    "timeZone": "Asia/Shanghai",
+    "dailyActiveMs": 3600000
+  }
 }

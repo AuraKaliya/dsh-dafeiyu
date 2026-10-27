@@ -1,8 +1,8 @@
 # 大肥鱼 · DSH可成长智能体插件
 
-[开源仓库](https://github.com/AuraKaliya/dsh-dafeiyu) · [v0.20.0预览版安装包](https://github.com/AuraKaliya/dsh-dafeiyu/releases/tag/v0.20.0) · [本机1300项检查](docs/checks/plugin-integration-8-final.md)
+[开源仓库](https://github.com/AuraKaliya/dsh-dafeiyu) · [v0.21.0预览版安装包](https://github.com/AuraKaliya/dsh-dafeiyu/releases/tag/v0.21.0) · [本版验证范围](packages/plugin/docs/validation.md)
 
-本轮版本为0.20.0：记忆与成长统一管理阶段人格、偏好与关系；QQ和B站各一个平台包，渠道与能力接口内部独立。安装入口、必要配置及独立运行已实现，见 [安装说明](packages/plugin/README.md) 和 [整体架构](docs/architecture.md)。
+本轮版本为0.21.0：QQ群助手过滤、最近24小时回看和媒体读取已接入，新增5秒连续消息合并和本地表情收录/发送；记忆与成长统一管理阶段人格、偏好与关系；QQ和B站各一个平台包，渠道与能力接口内部独立。安装入口、必要配置及独立运行已实现，见 [安装说明](packages/plugin/README.md) 和 [整体架构](docs/architecture.md)。
 
 公开版本由白名单构建到独立目录，包含预编译运行代码和运行模块源码；本开发仓库的历史验收、私人配置和运行数据不随开源快照发布。方案见 [插件整合与发布](docs/plugin-integration-release-plan.md)。原数据保留策略不变。
 
