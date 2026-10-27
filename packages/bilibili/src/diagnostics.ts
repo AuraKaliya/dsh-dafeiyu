@@ -33,6 +33,10 @@ export class BiliDiagnostics {
   constructor(private readonly db:DatabaseSync){}
   private atomic<T>(work:()=>T):T{this.db.exec('BEGIN IMMEDIATE');try{const value=work();this.db.exec('COMMIT');return value;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   get state(){return controlSchema.parse(JSON.parse(String(this.db.prepare('SELECT body FROM bili_http_control WHERE id=1').get()?.body)));}
+  /** A live condition cannot depend on a UI-sized recent-attempt window. */
+  conditionAttempt():BiliAttempt|null{const state=this.state;if(!state.failures||!state.kind||!state.endpoint)return null;
+    const row=this.db.prepare("SELECT body FROM bili_http_attempts WHERE json_extract(body,'$.outcome')='failed' AND json_extract(body,'$.kind')=? AND json_extract(body,'$.endpoint')=? ORDER BY at DESC,rowid DESC LIMIT 1").get(state.kind,state.endpoint);
+    return row?AttemptSchema.parse(JSON.parse(String(row.body))):null;}
   private set(value:z.infer<typeof controlSchema>){this.db.prepare('UPDATE bili_http_control SET body=? WHERE id=1').run(JSON.stringify(controlSchema.parse(value)));}
   assertAvailable(){if(this.state.held)throw new Error('BILI_DIAGNOSTIC_REQUIRED');}
   acquireProbe(id:string,now:number,timeout:number){this.atomic(()=>{const s=this.state;if(s.held)throw new Error('BILI_DIAGNOSTIC_REQUIRED');
@@ -52,6 +56,7 @@ export class BiliDiagnostics {
   /** Trusted maintenance only, after resolving the diagnosed condition. Not a model tool. */
   resolveHold(){this.atomic(()=>{if(Number(this.db.prepare('SELECT blocked_until FROM bili_clock WHERE id=1').get()?.blocked_until)>Date.now())throw new Error('BILI_BACKOFF');this.set(initial());this.db.prepare('UPDATE bili_clock SET error=NULL WHERE id=1').run();});}
   record(raw:BiliAttempt){const value=AttemptSchema.parse(raw);this.atomic(()=>{this.db.prepare('INSERT INTO bili_http_attempts VALUES(?,?,?)').run(value.id,value.at,JSON.stringify(value));
-    this.db.prepare('DELETE FROM bili_http_attempts WHERE at<? OR id IN (SELECT id FROM bili_http_attempts ORDER BY at DESC,rowid DESC LIMIT -1 OFFSET 5000)').run(value.at-7*86400000);});}
+    const active=this.conditionAttempt()?.id??'';
+    this.db.prepare('DELETE FROM bili_http_attempts WHERE id<>? AND (at<? OR id IN (SELECT id FROM bili_http_attempts WHERE id<>? ORDER BY at DESC,rowid DESC LIMIT -1 OFFSET ?))').run(active,value.at-7*86400000,active,active?4999:5000);});}
   recent(limit=20):BiliAttempt[]{return this.db.prepare('SELECT body FROM bili_http_attempts ORDER BY at DESC,rowid DESC LIMIT ?').all(z.number().int().min(1).max(100).parse(limit)).map(r=>AttemptSchema.parse(JSON.parse(String(r.body))));}
 }

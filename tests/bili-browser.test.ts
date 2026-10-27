@@ -88,6 +88,9 @@ test('anonymous HTTP hold preserves its evidence while a separately bound browse
   try{await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/BACKOFF/);now+=1100;
     await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/BACKOFF/);assert.equal(store.diagnostics.state.held,true);
     await assert.rejects(c.browserRead(port,i,new AbortController().signal,()=>{}),/BACKOFF/);assert.equal(browserCalls,0);now+=1100;
+    for(let n=0;n<120;n++)await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);
+    assert.ok(store.diagnostics.conditionAttempt());assert.ok(!store.diagnostics.recent(100).some(attempt=>attempt.kind==='risk'));
+    now+=8*86400000;await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);assert.equal(store.diagnostics.conditionAttempt()?.kind,'risk');
     await c.browserRead(port,i,new AbortController().signal,()=>{});assert.equal(browserCalls,1);assert.equal(store.diagnostics.state.held,true);assert.equal(c.status().pause.scope,'anonymous-http');
     await assert.rejects(c.read('video',{bvid:i.bvid},new AbortController().signal,()=>{}),/DIAGNOSTIC_REQUIRED/);assert.equal(httpCalls,2);
     now+=200;await assert.rejects(c.browserRead({read:async()=>{throw new Error('BILI_BROWSER_CHALLENGE');}},i,new AbortController().signal,()=>{}),/CHALLENGE/);now+=1100;

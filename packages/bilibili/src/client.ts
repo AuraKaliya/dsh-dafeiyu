@@ -37,7 +37,7 @@ export class BiliClient {
   withContext<T>(context:{taskId:string|null;runId:string;operationId:string},work:()=>T):T{return this.context.run({taskId:context.taskId,runId:context.runId,operationId:context.operationId},work);}
   accountStamp(){return createHash('sha256').update(this.session()?.hash??'anonymous').digest('hex');}
   private anonymousHttpCondition(){const state=this.store.diagnostics.state;if(!state.failures||!['risk','rate-limit','network'].includes(state.kind??''))return false;
-    const cause=this.store.diagnostics.recent(100).find(attempt=>attempt.outcome==='failed'&&attempt.kind===state.kind&&attempt.endpoint===state.endpoint);
+    const cause=this.store.diagnostics.conditionAttempt();
     return cause?.transport==='http'&&cause.auth==='anonymous';}
   status(){const state=this.store.diagnostics.state,waitUntil=this.store.clock.blockedUntil,waiting=waitUntil>Date.now(),httpOnly=this.anonymousHttpCondition();
     return {http:{identity:this.config.session?'configured-session':'anonymous',state:state.held?'diagnostic-required':waiting?'cooldown':'available'},

@@ -174,7 +174,8 @@ export class ExecutionCoordinator {
     const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
     const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
     const progress=this.d.store.readInput(run.id,'automatic-progress'),retention=this.d.store.readInput(run.id,'assessment-retention');
-    if(progress)operationalEvidence.push({id:'PROGRESS',kind:'reported',text:JSON.stringify({kind:'program-feedback-receipt',receipt:progress})});
+    if(progress)operationalEvidence.push({id:'PROGRESS',kind:'reported',text:JSON.stringify(this.progressFacts(progress))});
+    operationalEvidence.push({id:'WORKFLOW',kind:'reported',text:JSON.stringify(this.resultWorkflow(run.id))});
     if(retention)operationalEvidence.push({id:'RETENTION',kind:'reported',text:JSON.stringify({kind:'assessment-retention',result:retention,note:'保存的是有来源的模型评价；经历整理和人格采用仍有独立流程。'})});
     if(run.state==='waiting')operationalEvidence.push({id:'STATE',kind:'reported',text:JSON.stringify({state:run.state,error:run.error,note:'程序等待状态，不表示目标已经满足。'})});
     const reviewed=z.object({assessment:TaskAssessmentSchema}).safeParse(this.d.store.readInput(run.id,'task-assessment'));
@@ -186,11 +187,16 @@ export class ExecutionCoordinator {
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
       resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',phase:this.d.store.phaseStatus(run.id),assessment:this.assessmentStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
   feedbackSource(runId:string){const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
-    if(!source||source.kind!=='explicit-task'||source.conversation.channel!=='qq'||run.definition.scope.kind!=='task')return null;
+    if(!source||source.kind!=='explicit-task'||!['qq','local-owner'].includes(source.conversation.channel)||run.definition.scope.kind!=='task')return null;
     const {item}=this.validateMessageSource(source),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
     if(task.epoch!==run.definition.intentVersion||task.status!=='active')return null;
     return {item,taskId:task.id,state:run.state,error:run.error,operations:this.d.store.operations(run.id).map(op=>({state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null}))};
   }
+  private progressFacts(receipt:Json|null){return {kind:'program-feedback-receipt',purpose:'intermediate-status-only',doesNotDescribeFinalDelivery:true,receipt,
+    note:'这里只记录执行中的阶段通知；未发送阶段通知不表示最终结果发送失败。最终正文仍须经人格整理和核验。'};}
+  private resultWorkflow(runId:string){const used=[...new Set(this.d.store.operations(runId).map(op=>op.action))],registered=new Set(this.d.registry.actionNames());
+    return {kind:'result-workflow',finalDelivery:'after-persona-render-and-verification',actions:used.map(name=>({name,registered:registered.has(name)})),
+      note:'此材料用于生成最终答复，最终发送在正文核验之后；此时没有最终回执不表示发送失败。动作已注册与平台调用成功是两件事，暂停、超时或页面不可用不能推断缺少插件。'};}
   private assessmentStatus(runId:string){const value=z.object({assessment:TaskAssessmentSchema,at:z.string()}).safeParse(this.d.store.readInput(runId,'task-assessment'));return value.success?{goalStatus:value.data.assessment.goalStatus,next:value.data.assessment.next,at:value.data.at}:null;}
   reconcileCapabilityChange(raw:unknown){
     const change=DshCapabilityChangeSchema.parse(raw),authorization=change.authorization;
@@ -580,7 +586,7 @@ export class ExecutionCoordinator {
           const operations=this.d.store.operations(id).map(op=>({id:op.id,action:op.action,state:op.state,outcome:op.outcome}));
           this.d.store.appendExecutionEvent(id,'task.stage',{phase:'assessment',stage,deadlineAt:new Date(Math.min(Date.parse(run.updatedAt)+this.d.turnTimeoutMs,Date.now()+(this.d.assessmentTimeoutMs??60000))).toISOString()});this.flushEvents();
           let reviewed:Awaited<ReturnType<DshRuntime['assessExecution']>>;
-            try{reviewed=await this.d.runtime.assessExecution(frame,result,z.json().parse({operations,programFeedback:this.d.store.readInput(id,'automatic-progress'),blocking:memory?.intent(access).blocking??false,coverage:{complete:true}}));
+            try{reviewed=await this.d.runtime.assessExecution(frame,result,z.json().parse({operations,programFeedback:this.progressFacts(this.d.store.readInput(id,'automatic-progress')),workflow:this.resultWorkflow(id),blocking:memory?.intent(access).blocking??false,coverage:{complete:true}}));
             if(reviewed.assessment.evidenceIds.some(ref=>!operations.some(op=>op.id===ref)))throw new Error('TASK_ASSESSMENT_EVIDENCE_INVALID');
           }catch(e){admittedGuard();if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
             this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.checkpoint(id,{kind:'assessment-pending',draft:result.resultRef});

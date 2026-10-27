@@ -9,7 +9,7 @@ function state(root:string){const db=new DatabaseSync(join(root,'core/runtime.sq
 
 test('a normal task stop is followed by a separate persisted model assessment',async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let chat=0;
-  h.adapter.assessmentResponse=request=>{assert.match(JSON.stringify(request.messages),/internal-not-sent/);assert.match(JSON.stringify(request.messages),/after-persona-render-and-verification/);return assessment('deliver');};h.setResponse(request=>String(request.sessionId).startsWith('dafeiyu-task-')?textReply('只完成部分工作。'):++chat===1?call('qq_task_submit',{requestId:'assessment'}):textReply(''));
+  h.adapter.assessmentResponse=request=>{assert.match(JSON.stringify(request.messages),/internal-not-sent/);assert.match(JSON.stringify(request.messages),/after-persona-render-and-verification/);assert.match(JSON.stringify(request.messages),/intermediate-status-only/);assert.match(JSON.stringify(request.messages),/doesNotDescribeFinalDelivery/);return assessment('deliver');};h.setResponse(request=>String(request.sessionId).startsWith('dafeiyu-task-')?textReply('只完成部分工作。'):++chat===1?call('qq_task_submit',{requestId:'assessment'}):textReply(''));
   await h.message('查一查这个问题',{trigger:true});const s=state(h.root);assert.equal(s.run.state,'completed');assert.ok(s.assessment);const body=JSON.parse(String(s.assessment.body));assert.equal(body.assessment.goalStatus,'partial');assert.equal(body.assessment.next,'deliver');assert.ok(s.draft);
 });
 
