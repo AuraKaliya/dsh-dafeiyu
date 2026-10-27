@@ -21,7 +21,7 @@ export class BiliMedia implements MediaSourceProvider {
     if(bytes.toString('base64')!==base64||bytes.length<4||bytes[0]!==255||bytes[1]!==216||bytes[2]!==255)throw new Error('BILI_BROWSER_FRAME_INVALID');
     const key='frame:'+randomUUID(),sha256=createHash('sha256').update(bytes).digest('hex'),source={provider:'bilibili',key};
     return {data:{source,kind:'image',positionMs:frame.positionMs,durationMs:frame.durationMs,bytes:bytes.length,sha256,next:'dafeiyu_media_read(mode=image, source=source)',coverage:'仅该时间点的实际视频画面；尚未视觉阅读，不含音轨'},register:(page:BiliPage)=>{
-      this.store.registerMedia(key,{ref:source,origin:this.store.proof(page),kind:'image',name:`bilibili-frame-${frame.positionMs}ms.jpg`,mimeHint:'image/jpeg',bytesHint:bytes.length,durationMsHint:null,rangeReadable:false,publicContent:true},{kind:'browser-frame',base64,sha256},Date.now()+900000);
+      this.store.registerMedia(key,{ref:source,origin:this.store.proof(page),kind:'image',name:`bilibili-frame-${frame.positionMs}ms.jpg`,mimeHint:'image/jpeg',bytesHint:bytes.length,durationMsHint:null,rangeReadable:false,publicContent:true},{kind:'browser-frame',base64,sha256},Date.now()+7*86400000);
     }};
   }
   private async probe(urlValue:string,signal:AbortSignal,guard:()=>void){const url=biliUrl(urlValue,'media'),opened=await this.client.external(url.href,'media',{start:0,end:0},signal,guard,{allowWhole:true}),response=opened.response;

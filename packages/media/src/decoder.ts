@@ -4,7 +4,7 @@ import { BoundedProcess,contained } from './process.js';
 import { MediaRangeBroker } from './range-broker.js';
 
 export type DecoderInput={file:string}|{broker:MediaRangeBroker};
-export interface DecodedImage {data:Buffer;mime:'image/png';width:number;height:number;hasAlpha:boolean;requestedMs:number|null;ptsMs:number|null}
+export interface DecodedImage {data:Buffer;mime:'image/png'|'image/jpeg';width:number;height:number;hasAlpha:boolean;requestedMs:number|null;ptsMs:number|null}
 const formats='mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,wav,mp3,ogg,flac,image2,png_pipe,jpeg_pipe,webp_pipe,gif';
 const numberText=z.union([z.string(),z.number()]).transform(v=>Number(v)).refine(Number.isFinite);
 const probeSchema=z.object({streams:z.array(z.object({codec_type:z.string(),codec_name:z.string().optional(),width:z.number().optional(),height:z.number().optional(),duration:numberText.optional(),start_time:numberText.optional(),sample_rate:numberText.optional(),channels:z.number().optional()})).max(64),

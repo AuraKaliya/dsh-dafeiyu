@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
 import { PersonaSourceRefSchema,MediaSourceDescriptionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema } from '@dafeiyu/contracts';
 import type { ResourceProof,ExecutionContextV3,MediaSourceDescription,PersonaSourceRef } from '@dafeiyu/contracts';
-import { BILI_SCENE } from './config.js';
+import { BILI_SCENE,BvidSchema } from './config.js';
 import { BiliDiagnostics,initializeBiliDiagnostics } from './diagnostics.js';
 
 export const BILI_APPLICATION_ID=0x44464236,BILI_SCHEMA_VERSION=2;
@@ -66,7 +66,8 @@ export class BiliStore {
   pages(owner:string){return this.db.prepare('SELECT id FROM bili_pages WHERE owner=? ORDER BY rowid DESC LIMIT 64').all(owner).flatMap(r=>{try{return [this.page(owner,String(r.id))];}catch{return [];}});}
   sourceCurrent(key:string,version:number){const row=this.db.prepare('SELECT version,available FROM bili_sources WHERE key=?').get(key);return row?.version===version&&row.available===1;}
   unavailable(key:string){this.db.prepare('UPDATE bili_sources SET available=0 WHERE key=?').run(key);}
-  proof(page:BiliPage):ResourceProof{return {provider:'bilibili',scene:BILI_SCENE,key:page.id,version:page.sourceVersion,hash:biliHash(page),roots:['bilibili:'+page.sourceKey],detail:{owner:page.owner}};}
+  proof(page:BiliPage):ResourceProof{const frame=page.kind==='browser'&&page.sourceKey.startsWith('browser-frame:')?z.object({bvid:BvidSchema,section:z.literal('frame')}).safeParse(page.data):null;
+    return {provider:'bilibili',scene:BILI_SCENE,key:page.id,version:page.sourceVersion,hash:biliHash(page),roots:[frame?.success?'bilibili:video:'+frame.data.bvid:'bilibili:'+page.sourceKey],detail:{owner:page.owner}};}
   current(raw:ResourceProof):boolean{if(this.checking.has(raw.key)||this.checking.size>=64)return false;this.checking.add(raw.key);try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail),page=this.page(detail.owner,proof.key);return biliHash(proof)===biliHash(this.proof(page));}catch{return false;}finally{this.checking.delete(raw.key);}}
   bindObservation(page:BiliPage,source:PersonaSourceRef){const value=JSON.stringify(PersonaSourceRefSchema.parse(source)),old=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);if(!old)throw new Error('BILI_PAGE_UNAVAILABLE');if(old.observation&&old.observation!==value)throw new Error('BILI_OBSERVATION_CONFLICT');this.db.prepare('UPDATE bili_pages SET observation=? WHERE id=?').run(value,page.id);}
   observation(page:BiliPage){const row=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);return row?.observation?PersonaSourceRefSchema.parse(JSON.parse(String(row.observation))):null;}
