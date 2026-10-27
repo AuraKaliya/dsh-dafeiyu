@@ -58,7 +58,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   if(bili?.channel&&bili.capabilities)policies.push({id:'bili-owner-task',producers:['bili-owner-tasks'],actions:[...BILI_OWNER_NATIVE_ACTIONS],allowLocalWrite:true,resources:[BILI_PUBLIC_SCENE,biliOwnerScene(bili.channel)]});
   return HostConfigSchema.parse(JSON.parse(JSON.stringify({schemaVersion:1,profileId:meta.profileId,agent:{id:meta.agentId},paths:{core:join(root,'core'),memory:join(root,'memory'),sessions:join(root,'sessions'),query:join(root,'query.sqlite'),channels:{qq:join(root,'qq')}},
     modelRoutes:{chat:options.scripted?{provider:'local-test',model:'scripted'}:{provider:settings.model.auth==='dsh-account'?'deepseek-account':'deepseek-official',model:settings.model.model,...(settings.model.reasoningEffort?{reasoningEffort:settings.model.reasoningEffort}:{})}},
-    persona:{fixedFile:foundationFile,kind:options.scripted?'test':'formal'},...(settings.taskTimeoutMs?{runtime:{turnTimeoutMs:settings.taskTimeoutMs}}:{}),context:{compactionInputTokens:48000,regions:{'memory:qq-expression':{maxBytes:6000,priority:420}}},plugins,authorityPolicies:policies})));
+    persona:{fixedFile:foundationFile,kind:options.scripted?'test':'formal'},...(settings.taskTimeoutMs||settings.phaseTimeouts?{runtime:{...(settings.taskTimeoutMs?{turnTimeoutMs:settings.taskTimeoutMs}:{}),...(settings.phaseTimeouts?{phaseTimeouts:settings.phaseTimeouts}:{})}}:{}),context:{compactionInputTokens:48000,regions:{'memory:qq-expression':{maxBytes:6000,priority:420}}},plugins,authorityPolicies:policies})));
 }
 
 export function prepareInstallation(settingsFile:string,options:InstallationOptions={}) {

@@ -3,6 +3,7 @@ import { dirname,resolve } from 'node:path';
 import { z } from 'zod';
 import { QqBatchConfigSchema,QqStickersConfigSchema } from '@dafeiyu/qq';
 import { BiliRetryPolicySchema } from '@dafeiyu/bilibili';
+import {PhaseTimeoutsSchema} from '@dafeiyu/contracts';
 
 const path=z.string().trim().min(1).max(4096),uid=z.string().regex(/^[1-9][0-9]{0,19}$/),qq=z.string().regex(/^[1-9][0-9]{4,14}$/);
 export const InstallationSettingsSchema=z.strictObject({
@@ -11,6 +12,7 @@ export const InstallationSettingsSchema=z.strictObject({
   dshTools:z.boolean().default(false),
   localOwnerControl:z.boolean().default(false),
   taskTimeoutMs:z.number().int().min(1000).max(3600000).optional(),
+  phaseTimeouts:PhaseTimeoutsSchema.optional(),
   model:z.strictObject({auth:z.enum(['api-key','dsh-account']).optional(),model:z.string().trim().min(1).max(160),reasoningEffort:z.string().trim().min(1).max(40).optional(),
     credentialStore:path,baseURL:z.url().optional(),inlineTransport:z.record(z.string(),z.json()).optional()}),
   qq:z.strictObject({botId:qq,ownerId:qq,tokenFile:path,httpURL:z.url(),wsURL:z.url(),

@@ -20,9 +20,10 @@ test('owner and bot must be supplied separately; no provider credentials or priv
 });
 
 test('a local installation may explicitly extend task duration without adding a tool-call limit',()=>{
-  const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'data',taskTimeoutMs:1800000,model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}});
+  const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'data',taskTimeoutMs:1800000,phaseTimeouts:{verification:60000},model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}});
   const profile=installationProfile(settings,{schemaVersion:1,instanceId:'11111111-1111-4111-8111-111111111111',profileId:'fixture',agentId:'fish',createdAt:'2026-10-27T00:00:00.000Z',identityHash:'0'.repeat(64),biliOwner:null},'persona.md','settings.json',{scripted:true});
-  assert.equal(profile.runtime.turnTimeoutMs,1800000);assert.equal('maxToolCalls' in profile.runtime,false);
+  assert.equal(profile.runtime.turnTimeoutMs,1800000);assert.equal('maxToolCalls' in profile.runtime,false);assert.equal(profile.runtime.phaseTimeouts.verification,60000);assert.equal(profile.runtime.phaseTimeouts.render,60000);
+  assert.equal(InstallationSettingsSchema.safeParse({...settings,phaseTimeouts:{verification:60001}}).success,false);
 });
 
 test('DSH account installation selects the official account route without changing API-key installations',()=>{
