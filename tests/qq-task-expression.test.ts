@@ -44,8 +44,21 @@ test('a plugin copying a valid public observation cannot mark its other output f
 });
 
 test('a plain task result is a derived material and can be explicitly withdrawn without automatic regeneration',async t=>{
-  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const id=await task(h,'plain'),packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.evidence.length,2);assert.ok(packet.evidence.every(evidence=>evidence.kind==='inference'));
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const id=await task(h,'plain'),packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.evidence.filter(evidence=>evidence.kind==='inference').length,2);
+  const facts=packet.evidence.filter(evidence=>evidence.kind==='reported');assert.equal(facts.length,1);assert.equal(JSON.parse(facts[0]!.text).kind,'result-workflow');assert.doesNotMatch(facts[0]!.text,/EXECUTOR_REPORT_SENTINEL/);
   await h.core.withdrawMessageTaskExpression(id,packet.id,1);await assert.rejects(()=>h.core.prepareMessageTaskExpression(id),/UNAVAILABLE/);
+});
+
+test('source revocation inside a synchronous public-material read is caught before a packet is saved',async t=>{
+  const resource={channel:'fixture',account:'public',kind:'local' as const,id:'world'},h=await qqCapabilityFixture({tasks:true,extraTaskActions:['fixture_public_read'],extraTaskResources:[resource]});t.after(h.close);
+  let valid=true,chat=0,work=0;const page={text:'PUBLIC_MATERIAL'},view=JSON.stringify(page);
+  const handle=h.core.registerExtensionV3({protocolVersion:3,id:'fixture-public',version:'1',agentId:'dafeiyu',resourceProofs:{current:()=>valid,epoch:()=>String(valid),publicView:()=>{valid=false;return true;}},actions:[{
+    id:'fixture_public_read',description:'虚构公开来源',version:'1',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'read',execute:async(_raw,context)=>{
+      const observation=h.core.recordCapabilityObservation(context,'fixture-public',{requestId:'one',proof:{provider:'fixture-public',scene:resource,key:'one',version:1,hash:'a'.repeat(64),roots:['fixture:one'],detail:{}},text:view,occurredAt:'2026-10-28T00:00:00.000Z',counts:{received:1,processed:1},coverage:['fictional-text']}),source=observation.source;
+      return {status:'succeeded',effects:'none',completeness:'complete',data:z.json().parse({page,observation}),sources:[{id:source.id,scopeKey:source.scopeKey,version:source.version,contentHash:source.contentHash}],receipts:[]};}}]});t.after(()=>handle.dispose());
+  h.setResponse(request=>native(request)?++work===1?call('fixture_public_read',{}):textReply('候选结果'):++chat===1?call('qq_task_submit',{requestId:'source-revokes-in-read'}):textReply('已受理'));
+  await h.message('读取公开来源',{trigger:true});await assert.rejects(()=>h.core.prepareMessageTaskExpression(rows(h).at(-1)!),/SOURCE_STALE/);assert.equal(valid,false);
+  const db=new DatabaseSync(join(h.root,'memory/memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) AS n FROM native_expression_packets').get()?.n,0);}finally{db.close();}
 });
 
 test('source recall retires a native expression packet while unrelated new chat does not change its anchor',async t=>{

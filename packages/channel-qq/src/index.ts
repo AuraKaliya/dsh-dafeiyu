@@ -99,6 +99,7 @@ export class QqChannel extends Service {
   private readonly batches:QqMessageBatches;
   private readonly stickers:QqStickers|undefined;
   private readonly sourceSignals=new Map<string,AbortController>();
+  private readonly processingSignals=new WeakMap<AbortController,{sources:readonly AbortSignal[];signal:AbortSignal}>();
   private readonly tails=new Map<string,{route:string;sender:string;controller:AbortController}>();
   private progress:ReturnType<typeof bindQqProgress>|undefined;
   private readonly token: string;
@@ -185,7 +186,9 @@ export class QqChannel extends Service {
       return this.groups.processingSignal(part.conversation.id,Date.parse(part.occurredAt));
     });
     const key=JSON.stringify([scope.route,message.id]);let source=this.sourceSignals.get(key);if(!source){source=new AbortController();this.sourceSignals.set(key,source);}
-    return AbortSignal.any([this.controller.signal,source.signal,...signals]);
+    const inputs=[...new Set([this.controller.signal,source.signal,...signals])],cached=this.processingSignals.get(source);
+    if(cached&&inputs.length===cached.sources.length&&inputs.every((value,index)=>value===cached.sources[index]))return cached.signal;
+    const combined=AbortSignal.any(inputs);this.processingSignals.set(source,{sources:inputs,signal:combined});return combined;
   }
   /** Program-side refresh; no model invocation, privilege expansion or history replay. */
   refreshGroups(): Promise<void> { return this.groups.refresh(); }

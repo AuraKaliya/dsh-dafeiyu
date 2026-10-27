@@ -7,6 +7,21 @@ import { BiliService,BILI_ACTIONS,BILI_SCENE } from '@dafeiyu/bilibili';
 import { qqCapabilityFixture,outcomes } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
 
+test('many public observations survive target admission and reach verified delivery without dropping evidence',async()=>{
+  let bili:BiliService|undefined;const h=await qqCapabilityFixture({tasks:true,deliverResults:true,turnTimeoutMs:120000,extraTaskActions:[...BILI_ACTIONS],extraTaskResources:[BILI_SCENE],beforeActivate:async(ctx,root)=>{
+    bili=new BiliService(ctx,{agentId:'dafeiyu',profileId:'qq-capability-fixture',dataDir:join(root,'core'),createStore:true,settings:{minIntervalMs:100}},async url=>{
+      const page=Number(new URL(url).searchParams.get('pn')),bytes=Buffer.from(JSON.stringify({code:0,data:{list:[{bvid:'BV1xx411c7mD',aid:10,title:'PUBLIC_PAGE_'+page+'_END',owner:{name:'虚构UP'},duration:60}],no_more:false}}));
+      return {status:200,headers:{},body:(async function*(){yield bytes;})(),close(){}};});bili.recover();bili.activate();}});
+  try{let chat=0,work=0;h.setResponse(request=>{const session=String(request.sessionId);
+    if(session.startsWith('memory-expression-verify-delivery-'))return textReply('{"faithful":true,"issues":[]}');
+    if(session.startsWith('dafeiyu-delivery-v3-')){const material=JSON.stringify(request.messages);for(let page=1;page<=20;page++)assert.ok(material.includes('PUBLIC_PAGE_'+page+'_END'));assert.ok(!material.includes('PRIVATE_INTERNAL_RESULT'));return textReply('已查看二十页公开虚构材料。');}
+    if(session.startsWith('dafeiyu-task-'))return ++work<=20?call('bili_discover',{requestId:'page-'+work,page:work,limit:1}):textReply('PRIVATE_INTERNAL_RESULT');
+    return ++chat===1?call('qq_task_submit',{requestId:'many-public-pages'}):textReply('已受理');});
+    await h.message('查看多页公开材料并整理',{trigger:true});assert.ok(JSON.stringify(h.platform.sent).includes('已查看二十页公开虚构材料'));
+    const db=new DatabaseSync(join(h.root,'memory/memory.sqlite'),{readOnly:true});try{const packet=JSON.parse(String(db.prepare('SELECT body FROM native_expression_packets').get()?.body));assert.ok(packet.evidence.length<=19);assert.match(JSON.stringify(packet.evidence),/evidence-bundle/);}finally{db.close();}
+  }finally{await bili!.close();await h.close();}
+});
+
 test('QQ conversation interest can choose Bili discovery and return only public material through target-persona delivery',async()=>{let bili:BiliService|undefined,platformReads=0;const h=await qqCapabilityFixture({tasks:true,deliverResults:true,extraTaskActions:[...BILI_ACTIONS],extraTaskResources:[BILI_SCENE],explorationResources:[BILI_SCENE],beforeActivate:async(ctx,root)=>{
   bili=new BiliService(ctx,{agentId:'dafeiyu',profileId:'qq-capability-fixture',dataDir:join(root,'core'),createStore:true,settings:{minIntervalMs:100}},async()=>{platformReads++;const bytes=Buffer.from(JSON.stringify({code:0,data:{list:[{bvid:'BV1xx411c7mD',aid:10,title:'公开虚构星空样本',owner:{name:'虚构UP'},duration:60}],no_more:true}}));return {status:200,headers:{},body:(async function*(){yield bytes;})(),close(){}};});bili.recover();bili.activate();}});
   try{let chat=0,work=0;h.setResponse(request=>{const session=String(request.sessionId);if(session.startsWith('memory-expression-verify-delivery-'))return textReply('{"faithful":true,"issues":[]}');if(session.startsWith('dafeiyu-delivery-v3-')){assert.ok(JSON.stringify(request.messages).includes('公开虚构星空样本'));assert.ok(!JSON.stringify(request.messages).includes('PRIVATE_INTERNAL_RESULT'));return textReply('我发现了一个标题为“公开虚构星空样本”的视频，还没有观看音画。');}

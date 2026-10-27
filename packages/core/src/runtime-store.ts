@@ -33,13 +33,14 @@ export const RunResultRefSchema = z.strictObject({sessionId:z.string().min(1).ma
   .refine(value=>value.messageSeq<=value.turnEndSeq,'Result must precede turn end');
 export type RunResultRef = z.infer<typeof RunResultRefSchema>;
 const eventSchema=z.strictObject({id:z.uuid(),runId:z.uuid(),type:z.string().min(1).max(120),at:z.iso.datetime(),data:z.record(z.string(),z.json())});
-const string=(value:unknown)=>z.string().parse(value);
+const stringValue=z.string(),jsonValue=z.json(),uuidValue=z.uuid();
+const string=(value:unknown)=>stringValue.parse(value);
 function canonical(value:Json):string {
   if(value===null||typeof value!=='object')return JSON.stringify(value);
   if(Array.isArray(value))return `[${value.map(canonical).join(',')}]`;
   return `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key]!)}`).join(',')}}`;
 }
-export function runtimeHash(value:unknown):string{return createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');}
+export function runtimeHash(value:unknown):string{return createHash('sha256').update(canonical(jsonValue.parse(value))).digest('hex');}
 export interface StoredRun {id:string;requestKey:string;definition:RunDefinition;state:RunState;version:number;snapshot:RunSnapshot|null;result:RunResultRef|null;error:string|null;createdAt:string;updatedAt:string}
 
 /** One-host execution ledger. Task definitions and complete DSH histories remain in their own stores. */
@@ -120,8 +121,8 @@ export class RuntimeStore {
       const id=randomUUID();this.db.prepare('INSERT INTO execution_requests VALUES(?,?,?,?,?,NULL,NULL)').run(id,producer,requestId,fingerprint,body);return this.request(id);
     });
   }
-  request(id:string){this.open();z.uuid().parse(id);const row=this.db.prepare('SELECT * FROM execution_requests WHERE id=?').get(id);if(!row)throw new Error('REQUEST_NOT_FOUND');
-    return {id,producer:string(row.producer),requestId:string(row.request_id),payload:z.json().parse(JSON.parse(string(row.body))),taskId:row.task_id===null?null:z.uuid().parse(row.task_id),runId:row.run_id===null?null:z.uuid().parse(row.run_id)};}
+  request(id:string){this.open();uuidValue.parse(id);const row=this.db.prepare('SELECT * FROM execution_requests WHERE id=?').get(id);if(!row)throw new Error('REQUEST_NOT_FOUND');
+    return {id,producer:string(row.producer),requestId:string(row.request_id),payload:jsonValue.parse(JSON.parse(string(row.body))),taskId:row.task_id===null?null:uuidValue.parse(row.task_id),runId:row.run_id===null?null:uuidValue.parse(row.run_id)};}
   findRequest(producer:string,requestId:string){this.open();const row=this.db.prepare('SELECT id FROM execution_requests WHERE producer=? AND request_id=?').get(producer,requestId);return row?this.request(string(row.id)):null;}
   pendingRequests(){this.open();return this.db.prepare('SELECT id FROM execution_requests WHERE run_id IS NULL ORDER BY rowid').all().map(row=>this.request(string(row.id)));}
   bindTask(requestKey:string,taskId:string):void{z.uuid().parse(taskId);this.transaction(()=>{const request=this.request(requestKey);if(request.taskId&&request.taskId!==taskId)throw new Error('TASK_BINDING_CONFLICT');this.db.prepare('UPDATE execution_requests SET task_id=? WHERE id=? AND task_id IS NULL').run(taskId,requestKey);});}

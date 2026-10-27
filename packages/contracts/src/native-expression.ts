@@ -16,6 +16,8 @@ export type NativeExpressionPacket=z.infer<typeof NativeExpressionPacketSchema>;
 export interface NativeExpressionAccess {readonly execution:PersonaAccess;readonly anchor:TaskResultAnchor;readonly question:string;readonly output:string;
   readonly assessment?:TaskAssessment;readonly selectedSourceIds?:readonly string[];
   readonly operationalEvidence?:readonly NativeExpressionPacket['evidence'][number][];
+  /** Core-owned synchronous read scope only; caller rechecks guard after it returns. */
+  readSources?(read:()=>void):void;
   readonly candidates:readonly z.infer<typeof NativeExpressionCandidateSchema>[];readonly opaqueInfluence:boolean;
   /** Only the Core source walk can attest that a derived target page has no unclassified input influence. */
   readonly derivedInputComplete?:boolean;readonly requestMaxBytes:number;readonly expressionPolicy?:{id:string;version:number};readonly media?:NativeMediaMaterial;guard():void;}

@@ -9,7 +9,8 @@ import type { NewEvent } from '@dafeiyu/journal';
 import { MEMORY_VERSION,sourceVersionSchema,sourceFenceSchema } from './types.js';
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const string=(v:unknown)=>z.string().parse(v),integer=(v:unknown)=>z.number().int().safe().parse(v);
+const stringValue=z.string(),integerValue=z.number().int().safe(),taskBody=z.strictObject({title:z.string(),goal:z.string()}),taskStatus=z.enum(['active','paused','completed']);
+const string=(v:unknown)=>stringValue.parse(v),integer=(v:unknown)=>integerValue.parse(v);
 export const witnessSchema=z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('memory'),route:z.string(),id:z.uuid(),revision:z.number().int().positive(),version:z.number().int().positive(),contentHash:z.string(),
     ancestors:z.array(sourceVersionSchema),fences:z.array(sourceFenceSchema),authorization:TaskMemoryAuthorizationSchema.optional(),range:z.strictObject({start:z.number().int().nonnegative(),end:z.number().int().positive()}).optional()}),
@@ -70,8 +71,8 @@ export class TaskWorkspace {
     private readonly timeline:(scope:TimelineScope,ref:string,hash:string)=>boolean,private readonly sameSource:(scope:TimelineScope,a:string,b:string)=>boolean){}
   private task(agentId:string,id:string){
     const row=this.db.prepare('SELECT * FROM task_workspaces WHERE id=? AND agent_id=?').get(id,agentId);if(!row)throw new Error('task_not_found');
-    const body=z.strictObject({title:z.string(),goal:z.string()}).parse(JSON.parse(string(row.body)));
-    return {id,agentId,version:integer(row.version),epoch:integer(row.epoch),status:z.enum(['active','paused','completed']).parse(row.status),...body};
+    const body=taskBody.parse(JSON.parse(string(row.body)));
+    return {id,agentId,version:integer(row.version),epoch:integer(row.epoch),status:taskStatus.parse(row.status),...body};
   }
   private record(task:ReturnType<TaskWorkspace['task']>,type:string,data:Record<string,import('@dafeiyu/contracts').Json>,authority?:ObservationAuthority){
     const eventId=randomUUID(),event:NewEvent={agentId:task.agentId,route:authority?.route??privateRoute(task.agentId,task.id),traceId:authority?.parent?.traceId??task.id,

@@ -5,15 +5,16 @@ import { createHash,randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
 import { PersonaSourceRefSchema,MediaSourceDescriptionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema } from '@dafeiyu/contracts';
-import type { ResourceProof,ExecutionContextV3,MediaSourceDescription,PersonaSourceRef } from '@dafeiyu/contracts';
+import type { ResourceProof,ExecutionContextV3,MediaSourceDescription,PersonaSourceRef,Json } from '@dafeiyu/contracts';
 import { BILI_SCENE,BvidSchema } from './config.js';
 import { BiliDiagnostics,initializeBiliDiagnostics } from './diagnostics.js';
 
 export const BILI_APPLICATION_ID=0x44464236,BILI_SCHEMA_VERSION=2;
 export const BILI_TABLES=['bili_metadata','bili_clock','bili_requests','bili_sources','bili_revisions','bili_pages','bili_media','bili_outbox','bili_http_attempts','bili_http_control'] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
-function canonical(value:unknown):string{const v=z.json().parse(value);return v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';}
-export const biliHash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest('hex');
+const jsonValue=z.json();
+function canonical(v:Json):string{return v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k]!)).join(',')+'}';}
+export const biliHash=(value:unknown)=>createHash('sha256').update(canonical(jsonValue.parse(value))).digest('hex');
 export const biliOwner=(context:Pick<ExecutionContextV3,'scope'|'intentVersion'>)=>biliHash([context.scope,context.intentVersion]);
 export const BiliPageSchema=z.strictObject({id:z.uuid(),owner:z.string().length(64),kind:z.enum(['discover','search','video','comments','subtitles','danmaku','media','browser']),
   sourceKey:z.string().min(1).max(240),sourceVersion:z.number().int().positive(),fetchedAt:z.iso.datetime(),data:z.json(),coverage:z.array(z.string().max(500)).max(24),

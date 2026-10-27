@@ -7,6 +7,15 @@ import { call,textReply } from './harness.js';
 const assessment=(next:'deliver'|'continue'|'wait',goalStatus='partial')=>textReply(JSON.stringify({goalStatus,summary:'当前只完成部分目标，评价与真实操作状态分别记录。',evidenceIds:[],limitations:['仍有资料缺口'],unfinished:['剩余部分'],next}));
 function state(root:string){const db=new DatabaseSync(join(root,'core/runtime.sqlite'),{readOnly:true});try{const run=db.prepare("SELECT id,state,error FROM runs WHERE json_extract(definition,'$.scope.kind')='task' ORDER BY rowid DESC LIMIT 1").get()!;return {run,assessment:db.prepare("SELECT body FROM run_inputs WHERE run_id=? AND input_id='task-assessment'").get(run.id!),draft:db.prepare("SELECT body FROM run_inputs WHERE run_id=? AND input_id='draft-result:0'").get(run.id!),checkpoints:db.prepare('SELECT count(*) AS n FROM run_checkpoints WHERE run_id=?').get(run.id!)};}finally{db.close();}}
 
+for(const variant of ['single-fence','ambiguous-fences','invalid-contract'] as const)test('assessment formatting '+variant+' keeps the schema and ambiguity boundary',async t=>{
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let chat=0;
+  const body=JSON.stringify({goalStatus:'partial',summary:'有依据的阶段结果',evidenceIds:[],limitations:[],unfinished:[],next:variant==='invalid-contract'?'fake-send':'deliver'}),block='```json\n'+body+'\n```';
+  h.adapter.assessmentResponse=()=>textReply('这是模型评价，不是发送回执。\n'+block+(variant==='ambiguous-fences'?'\n'+block:''));
+  h.setResponse(request=>String(request.sessionId).startsWith('dafeiyu-task-')?textReply('已保留观察'):++chat===1?call('qq_task_submit',{requestId:variant}):textReply(''));
+  await h.message('根据观察整理结果',{trigger:true});const saved=state(h.root);assert.equal(saved.run.state,variant==='single-fence'?'completed':'waiting');
+  if(variant!=='single-fence')assert.equal(saved.run.error,'TASK_ASSESSMENT_INVALID');
+});
+
 test('a normal task stop is followed by a separate persisted model assessment',async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let chat=0;
   h.adapter.assessmentResponse=request=>{assert.match(JSON.stringify(request.messages),/internal-not-sent/);assert.match(JSON.stringify(request.messages),/after-persona-render-and-verification/);assert.match(JSON.stringify(request.messages),/intermediate-status-only/);assert.match(JSON.stringify(request.messages),/doesNotDescribeFinalDelivery/);return assessment('deliver');};h.setResponse(request=>String(request.sessionId).startsWith('dafeiyu-task-')?textReply('只完成部分工作。'):++chat===1?call('qq_task_submit',{requestId:'assessment'}):textReply(''));
