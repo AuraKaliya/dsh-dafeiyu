@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import WebSocket from 'ws';
 import { z } from 'zod';
-import { loopbackURL, OneBot, platformId } from './onebot.js';
+import { loopbackURL, OneBot, platformId,oneBotDiagnostic } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
 import { readRecentQqHistory,QQ_HISTORY_WINDOW_MS } from './history.js';
@@ -135,7 +135,7 @@ export class QqChannel extends Service {
     try {
       this.store.delivery.recover();
       this.store.mediaDelivery.recover();
-      this.transport=new QqSegmentedTransport({ledger:this.store.delivery,...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
+      this.transport=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
         confirmed:(reply,text,receipt)=>{this.counters.segmentsConfirmed++;if(this.store.delivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
           if(reply.taskResult)this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,'[任务交付占位：正文须经核心任务来源验证后回查，不能据此推断任务内容。]',{occurredAt:null,unsupported:['task-result-body-withheld']});
           else this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text);}});
@@ -166,6 +166,10 @@ export class QqChannel extends Service {
   private observation(type: Parameters<ExtensionHandle['observe']>[0]['type'], code: string, conversation?: Conversation): void {
     if (this.stopped) return;
     this.handle.observe({ conversation: conversation ?? { channel: 'qq', account: this.config.botId, kind: 'local', id: '__transport__' }, type, data: { code } });
+  }
+  private recordDeliveryDiagnostic(reply:Reply,error:unknown,position:number,invoked:boolean):void{
+    if(this.stopped)return;this.handle.observe({conversation:{channel:'qq',account:this.config.botId,kind:'local',id:'__transport__'},type:'delivery.diagnostic',
+      data:z.record(z.string(),z.union([z.string().max(200),z.number().finite(),z.boolean(),z.null()])).parse({replyId:reply.id,position,invoked,state:this.store.delivery.progress(reply.id)?.state??null,...oneBotDiagnostic(error)})});
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
     messageBatch:{...this.config.messageBatch,pending:this.stopped?0:this.batches.count()},
@@ -351,7 +355,7 @@ export class QqChannel extends Service {
       if(value.taskResult&&(value.taskResult.inboundId!==source.id||conversationKey(this.config.agentId,value.taskResult.target)!==conversationKey(this.config.agentId,scene)||Date.parse(value.taskResult.expiresAt)<=Date.now()))throw new Error('SOURCE_STALE');
       await this.api.verify(workSignal);authority();};
     // Each invocation supplies its own authority; the transport only retains immutable ledger state.
-    this.localOwnerTransport??=new QqSegmentedTransport({ledger:this.store.delivery,
+    this.localOwnerTransport??=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),
       ...(this.config.replyDelay?{beforeSend:(value:Reply,workSignal:AbortSignal)=>waitForQqReply(value.text,workSignal),betweenMessages:waitBetweenQqMessages}:{}),
       check:async(value,workSignal)=>{if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');if(value.conversation.channel!=='local-owner'||value.conversation.account!==this.config.botId||value.conversation.kind!=='local'||value.conversation.id!==value.sourceMessageId)throw new Error('TARGET_NOT_ALLOWED');await this.api.verify(workSignal);},
       send:async(_value,text,workSignal)=>z.object({message_id:platformId}).parse(await this.api.call('send_private_msg',{user_id:Number(this.config.ownerId),message:[{type:'text',data:{text}}]},workSignal)).message_id,

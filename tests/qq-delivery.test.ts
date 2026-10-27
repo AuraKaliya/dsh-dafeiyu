@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import type { Reply } from '@dafeiyu/contracts';
+import {conversationKey} from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,bot,group,until,lastPage } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
 const text='第一段说明\n'+'🐟'.repeat(2600)+'\r\n'+'尾部文字'.repeat(1100);
@@ -53,6 +54,7 @@ test('a missing middle-segment receipt stops delivery and neither reload nor dup
   const h=await qqCapabilityFixture();t.after(h.close);h.platform.loseAt=2;h.setResponse(()=>textReply(text));await h.message('丢回执',{trigger:true});const item=h.core.journal.list()[0]!;
   assert.equal(item.state,'uncertain');assert.equal(h.platform.sent.length,2);let progress=h.ctx.dafeiyuQQ.deliveryStatus(item.reply!.id)!;
   assert.equal(progress.confirmed,1);assert.equal(progress.unknown,1);assert.ok(progress.pending>0);assert.throws(()=>h.core.retryDelivery(item.id),/definitely unsent/);
+  const diagnostics=h.core.journal.events(conversationKey('dafeiyu',{channel:'qq',account:bot,kind:'local',id:'__transport__'})).filter(event=>event.type==='delivery.diagnostic');assert.equal(diagnostics.length,1);assert.equal(diagnostics[0]!.data.replyId,item.reply!.id);assert.equal(diagnostics[0]!.data.phase,'fetch');assert.equal(diagnostics[0]!.data.fetchInvoked,true);assert.ok(!JSON.stringify(diagnostics).includes('第一段说明'));
   await h.reload();h.platform.loseAt=0;assert.equal((await h.ctx.dafeiyuQQ.deliver(item.reply!,signal())).status,'unknown');assert.equal(h.platform.sent.length,2);progress=h.ctx.dafeiyuQQ.deliveryStatus(item.reply!.id)!;assert.equal(progress.unknown,1);
 });
 

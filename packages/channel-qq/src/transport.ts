@@ -9,6 +9,7 @@ interface TransportHost {
   check(reply:Reply,signal:AbortSignal):Promise<void>;
   send(reply:Reply,text:string,signal:AbortSignal):Promise<string>;
   confirmed(reply:Reply,text:string,receipt:string):void;
+  failed?(reply:Reply,error:unknown,position:number,invoked:boolean):void;
 }
 const safeCode=(error:unknown,fallback:string)=>error instanceof Error&&['CHANNEL_OFFLINE','TARGET_NOT_ALLOWED','IDENTITY_UNAVAILABLE','SOURCE_MESSAGE_NOT_FOUND','SOURCE_STALE','DELIVERY_CANCELLED','DELIVERY_INTERRUPTED_BY_MESSAGE','DELIVERY_AUTHORITY_REVOKED','DELIVERY_PLAN_CONFLICT','TEXT_SIZE_UNSUPPORTED','INVALID_TEXT_ENCODING','QQ_MESSAGE_SEQUENCE_INVALID'].includes(error.message)?error.message:fallback;
 function result(progress:QqDeliveryProgress,code:string):DeliveryResult {
@@ -43,6 +44,7 @@ export class QqSegmentedTransport {
       }catch(error){const current=this.host.ledger.progress(reply.id)!;
         if(current.segments[position]!.state==='sending')this.host.ledger.unknown(reply.id,position,'PLATFORM_RESULT_UNKNOWN');
         else if(current.segments[position]!.state==='pending')this.host.ledger.defer(reply.id,position,safeCode(error,'DELIVERY_PRECHECK_FAILED'));
+        try{this.host.failed?.(reply,error,position,invoked);}catch{/* Diagnostics cannot rewrite the recorded transport outcome. */}
         return result(this.host.ledger.progress(reply.id)!,invoked?'LOCAL_PROJECTION_FAILED':safeCode(error,'DELIVERY_PRECHECK_FAILED'));
       }
     }

@@ -72,7 +72,7 @@ export const messageMainText=(message:Pick<InboundMessage,'mainText'|'batch'>)=>
 export const messageDisplayText=(message:InboundMessage)=>message.batch?message.batch.sources.map(part=>`[原消息 ${part.id}；${part.occurredAt}${part.replyTo?'；引用 '+part.replyTo:''}]\n${part.text}`).join('\n\n'):message.text;
 export const ObservationSchema = z.strictObject({
   conversation: ConversationSchema,
-  type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled']),
+  type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled', 'delivery.diagnostic']),
   data: z.record(z.string(), z.union([z.string().max(200), z.number().finite(), z.boolean(), z.null()])),
 });
 export type Observation = z.infer<typeof ObservationSchema>;
