@@ -60,6 +60,9 @@ export class MemorySourcePolicy implements SourcePolicy {
   tool(scope:CompactionScope,name:string,text:string,meta:unknown):SourceDependency[]{
     try{
       const data:unknown=JSON.parse(text);
+      // These are current-inbound acceptance receipts, not remembered content. A child
+      // task writing unrelated memory must not invalidate its parent's acknowledgement.
+      if(['qq_task_submit','qq_explore','local_owner_task_submit'].includes(name)){ActionOutcomeSchema.parse(data);return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];}
       if(name==='qq_browse'){
         const outcome=ActionOutcomeSchema.parse(data);if(outcome.data===null)return [];
         const view=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema})}).parse(outcome.data),ref=view.observation.source;

@@ -11,10 +11,17 @@ import { CompactionId,compactCheckpointSource } from '@deepseek-ai/dsh-compactio
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-compaction/types';
 import { checkpointProof } from './summary-proof.js';
+import {MemorySourcePolicy} from '../packages/memory/lib/source-policy.js';
 
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
   'provenance-test-barrier':{kind:'provenance-test-barrier'};
 } }
+
+test('current-inbound task acceptance receipts survive unrelated child memory changes without becoming reusable evidence',async t=>{
+  const h=await provenanceFixture();t.after(h.close);let epoch='before';const policy=new MemorySourcePolicy(h.ctx,h.store,null,null,()=>epoch),scope={agentId:'dafeiyu',route:'fixture-route',traceId:'current-inbound'};
+  const text=JSON.stringify({status:'succeeded',effects:'confirmed',completeness:'complete',data:{task:{id:randomUUID()},run:{id:randomUUID()},state:'accepted'},sources:[],receipts:[]});
+  for(const name of ['qq_task_submit','qq_explore','local_owner_task_submit']){const refs=policy.tool(scope,name,text,null);assert.ok(refs.length);epoch='after-child-write';assert.ok(refs.every(ref=>policy.validate(scope,ref)));assert.ok(refs.every(ref=>!policy.validate({...scope,traceId:'later-inbound'},ref)));}
+});
 
 test('delete A retires dependent answers but preserves independent B history and later user input byte-for-byte',async t=>{
   const h=await provenanceFixture();t.after(h.close);
