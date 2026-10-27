@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-27",
+  "implementation": "9be67e2",
+  "startupFix": "0eda15e",
+  "relatedDistinctTests": 98,
+  "relatedFiles": 14,
+  "allLatestSelectedPassed": true,
+  "realModelTest": false,
+  "realQQTestMessage": false,
+  "serverAccess": false,
+  "published": false,
+  "liveDshToolReadOnly": true,
+  "liveBridgeLoaded": true,
+  "verifiedTools": [
+    "read",
+    "write",
+    "edit",
+    "pwsh",
+    "web_search",
+    "web_fetch",
+    "dsh_browser_download",
+    "plugin_manager"
+  ],
+  "preservation": {
+    "at": "2026-10-27T09:44:01.659Z",
+    "snapshot": {
+      "pid": 32576,
+      "alive": true,
+      "phase": "ready",
+      "error": null,
+      "features": [
+        "core.registration.v1",
+        "lifecycle.managed.v1",
+        "context.conversation.v1",
+        "task.repository.v1",
+        "execution.task.v1",
+        "execution.source-anchor.v1",
+        "execution.wake-ingress.v1",
+        "context.task.v1",
+        "execution.resource-scope.v1",
+        "execution.message-task.v1",
+        "delivery.task-result.v1",
+        "memory.execution.v1",
+        "continuity.checkpoint.v1",
+        "task.intent.v1",
+        "memory.capability-observation.v1",
+        "memory.native-expression.v1",
+        "media.assets.v1",
+        "persona.stage-state.v1",
+        "persona.growth-selection.v1",
+        "memory.maintenance.v1",
+        "dsh.tools.v1",
+        "activity.plan.v1",
+        "activity.wakeup.v1",
+        "media.processing.v1",
+        "qq.browse.v1",
+        "qq.tasks.v1",
+        "qq.media.v1",
+        "qq.stickers.v1"
+      ],
+      "counts": {
+        "activeRuns": 0,
+        "queuedRuns": 0,
+        "queuedRoutes": 0,
+        "pendingMessages": 0,
+        "outbox": 0
+      },
+      "qq": {
+        "state": "online",
+        "groupSync": "current",
+        "groupError": null,
+        "effectiveGroups": 3,
+        "lastGroupSync": "2026-10-27T09:43:37.545Z",
+        "capabilities": true,
+        "tasks": {
+          "enabled": true,
+          "registered": true,
+          "deliverResults": true
+        },
+        "delivery": {
+          "plans": 21,
+          "pending": 0,
+          "unknown": 0
+        }
+      }
+    },
+    "identity": true,
+    "foundation": true,
+    "sessions": {
+      "before": 4,
+      "preserved": true
+    },
+    "memoryUnchanged": true,
+    "databases": [
+      {
+        "file": "core/activity.sqlite",
+        "tables": 12,
+        "changes": [
+          {
+            "table": "activity_clock",
+            "old": 1,
+            "current": 1,
+            "lost": 1
+          }
+        ]
+      },
+      {
+        "file": "core/delivery.sqlite",
+        "tables": 2,
+        "changes": []
+      },
+      {
+        "file": "core/journal.sqlite",
+        "tables": 6,
+        "changes": [
+          {
+            "table": "events",
+            "old": 620,
+            "current": 622,
+            "lost": 0
+          },
+          {
+            "table": "ownership",
+            "old": 0,
+            "current": 1,
+            "lost": 0
+          }
+        ]
+      },
+      {
+        "file": "core/media.sqlite",
+        "tables": 14,
+        "changes": []
+      },
+      {
+        "file": "core/migration-lock.sqlite",
+        "tables": 6,
+        "changes": []
+      },
+      {
+        "file": "core/runtime.sqlite",
+        "tables": 12,
+        "changes": [
+          {
+            "table": "runtime_ownership",
+            "old": 0,
+            "current": 1,
+            "lost": 0
+          }
+        ]
+      },
+      {
+        "file": "memory/analysis.sqlite",
+        "tables": 3,
+        "changes": []
+      },
+      {
+        "file": "memory/feedback.sqlite",
+        "tables": 5,
+        "changes": []
+      },
+      {
+        "file": "memory/memory.sqlite",
+        "tables": 70,
+        "changes": []
+      },
+      {
+        "file": "memory/working.sqlite",
+        "tables": 4,
+        "changes": []
+      },
+      {
+        "file": "qq/qq.sqlite",
+        "tables": 17,
+        "changes": [
+          {
+            "table": "qq_group_snapshots",
+            "old": 1,
+            "current": 1,
+            "lost": 1
+          }
+        ]
+      }
+    ],
+    "snowLumaSha256": "e23ed3d4aa7e01e7f45400a7ffe6b0c4b67bb6d011f776f2fd04b959510435e6",
+    "settingsSha256": "4f2c1fa7ff3f2fb5da48073ab5707909c8c4334640567830a50aa7330172ac39",
+    "onlyExpectedChanges": true,
+    "passed": true
+  }
+}
