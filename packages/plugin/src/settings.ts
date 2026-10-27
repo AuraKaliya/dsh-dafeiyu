@@ -10,6 +10,7 @@ export const InstallationSettingsSchema=z.strictObject({
   foundationFile:path.optional(),
   dshTools:z.boolean().default(false),
   localOwnerControl:z.boolean().default(false),
+  taskTimeoutMs:z.number().int().min(1000).max(3600000).optional(),
   model:z.strictObject({auth:z.enum(['api-key','dsh-account']).optional(),model:z.string().trim().min(1).max(160),reasoningEffort:z.string().trim().min(1).max(40).optional(),
     credentialStore:path,baseURL:z.url().optional(),inlineTransport:z.record(z.string(),z.json()).optional()}),
   qq:z.strictObject({botId:qq,ownerId:qq,tokenFile:path,httpURL:z.url(),wsURL:z.url(),
