@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "version": "0.21.0",
+  "status": "published-and-download-verified",
+  "prerelease": true,
+  "privateSourceRevision": "153ca58a4fe924ccd61065da2f61eefcc5affda5",
+  "repository": "https://github.com/AuraKaliya/dsh-dafeiyu",
+  "publicCommit": "a7580b8f5e604946a80aa964d16ac4b6e0780495",
+  "publicTree": "06826c14fa77af087b84fabf2582796e3034bcde",
+  "publicParent": "88825174fecd1eb80809da9f225b31b7bca8593a",
+  "publicHistoryCommits": 3,
+  "mainAndTagVerified": true,
+  "publicSnapshotFiles": 813,
+  "privacyPassed": true,
+  "privateHistoryIncluded": false,
+  "releaseId": 424984798,
+  "releaseUrl": "https://github.com/AuraKaliya/dsh-dafeiyu/releases/tag/v0.21.0",
+  "asset": {
+    "name": "dsh-dafeiyu-0.21.0.tgz",
+    "bytes": 719124,
+    "entryCount": 494,
+    "sha256": "f0ed72ca3ec9844b4a5d75408879f1c4a1d85843db14e589b4230448a9956a61",
+    "serverDigestVerified": true,
+    "publicDownloadVerified": true,
+    "checksumAsset": "SHA256SUMS"
+  },
+  "checks": {
+    "installationCasesPassed": 5,
+    "distributionCasesPassed": 2,
+    "distributionReport": "a1910d6e-ae6d-407c-ac15-e6b73066048f",
+    "initialFailureRetained": "63d5d09c-2914-454c-8680-b60b0156b6e2",
+    "fullRegressionRerun": false
+  },
+  "localInstance": {"packageVersion": "0.21.0", "phase": "ready", "qq": "online", "identityPreserved": true, "foundationPreserved": true, "configurationUnchanged": true},
+  "serverAccess": false,
+  "newModelCalls": 0,
+  "qqTestMessagesSent": 0,
+  "originalUncommittedDocumentSha256": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+}
