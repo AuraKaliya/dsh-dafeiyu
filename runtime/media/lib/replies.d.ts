@@ -8,7 +8,7 @@ interface Host {
     store: MediaStore;
     files: MediaFiles;
     ready(): boolean;
-    prepareAsset(context: ExecutionContextV3, asset: MediaAssetRef, as: 'image' | 'record' | 'file', key: string): Promise<{
+    prepareAsset(context: ExecutionContextV3, asset: MediaAssetRef, as: 'image' | 'record' | 'file', key: string, owner: string): Promise<{
         asset: MediaAssetRef;
         source: MediaSourceDescription;
     }>;
@@ -19,7 +19,7 @@ export declare class MediaReplies {
     private readonly host;
     constructor(host: Host);
     private write;
-    prepare(context: ExecutionContextV3, raw: unknown): Promise<{
+    prepare(context: ExecutionContextV3, raw: unknown, owner?: string): Promise<{
         draftId: string;
         version: number;
         currentDraftId: string;
@@ -67,12 +67,12 @@ export declare class MediaReplies {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "record" | "file" | "image";
+            delivery: "image" | "record" | "file";
             asset: {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -94,7 +94,7 @@ export declare class MediaReplies {
         target: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         };
         sourceMessageId: string;
@@ -110,7 +110,7 @@ export declare class MediaReplies {
             target: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -129,7 +129,7 @@ export declare class MediaReplies {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -140,7 +140,7 @@ export declare class MediaReplies {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -151,7 +151,7 @@ export declare class MediaReplies {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;

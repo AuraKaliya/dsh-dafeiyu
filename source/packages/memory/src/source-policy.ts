@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { redactContent,redactJson,FeedbackMetaSchema,PersonaSourceRefSchema,ActionOutcomeSchema } from '@dafeiyu/contracts';
+import { redactContent,redactJson,FeedbackMetaSchema,PersonaSourceRefSchema,ActionOutcomeSchema,messageDisplayText } from '@dafeiyu/contracts';
 import type { SourceDependency,SourcePolicy,CompactionScope,ContextItem } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import type { WorkingMemory } from './working.js';
@@ -20,7 +20,7 @@ export class MemorySourcePolicy implements SourcePolicy {
   private inboundMatch(scope:CompactionScope,id:string){return (ref:string)=>this.ctx.dafeiyuTimeline.matchesInboundSource(scope,ref,id);}
   private message(scope:CompactionScope,id:string):string|null {
     const item=this.ctx.dafeiyu.journal.messageFor(scope,id);if(!item||this.ctx.dafeiyu.journal.messageRecalled(scope,id))return null;
-    return redactContent(JSON.stringify(redactJson({sender:item.message.sender,occurredAt:item.message.occurredAt,text:item.message.text}).value,null,2)).value;
+    return redactContent(JSON.stringify(redactJson({sender:item.message.sender,occurredAt:item.message.occurredAt,text:messageDisplayText(item.message)}).value,null,2)).value;
   }
   inbound(scope:CompactionScope,id:string):SourceDependency[]{
     const text=this.message(scope,id);if(text===null)return this.missing(scope);const hash=digest(text);
@@ -66,7 +66,7 @@ export class MemorySourcePolicy implements SourcePolicy {
         if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,ref,digest(JSON.stringify(view.page))))return this.missing(scope);
         return [{...scoped(scope),kind:'capability',ref}];
       }
-      if(name==='dafeiyu_media_read'||name==='qq_media_list'){
+      if(name==='dafeiyu_media_read'||name==='qq_media_list'||name==='qq_sticker_list'){
         const outcome=ActionOutcomeSchema.parse(data);if(outcome.status!=='succeeded'||outcome.data===null)return [];
         const value=z.record(z.string(),z.json()).parse(outcome.data);if(value.observation===undefined)return [];
         const observation=z.object({source:PersonaSourceRefSchema}).parse(value.observation),{observation:_observation,...view}=value;
@@ -74,7 +74,7 @@ export class MemorySourcePolicy implements SourcePolicy {
         if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,observation.source,digest(actual)))return this.missing(scope);
         return [{...scoped(scope),kind:'capability',ref:observation.source}];
       }
-      if(['qq_groups','qq_observe_select','dafeiyu_media_select','dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_reply','dafeiyu_media_reply_status'].includes(name))return [];
+      if(['qq_groups','qq_observe_select','dafeiyu_media_select','dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_reply','dafeiyu_media_reply_status','qq_sticker_collect','qq_sticker_use','qq_sticker_manage'].includes(name))return [];
       if(name==='dafeiyu_source_open'||name.includes('_deleted_')||name==='dafeiyu_memory_analysis_open'
         ||name==='dafeiyu_tool_feedback_open'||/deleted_lookup_only|historical_evidence_only/.test(text))return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];
       const feedback=z.object({dafeiyuFeedback:FeedbackMetaSchema}).safeParse(meta);

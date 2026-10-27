@@ -34,7 +34,7 @@ export declare class PersonaStore {
     review(access: PersonaAccess, raw: unknown): {
         id: string;
         version: number;
-        state: "proposed" | "held" | "trial" | "adopted" | "rejected" | "withdrawn" | "dormant" | "superseded";
+        state: "superseded" | "withdrawn" | "proposed" | "held" | "trial" | "adopted" | "rejected" | "dormant";
     };
     selectTrial(access: PersonaAccess, raw: unknown): {
         selection: {
@@ -129,8 +129,8 @@ export declare class PersonaStore {
         candidates: {
             id: string;
             version: number;
-            state: "proposed" | "held" | "trial" | "adopted" | "rejected" | "withdrawn" | "dormant" | "superseded";
-            kind: "interest" | "preference" | "view" | "habit" | "relationship" | "value-application";
+            state: "superseded" | "withdrawn" | "proposed" | "held" | "trial" | "adopted" | "rejected" | "dormant";
+            kind: "preference" | "interest" | "view" | "habit" | "relationship" | "value-application";
             applicability: string;
             maturity: string;
             available: boolean;

@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { MessageTaskSubmitSchema, MessageTaskStatusSchema, MessageTaskControlSchema, ConversationSchema } from '#dafeiyu/contracts';
+import { MessageTaskSubmitSchema, MessageTaskStatusSchema, MessageTaskControlSchema, ConversationSchema, messageMainText, messageParts } from '#dafeiyu/contracts';
 export const QQ_TASK_ACTIONS = ['qq_task_submit', 'qq_task_status', 'qq_task_control'];
 export const QqTasksConfigSchema = z.strictObject({ enabled: z.boolean().default(false), deliverResults: z.boolean().default(true), policyId: z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('qq-task'), explorationResources: z.array(ConversationSchema).max(32).optional(), expressionPolicy: z.strictObject({ id: z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/), version: z.number().int().positive() }).optional() });
 export function qqTaskDirective(message, names = []) {
-    let text = message.mainText?.trim() ?? '';
+    let text = messageMainText(message).trim();
     for (const name of [...names].sort((a, b) => b.length - a.length)) {
         const prefix = text.startsWith('@' + name) ? '@' + name : text.startsWith(name) ? name : null;
         if (prefix) {
@@ -26,10 +26,10 @@ export class QqTaskCapabilities {
     closed = false;
     constructor(ctx, config) {
         this.ctx = ctx;
-        const current = (message, evidence) => !this.closed && message.sender.id === config.ownerId && message.conversation.channel === 'qq' && message.conversation.account === config.botId && !message.mainText?.trim()
+        const current = (message, evidence) => !this.closed && message.sender.id === config.ownerId && message.conversation.channel === 'qq' && message.conversation.account === config.botId && !messageMainText(message).trim()
             && evidence.origin.provider === 'qq-media' && JSON.stringify(message.conversation) === JSON.stringify(evidence.origin.scene)
-            && z.object({ messageId: z.literal(message.id), sender: z.literal(config.ownerId) }).safeParse(evidence.origin.detail).success
-            && message.media?.some(m => m.kind === 'audio' && m.source.provider === evidence.source.provider && m.source.key === evidence.source.key) === true && ctx.dafeiyu.mediaVoiceCurrent(evidence);
+            && messageParts(message).some(part => z.object({ messageId: z.literal(part.id), sender: z.literal(config.ownerId) }).safeParse(evidence.origin.detail).success)
+            && messageParts(message).flatMap(part => part.media ?? []).some(m => m.kind === 'audio' && m.source.provider === evidence.source.provider && m.source.key === evidence.source.key) === true && ctx.dafeiyu.mediaVoiceCurrent(evidence);
         this.handle = ctx.dafeiyu.registerExtensionV3({ protocolVersion: 3, id: 'qq-tasks', version: '1', agentId: config.agentId, requires: ['execution.message-task.v1', 'memory.execution.v1', ...(config.voiceDirectives ? ['media.assets.v1'] : []), ...(config.deliverResults ? ['memory.native-expression.v1', 'delivery.task-result.v1'] : [])], provides: ['qq.tasks.v1'], lifecycleReady: () => !this.closed, actions: this.actions() });
         try {
             this.unbind = ctx.dafeiyu.bindMessageTasks({ id: 'qq-tasks', pluginId: 'qq-tasks', channelExtensionId: 'channel-qq', channel: 'qq', account: config.botId, ownerId: config.ownerId, policyId: config.policyId, version: '1', autoDeliver: config.deliverResults, ...(config.explorationResources?.length ? { explorationResources: config.explorationResources } : {}), ...(config.expressionPolicy ? { expressionPolicy: config.expressionPolicy } : {}), classify: message => qqTaskDirective(message, config.naturalNames), active: () => !this.closed,

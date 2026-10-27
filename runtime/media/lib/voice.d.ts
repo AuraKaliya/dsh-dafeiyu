@@ -11,7 +11,7 @@ export declare function voiceWitness(store: MediaStore, exposure: MediaExposure)
             scene: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             key: string;
@@ -25,7 +25,7 @@ export declare function voiceWitness(store: MediaStore, exposure: MediaExposure)
             scene: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             key: string;

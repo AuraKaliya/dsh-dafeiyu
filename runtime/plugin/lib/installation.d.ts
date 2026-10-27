@@ -90,7 +90,7 @@ export declare function installationProfile(settings: InstallationSettings, meta
         resources: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "local" | "group";
             id: string;
         }[];
         externalActions?: {
@@ -121,8 +121,20 @@ export declare function prepareInstallation(settingsFile: string, options?: Inst
             tokenFile: string;
             httpURL: string;
             wsURL: string;
+            messageBatch: {
+                enabled: boolean;
+                quietMs: number;
+                maxWaitMs: number;
+                maxMessages: number;
+            };
+            stickers: {
+                enabled: boolean;
+                maxBytes: number;
+                maxEntries: number;
+            };
             groupIds: string[];
             joinedGroups: boolean;
+            replyDelay: boolean;
             naturalNames: string[];
             media?: {
                 cacheRoots: string[];

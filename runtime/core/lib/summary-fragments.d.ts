@@ -181,13 +181,13 @@ export declare const rewriteSchema: z.ZodObject<{
     result: z.ZodObject<{
         fragment: z.ZodObject<{
             kind: z.ZodEnum<{
-                decision: "decision";
-                result: "result";
                 fact: "fact";
+                decision: "decision";
                 constraint: "constraint";
                 correction: "correction";
                 pending: "pending";
                 uncertainty: "uncertainty";
+                result: "result";
                 note: "note";
             }>;
             text: z.ZodString;
@@ -390,13 +390,13 @@ export declare const fragmentManifestSchema: z.ZodObject<{
     }, z.core.$strict>>;
     fragments: z.ZodArray<z.ZodObject<{
         kind: z.ZodEnum<{
-            decision: "decision";
-            result: "result";
             fact: "fact";
+            decision: "decision";
             constraint: "constraint";
             correction: "correction";
             pending: "pending";
             uncertainty: "uncertainty";
+            result: "result";
             note: "note";
         }>;
         text: z.ZodString;
@@ -591,13 +591,13 @@ export declare const fragmentManifestSchema: z.ZodObject<{
         result: z.ZodObject<{
             fragment: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    decision: "decision";
-                    result: "result";
                     fact: "fact";
+                    decision: "decision";
                     constraint: "constraint";
                     correction: "correction";
                     pending: "pending";
                     uncertainty: "uncertainty";
+                    result: "result";
                     note: "note";
                 }>;
                 text: z.ZodString;
@@ -814,13 +814,13 @@ export declare const fragmentRecordSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
         }, z.core.$strict>>;
         fragments: z.ZodArray<z.ZodObject<{
             kind: z.ZodEnum<{
-                decision: "decision";
-                result: "result";
                 fact: "fact";
+                decision: "decision";
                 constraint: "constraint";
                 correction: "correction";
                 pending: "pending";
                 uncertainty: "uncertainty";
+                result: "result";
                 note: "note";
             }>;
             text: z.ZodString;
@@ -1015,13 +1015,13 @@ export declare const fragmentRecordSchema: z.ZodDiscriminatedUnion<[z.ZodObject<
             result: z.ZodObject<{
                 fragment: z.ZodObject<{
                     kind: z.ZodEnum<{
-                        decision: "decision";
-                        result: "result";
                         fact: "fact";
+                        decision: "decision";
                         constraint: "constraint";
                         correction: "correction";
                         pending: "pending";
                         uncertainty: "uncertainty";
+                        result: "result";
                         note: "note";
                     }>;
                     text: z.ZodString;
@@ -1080,13 +1080,13 @@ export declare const fragmentCapsuleSchema: z.ZodObject<{
     ref: z.ZodString;
     fragments: z.ZodArray<z.ZodObject<{
         kind: z.ZodEnum<{
-            decision: "decision";
-            result: "result";
             fact: "fact";
+            decision: "decision";
             constraint: "constraint";
             correction: "correction";
             pending: "pending";
             uncertainty: "uncertainty";
+            result: "result";
             note: "note";
         }>;
         text: z.ZodString;
@@ -1262,7 +1262,7 @@ export declare function composeFragmentContent(views: readonly ResolvedFragmentV
         semanticDepth?: number | undefined;
     }[];
     fragments: {
-        kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
         text: string;
         id: string;
         version: 1;
@@ -1592,7 +1592,7 @@ export declare function rewrittenContent(session: Session, parent: ResolvedFragm
         semanticDepth?: number | undefined;
     }[];
     fragments: {
-        kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
         text: string;
         id: string;
         version: 1;
@@ -1607,7 +1607,7 @@ export declare function resolveFragmentView(session: Session, reference: string,
 /** Display lifecycle only. Neither 'active' nor 'superseded' asserts live source validity. */
 export declare function summarySelectionState(session: Session, reference: string, scope: TimelineScope): 'active' | 'withdrawn' | 'superseded' | 'unselected' | 'unproven';
 export declare function activeFragments(view: ResolvedFragmentView): {
-    kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+    kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
     text: string;
     id: string;
     version: 1;

@@ -132,7 +132,7 @@ export declare class ActivityStore {
             start: string;
             end: string;
         }[];
-        state: "cancelled" | "active" | "paused";
+        state: "active" | "paused" | "cancelled";
         createdAt: string;
         updatedAt: string;
     };

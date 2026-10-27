@@ -11,7 +11,7 @@ import { ContextRuntime } from './context-runtime.js';
 import type { ContextCoordinator } from './context.js';
 import { FeedbackRuntime } from './feedback-runtime.js';
 import type { FeedbackValidator } from './feedback-runtime.js';
-import { FeedbackWitnessSchema } from '@dafeiyu/contracts';
+import { FeedbackWitnessSchema,messageDisplayText } from '@dafeiyu/contracts';
 import type { FeedbackMeta } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
@@ -77,15 +77,15 @@ export class DshRuntime {
     });
   }
 
-  async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。',delivery?:RuntimeDelivery,nativeActions:readonly NativeAction[]=[]): Promise<RunResult> {
-    return this.runFrame({mode:delivery?'delivery-v2':'conversation',item,persona,actions,signal,channelDescription,...(delivery?{delivery}:{}),nativeActions});
+  async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。',delivery?:RuntimeDelivery,nativeActions:readonly NativeAction[]=[],allowEmpty:()=>boolean=()=>false): Promise<RunResult> {
+    return this.runFrame({mode:delivery?'delivery-v2':'conversation',item,persona,actions,signal,channelDescription,...(delivery?{delivery}:{}),nativeActions,allowEmpty});
   }
   runFrame(frame:TaskExecutionFrame):ReturnType<NativeRuntime['run']>;
   runFrame(frame:ConversationExecutionFrame):Promise<RunResult>;
   runFrame(frame:ExecutionFrame):ReturnType<NativeRuntime['run']>|Promise<RunResult>{
-    return frame.mode==='task'?this.native.run(frame):this.runConversation(frame.item,frame.persona,frame.actions,frame.signal,frame.channelDescription,frame.delivery,frame.nativeActions??[]);
+    return frame.mode==='task'?this.native.run(frame):this.runConversation(frame.item,frame.persona,frame.actions,frame.signal,frame.channelDescription,frame.delivery,frame.nativeActions??[],frame.allowEmpty??(()=>false));
   }
-  private async runConversation(item:PendingMessage,persona:PersonaSnapshot,actions:readonly BoundAction[],signal:AbortSignal,channelDescription:string,delivery:RuntimeDelivery|undefined,nativeActions:readonly NativeAction[]):Promise<RunResult>{
+  private async runConversation(item:PendingMessage,persona:PersonaSnapshot,actions:readonly BoundAction[],signal:AbortSignal,channelDescription:string,delivery:RuntimeDelivery|undefined,nativeActions:readonly NativeAction[],allowEmpty:()=>boolean):Promise<RunResult>{
     signal.throwIfAborted();
     if(this.compactionBinding()&&!this.ctx.get('tokenMeter'))await (this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter)));
     let owned = this.handles.get(item.sessionId);
@@ -147,9 +147,9 @@ export class DshRuntime {
           if(exec.agent!==agent)throw new Error('SCOPE_DENIED');return action.execute(raw,String(exec.callId),AbortSignal.any([signal,exec.signal]));}}));
       signal.throwIfAborted();
       const input=createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
-        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文]\n${item.message.text}` }] });
+        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch?'：同一发送者的连续原消息，依序一起理解，引用保留各自身份':''}]\n${messageDisplayText(item.message)}` }] });
       owned.compaction.expectInput(input);
-      const {text,events,messageSeq,turnEndSeq}=await runAgentTurn(this.ctx,agent,input,signal,()=>owned!.compaction.seal());
+      const {text,events,messageSeq,turnEndSeq}=await runAgentTurn(this.ctx,agent,input,signal,()=>owned!.compaction.seal(),allowEmpty);
       const result:RunResult={ text,resultRef:{sessionId:item.sessionId,messageSeq,turnEndSeq,textHash:createHash('sha256').update(text).digest('hex')}, sources: events.filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
         .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })) };
       if(delivery)await delivery.finalize(result,()=>{signal.throwIfAborted();delivery.guard();

@@ -42,14 +42,14 @@ export declare class TaskDelivery {
     status(taskId: string, id: string): {
         deliveryId: string;
         jobId: string;
-        status: "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain" | "rejected" | "interrupted";
+        status: "rejected" | "interrupted" | "ready" | "sending" | "uncertain" | "sent" | "not-sent" | "rendering";
         receiptId: string | null;
         simulationOnly: boolean;
     };
     submit(taskId: string, input: Submit, signal: AbortSignal, authority: () => void): Promise<{
         deliveryId: string;
         jobId: string;
-        status: "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain" | "rejected" | "interrupted";
+        status: "rejected" | "interrupted" | "ready" | "sending" | "uncertain" | "sent" | "not-sent" | "rendering";
         receiptId: string | null;
         simulationOnly: boolean;
     }>;

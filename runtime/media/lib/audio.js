@@ -7,8 +7,8 @@ import { BoundedProcess, contained } from './process.js';
 import { hashFile } from './files.js';
 const pinned = z.strictObject({ path: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/) });
 export const audioConfigSchema = z.strictObject({
-    whisper: z.strictObject({ node: z.string().min(1), moduleDirectory: z.string().min(1), moduleVersion: z.literal('1.1.3'), model: pinned, language: z.string().regex(/^(auto|[a-z]{2,3})$/).default('auto') }).optional(),
-    events: z.strictObject({ python: z.string().min(1), model: pinned, labels: pinned, onnxruntimeVersion: z.string().min(1), numpyVersion: z.string().min(1) }).optional(),
+    whisper: z.strictObject({ node: z.string().min(1), moduleDirectory: z.string().min(1), moduleVersion: z.literal('1.1.3'), model: pinned, language: z.string().regex(/^(auto|[a-z]{2,3})$/).default('auto'), memoryBytes: z.number().int().min(128 * 1024 ** 2).max(2 * 1024 ** 3).default(512 * 1024 ** 2) }).optional(),
+    events: z.strictObject({ python: z.string().min(1), model: pinned, labels: pinned, onnxruntimeVersion: z.string().min(1), numpyVersion: z.string().min(1), memoryBytes: z.number().int().min(128 * 1024 ** 2).max(2 * 1024 ** 3).default(512 * 1024 ** 2) }).optional(),
 });
 const segment = z.strictObject({ startMs: z.number().finite().nonnegative(), endMs: z.number().finite().nonnegative(), text: z.string().max(8000) }).refine(v => v.endMs >= v.startMs);
 const scored = z.strictObject({ label: z.string().min(1).max(200), score: z.number().finite() });
@@ -50,12 +50,12 @@ export class AudioPipeline {
             signal.throwIfAborted();
             await writeFile(file, audio.data, { flag: 'wx' });
             const common = { input: file, inputSha256: input.sha256, samples: input.samples };
-            const execute = async (executable, script, request) => {
+            const execute = async (executable, script, request, memoryBytes = 512 * 1024 ** 2) => {
                 guard();
                 signal.throwIfAborted();
                 const path = join(directory, script.endsWith('.py') ? 'events.json' : 'asr.json');
                 await writeFile(path, JSON.stringify(request), { flag: 'wx' });
-                const result = await this.worker.run({ executable, arguments: [fileURLToPath(new URL('../workers/' + script, import.meta.url)), path], timeoutMs: this.timeoutMs, memoryBytes: 512 * 1024 ** 2, maxStdoutBytes: 128 * 1024, maxStderrBytes: 8192, signal });
+                const result = await this.worker.run({ executable, arguments: [fileURLToPath(new URL('../workers/' + script, import.meta.url)), path], timeoutMs: this.timeoutMs, memoryBytes, maxStdoutBytes: 128 * 1024, maxStderrBytes: 8192, signal });
                 guard();
                 signal.throwIfAborted();
                 return JSON.parse(result.stdout.toString('utf8').replace(/^\uFEFF/, ''));
@@ -67,7 +67,7 @@ export class AudioPipeline {
                 try {
                     const settings = this.config.whisper;
                     await this.pinned(settings.model);
-                    const result = asrSchema.parse(await execute(settings.node, 'whisper.cjs', { ...common, ...settings }));
+                    const result = asrSchema.parse(await execute(settings.node, 'whisper.cjs', { ...common, ...settings }, settings.memoryBytes));
                     if (result.inputSha256 !== input.sha256 || result.samples !== input.samples || result.modelSha256 !== settings.model.sha256 || result.segments.some((s, i) => s.endMs > input.durationMs + 1 || i > 0 && s.startMs < result.segments[i - 1].startMs))
                         throw new Error('MEDIA_ASR_RANGE_INVALID');
                     if (result.segments.reduce((n, s) => n + s.text.length, 0) > 8000)
@@ -87,7 +87,7 @@ export class AudioPipeline {
                     const settings = this.config.events;
                     await this.pinned(settings.model);
                     await this.pinned(settings.labels);
-                    const result = eventSchema.parse(await execute(settings.python, 'audio_events.py', { ...common, ...settings }));
+                    const result = eventSchema.parse(await execute(settings.python, 'audio_events.py', { ...common, ...settings }, settings.memoryBytes));
                     if (result.inputSha256 !== input.sha256 || result.samples !== input.samples || result.modelSha256 !== settings.model.sha256 || result.labelsSha256 !== settings.labels.sha256 || result.onnxruntimeVersion !== settings.onnxruntimeVersion || result.numpyVersion !== settings.numpyVersion)
                         throw new Error('MEDIA_EVENTS_IDENTITY_INVALID');
                     let covered = 0;

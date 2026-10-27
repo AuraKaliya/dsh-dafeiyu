@@ -13,11 +13,11 @@ export class MediaReplies {
     constructor(host) {
         this.host = host;
     }
-    write(context) { if (!this.host.ready())
-        throw new Error('MEDIA_NOT_CONFIGURED'); const access = this.host.ctx.dafeiyu.personaAccess(context, 'media', 'local-write'); if (!access.historyTracked)
+    write(context, owner) { if (!this.host.ready())
+        throw new Error('MEDIA_NOT_CONFIGURED'); const access = this.host.ctx.dafeiyu.personaAccess(context, owner, 'local-write'); if (!access.historyTracked)
         throw new Error('HISTORY_UNTRACKED'); return access; }
-    async prepare(context, raw) {
-        const input = MediaReplyDraftInputSchema.parse(raw), access = this.write(context), temporary = [];
+    async prepare(context, raw, owner = 'media') {
+        const input = MediaReplyDraftInputSchema.parse(raw), access = this.write(context, owner), temporary = [];
         const parts = [];
         let persisted = false;
         try {
@@ -29,24 +29,24 @@ export class MediaReplies {
                     continue;
                 }
                 const as = part.as ?? (part.asset.kind === 'image' ? 'image' : part.asset.kind === 'audio' ? 'record' : 'file');
-                const prepared = await this.host.prepareAsset(context, part.asset, as, 'reply:' + mediaHash([input.requestId, input.expectedVersion, index]));
+                const prepared = await this.host.prepareAsset(context, part.asset, as, 'reply:' + mediaHash([input.requestId, input.expectedVersion, index]), owner);
                 access.guard();
                 if (prepared.asset.bytes > 16 * 1024 ** 2)
                     throw new Error('MEDIA_SIZE_LIMIT');
                 parts.push({ kind: 'asset', ...prepared, as });
-                const mediaAccess = this.host.ctx.dafeiyu.mediaAccess(context, 'media', prepared.source.origin);
+                const mediaAccess = this.host.ctx.dafeiyu.mediaAccess(context, owner, prepared.source.origin);
                 temporary.push(this.host.store.lease(mediaAccess, prepared.asset, 'draft-preparing', Date.now() + 3600000));
             }
             if (parts.reduce((n, p) => n + (p.kind === 'asset' ? p.asset.bytes : 0), 0) > 32 * 1024 ** 2)
                 throw new Error('MEDIA_SIZE_LIMIT');
             const content = mediaDraftContentSchema.parse({ schemaVersion: 1, runId: access.view.runId, scope: access.view.scope, taskEpoch: access.intentVersion, parts });
-            const authority = this.host.ctx.dafeiyu.captureMediaReplyAuthority(context, 'media', mediaHash(content)), before = this.host.store.replies.current(context.runId)?.draft;
+            const authority = this.host.ctx.dafeiyu.captureMediaReplyAuthority(context, owner, mediaHash(content)), before = this.host.store.replies.current(context.runId)?.draft;
             const draft = this.host.store.replies.prepare(access, { requestId: input.requestId, expectedVersion: input.expectedVersion, content, authority });
             persisted = true;
             // Each immutable selection has bounded pins; replacing/cancelling only releases that selection's pins.
             for (const part of draft.parts)
                 if (part.kind === 'asset') {
-                    const mediaAccess = this.host.ctx.dafeiyu.mediaAccess(context, 'media', part.source.origin);
+                    const mediaAccess = this.host.ctx.dafeiyu.mediaAccess(context, owner, part.source.origin);
                     this.host.store.ensureLease(mediaAccess, part.asset, 'media-draft:' + draft.id, Date.now() + 3600000);
                 }
             if (before && before.id !== draft.id)

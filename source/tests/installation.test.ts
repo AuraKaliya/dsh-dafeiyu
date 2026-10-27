@@ -5,7 +5,8 @@ import { promisify } from 'node:util';
 import { mkdtempSync,writeFileSync,readdirSync } from 'node:fs';
 import { join,resolve } from 'node:path';
 import { readInstallationSettings,InstallationSettingsSchema,SettingsError } from 'dsh-dafeiyu/settings';
-import { prepareInstallation } from 'dsh-dafeiyu/installation';
+import { prepareInstallation, installationProfile } from 'dsh-dafeiyu/installation';
+import { z } from 'zod';
 import { testTempDir } from './test-temp.js';
 
 test('missing owner/model configuration reports only fields and does not initialize data',()=>{
@@ -16,6 +17,15 @@ test('missing owner/model configuration reports only fields and does not initial
 test('owner and bot must be supplied separately; no provider credentials or private identity defaults',()=>{
   assert.equal(InstallationSettingsSchema.safeParse({}).success,false);
   assert.equal(InstallationSettingsSchema.safeParse({schemaVersion:1,dataDir:'data',model:{model:'fixture',credentialStore:'file'},qq:{botId:'12345678',ownerId:'12345678',tokenFile:'file',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'}}).success,false);
+});
+test('allowlisted and joined installations both use the one verified group directory',()=>{
+  for(const joinedGroups of [false,true]){
+    const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'data',model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/',groupIds:['11223344'],joinedGroups}});
+    const config=installationProfile(settings,{schemaVersion:1,instanceId:'11111111-1111-4111-8111-111111111111',profileId:'fixture',agentId:'fish',createdAt:'2026-10-27T00:00:00.000Z',identityHash:'0'.repeat(64),biliOwner:null},'persona.md','settings.json',{scripted:true});
+    const qq=config.plugins.find(plugin=>plugin.id==='qq');assert.ok(qq);
+    assert.equal(settings.qq.messageBatch.enabled,true);assert.equal(settings.qq.messageBatch.quietMs,5000);
+    assert.deepEqual(z.object({groupSync:z.object({enabled:z.boolean(),mode:z.string()})}).parse(qq.config).groupSync,{enabled:true,mode:joinedGroups?'joined':'allowlist'});
+  }
 });
 test('a missing or short OneBot token is rejected before creating the instance directory',()=>{
   const root=mkdtempSync(join(testTempDir(),'installation-token-')),file=join(root,'settings.json');

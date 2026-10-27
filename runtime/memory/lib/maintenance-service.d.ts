@@ -31,7 +31,7 @@ export declare class MaintenanceService {
     };
     status(context: ExecutionContextV3, id?: string, pluginId?: string): {
         id: string;
-        state: "completed" | "failed" | "cancelled" | "ready" | "running" | "stale" | "waiting-scheduler";
+        state: "completed" | "failed" | "running" | "ready" | "cancelled" | "stale" | "waiting-scheduler";
         version: number;
         reason: string;
         watermark: string;
@@ -43,7 +43,7 @@ export declare class MaintenanceService {
         schemaVersion: 1;
         id: string;
         version: number;
-        state: "proposed" | "held" | "rejected" | "withdrawn" | "accepted";
+        state: "withdrawn" | "accepted" | "proposed" | "held" | "rejected";
         scope: {
             kind: "conversation";
             agentId: string;
@@ -59,7 +59,7 @@ export declare class MaintenanceService {
         maintenanceId: string;
         goal: string;
         motivation: {
-            kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+            kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
         content: {
@@ -195,13 +195,13 @@ export declare class MaintenanceService {
     review(context: ExecutionContextV3, input: unknown, pluginId?: string): z.core.util.JSONType | {
         id: string;
         version: number;
-        state: "held" | "rejected" | "withdrawn" | "accepted";
+        state: "withdrawn" | "accepted" | "held" | "rejected";
     };
     private result;
     inspect(context: ExecutionContextV3, id: string, pluginId?: string): {
         persona: {
             text: string;
-            kind: "interest" | "preference" | "view" | "habit" | "relationship" | "value-application";
+            kind: "preference" | "view" | "interest" | "habit" | "relationship" | "value-application";
             contentRef: {
                 kind: "memory";
                 revision: number;
@@ -393,10 +393,10 @@ export declare class MaintenanceService {
     cancel(): void;
     whenIdle(): Promise<void>;
     get health(): {
-        state: "closed" | "ready" | "paused";
+        state: "paused" | "closed" | "ready";
         active: number;
         requests: Record<string, number>;
-        scheduler: "not-configured" | "connected";
+        scheduler: "connected" | "not-configured";
     };
     close(): Promise<void>;
 }

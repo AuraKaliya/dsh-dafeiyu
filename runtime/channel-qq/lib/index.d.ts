@@ -2,14 +2,19 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type { DeliveryResult, Reply, TaskResultAnchor, ReplyMediaManifest } from '#dafeiyu/contracts';
 import { z } from 'zod';
+export { qqReplyDelayMs } from './reply-delay.js';
+export { QQ_STICKER_ACTIONS } from './stickers.js';
+export { QqBatchConfigSchema } from './batch.js';
+export { QqStickersConfigSchema } from './sticker-store.js';
 export { QqStore } from './store.js';
 export { QqMediaDeliveryLedger } from './media-delivery.js';
 export { inspectQqSchema, QQ_APPLICATION_ID, QQ_SCHEMA_VERSION } from './schema.js';
 export { GroupDirectory, GroupSyncConfigSchema, GroupSyncStateSchema } from './groups.js';
+export type { GroupInfo, GroupInput, GroupSnapshot } from './groups.js';
 export { naturallyAddressed } from './trigger.js';
 export { QqBrowseInputSchema, QqCacheProofSchema } from './cache.js';
 export type { QqCacheProof } from './cache.js';
-export { QQ_ACTIONS } from './capabilities.js';
+export { QQ_ACTIONS, QQ_OBSERVATION_ACTIONS } from './capabilities.js';
 export { splitQqText, qqDeliveryPlan } from './delivery.js';
 export type { QqDeliveryProgress, QqDeliveryPlan } from './delivery.js';
 export { QQ_TASK_ACTIONS, qqTaskDirective } from './tasks.js';
@@ -35,6 +40,18 @@ declare const configSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         snapshotTtlMs: z.ZodDefault<z.ZodNumber>;
         maxSnapshots: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    replyDelay: z.ZodDefault<z.ZodBoolean>;
+    messageBatch: z.ZodPrefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        quietMs: z.ZodDefault<z.ZodNumber>;
+        maxWaitMs: z.ZodDefault<z.ZodNumber>;
+        maxMessages: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    stickers: z.ZodPrefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        maxBytes: z.ZodDefault<z.ZodNumber>;
+        maxEntries: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     tasks: z.ZodPrefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -84,6 +101,11 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         maxReadBytes: z.ZodDefault<z.ZodNumber>;
         voiceDirectives: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>>;
+    stickers: z.ZodPrefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        maxBytes: z.ZodDefault<z.ZodNumber>;
+        maxEntries: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     botId: z.ZodString;
     ownerId: z.ZodString;
     groupIds: z.ZodArray<z.ZodString>;
@@ -101,6 +123,13 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         snapshotTtlMs: z.ZodDefault<z.ZodNumber>;
         maxSnapshots: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    replyDelay: z.ZodDefault<z.ZodBoolean>;
+    messageBatch: z.ZodPrefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        quietMs: z.ZodDefault<z.ZodNumber>;
+        maxWaitMs: z.ZodDefault<z.ZodNumber>;
+        maxMessages: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     tasks: z.ZodPrefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -146,6 +175,9 @@ export declare class QqChannel extends Service {
     private readonly capabilities;
     private readonly tasks;
     private readonly media;
+    private readonly batches;
+    private readonly stickers;
+    private readonly sourceSignals;
     private readonly token;
     private socket;
     private retry;
@@ -170,6 +202,18 @@ export declare class QqChannel extends Service {
         error: string | null;
         botId: string;
         ownerId: string;
+        messageBatch: {
+            pending: number;
+            enabled: boolean;
+            quietMs: number;
+            maxWaitMs: number;
+            maxMessages: number;
+        };
+        stickers: {
+            enabled: boolean;
+            registered: boolean;
+            actions: ("qq_sticker_list" | "qq_sticker_collect" | "qq_sticker_use" | "qq_sticker_manage")[];
+        };
         media: {
             enabled: boolean;
             sendEnabled: boolean;
@@ -188,6 +232,8 @@ export declare class QqChannel extends Service {
             revision: number | null;
             joinedIds: string[];
             effectiveIds: string[];
+            assistantIds: string[];
+            unknownIds: string[];
             error: string | null;
         };
         delivery: {
@@ -204,7 +250,7 @@ export declare class QqChannel extends Service {
         capabilities: {
             enabled: boolean;
             registered: boolean;
-            actions: ("qq_groups" | "qq_browse" | "qq_observe_select")[];
+            actions: ("qq_groups" | "qq_browse" | "qq_observe_select" | "qq_forward_read" | "qq_reply_quote")[];
         };
         counters: {
             received: number;
@@ -221,6 +267,7 @@ export declare class QqChannel extends Service {
     private deliveryCounts;
     private cacheRoute;
     private allowed;
+    private processingSignal;
     /** Program-side refresh; no model invocation, privilege expansion or history replay. */
     refreshGroups(): Promise<void>;
     start(): Promise<void>;
@@ -231,6 +278,8 @@ export declare class QqChannel extends Service {
     private connect;
     private retryLater;
     private receive;
+    private readHistory;
+    private readForward;
     deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
     deliverMedia(reply: Reply & {
         media: ReplyMediaManifest;

@@ -164,9 +164,9 @@ export declare const ActivityScheduleBodySchema: z.ZodObject<{
         end: z.ZodString;
     }, z.core.$strict>>;
     state: z.ZodEnum<{
-        cancelled: "cancelled";
         active: "active";
         paused: "paused";
+        cancelled: "cancelled";
     }>;
     createdAt: z.ZodISODateTime;
     updatedAt: z.ZodISODateTime;
@@ -201,8 +201,8 @@ export declare const WakeOccurrenceBodySchema: z.ZodObject<{
     dueAt: z.ZodISODateTime;
     createdAt: z.ZodISODateTime;
     reason: z.ZodEnum<{
-        maintenance: "maintenance";
         time: "time";
+        maintenance: "maintenance";
         condition: "condition";
         resume: "resume";
     }>;
@@ -211,13 +211,13 @@ export declare const WakeOccurrenceBodySchema: z.ZodObject<{
 }, z.core.$strict>;
 export type WakeOccurrenceBody = z.infer<typeof WakeOccurrenceBodySchema>;
 export declare const ActivityOccurrenceStateSchema: z.ZodEnum<{
-    completed: "completed";
     failed: "failed";
-    cancelled: "cancelled";
-    accepted: "accepted";
-    pending: "pending";
     waiting: "waiting";
     blocked: "blocked";
+    completed: "completed";
+    pending: "pending";
+    cancelled: "cancelled";
+    accepted: "accepted";
     running: "running";
 }>;
 export type ActivityOccurrenceState = z.infer<typeof ActivityOccurrenceStateSchema>;

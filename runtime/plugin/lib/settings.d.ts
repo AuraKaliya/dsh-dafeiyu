@@ -17,8 +17,20 @@ export declare const InstallationSettingsSchema: z.ZodObject<{
         tokenFile: z.ZodString;
         httpURL: z.ZodURL;
         wsURL: z.ZodURL;
+        messageBatch: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            quietMs: z.ZodDefault<z.ZodNumber>;
+            maxWaitMs: z.ZodDefault<z.ZodNumber>;
+            maxMessages: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        stickers: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+            maxEntries: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         groupIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
         joinedGroups: z.ZodDefault<z.ZodBoolean>;
+        replyDelay: z.ZodDefault<z.ZodBoolean>;
         naturalNames: z.ZodDefault<z.ZodArray<z.ZodString>>;
         media: z.ZodOptional<z.ZodObject<{
             cacheRoots: z.ZodDefault<z.ZodArray<z.ZodString>>;

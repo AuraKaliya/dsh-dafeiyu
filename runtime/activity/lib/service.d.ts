@@ -59,7 +59,7 @@ export declare class ActivityService extends Service {
     status(context: ExecutionContextV3, id?: string): {
         id: string;
         version: number;
-        status: "cancelled" | "active" | "paused" | "exhausted" | "blocked";
+        status: "active" | "paused" | "cancelled" | "blocked" | "exhausted";
         purpose: "maintenance" | "exploration";
         goal: string | null;
         trigger: {

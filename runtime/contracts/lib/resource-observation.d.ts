@@ -9,9 +9,9 @@ export declare const ResourceProofSchema: z.ZodObject<{
         channel: z.ZodString;
         account: z.ZodString;
         kind: z.ZodEnum<{
-            local: "local";
             private: "private";
             group: "group";
+            local: "local";
         }>;
         id: z.ZodString;
     }, z.core.$strict>;
@@ -47,9 +47,9 @@ export declare const CapabilityObservationSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -73,9 +73,9 @@ export declare const CapabilitySelectionSchema: z.ZodObject<{
     version: z.ZodNumber;
     mode: z.ZodEnum<{
         none: "none";
-        summary: "summary";
         original: "original";
         fragment: "fragment";
+        summary: "summary";
     }>;
     start: z.ZodOptional<z.ZodNumber>;
     end: z.ZodOptional<z.ZodNumber>;

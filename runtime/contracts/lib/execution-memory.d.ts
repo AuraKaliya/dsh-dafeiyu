@@ -61,8 +61,8 @@ export declare const ExecutionContributionSchema: z.ZodObject<{
     source: z.ZodUUID;
     version: z.ZodNumber;
     mode: z.ZodEnum<{
-        summary: "summary";
         original: "original";
+        summary: "summary";
         excerpt: "excerpt";
     }>;
     start: z.ZodOptional<z.ZodNumber>;
@@ -141,8 +141,8 @@ export type ExecutionToolReceipt = z.infer<typeof ExecutionToolReceiptSchema>;
 export declare const TaskObjectionSchema: z.ZodObject<{
     requestId: z.ZodString;
     category: z.ZodEnum<{
-        preference: "preference";
         scope: "scope";
+        preference: "preference";
         method: "method";
         premise: "premise";
         "missing-information": "missing-information";
@@ -188,10 +188,10 @@ export declare const TaskResolutionSchema: z.ZodObject<{
 export declare const ExecutionMotivationSchema: z.ZodObject<{
     kind: z.ZodEnum<{
         unknown: "unknown";
+        maintenance: "maintenance";
         "explicit-task": "explicit-task";
         "self-exploration": "self-exploration";
         "conversation-invitation": "conversation-invitation";
-        maintenance: "maintenance";
         mixed: "mixed";
     }>;
     basis: z.ZodDefault<z.ZodArray<z.ZodString>>;

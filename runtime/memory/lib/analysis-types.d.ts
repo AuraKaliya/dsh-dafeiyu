@@ -21,16 +21,16 @@ export declare const resultSchema: z.ZodObject<{
             add: "add";
         }>;
         kind: z.ZodEnum<{
-            preference: "preference";
             experience: "experience";
             knowledge: "knowledge";
+            preference: "preference";
             procedure: "procedure";
         }>;
         claimType: z.ZodEnum<{
-            inference: "inference";
-            reported_claim: "reported_claim";
-            self_report: "self_report";
             observation: "observation";
+            self_report: "self_report";
+            reported_claim: "reported_claim";
+            inference: "inference";
         }>;
         subject: z.ZodString;
         content: z.ZodString;
@@ -84,9 +84,9 @@ export declare const sourceSchema: z.ZodObject<{
     text: z.ZodString;
     origin: z.ZodEnum<{
         memory: "memory";
-        event: "event";
         user: "user";
         tool: "tool";
+        event: "event";
     }>;
     authorId: z.ZodOptional<z.ZodString>;
     version: z.ZodOptional<z.ZodNumber>;
@@ -96,16 +96,16 @@ declare const targetItemSchema: z.ZodObject<{
     id: z.ZodUUID;
     revision: z.ZodNumber;
     kind: z.ZodEnum<{
-        preference: "preference";
         experience: "experience";
         knowledge: "knowledge";
+        preference: "preference";
         procedure: "procedure";
     }>;
     claimType: z.ZodEnum<{
-        inference: "inference";
-        reported_claim: "reported_claim";
-        self_report: "self_report";
         observation: "observation";
+        self_report: "self_report";
+        reported_claim: "reported_claim";
+        inference: "inference";
     }>;
     content: z.ZodString;
     contentHash: z.ZodString;
@@ -219,12 +219,12 @@ export declare const jobSchema: z.ZodObject<{
     inputGeneration: z.ZodNumber;
     generation: z.ZodNumber;
     state: z.ZodEnum<{
-        completed: "completed";
-        failed: "failed";
-        cancelled: "cancelled";
         queued: "queued";
         running: "running";
         committing: "committing";
+        completed: "completed";
+        failed: "failed";
+        cancelled: "cancelled";
     }>;
     sources: z.ZodArray<z.ZodObject<{
         sourceId: z.ZodString;
@@ -256,9 +256,9 @@ export declare const jobSchema: z.ZodObject<{
         text: z.ZodString;
         origin: z.ZodEnum<{
             memory: "memory";
-            event: "event";
             user: "user";
             tool: "tool";
+            event: "event";
         }>;
         authorId: z.ZodOptional<z.ZodString>;
         version: z.ZodOptional<z.ZodNumber>;
@@ -268,16 +268,16 @@ export declare const jobSchema: z.ZodObject<{
             id: z.ZodUUID;
             revision: z.ZodNumber;
             kind: z.ZodEnum<{
-                preference: "preference";
                 experience: "experience";
                 knowledge: "knowledge";
+                preference: "preference";
                 procedure: "procedure";
             }>;
             claimType: z.ZodEnum<{
-                inference: "inference";
-                reported_claim: "reported_claim";
-                self_report: "self_report";
                 observation: "observation";
+                self_report: "self_report";
+                reported_claim: "reported_claim";
+                inference: "inference";
             }>;
             content: z.ZodString;
             contentHash: z.ZodString;
@@ -331,16 +331,16 @@ export declare const jobSchema: z.ZodObject<{
                 add: "add";
             }>;
             kind: z.ZodEnum<{
-                preference: "preference";
                 experience: "experience";
                 knowledge: "knowledge";
+                preference: "preference";
                 procedure: "procedure";
             }>;
             claimType: z.ZodEnum<{
-                inference: "inference";
-                reported_claim: "reported_claim";
-                self_report: "self_report";
                 observation: "observation";
+                self_report: "self_report";
+                reported_claim: "reported_claim";
+                inference: "inference";
             }>;
             subject: z.ZodString;
             content: z.ZodString;
@@ -371,16 +371,16 @@ export declare const jobSchema: z.ZodObject<{
                 add: "add";
             }>;
             kind: z.ZodEnum<{
-                preference: "preference";
                 experience: "experience";
                 knowledge: "knowledge";
+                preference: "preference";
                 procedure: "procedure";
             }>;
             claimType: z.ZodEnum<{
-                inference: "inference";
-                reported_claim: "reported_claim";
-                self_report: "self_report";
                 observation: "observation";
+                self_report: "self_report";
+                reported_claim: "reported_claim";
+                inference: "inference";
             }>;
             subject: z.ZodString;
             content: z.ZodString;
@@ -402,10 +402,10 @@ export declare const jobSchema: z.ZodObject<{
             targetId: z.ZodNullable<z.ZodUUID>;
         }, z.core.$strict>;
         status: z.ZodEnum<{
-            duplicate: "duplicate";
-            ready: "ready";
             needs_review: "needs_review";
+            ready: "ready";
             committed: "committed";
+            duplicate: "duplicate";
             stale: "stale";
         }>;
         reason: z.ZodString;
@@ -415,16 +415,16 @@ export declare const jobSchema: z.ZodObject<{
             expectedGeneration: z.ZodNumber;
             value: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    preference: "preference";
                     experience: "experience";
                     knowledge: "knowledge";
+                    preference: "preference";
                     procedure: "procedure";
                 }>;
                 claimType: z.ZodEnum<{
-                    inference: "inference";
-                    reported_claim: "reported_claim";
-                    self_report: "self_report";
                     observation: "observation";
+                    self_report: "self_report";
+                    reported_claim: "reported_claim";
+                    inference: "inference";
                 }>;
                 content: z.ZodString;
                 sources: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -466,16 +466,16 @@ export declare const jobSchema: z.ZodObject<{
             expectedGeneration: z.ZodNumber;
             value: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    preference: "preference";
                     experience: "experience";
                     knowledge: "knowledge";
+                    preference: "preference";
                     procedure: "procedure";
                 }>;
                 claimType: z.ZodEnum<{
-                    inference: "inference";
-                    reported_claim: "reported_claim";
-                    self_report: "self_report";
                     observation: "observation";
+                    self_report: "self_report";
+                    reported_claim: "reported_claim";
+                    inference: "inference";
                 }>;
                 content: z.ZodString;
                 sources: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -526,8 +526,8 @@ export declare const jobSchema: z.ZodObject<{
 export declare const targetSnapshot: (item: unknown) => {
     id: string;
     revision: number;
-    kind: "preference" | "experience" | "knowledge" | "procedure";
-    claimType: "inference" | "reported_claim" | "self_report" | "observation";
+    kind: "experience" | "knowledge" | "preference" | "procedure";
+    claimType: "observation" | "self_report" | "reported_claim" | "inference";
     content: string;
     contentHash: string;
     sources: ({

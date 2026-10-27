@@ -42,7 +42,7 @@ export class QqMediaTransport {
         catch {
             throw new Error('DELIVERY_AUTHORITY_REVOKED');
         } };
-        let mediaPosition = 0;
+        let mediaPosition = 0, delayed = false;
         for (const [position, part] of plan.parts.entries()) {
             const mediaIndex = part.kind === 'text' ? null : mediaPosition++;
             const progress = this.host.ledger.progress(reply.id);
@@ -58,6 +58,11 @@ export class QqMediaTransport {
                     data = Buffer.from(await bytes(mediaIndex));
                     if (data.length !== part.asset.bytes || data.length > 16 * 1024 ** 2 || createHash('sha256').update(data).digest('hex') !== part.asset.sha256)
                         throw new Error('MEDIA_BLOB_CORRUPT');
+                }
+                guard();
+                if (!delayed && progress.confirmed === 0) {
+                    await this.host.beforeSend?.(reply, signal);
+                    delayed = true;
                 }
                 guard();
                 await this.host.check(reply, signal);

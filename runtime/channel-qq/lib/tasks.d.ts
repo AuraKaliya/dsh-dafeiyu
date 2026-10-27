@@ -21,7 +21,7 @@ export declare const QqTasksConfigSchema: z.ZodObject<{
         version: z.ZodNumber;
     }, z.core.$strict>>;
 }, z.core.$strict>;
-export declare function qqTaskDirective(message: Pick<InboundMessage, 'mainText'>, names?: readonly string[]): {
+export declare function qqTaskDirective(message: Pick<InboundMessage, 'mainText' | 'batch'>, names?: readonly string[]): {
     kind: 'submit' | 'cancel' | 'revise' | 'resolve' | 'none';
     text: string;
 };

@@ -31,9 +31,9 @@ declare const snapshotSchema: z.ZodObject<{
         id: z.ZodString;
         required: z.ZodBoolean;
         state: z.ZodEnum<{
+            disabled: "disabled";
             failed: "failed";
             configured: "configured";
-            disabled: "disabled";
             ready: "ready";
             degraded: "degraded";
             stopped: "stopped";
@@ -202,11 +202,11 @@ declare const snapshotSchema: z.ZodObject<{
         }, z.core.$strict>>>;
         qq: z.ZodOptional<z.ZodNullable<z.ZodObject<{
             state: z.ZodEnum<{
+                rejected: "rejected";
                 stopped: "stopped";
                 starting: "starting";
                 offline: "offline";
                 online: "online";
-                rejected: "rejected";
             }>;
             groupSync: z.ZodEnum<{
                 disabled: "disabled";
@@ -277,7 +277,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
         plugins: {
             id: string;
             required: boolean;
-            state: "failed" | "configured" | "disabled" | "ready" | "degraded" | "stopped" | "starting" | "not-configured";
+            state: "disabled" | "failed" | "configured" | "ready" | "degraded" | "stopped" | "starting" | "not-configured";
             version: string | null;
             code: string | null;
         }[];
@@ -377,7 +377,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
                 blocked: number;
             } | null | undefined;
             qq?: {
-                state: "stopped" | "starting" | "offline" | "online" | "rejected";
+                state: "rejected" | "stopped" | "starting" | "offline" | "online";
                 groupSync: "disabled" | "unavailable" | "current" | "stale";
                 groupError: string | null;
                 effectiveGroups: number;
@@ -405,7 +405,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
         schemas: {
             journal: 2;
             memory: 8 | 9 | 10 | 11 | 12;
-            runtime: 2 | 3 | 4;
+            runtime: 3 | 4 | 2;
             activity?: 1 | null | undefined;
             media?: 2 | null | undefined;
             bilibili?: 1 | null | undefined;

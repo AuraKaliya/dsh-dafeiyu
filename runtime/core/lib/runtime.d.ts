@@ -45,7 +45,7 @@ export declare class DshRuntime {
     private readonly native;
     private meterLoading;
     constructor(ctx: Context, model: AgentOptions, cwd: string, coordinator: ContextCoordinator, validateFeedback: FeedbackValidator, agentId: string, compactionBinding: () => CompactionBinding | undefined, compactionAudit: CompactionAudit, managedProjection?: boolean);
-    run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription?: string, delivery?: RuntimeDelivery, nativeActions?: readonly NativeAction[]): Promise<RunResult>;
+    run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription?: string, delivery?: RuntimeDelivery, nativeActions?: readonly NativeAction[], allowEmpty?: () => boolean): Promise<RunResult>;
     runFrame(frame: TaskExecutionFrame): ReturnType<NativeRuntime['run']>;
     runFrame(frame: ConversationExecutionFrame): Promise<RunResult>;
     private runConversation;
@@ -274,7 +274,7 @@ export declare class DshRuntime {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -322,7 +322,7 @@ export declare class DshRuntime {
             };
             fragments: {
                 ref: string;
-                kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;

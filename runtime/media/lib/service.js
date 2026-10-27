@@ -58,7 +58,7 @@ export class MediaService extends Service {
         this.replySpeech = this.config.tts ? new ReplySpeech(ctx, this.store, this.files, this.config.tts, testBackends?.ttsWorker) : undefined;
         if (this.replySpeech)
             this.providers.set('media', { id: 'media', describe: key => this.replySpeech.describe(key), open: async () => { throw new Error('MEDIA_REPLY_OUTPUT_PRIVATE'); } });
-        this.replies = new MediaReplies({ ctx, store: this.store, files: this.files, ready: () => this.ready(), prepareAsset: (c, a, as, key) => this.prepareReplyAsset(c, a, as, key), sourceCurrent: source => this.sourceCurrent(source), ...(this.replySpeech ? { speech: this.replySpeech } : {}) });
+        this.replies = new MediaReplies({ ctx, store: this.store, files: this.files, ready: () => this.ready(), prepareAsset: (c, a, as, key, owner) => this.prepareReplyAsset(c, a, as, key, owner), sourceCurrent: source => this.sourceCurrent(source), ...(this.replySpeech ? { speech: this.replySpeech } : {}) });
         try {
             this.handle = ctx.dafeiyu.registerExtensionV3({ protocolVersion: 3, id: 'media', version: '0.1.0', agentId: this.config.agentId, requires: ['execution.task.v1', 'memory.capability-observation.v1'], provides: ['media.processing.v1'], lifecycleReady: () => this.ready(), actions: this.actions(),
                 resourceProofs: { current: proof => this.ready() && (proof.key.startsWith('reply-text:') ? this.replySpeech?.current(proof) === true : this.store.validateExposure(proof, source => this.sourceCurrent(source))), epoch: scope => this.ready() ? mediaHash([this.store.epoch(), [...this.providers.keys()], ctx.dafeiyu.capabilityResourceEpochWithout('media', scope)]) : 'closed' } });
@@ -258,13 +258,15 @@ export class MediaService extends Service {
                 this.store.releaseLease(lease, 'audio');
         }
     }
-    async prepareReplyAsset(context, asset, as, key) {
-        return this.withInput(context, 'media', { requestId: key, asset, mode: 'inspect' }, async (p) => {
+    async prepareReplyAsset(context, asset, as, key, owner) {
+        return this.withInput(context, owner, { requestId: key, asset, mode: 'inspect' }, async (p) => {
             const record = this.store.read(p.access, asset.id);
             if (as === 'file' || record.processingHash !== null && (as === 'image' && asset.mime === 'image/png' && asset.kind === 'image' || as === 'record' && asset.mime === 'audio/wav' && asset.kind === 'audio'))
                 return { asset, source: p.source.description };
             const metadata = await this.decoder.inspect(p.input, p.signal);
             let data, kind, mime;
+            if (as === 'image' && p.source.description.ref.provider === 'qq-stickers' && metadata.kind === 'image' && ['image/gif', 'image/png', 'image/jpeg', 'image/webp'].includes(asset.mime))
+                return { asset, source: p.source.description };
             if (as === 'image') {
                 if (metadata.kind !== 'image')
                     throw new Error('MEDIA_IMAGE_ASSET_REQUIRED');
@@ -287,7 +289,25 @@ export class MediaService extends Service {
             return { asset: prepared, source: p.source.description };
         });
     }
-    prepareReply(context, input) { return this.serial(() => this.replies.prepare(context, input)); }
+    prepareReply(context, input, owner = 'media') { return this.serial(() => this.replies.prepare(context, input, owner)); }
+    imageOriginal(context, owner, exposureId) {
+        return this.serial(async () => {
+            const description = this.store.exposureOrigin(exposureId), { provider } = this.describe(description.ref), access = this.access(context, owner, description, provider), exposure = this.store.exposure(access, exposureId), observation = this.store.observation(exposureId);
+            if (description.kind !== 'image' || !z.object({ mode: z.literal('image') }).safeParse(exposure.detail).success || !exposure.coverage.exposed)
+                throw new Error('IMAGE_OBSERVATION_REQUIRED');
+            if (!access.execution.historyTracked || !access.execution.historyDependencies?.some(d => (d.kind === 'capability' || d.kind === 'execution-source') && mediaHash(d.ref) === mediaHash(observation)))
+                throw new Error('OBSERVATION_NOT_EXPOSED');
+            return this.withInput(context, owner, { requestId: 'sticker-original:' + exposureId, source: description.ref, mode: 'inspect' }, async (p) => {
+                if (!p.parent || p.parent.bytes > 16 * 1024 ** 2)
+                    throw new Error('STICKER_FORMAT_UNSUPPORTED');
+                const data = await this.files.bytes(p.parent, p.signal, p.access.guard), mime = data.subarray(0, 6).toString('ascii').match(/^GIF8[79]a$/) ? 'image/gif' : data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'image/png' : data[0] === 255 && data[1] === 216 && data[2] === 255 ? 'image/jpeg' : data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP' ? 'image/webp' : null;
+                if (!mime)
+                    throw new Error('STICKER_FORMAT_UNSUPPORTED');
+                access.guard();
+                return { data, mime, source: description };
+            });
+        });
+    }
     replyDraft(runId) { return this.replies.pending(runId); }
     finalizeReply(access) { return this.serial(() => this.replies.finalize(access)); }
     readReplyPart(access, id, position) { return this.replies.bytes(access, id, position); }

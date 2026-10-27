@@ -3,6 +3,7 @@ import type { QqDeliveryLedger,QqDeliveryPlan,QqDeliveryProgress } from './deliv
 
 interface TransportHost {
   ledger:QqDeliveryLedger;
+  beforeSend?(reply:Reply,signal:AbortSignal):Promise<void>;
   check(reply:Reply,signal:AbortSignal):Promise<void>;
   send(reply:Reply,text:string,signal:AbortSignal):Promise<string>;
   confirmed(reply:Reply,text:string,receipt:string):void;
@@ -27,11 +28,12 @@ export class QqSegmentedTransport {
   }
   private async execute(reply:Reply,plan:QqDeliveryPlan,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>{
     const guard=()=>{if(signal.aborted)throw new Error('DELIVERY_CANCELLED');try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};
+    let delayed=false;
     for(let position=0;position<plan.segments.length;position++){
       const progress=this.host.ledger.progress(reply.id)!;if(progress.unknown||progress.state==='sending')return result(progress,'DELIVERY_NOT_RESUMABLE');if(progress.segments[position]!.state==='sent')continue;
       let invoked=false;
       try{
-        guard();await this.host.check(reply,signal);guard();this.host.ledger.begin(reply.id,position);
+        guard();if(!delayed&&progress.confirmed===0){await this.host.beforeSend?.(reply,signal);delayed=true;}guard();await this.host.check(reply,signal);guard();this.host.ledger.begin(reply.id,position);
         invoked=true;const receipt=await this.host.send(reply,plan.segments[position]!,signal);
         this.host.ledger.confirm(reply.id,position,receipt);
         // A cache projection failure must not erase an already committed platform receipt.

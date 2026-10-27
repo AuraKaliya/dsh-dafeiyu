@@ -26,7 +26,7 @@ export declare class QqMedia {
     remember(scene: Conversation, messageId: string, sender: string, envelope: unknown, parts: readonly {
         type: string;
         data: Record<string, unknown>;
-    }[]): {
+    }[], positionOffset?: number): {
         attachments: MediaAttachment[];
         positions: Set<number>;
     };

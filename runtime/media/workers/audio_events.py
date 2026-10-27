@@ -75,7 +75,7 @@ def main() -> None:
         raise ValueError("MEDIA_PCM_CHANGED")
     with Path(spec["labels"]["path"]).open(encoding="utf-8", newline="") as stream:
         rows = list(csv.DictReader(stream))
-    if len(rows) != 527 or any(int(row["index"]) != index for index, row in enumerate(rows)):
+    if len(rows) != 521 or any(int(row["index"]) != index for index, row in enumerate(rows)):
         raise ValueError("MEDIA_LABELS_INVALID")
     labels = [row["display_name"] for row in rows]
     options = ort.SessionOptions()

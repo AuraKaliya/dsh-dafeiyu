@@ -5,9 +5,9 @@ declare const segmentSchema: z.ZodObject<{
     position: z.ZodNumber;
     state: z.ZodEnum<{
         unknown: "unknown";
+        sending: "sending";
         sent: "sent";
         pending: "pending";
-        sending: "sending";
     }>;
     receipt: z.ZodNullable<z.ZodString>;
     code: z.ZodNullable<z.ZodString>;
@@ -38,9 +38,9 @@ declare const planSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;

@@ -23,7 +23,7 @@ export declare class MemoryAnalysis {
     quiesce(): void;
     cancelRunning(): void;
     get health(): {
-        state: "failed" | "stopped" | "ready" | "paused";
+        state: "failed" | "paused" | "stopped" | "ready";
         active: boolean;
     };
     start(): void;
@@ -34,7 +34,7 @@ export declare class MemoryAnalysis {
         duplicate: boolean;
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -47,7 +47,7 @@ export declare class MemoryAnalysis {
     status(context: ActionContext, id: unknown): {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -69,9 +69,9 @@ export declare class MemoryAnalysis {
             overview: string;
             gaps: string[];
             claims: {
-                action: "revise" | "none" | "add";
-                kind: "preference" | "experience" | "knowledge" | "procedure";
-                claimType: "inference" | "reported_claim" | "self_report" | "observation";
+                action: "add" | "revise" | "none";
+                kind: "experience" | "knowledge" | "preference" | "procedure";
+                claimType: "observation" | "self_report" | "reported_claim" | "inference";
                 subject: string;
                 content: string;
                 support: {
@@ -118,7 +118,7 @@ export declare class MemoryAnalysis {
                 revision: number;
                 contentHash: string;
             };
-            origin: "memory" | "event" | "user" | "tool";
+            origin: "memory" | "user" | "tool" | "event";
             authorId?: string | undefined;
             version?: number | undefined;
         }[];
@@ -136,7 +136,7 @@ export declare class MemoryAnalysis {
         }[];
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -149,7 +149,7 @@ export declare class MemoryAnalysis {
     cancel(context: ActionContext, id: unknown): {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;

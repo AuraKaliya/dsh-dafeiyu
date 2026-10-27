@@ -40,5 +40,6 @@ export interface ConversationExecutionFrame {
     channelDescription: string;
     delivery?: RuntimeDelivery;
     nativeActions?: readonly NativeAction[];
+    allowEmpty?: () => boolean;
 }
 export type ExecutionFrame = TaskExecutionFrame | ConversationExecutionFrame;

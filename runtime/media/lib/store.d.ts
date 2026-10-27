@@ -24,9 +24,9 @@ declare const sourceRecord: z.ZodObject<{
                 channel: z.ZodString;
                 account: z.ZodString;
                 kind: z.ZodEnum<{
-                    local: "local";
                     private: "private";
                     group: "group";
+                    local: "local";
                 }>;
                 id: z.ZodString;
             }, z.core.$strict>;
@@ -139,7 +139,7 @@ export declare class MediaStore {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 key: string;
@@ -171,7 +171,7 @@ export declare class MediaStore {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 key: string;
@@ -210,7 +210,7 @@ export declare class MediaStore {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
+        state: "ready" | "staging" | "evicted" | "deleted" | "failed";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -280,7 +280,7 @@ export declare class MediaStore {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
+        state: "ready" | "staging" | "evicted" | "deleted" | "failed";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -345,7 +345,7 @@ export declare class MediaStore {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 key: string;
@@ -458,7 +458,7 @@ export declare class MediaStore {
             scene: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             key: string;
@@ -536,7 +536,7 @@ export declare class MediaStore {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
+        state: "ready" | "staging" | "evicted" | "deleted" | "failed";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;

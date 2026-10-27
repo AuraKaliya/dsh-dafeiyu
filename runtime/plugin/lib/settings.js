@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import { QqBatchConfigSchema, QqStickersConfigSchema } from '#dafeiyu/qq';
 const path = z.string().trim().min(1).max(4096), uid = z.string().regex(/^[1-9][0-9]{0,19}$/), qq = z.string().regex(/^[1-9][0-9]{4,14}$/);
 export const InstallationSettingsSchema = z.strictObject({
     schemaVersion: z.literal(1), dataDir: path, instanceName: z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('dafeiyu'),
@@ -8,7 +9,8 @@ export const InstallationSettingsSchema = z.strictObject({
     model: z.strictObject({ model: z.string().trim().min(1).max(160), reasoningEffort: z.string().trim().min(1).max(40).optional(),
         credentialStore: path, baseURL: z.url().optional(), inlineTransport: z.record(z.string(), z.json()).optional() }),
     qq: z.strictObject({ botId: qq, ownerId: qq, tokenFile: path, httpURL: z.url(), wsURL: z.url(),
-        groupIds: z.array(qq).max(10).default([]), joinedGroups: z.boolean().default(false), naturalNames: z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
+        messageBatch: QqBatchConfigSchema.prefault({ enabled: true }), stickers: QqStickersConfigSchema.prefault({}),
+        groupIds: z.array(qq).max(10).default([]), joinedGroups: z.boolean().default(false), replyDelay: z.boolean().default(true), naturalNames: z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
         media: z.strictObject({ cacheRoots: z.array(path).max(8).default([]), httpsHosts: z.array(z.string()).max(16).default([]), sendEnabled: z.boolean().default(false), voiceDirectives: z.boolean().default(false) }).optional() }).refine(value => value.botId !== value.ownerId, 'Bot and owner must differ'),
     bilibili: z.strictObject({ capabilities: z.boolean().default(true),
         session: z.strictObject({ file: path, expectedUid: uid }).optional(),
@@ -21,6 +23,8 @@ export const InstallationSettingsSchema = z.strictObject({
         ctx.addIssue({ code: 'custom', path: ['bilibili'], message: 'Enable a platform interface or omit the plugin' });
     if (value.qq.media && !value.media)
         ctx.addIssue({ code: 'custom', path: ['media'], message: 'QQ media interfaces require media configuration' });
+    if (value.qq.stickers.enabled && !value.media)
+        ctx.addIssue({ code: 'custom', path: ['qq', 'stickers'], message: 'Stickers require media configuration' });
     if (value.media?.vision && !value.model.inlineTransport)
         ctx.addIssue({ code: 'custom', path: ['model', 'inlineTransport'], message: 'Vision requires explicit image transport configuration' });
     if (value.bilibili?.capabilities && !value.media)

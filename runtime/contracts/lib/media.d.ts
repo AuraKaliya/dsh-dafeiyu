@@ -25,9 +25,9 @@ export declare const MediaSourceDescriptionSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -138,11 +138,11 @@ export declare const MediaAssetRecordSchema: z.ZodObject<{
         document: "document";
     }>;
     state: z.ZodEnum<{
-        failed: "failed";
-        deleted: "deleted";
         staging: "staging";
         ready: "ready";
         evicted: "evicted";
+        deleted: "deleted";
+        failed: "failed";
     }>;
     sha256: z.ZodNullable<z.ZodString>;
     bytes: z.ZodNullable<z.ZodNumber>;
@@ -201,9 +201,9 @@ export declare const MediaVoiceEvidenceSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -219,9 +219,9 @@ export declare const MediaVoiceEvidenceSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -315,9 +315,9 @@ export declare const NativeMediaMaterialSchema: z.ZodObject<{
     parts: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"asset">;
         delivery: z.ZodEnum<{
+            image: "image";
             record: "record";
             file: "file";
-            image: "image";
         }>;
         asset: z.ZodObject<{
             schemaVersion: z.ZodLiteral<1>;
@@ -412,6 +412,12 @@ export interface MediaPort {
     acquire(context: ExecutionContextV3, owner: string, input: z.infer<typeof MediaAcquireSchema>): Promise<MediaAssetRef>;
     inspect(context: ExecutionContextV3, owner: string, ref: MediaAssetRef): unknown;
     read(context: ExecutionContextV3, owner: string, input: z.infer<typeof MediaReadSchema>): Promise<unknown>;
+    imageOriginal?(context: ExecutionContextV3, owner: string, exposureId: string): Promise<{
+        data: Uint8Array;
+        mime: string;
+        source: MediaSourceDescription;
+    }>;
+    prepareReply?(context: ExecutionContextV3, input: unknown, owner?: string): Promise<unknown>;
     voice?(context: ExecutionContextV3, owner: string, exposureId: string): {
         text: string;
         evidence: MediaVoiceEvidence;

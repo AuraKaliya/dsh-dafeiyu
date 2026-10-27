@@ -15,6 +15,7 @@ export declare const QqBrowseInputSchema: z.ZodObject<{
     requestId: z.ZodString;
     limit: z.ZodDefault<z.ZodNumber>;
     cursor: z.ZodOptional<z.ZodUUID>;
+    includeRecentHistory: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strict>;
 export interface QqCacheOptions {
     clock?: () => number;
@@ -33,6 +34,13 @@ export declare class QqCache {
     private epoch;
     generation(route?: string): number;
     known(route: string, id: string): boolean;
+    completeHistoryMetadata(route: string, id: string, occurredAt: string, forwardIds?: readonly string[]): void;
+    messageProof(route: string, id: string): QqCacheProof;
+    forward(route: string, id: string, index: number): string;
+    groupAccess(route: string, id: string): {
+        generation: number;
+        occurredAt: string;
+    } | null;
     recalled(route: string, id: string): boolean;
     private bump;
     private meta;
@@ -40,6 +48,9 @@ export declare class QqCache {
         occurredAt: string | null;
         unsupported: readonly string[];
         media?: readonly MediaAttachment[];
+        groupGeneration?: number;
+        history?: true;
+        forwardIds?: readonly string[];
     }): boolean;
     revoke(route: string, id: string): boolean;
     proofCurrent(raw: unknown): boolean;
@@ -72,6 +83,7 @@ export declare class QqCache {
                     kind: "image" | "audio" | "video" | "document";
                     name: string | null;
                 }[] | undefined;
+                history?: true | undefined;
             }[];
             limitations: string[];
         };
@@ -90,11 +102,12 @@ export declare class QqCache {
             offset: number;
             epoch: number;
             limit: number;
+            observedAt?: string | undefined;
         } | null;
         createdAt: string;
         id: string;
     };
-    browse(route: string, owner: string, raw: unknown): {
+    browse(route: string, owner: string, raw: unknown, recentOnly?: boolean): {
         expiresAt: string;
         page: {
             order: "received-newest-first";
@@ -123,6 +136,7 @@ export declare class QqCache {
                     kind: "image" | "audio" | "video" | "document";
                     name: string | null;
                 }[] | undefined;
+                history?: true | undefined;
             }[];
             limitations: string[];
         };
@@ -141,6 +155,7 @@ export declare class QqCache {
             offset: number;
             epoch: number;
             limit: number;
+            observedAt?: string | undefined;
         } | null;
         createdAt: string;
         id: string;

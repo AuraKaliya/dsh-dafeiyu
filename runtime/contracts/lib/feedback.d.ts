@@ -38,8 +38,8 @@ export declare const FeedbackWitnessSchema: z.ZodObject<{
     version: z.ZodNumber;
     hash: z.ZodString;
     mode: z.ZodEnum<{
-        normal: "normal";
         deleted: "deleted";
+        normal: "normal";
         history: "history";
     }>;
     view: z.ZodEnum<{
@@ -74,8 +74,8 @@ export declare const FeedbackMetaSchema: z.ZodObject<{
         version: z.ZodNumber;
         hash: z.ZodString;
         mode: z.ZodEnum<{
-            normal: "normal";
             deleted: "deleted";
+            normal: "normal";
             history: "history";
         }>;
         view: z.ZodEnum<{

@@ -41,16 +41,16 @@ export declare const API_VERSION: 2;
 export type Json = null | boolean | number | string | Json[] | {
     [key: string]: Json;
 };
-export declare const MessageSchema: z.ZodObject<{
+export declare const MessagePartSchema: z.ZodObject<{
     id: z.ZodString;
     occurredAt: z.ZodISODateTime;
     conversation: z.ZodObject<{
         channel: z.ZodString;
         account: z.ZodString;
         kind: z.ZodEnum<{
-            local: "local";
             private: "private";
             group: "group";
+            local: "local";
         }>;
         id: z.ZodString;
     }, z.core.$strict>;
@@ -76,15 +76,116 @@ export declare const MessageSchema: z.ZodObject<{
     }, z.core.$strict>>>;
     replyTo: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
+/** A batch is a program envelope. Each source remains an authentic platform message. */
+export declare const MessageSchema: z.ZodObject<{
+    id: z.ZodString;
+    occurredAt: z.ZodISODateTime;
+    conversation: z.ZodObject<{
+        channel: z.ZodString;
+        account: z.ZodString;
+        kind: z.ZodEnum<{
+            private: "private";
+            group: "group";
+            local: "local";
+        }>;
+        id: z.ZodString;
+    }, z.core.$strict>;
+    sender: z.ZodObject<{
+        id: z.ZodString;
+        displayName: z.ZodString;
+    }, z.core.$strict>;
+    text: z.ZodString;
+    mainText: z.ZodOptional<z.ZodString>;
+    media: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        schemaVersion: z.ZodLiteral<1>;
+        source: z.ZodObject<{
+            provider: z.ZodString;
+            key: z.ZodString;
+        }, z.core.$strict>;
+        kind: z.ZodEnum<{
+            image: "image";
+            audio: "audio";
+            video: "video";
+            document: "document";
+        }>;
+        name: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>>;
+    replyTo: z.ZodOptional<z.ZodString>;
+    batch: z.ZodOptional<z.ZodObject<{
+        sources: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            occurredAt: z.ZodISODateTime;
+            conversation: z.ZodObject<{
+                channel: z.ZodString;
+                account: z.ZodString;
+                kind: z.ZodEnum<{
+                    private: "private";
+                    group: "group";
+                    local: "local";
+                }>;
+                id: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodObject<{
+                id: z.ZodString;
+                displayName: z.ZodString;
+            }, z.core.$strict>;
+            text: z.ZodString;
+            mainText: z.ZodOptional<z.ZodString>;
+            media: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                schemaVersion: z.ZodLiteral<1>;
+                source: z.ZodObject<{
+                    provider: z.ZodString;
+                    key: z.ZodString;
+                }, z.core.$strict>;
+                kind: z.ZodEnum<{
+                    image: "image";
+                    audio: "audio";
+                    video: "video";
+                    document: "document";
+                }>;
+                name: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>>;
+            replyTo: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
 export type InboundMessage = z.infer<typeof MessageSchema>;
+export declare const messageParts: (message: InboundMessage) => {
+    id: string;
+    occurredAt: string;
+    conversation: {
+        channel: string;
+        account: string;
+        kind: "private" | "group" | "local";
+        id: string;
+    };
+    sender: {
+        id: string;
+        displayName: string;
+    };
+    text: string;
+    mainText?: string | undefined;
+    media?: {
+        schemaVersion: 1;
+        source: {
+            provider: string;
+            key: string;
+        };
+        kind: "image" | "audio" | "video" | "document";
+        name: string | null;
+    }[] | undefined;
+    replyTo?: string | undefined;
+}[];
+export declare const messageMainText: (message: Pick<InboundMessage, "mainText" | "batch">) => string;
+export declare const messageDisplayText: (message: InboundMessage) => string;
 export declare const ObservationSchema: z.ZodObject<{
     conversation: z.ZodObject<{
         channel: z.ZodString;
         account: z.ZodString;
         kind: z.ZodEnum<{
-            local: "local";
             private: "private";
             group: "group";
+            local: "local";
         }>;
         id: z.ZodString;
     }, z.core.$strict>;
@@ -139,6 +240,8 @@ export interface ChannelCapability {
     /** Opt-in for persistent reply source rebinding and checks before every transport part. */
     readonly deliveryValidation?: 'per-segment';
     readonly mediaDelivery?: 'parts-v1';
+    /** Transport-owned access lease for queued/running work; revocation cancels the turn. */
+    processingSignal?(message: InboundMessage): AbortSignal;
     /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
     deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
     deliverMedia?(reply: Reply & {

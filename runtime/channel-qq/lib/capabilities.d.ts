@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { Conversation } from '#dafeiyu/contracts';
 import type { QqStore } from './store.js';
 import type { GroupDirectory } from './groups.js';
-export declare const QQ_ACTIONS: readonly ["qq_groups", "qq_browse", "qq_observe_select"];
+export declare const QQ_OBSERVATION_ACTIONS: readonly ["qq_groups", "qq_browse", "qq_observe_select"];
+export declare const QQ_ACTIONS: readonly ["qq_groups", "qq_browse", "qq_observe_select", "qq_forward_read", "qq_reply_quote"];
 export declare const QqCapabilitiesConfigSchema: z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
     snapshotTtlMs: z.ZodDefault<z.ZodNumber>;
@@ -18,6 +19,8 @@ interface Host {
     groups: GroupDirectory;
     allowed(scene: Conversation): boolean;
     available(): boolean;
+    readHistory?(scene: Conversation, signal: AbortSignal): Promise<unknown>;
+    readForward?(scene: Conversation, messageId: string, index: number, signal: AbortSignal): Promise<unknown>;
 }
 /** A v3 capability extension, separate from the v2 transport. It never sends a QQ message. */
 export declare class QqCapabilities {
@@ -36,6 +39,8 @@ export declare class QqCapabilities {
     private groups;
     private browse;
     private select;
+    private forward;
+    private quote;
     private actions;
     close(): void;
 }

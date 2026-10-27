@@ -30,7 +30,7 @@ export declare const biliServiceConfigSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type Config = z.input<typeof biliServiceConfigSchema>;
 export declare function pageView(page: BiliPage): {
-    kind: "media" | "video" | "discover" | "search" | "comments" | "subtitles" | "danmaku";
+    kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
     fetchedAt: string;
     data: z.core.util.JSONType;
     coverage: string[];

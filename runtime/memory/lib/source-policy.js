@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { redactContent, redactJson, FeedbackMetaSchema, PersonaSourceRefSchema, ActionOutcomeSchema } from '#dafeiyu/contracts';
+import { redactContent, redactJson, FeedbackMetaSchema, PersonaSourceRefSchema, ActionOutcomeSchema, messageDisplayText } from '#dafeiyu/contracts';
 import { memoryRefPattern, sourceVersionSchema, sourceFenceSchema } from './types.js';
 const digest = (text) => createHash('sha256').update(text).digest('hex');
 const memoryView = z.object({ id: z.string(), revision: z.number(), version: z.number(), contentHash: z.string(), sourceVersions: z.array(sourceVersionSchema).optional(), sourceFences: z.array(sourceFenceSchema).optional() });
@@ -26,7 +26,7 @@ export class MemorySourcePolicy {
         const item = this.ctx.dafeiyu.journal.messageFor(scope, id);
         if (!item || this.ctx.dafeiyu.journal.messageRecalled(scope, id))
             return null;
-        return redactContent(JSON.stringify(redactJson({ sender: item.message.sender, occurredAt: item.message.occurredAt, text: item.message.text }).value, null, 2)).value;
+        return redactContent(JSON.stringify(redactJson({ sender: item.message.sender, occurredAt: item.message.occurredAt, text: messageDisplayText(item.message) }).value, null, 2)).value;
     }
     inbound(scope, id) {
         const text = this.message(scope, id);
@@ -86,7 +86,7 @@ export class MemorySourcePolicy {
                     return this.missing(scope);
                 return [{ ...scoped(scope), kind: 'capability', ref }];
             }
-            if (name === 'dafeiyu_media_read' || name === 'qq_media_list') {
+            if (name === 'dafeiyu_media_read' || name === 'qq_media_list' || name === 'qq_sticker_list') {
                 const outcome = ActionOutcomeSchema.parse(data);
                 if (outcome.status !== 'succeeded' || outcome.data === null)
                     return [];
@@ -99,7 +99,7 @@ export class MemorySourcePolicy {
                     return this.missing(scope);
                 return [{ ...scoped(scope), kind: 'capability', ref: observation.source }];
             }
-            if (['qq_groups', 'qq_observe_select', 'dafeiyu_media_select', 'dafeiyu_media_acquire', 'dafeiyu_media_inspect', 'dafeiyu_media_reply', 'dafeiyu_media_reply_status'].includes(name))
+            if (['qq_groups', 'qq_observe_select', 'dafeiyu_media_select', 'dafeiyu_media_acquire', 'dafeiyu_media_inspect', 'dafeiyu_media_reply', 'dafeiyu_media_reply_status', 'qq_sticker_collect', 'qq_sticker_use', 'qq_sticker_manage'].includes(name))
                 return [];
             if (name === 'dafeiyu_source_open' || name.includes('_deleted_') || name === 'dafeiyu_memory_analysis_open'
                 || name === 'dafeiyu_tool_feedback_open' || /deleted_lookup_only|historical_evidence_only/.test(text))

@@ -7,7 +7,7 @@ export async function openAgentSession(ctx, id, model, cwd, setup) {
         ? ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: model, setup })
         : ctx.agents.create({ sessionId, meta: { cwd }, agentOptions: model, setup });
 }
-export async function runAgentTurn(ctx, agent, input, signal, afterIdle = () => { }) {
+export async function runAgentTurn(ctx, agent, input, signal, afterIdle = () => { }, allowEmpty = () => false) {
     if (agent.status !== 'idle')
         throw new Error('SESSION_BUSY');
     signal.throwIfAborted();
@@ -29,7 +29,7 @@ export async function runAgentTurn(ctx, agent, input, signal, afterIdle = () => 
         if (!output || output.type !== 'assistant/message')
             throw new Error('MODEL_INCOMPLETE');
         const text = output.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
-        if (!text)
+        if (!text && !allowEmpty())
             throw new Error('MODEL_INCOMPLETE');
         return { text, events, messageSeq: output.seq, turnEndSeq: ended.seq };
     }

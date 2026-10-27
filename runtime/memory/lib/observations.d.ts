@@ -37,7 +37,7 @@ export declare class ObservationStore {
                 conversation: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 ingressPluginId: string | null;
@@ -128,7 +128,7 @@ export declare class ObservationStore {
             }[];
             contributions: {
                 id: string;
-                form: "summary" | "original" | "fragment";
+                form: "original" | "fragment" | "summary";
                 memoryId: string;
                 revision: number;
                 version: number;

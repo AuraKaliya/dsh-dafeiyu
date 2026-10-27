@@ -2,6 +2,7 @@ import type { DeliveryResult, Reply } from '#dafeiyu/contracts';
 import type { QqDeliveryLedger } from './delivery.js';
 interface TransportHost {
     ledger: QqDeliveryLedger;
+    beforeSend?(reply: Reply, signal: AbortSignal): Promise<void>;
     check(reply: Reply, signal: AbortSignal): Promise<void>;
     send(reply: Reply, text: string, signal: AbortSignal): Promise<string>;
     confirmed(reply: Reply, text: string, receipt: string): void;

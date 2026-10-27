@@ -45,9 +45,9 @@ export declare const mediaDraftContentSchema: z.ZodObject<{
                     channel: z.ZodString;
                     account: z.ZodString;
                     kind: z.ZodEnum<{
-                        local: "local";
                         private: "private";
                         group: "group";
+                        local: "local";
                     }>;
                     id: z.ZodString;
                 }, z.core.$strict>;
@@ -121,9 +121,9 @@ export declare const mediaDraftSchema: z.ZodObject<{
                     channel: z.ZodString;
                     account: z.ZodString;
                     kind: z.ZodEnum<{
-                        local: "local";
                         private: "private";
                         group: "group";
+                        local: "local";
                     }>;
                     id: z.ZodString;
                 }, z.core.$strict>;
@@ -190,9 +190,9 @@ declare const exportSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -210,9 +210,9 @@ declare const exportSchema: z.ZodObject<{
                 channel: z.ZodString;
                 account: z.ZodString;
                 kind: z.ZodEnum<{
-                    local: "local";
                     private: "private";
                     group: "group";
+                    local: "local";
                 }>;
                 id: z.ZodString;
             }, z.core.$strict>;
@@ -327,7 +327,7 @@ export declare class MediaReplyStore {
                     scene: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     key: string;
@@ -409,7 +409,7 @@ export declare class MediaReplyStore {
                         scene: {
                             channel: string;
                             account: string;
-                            kind: "local" | "private" | "group";
+                            kind: "private" | "group" | "local";
                             id: string;
                         };
                         key: string;
@@ -497,7 +497,7 @@ export declare class MediaReplyStore {
                     scene: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     key: string;
@@ -553,7 +553,7 @@ export declare class MediaReplyStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             sourceMessageId: string;
@@ -569,7 +569,7 @@ export declare class MediaReplyStore {
                 target: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 intentVersion: number;
@@ -636,7 +636,7 @@ export declare class MediaReplyStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             sourceMessageId: string;
@@ -652,7 +652,7 @@ export declare class MediaReplyStore {
                 target: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 intentVersion: number;
@@ -724,7 +724,7 @@ export declare class MediaReplyStore {
             target: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             sourceMessageId: string;
@@ -740,7 +740,7 @@ export declare class MediaReplyStore {
                 target: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 intentVersion: number;

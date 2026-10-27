@@ -159,10 +159,10 @@ export type PersonaSourceEvidence = z.infer<typeof PersonaSourceEvidenceSchema>;
 export declare const MotivationSchema: z.ZodObject<{
     kind: z.ZodEnum<{
         unknown: "unknown";
+        maintenance: "maintenance";
         "explicit-task": "explicit-task";
         "self-exploration": "self-exploration";
         "conversation-invitation": "conversation-invitation";
-        maintenance: "maintenance";
         mixed: "mixed";
     }>;
     basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -454,10 +454,10 @@ export declare const PersonaCandidateRevisionV1Schema: z.ZodObject<{
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
             unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -627,10 +627,10 @@ export declare const PersonaCandidateRevisionV2Schema: z.ZodObject<{
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
             unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -815,10 +815,10 @@ export declare const PersonaCandidateRevisionSchema: z.ZodUnion<readonly [z.ZodO
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
             unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -986,10 +986,10 @@ export declare const PersonaCandidateRevisionSchema: z.ZodUnion<readonly [z.ZodO
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
             unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -2061,10 +2061,10 @@ export declare const PersonaAdoptionReviewSchema: z.ZodObject<{
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
             unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -2866,18 +2866,18 @@ export declare const TaskIntentEventSchema: z.ZodObject<{
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
             unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
     }, z.core.$strict>;
     category: z.ZodEnum<{
-        preference: "preference";
         scope: "scope";
         none: "none";
+        preference: "preference";
         method: "method";
         premise: "premise";
         "missing-information": "missing-information";

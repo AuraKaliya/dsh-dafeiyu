@@ -10,7 +10,7 @@ export const qqMediaHash=(value:unknown)=>createHash('sha256').update(canonical(
 export const qqTextHash=(text:string)=>createHash('sha256').update(text).digest('hex');
 const state=z.enum(['pending','sending','sent','unknown']);
 const part=z.union([z.strictObject({kind:z.literal('text'),text:z.string().min(1).max(4000)}),ReplyMediaPartSchema]);
-const planSchema=z.strictObject({version:z.literal(2),replyId:z.string(),target:ConversationSchema,sourceMessageId:z.string(),textHash:z.string().length(64),manifest:ReplyMediaManifestSchema,parts:z.array(part).min(2).max(72)});
+const planSchema=z.strictObject({version:z.literal(2),replyId:z.string(),target:ConversationSchema,sourceMessageId:z.string(),textHash:z.string().length(64),manifest:ReplyMediaManifestSchema,parts:z.array(part).min(1).max(72)});
 export type QqMediaDeliveryPlan=z.infer<typeof planSchema>;
 const progressPart=z.strictObject({position:z.number().int().nonnegative(),state,receipt:z.string().nullable(),code:z.string().nullable()});
 export interface QqMediaDeliveryProgress {replyId:string;planHash:string;state:'ready'|'sending'|'partial'|'uncertain'|'sent';total:number;confirmed:number;pending:number;unknown:number;parts:z.infer<typeof progressPart>[]}
@@ -20,7 +20,7 @@ export function qqMediaDeliveryPlan(reply:Reply):QqMediaDeliveryPlan {const mani
   if(manifest.replyId!==reply.id||qqMediaHash(manifest.target)!==qqMediaHash(reply.conversation)||manifest.sourceMessageId!==reply.sourceMessageId||manifest.textHash!==qqTextHash(reply.text))throw new Error('DELIVERY_MANIFEST_MISMATCH');
   if(reply.taskResult){const anchor=TaskResultAnchorSchema.parse(reply.taskResult);if(manifest.anchor.kind!=='task-result'||qqMediaHash(anchor)!==qqMediaHash(manifest.anchor)||manifest.runId!==anchor.runId)throw new Error('DELIVERY_MANIFEST_MISMATCH');}
   else if(manifest.anchor.kind!=='reply'||reply.id!==manifest.anchor.inboundId+':reply')throw new Error('DELIVERY_MANIFEST_MISMATCH');
-  return planSchema.parse({version:2,replyId:reply.id,target:reply.conversation,sourceMessageId:reply.sourceMessageId,textHash:manifest.textHash,manifest,parts:[...splitQqText(reply.text).map(text=>({kind:'text' as const,text})),...manifest.parts]});
+  return planSchema.parse({version:2,replyId:reply.id,target:reply.conversation,sourceMessageId:reply.sourceMessageId,textHash:manifest.textHash,manifest,parts:[...(reply.text?splitQqText(reply.text):[]).map(text=>({kind:'text' as const,text})),...manifest.parts]});
 }
 export class QqMediaDeliveryLedger {
   constructor(private readonly db:DatabaseSync){}

@@ -72,7 +72,7 @@ export declare class MemoryRetrieval {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     ingressPluginId: string | null;
@@ -144,7 +144,7 @@ export declare class MemoryRetrieval {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     ingressPluginId: string | null;
@@ -280,7 +280,7 @@ export declare class MemoryRetrieval {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     ingressPluginId: string | null;
@@ -352,7 +352,7 @@ export declare class MemoryRetrieval {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     ingressPluginId: string | null;

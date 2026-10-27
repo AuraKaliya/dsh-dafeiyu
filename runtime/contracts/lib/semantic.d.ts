@@ -13,13 +13,13 @@ export declare const qualifierSchema: z.ZodObject<{
 export declare const semanticResultSchema: z.ZodObject<{
     fragment: z.ZodObject<{
         kind: z.ZodEnum<{
-            decision: "decision";
-            result: "result";
             fact: "fact";
+            decision: "decision";
             constraint: "constraint";
             correction: "correction";
             pending: "pending";
             uncertainty: "uncertainty";
+            result: "result";
             note: "note";
         }>;
         text: z.ZodString;

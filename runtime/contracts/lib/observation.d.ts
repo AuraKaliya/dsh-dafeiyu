@@ -6,9 +6,9 @@ export declare const MemoryObservationSchema: z.ZodObject<{
         channel: z.ZodString;
         account: z.ZodString;
         kind: z.ZodEnum<{
-            local: "local";
             private: "private";
             group: "group";
+            local: "local";
         }>;
         id: z.ZodString;
     }, z.core.$strict>;
@@ -16,8 +16,8 @@ export declare const MemoryObservationSchema: z.ZodObject<{
     observedAt: z.ZodISODateTime;
     finishedAt: z.ZodISODateTime;
     outcome: z.ZodEnum<{
-        completed: "completed";
         failed: "failed";
+        completed: "completed";
     }>;
     selection: z.ZodObject<{
         policyId: z.ZodString;
@@ -151,9 +151,9 @@ export declare const ObservationStoredReceiptSchema: z.ZodObject<{
     contributions: z.ZodArray<z.ZodObject<{
         id: z.ZodString;
         form: z.ZodEnum<{
-            summary: "summary";
             original: "original";
             fragment: "fragment";
+            summary: "summary";
         }>;
         memoryId: z.ZodUUID;
         revision: z.ZodNumber;
@@ -165,16 +165,16 @@ export declare const ObservationSourceReadSchema: z.ZodObject<{
         channel: z.ZodString;
         account: z.ZodString;
         kind: z.ZodEnum<{
-            local: "local";
             private: "private";
             group: "group";
+            local: "local";
         }>;
         id: z.ZodString;
     }, z.core.$strict>;
     ref: z.ZodString;
     mode: z.ZodDefault<z.ZodEnum<{
-        normal: "normal";
         deleted: "deleted";
+        normal: "normal";
     }>>;
     offset: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -184,9 +184,9 @@ export declare const ObservationSourceChangeSchema: z.ZodObject<{
         channel: z.ZodString;
         account: z.ZodString;
         kind: z.ZodEnum<{
-            local: "local";
             private: "private";
             group: "group";
+            local: "local";
         }>;
         id: z.ZodString;
     }, z.core.$strict>;

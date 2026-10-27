@@ -47,7 +47,7 @@ export declare class ExperienceStore {
             reason: string;
             goal: string;
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
             sources: ({
@@ -245,7 +245,7 @@ export declare class ExperienceStore {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                 } | {
@@ -269,7 +269,7 @@ export declare class ExperienceStore {
                     requestId: string;
                 };
                 motivation: {
-                    kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                    kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                     basis: string[];
                 };
                 type: "run.running" | "run.completed" | "run.waiting" | "run.failed" | "run.cancelled" | "run.interrupted" | "evidence.changed";
@@ -289,14 +289,14 @@ export declare class ExperienceStore {
             expiresAt: string;
             omittedSources?: number | undefined;
         };
-        state: "completed" | "failed" | "cancelled" | "ready" | "running" | "stale" | "waiting-scheduler";
+        state: "ready" | "stale" | "running" | "completed" | "failed" | "cancelled" | "waiting-scheduler";
         version: number;
         result: z.core.util.JSONType;
         error: string | null;
     };
     status(access: PersonaAccess, id?: string): {
         id: string;
-        state: "completed" | "failed" | "cancelled" | "ready" | "running" | "stale" | "waiting-scheduler";
+        state: "ready" | "stale" | "running" | "completed" | "failed" | "cancelled" | "waiting-scheduler";
         version: number;
         reason: string;
         watermark: string;
@@ -324,7 +324,7 @@ export declare class ExperienceStore {
             reason: string;
             goal: string;
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
             sources: ({
@@ -522,7 +522,7 @@ export declare class ExperienceStore {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                 } | {
@@ -546,7 +546,7 @@ export declare class ExperienceStore {
                     requestId: string;
                 };
                 motivation: {
-                    kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                    kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                     basis: string[];
                 };
                 type: "run.running" | "run.completed" | "run.waiting" | "run.failed" | "run.cancelled" | "run.interrupted" | "evidence.changed";
@@ -566,7 +566,7 @@ export declare class ExperienceStore {
             expiresAt: string;
             omittedSources?: number | undefined;
         };
-        state: "completed" | "failed" | "cancelled" | "ready" | "running" | "stale" | "waiting-scheduler";
+        state: "ready" | "stale" | "running" | "completed" | "failed" | "cancelled" | "waiting-scheduler";
         version: number;
         result: z.core.util.JSONType;
         error: string | null;
@@ -580,7 +580,7 @@ export declare class ExperienceStore {
     review(access: PersonaAccess, raw: unknown): z.core.util.JSONType | {
         id: string;
         version: number;
-        state: "held" | "rejected" | "withdrawn" | "accepted";
+        state: "withdrawn" | "held" | "rejected" | "accepted";
     };
     relations(access: PersonaAccess, id: string): z.core.util.JSONType[];
     counts(): {
@@ -602,7 +602,7 @@ export declare class ExperienceStore {
         runId: string;
         watermark: string;
         expiresAt: string;
-        state: "completed" | "failed" | "cancelled" | "ready" | "running" | "stale" | "waiting-scheduler";
+        state: "ready" | "stale" | "running" | "completed" | "failed" | "cancelled" | "waiting-scheduler";
         version: number;
         reason: string;
         retainedSources: number;
@@ -626,7 +626,7 @@ export declare class ExperienceStore {
             runId: string;
             watermark: string;
             expiresAt: string;
-            state: "completed" | "failed" | "cancelled" | "ready" | "running" | "stale" | "waiting-scheduler";
+            state: "ready" | "stale" | "running" | "completed" | "failed" | "cancelled" | "waiting-scheduler";
             version: number;
             reason: string;
             retainedSources: number;
@@ -650,7 +650,7 @@ export declare class ExperienceStore {
         runId: string;
         watermark: string;
         expiresAt: string;
-        state: "completed" | "failed" | "cancelled" | "ready" | "running" | "stale" | "waiting-scheduler";
+        state: "ready" | "stale" | "running" | "completed" | "failed" | "cancelled" | "waiting-scheduler";
         version: number;
         reason: string;
         retainedSources: number;

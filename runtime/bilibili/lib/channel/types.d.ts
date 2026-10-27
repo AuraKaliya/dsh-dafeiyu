@@ -119,9 +119,9 @@ export declare const BiliOwnerReplySchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -132,8 +132,8 @@ export declare const BiliOwnerReplySchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const BiliOwnerInboundStateSchema: z.ZodEnum<{
-    "before-start": "before-start";
     pending: "pending";
+    "before-start": "before-start";
     accepted: "accepted";
     unsupported: "unsupported";
     recalled: "recalled";
@@ -172,9 +172,9 @@ export declare const BiliOwnerDeliveryPlanSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;

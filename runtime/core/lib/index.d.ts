@@ -62,7 +62,7 @@ export declare class DafeiyuService extends Service {
         deliveryId: string;
         runId: string;
         taskId: string;
-        state: "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain" | "rejected" | "interrupted";
+        state: "rejected" | "interrupted" | "partial" | "ready" | "accepted" | "sending" | "uncertain" | "sent" | "not-sent" | "rendering" | "verifying";
         version: number;
         receiptId: string | null;
         error: string | null;
@@ -71,7 +71,7 @@ export declare class DafeiyuService extends Service {
         deliveryId: string;
         runId: string;
         taskId: string;
-        state: "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain" | "rejected" | "interrupted";
+        state: "rejected" | "interrupted" | "partial" | "ready" | "accepted" | "sending" | "uncertain" | "sent" | "not-sent" | "rendering" | "verifying";
         version: number;
         receiptId: string | null;
         error: string | null;
@@ -94,6 +94,12 @@ export declare class DafeiyuService extends Service {
     }>;
     inspectMedia(context: ExecutionContextV3, owner: string, ref: MediaAssetRef): unknown;
     readMedia(context: ExecutionContextV3, owner: string, input: unknown): Promise<unknown>;
+    originalImage(context: ExecutionContextV3, owner: string, exposureId: string): Promise<{
+        data: Uint8Array;
+        mime: string;
+        source: import("#dafeiyu/contracts").MediaSourceDescription;
+    }>;
+    prepareReplyMedia(context: ExecutionContextV3, owner: string, input: unknown): Promise<unknown>;
     mediaVoiceEvidence(context: ExecutionContextV3, owner: string, exposureId: string): {
         text: string;
         evidence: import("#dafeiyu/contracts").MediaVoiceEvidence;
@@ -133,7 +139,7 @@ export declare class DafeiyuService extends Service {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "record" | "file" | "image";
+            delivery: "image" | "file" | "record";
             asset: {
                 schemaVersion: 1;
                 id: string;
@@ -160,7 +166,7 @@ export declare class DafeiyuService extends Service {
             target: {
                 channel: string;
                 account: string;
-                kind: "private" | "group" | "local";
+                kind: "group" | "private" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -182,7 +188,7 @@ export declare class DafeiyuService extends Service {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "record" | "file" | "image";
+                delivery: "image" | "file" | "record";
                 asset: {
                     schemaVersion: 1;
                     id: string;
@@ -210,7 +216,7 @@ export declare class DafeiyuService extends Service {
             target: {
                 channel: string;
                 account: string;
-                kind: "private" | "group" | "local";
+                kind: "group" | "private" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -232,7 +238,7 @@ export declare class DafeiyuService extends Service {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "record" | "file" | "image";
+                delivery: "image" | "file" | "record";
                 asset: {
                     schemaVersion: 1;
                     id: string;
@@ -293,7 +299,7 @@ export declare class DafeiyuService extends Service {
     submitMessageTask(context: ExecutionContextV3, pluginId: string, input: unknown): {
         taskId: string;
         runId: string;
-        state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+        state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
         motivation: "explicit-task" | "self-exploration";
         sourceInboundId: string;
     };
@@ -302,26 +308,26 @@ export declare class DafeiyuService extends Service {
             deliveryId: string;
             runId: string;
             taskId: string;
-            state: "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain" | "rejected" | "interrupted";
+            state: "rejected" | "interrupted" | "partial" | "ready" | "accepted" | "sending" | "uncertain" | "sent" | "not-sent" | "rendering" | "verifying";
             version: number;
             receiptId: string | null;
             error: string | null;
         } | null;
         taskId: string;
         runId: string;
-        state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+        state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
         version: number;
         taskVersion: number;
         intentVersion: number;
         taskState: "active" | "completed" | "paused";
         title: string;
         goal: string;
-        motivation: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+        motivation: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
         resultCurrent: boolean;
         blocking: boolean;
         objections: {
             id: string;
-            category: "scope" | "preference" | "none" | "method" | "premise" | "missing-information";
+            category: "scope" | "none" | "preference" | "method" | "premise" | "missing-information";
             blocking: boolean;
             resolved: boolean;
         }[];
@@ -351,6 +357,15 @@ export declare class DafeiyuService extends Service {
     personaAccess(context: ExecutionContextV3, pluginId: string, effect?: 'read' | 'local-write'): PersonaAccess;
     bindCapabilityObservations(port: CapabilityObservationPort): () => void;
     capabilityResources(context: ExecutionContextV3, pluginId: string): readonly Conversation[];
+    quoteReplySource(context: ExecutionContextV3, pluginId: string): {
+        key: string;
+        target: {
+            channel: string;
+            account: string;
+            kind: "group" | "private" | "local";
+            id: string;
+        };
+    };
     authorizeCapabilityResource(context: ExecutionContextV3, pluginId: string, raw: unknown): Conversation;
     capabilityResourceCurrent(raw: unknown): boolean;
     capabilityPublicView(raw: unknown, view: string): boolean;
@@ -408,7 +423,7 @@ export declare class DafeiyuService extends Service {
             run: Readonly<{
                 id: string;
             }>;
-            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+            state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
         };
         openTask: (id: string) => Readonly<{
             id: string;
@@ -429,7 +444,7 @@ export declare class DafeiyuService extends Service {
         status: (ref: import("#dafeiyu/contracts").RunRef) => {
             id: string;
             taskId: string | null;
-            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+            state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
             version: number;
             result: {
                 sessionId: string;
@@ -443,7 +458,7 @@ export declare class DafeiyuService extends Service {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "unknown" | "cancelled" | "partial" | "failed" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -455,7 +470,7 @@ export declare class DafeiyuService extends Service {
         cancel: (ref: import("#dafeiyu/contracts").RunRef, input: unknown) => {
             id: string;
             taskId: string | null;
-            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+            state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
             version: number;
             result: {
                 sessionId: string;
@@ -469,7 +484,7 @@ export declare class DafeiyuService extends Service {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "unknown" | "cancelled" | "partial" | "failed" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -480,7 +495,7 @@ export declare class DafeiyuService extends Service {
         pause: (ref: import("#dafeiyu/contracts").RunRef, input: unknown) => {
             id: string;
             taskId: string | null;
-            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+            state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
             version: number;
             result: {
                 sessionId: string;
@@ -494,7 +509,7 @@ export declare class DafeiyuService extends Service {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "unknown" | "cancelled" | "partial" | "failed" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -509,7 +524,7 @@ export declare class DafeiyuService extends Service {
             run: Readonly<{
                 id: string;
             }>;
-            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+            state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
         };
         acceptWake: (raw: unknown, task: import("#dafeiyu/contracts").TaskRef) => {
             task: Readonly<{
@@ -518,7 +533,7 @@ export declare class DafeiyuService extends Service {
             run: Readonly<{
                 id: string;
             }>;
-            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+            state: "cancelled" | "running" | "completed" | "interrupted" | "failed" | "accepted" | "queued" | "waiting" | "cancelling";
         };
     }>;
     bindWakeAuthority(provider: WakeAuthorityProvider): () => void;
@@ -539,7 +554,7 @@ export declare class DafeiyuService extends Service {
             scopeKey: string;
         };
         intentVersion: number;
-        kind: "execution" | "maintenance";
+        kind: "maintenance" | "execution";
         hash: string;
     };
     activityAnchorStatus(anchor: unknown): {
@@ -562,7 +577,7 @@ export declare class DafeiyuService extends Service {
             scopeKey: string;
         };
         intentVersion: number;
-        kind: "execution" | "maintenance";
+        kind: "maintenance" | "execution";
         hash: string;
     };
     activityPressure(): {
@@ -807,7 +822,7 @@ export declare class DafeiyuService extends Service {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -855,7 +870,7 @@ export declare class DafeiyuService extends Service {
             };
             fragments: {
                 ref: string;
-                kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;
@@ -1031,6 +1046,8 @@ export declare class DafeiyuService extends Service {
     private actions;
     private parseAction;
     private process;
+    private messageProcessingSignal;
+    private deliveryChannel;
     private validateRunPersona;
     private processMessage;
     /** Explicit retry only for definitely-not-sent replies; never runs the model or replays tool operations. */

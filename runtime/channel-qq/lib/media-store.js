@@ -13,14 +13,15 @@ export class QqMediaStore {
         this.db = db;
         this.cache = cache;
     }
-    remember(scene, messageId, sender, envelopeHash, parts) {
+    remember(scene, messageId, sender, envelopeHash, parts, positionOffset = 0) {
         const route = JSON.stringify([scene.account, scene.kind, scene.id]);
         if (this.cache.recalled(route, messageId))
             return [];
         this.db.exec('BEGIN IMMEDIATE');
         try {
             const ids = [];
-            for (const [position, part] of parts.entries()) {
+            for (const [index, part] of parts.entries()) {
+                const position = positionOffset + index;
                 if (!['image', 'record', 'video', 'file'].includes(part.type) || ids.length >= 8)
                     continue;
                 const locator = locatorSchema.safeParse({ ...(typeof part.data.file === 'string' ? { file: part.data.file } : {}), ...(typeof part.data.file_id === 'string' ? { fileId: part.data.file_id } : {}), ...(typeof part.data.url === 'string' ? { url: part.data.url } : {}) });

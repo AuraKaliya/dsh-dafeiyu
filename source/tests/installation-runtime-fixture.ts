@@ -4,14 +4,17 @@ import { join,resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { testTempDir } from './test-temp.js';
+import { groupPacket, assertGroupQuery } from './qq-group-packet-fixture.js';
 
 const root=await mkdtemp(join(testTempDir(),'installation-runtime-')),file=join(root,'settings.json'),data=join(root,'data');
 process.env.DSH_HOME=join(data,'core','dsh-home');
 const {prepareInstallation,startInstallation}=await import('dsh-dafeiyu/installation');
 const token='synthetic-installation-token-at-least-thirty-two-characters';let sends=0;
-const server=createServer((request,response)=>{
+const server=createServer(async(request,response)=>{
   assert.equal(request.headers.authorization,'Bearer '+token);
-  const value=request.url==='/get_login_info'?{user_id:12345678}:request.url==='/get_status'?{online:true}:request.url==='/get_group_list'?[]:request.url==='/send_private_msg'?{message_id:++sends}:null;
+  let raw='';for await(const part of request)raw+=String(part);
+  if(request.url==='/send_packet')assertGroupQuery(raw);
+  const value=request.url==='/get_login_info'?{user_id:12345678}:request.url==='/get_status'?{online:true}:request.url==='/get_group_list'?[]:request.url==='/send_packet'?groupPacket([]):request.url==='/send_private_msg'?{message_id:++sends}:null;
   response.setHeader('content-type','application/json');response.end(JSON.stringify({status:'ok',retcode:0,data:value}));
 });
 const wss=new WebSocketServer({server});wss.on('connection',socket=>socket.send(JSON.stringify({post_type:'message',self_id:12345678,message_id:7,message_type:'private',user_id:87654321,time:1793000000,message:[{type:'text',data:{text:'这是虚构的安装连接检查。'}}],sender:{nickname:'虚构用户'}})));
@@ -23,7 +26,7 @@ try{
   const prepared=prepareInstallation(file,options);assert.equal(prepared.inspection.ready,true);
   const metadata=await readFile(join(data,'installation.json'),'utf8');
   host=await startInstallation(file,options);assert.equal(host.snapshot().phase,'ready');assert.ok(host.ctx.dafeiyuMemory.growth);assert.equal(host.ctx.dafeiyuMemory.growth,host.ctx.dafeiyuMemory.persona);
-  const deadline=Date.now()+6000;while(sends===0&&Date.now()<deadline)await new Promise(done=>setTimeout(done,20));assert.equal(sends,1);
+  const deadline=Date.now()+11000;while(sends===0&&Date.now()<deadline)await new Promise(done=>setTimeout(done,20));assert.equal(sends,1);
   await assert.rejects(()=>startInstallation(file,options),/STORE_OWNED|RESOURCE_OWNED|ALREADY_OWNED/);
   await host.close('fixture');host=undefined;
   host=await startInstallation(file,options);await new Promise(done=>setTimeout(done,200));assert.equal(sends,1);await host.close('fixture');host=undefined;

@@ -13,7 +13,7 @@ export async function openAgentSession(ctx:Context,id:string,model:AgentOptions,
     ?ctx.agents.resume({resumeSessionId:sessionId,agentOptions:model,setup})
     :ctx.agents.create({sessionId,meta:{cwd},agentOptions:model,setup});
 }
-export async function runAgentTurn(ctx:Context,agent:Agent,input:UserMessage,signal:AbortSignal,afterIdle:()=>void=()=>{}){
+export async function runAgentTurn(ctx:Context,agent:Agent,input:UserMessage,signal:AbortSignal,afterIdle:()=>void=()=>{},allowEmpty:()=>boolean=()=>false){
   if(agent.status!=='idle')throw new Error('SESSION_BUSY');
   signal.throwIfAborted();const before=agent.session.snapshotEvents().length;
   const abort=()=>agent.cancel({kind:'hook',reason:'Dafeiyu run cancelled'});
@@ -27,7 +27,7 @@ export async function runAgentTurn(ctx:Context,agent:Agent,input:UserMessage,sig
     const output=events.findLast(event=>event.type==='assistant/message'&&!event.data.interrupted&&event.data.turn===ended.data.turn);
     if(!output||output.type!=='assistant/message')throw new Error('MODEL_INCOMPLETE');
     const text=output.data.message.content.filter(block=>block.type==='text').map(block=>block.text).join('\n').trim();
-    if(!text)throw new Error('MODEL_INCOMPLETE');
+    if(!text&&!allowEmpty())throw new Error('MODEL_INCOMPLETE');
     return {text,events,messageSeq:output.seq,turnEndSeq:ended.seq};
   }finally{signal.removeEventListener('abort',abort);}
 }

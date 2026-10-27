@@ -159,7 +159,20 @@ export class QqMediaReader {
         let location;
         if (params) {
             const raw = await api.call(kind === 'image' ? 'get_image' : kind === 'audio' ? 'get_record' : 'get_file', { ...params, ...(kind === 'audio' ? { out_format: 'wav' } : {}) }, signal);
-            const result = z.object({ file: z.string().max(8192).optional(), url: z.string().max(8192).optional() }).parse(raw);
+            const result = z.object({ file: z.string().max(8192).optional(), url: z.string().max(8192).optional(), base64: z.string().max(32 * 1024 ** 2).optional(), out_format: z.string().optional() }).parse(raw);
+            if (kind === 'audio' && result.base64 !== undefined) {
+                if (result.out_format !== 'wav' || result.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(result.base64))
+                    throw new Error('QQ_MEDIA_AUDIO_CONVERSION_INVALID');
+                const data = Buffer.from(result.base64, 'base64');
+                if (data.length > this.config.maxReadBytes)
+                    throw new Error('QQ_MEDIA_SIZE_LIMIT');
+                if (data.length < 44 || data.toString('ascii', 0, 4) !== 'RIFF' || data.toString('ascii', 8, 12) !== 'WAVE')
+                    throw new Error('QQ_MEDIA_AUDIO_CONVERSION_INVALID');
+                await api.verify(signal);
+                guard();
+                const selected = bounds(range, data.length), bytes = range ? selected.end - selected.start + 1 : data.length;
+                return { bytes, totalBytes: data.length, mime: 'audio/wav', range: range ? selected : null, stream: (async function* () { guard(); signal.throwIfAborted(); yield data.subarray(selected.start, selected.end + 1); guard(); await api.verify(signal); guard(); })() };
+            }
             location = result.file ?? result.url ?? '';
         }
         else {

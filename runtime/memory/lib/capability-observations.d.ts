@@ -7,8 +7,8 @@ import type { MemoryStore } from './store.js';
 declare const recordSchema: z.ZodObject<{
     schemaVersion: z.ZodLiteral<1>;
     kind: z.ZodEnum<{
-        observed: "observed";
         selected: "selected";
+        observed: "observed";
     }>;
     scope: z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"conversation">;
@@ -27,9 +27,9 @@ declare const recordSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -62,9 +62,9 @@ declare const recordSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -254,9 +254,9 @@ declare const recordSchema: z.ZodObject<{
     }, z.core.$strict>], "kind">>;
     selection: z.ZodNullable<z.ZodObject<{
         mode: z.ZodEnum<{
-            summary: "summary";
             original: "original";
             fragment: "fragment";
+            summary: "summary";
         }>;
         outputHash: z.ZodString;
     }, z.core.$strict>>;
@@ -326,7 +326,7 @@ export declare class CapabilityObservations {
                 conversation: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 ingressPluginId: string | null;
@@ -387,7 +387,7 @@ export declare class CapabilityObservations {
         };
         body: {
             schemaVersion: 1;
-            kind: "observed" | "selected";
+            kind: "selected" | "observed";
             scope: {
                 kind: "conversation";
                 agentId: string;
@@ -404,7 +404,7 @@ export declare class CapabilityObservations {
                 conversation: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
             } | {
@@ -435,7 +435,7 @@ export declare class CapabilityObservations {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 key: string;
@@ -623,7 +623,7 @@ export declare class CapabilityObservations {
                 contentHash: string;
             } | null;
             selection: {
-                mode: "summary" | "original" | "fragment";
+                mode: "original" | "fragment" | "summary";
                 outputHash: string;
             } | null;
             rawRetained: false;

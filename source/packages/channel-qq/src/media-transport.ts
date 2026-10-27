@@ -4,6 +4,7 @@ import type { QqMediaDeliveryLedger,QqMediaDeliveryPlan,QqMediaDeliveryProgress 
 type MediaReply=Reply&{media:ReplyMediaManifest};
 type Part=QqMediaDeliveryPlan['parts'][number];
 interface Host {ledger:QqMediaDeliveryLedger;legacyProgress(id:string):{confirmed:number;unknown:number;state:string}|null;
+  beforeSend?(reply:Reply,signal:AbortSignal):Promise<void>;
   check(reply:Reply,signal:AbortSignal):Promise<void>;send(reply:MediaReply,part:Part,data:Uint8Array|null,signal:AbortSignal):Promise<string>;confirmed(reply:MediaReply,part:Part,receipt:string):void;}
 const safe=(error:unknown)=>error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'MEDIA_DELIVERY_PRECHECK_FAILED';
 function result(value:QqMediaDeliveryProgress,code:string):DeliveryResult {if(value.state==='sent')return {status:'sent',receiptId:value.parts[0]!.receipt!};
@@ -18,11 +19,11 @@ export class QqMediaTransport {
     const snapshot:MediaReply={id:plan.replyId,conversation:plan.target,sourceMessageId:plan.sourceMessageId,text:plan.parts.filter(p=>p.kind==='text').map(p=>p.text).join(''),media:plan.manifest,...(plan.manifest.anchor.kind==='task-result'?{taskResult:plan.manifest.anchor}:{})};
     const work=this.execute(snapshot,plan,signal,authority,bytes).finally(()=>this.active.delete(reply.id));this.active.set(reply.id,work);return work;
   }
-  private async execute(reply:MediaReply,plan:QqMediaDeliveryPlan,signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>):Promise<DeliveryResult>{const guard=()=>{if(signal.aborted)throw new Error('DELIVERY_CANCELLED');try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};let mediaPosition=0;
+  private async execute(reply:MediaReply,plan:QqMediaDeliveryPlan,signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>):Promise<DeliveryResult>{const guard=()=>{if(signal.aborted)throw new Error('DELIVERY_CANCELLED');try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};let mediaPosition=0,delayed=false;
     for(const [position,part] of plan.parts.entries()){const mediaIndex=part.kind==='text'?null:mediaPosition++;const progress=this.host.ledger.progress(reply.id)!;if(progress.state==='sent'||progress.unknown||progress.state==='sending')return result(progress,'DELIVERY_NOT_RESUMABLE');if(progress.parts[position]!.state==='sent')continue;
       let invoked=false;try{guard();let data:Buffer|null=null;
         if(part.kind!=='text'){data=Buffer.from(await bytes(mediaIndex!));if(data.length!==part.asset.bytes||data.length>16*1024**2||createHash('sha256').update(data).digest('hex')!==part.asset.sha256)throw new Error('MEDIA_BLOB_CORRUPT');}
-        guard();await this.host.check(reply,signal);guard();this.host.ledger.begin(reply.id,position);invoked=true;const receipt=await this.host.send(reply,part,data,signal);this.host.ledger.confirm(reply.id,position,receipt);this.host.confirmed(reply,part,receipt);
+        guard();if(!delayed&&progress.confirmed===0){await this.host.beforeSend?.(reply,signal);delayed=true;}guard();await this.host.check(reply,signal);guard();this.host.ledger.begin(reply.id,position);invoked=true;const receipt=await this.host.send(reply,part,data,signal);this.host.ledger.confirm(reply.id,position,receipt);this.host.confirmed(reply,part,receipt);
       }catch(error){const current=this.host.ledger.progress(reply.id)!;if(current.parts[position]!.state==='sending')this.host.ledger.unknown(reply.id,position,'PLATFORM_RESULT_UNKNOWN');else if(current.parts[position]!.state==='pending')this.host.ledger.defer(reply.id,position,safe(error));
         return result(this.host.ledger.progress(reply.id)!,invoked?'LOCAL_PROJECTION_FAILED':safe(error));}
     }return result(this.host.ledger.progress(reply.id)!,'DELIVERY_INCOMPLETE');

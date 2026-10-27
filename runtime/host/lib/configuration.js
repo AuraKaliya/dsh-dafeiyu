@@ -8,7 +8,7 @@ import { ActivityPluginConfigSchema, ACTIVITY_ACTIONS, validateQuiet } from '#da
 import { MediaPluginConfigSchema } from '#dafeiyu/media';
 import { BiliPluginConfigSchema } from '#dafeiyu/bilibili';
 import { ServerExecutorPluginConfigSchema, serverExecutorScene } from '#dafeiyu/server-executor';
-import { QqPluginConfigSchema, QQ_ACTIONS, QQ_TASK_ACTIONS } from '#dafeiyu/qq';
+import { QqPluginConfigSchema, QQ_OBSERVATION_ACTIONS, QQ_TASK_ACTIONS, QQ_STICKER_ACTIONS } from '#dafeiyu/qq';
 import { BiliOwnerPluginConfigSchema, BILI_OWNER_TASK_ACTIONS, biliOwnerScene, BILI_PUBLIC_SCENE } from '#dafeiyu/bilibili/channel';
 import { TimelinePluginConfigSchema } from '#dafeiyu/timeline';
 import { runtimeHash } from '#dafeiyu/core/runtime-store';
@@ -232,13 +232,20 @@ export function loadHostConfig(input) {
             throw new Error('HOST_QQ_MEDIA_REQUIRED');
         if (qqMedia?.voiceDirectives && (!qqMedia.enabled || !QqPluginConfigSchema.parse(qq.config).tasks.enabled || !mediaConfig?.audio?.whisper || !mediaConfig.audio.events))
             throw new Error('HOST_QQ_VOICE_DEPENDENCY_REQUIRED');
+        if (qq && QqPluginConfigSchema.parse(qq.config).stickers.enabled) {
+            if (!qqMedia?.enabled || !qqCapabilities)
+                throw new Error('HOST_QQ_STICKER_DEPENDENCY_REQUIRED');
+            const policy = config.authorityPolicies.find(policy => policy.id === 'conversation' && policy.producers.includes('channel-qq'));
+            if (!policy?.allowLocalWrite || QQ_STICKER_ACTIONS.some(action => !policy.actions.includes(action)))
+                throw new Error('HOST_QQ_STICKER_POLICY_REQUIRED');
+        }
         if (qqCapabilities) {
             if (!memory)
                 throw new Error('HOST_QQ_MEMORY_REQUIRED');
             if (!memory.config.sourceTracking && !memory.config.compaction && config.context.compactionInputTokens === undefined)
                 throw new Error('HOST_QQ_SOURCE_TRACKING_REQUIRED');
             const policy = config.authorityPolicies.find(policy => policy.id === 'conversation' && policy.producers.includes('channel-qq'));
-            if (!policy || !policy.allowLocalWrite || QQ_ACTIONS.some(action => !policy.actions.includes(action)))
+            if (!policy || !policy.allowLocalWrite || QQ_OBSERVATION_ACTIONS.some(action => !policy.actions.includes(action)))
                 throw new Error('HOST_QQ_CAPABILITY_POLICY_REQUIRED');
         }
         const qqTasks = qq && QqPluginConfigSchema.parse(qq.config).tasks;

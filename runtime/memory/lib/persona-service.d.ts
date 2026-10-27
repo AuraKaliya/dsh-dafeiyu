@@ -76,7 +76,7 @@ export declare class GrowthService {
     review(context: ExecutionContextV3, raw: unknown, pluginId?: string): {
         id: string;
         version: number;
-        state: "proposed" | "held" | "trial" | "adopted" | "rejected" | "withdrawn" | "dormant" | "superseded";
+        state: "superseded" | "withdrawn" | "proposed" | "held" | "trial" | "adopted" | "rejected" | "dormant";
     };
     selectTrial(context: ExecutionContextV3, raw: unknown, pluginId?: string): {
         selection: {
@@ -149,7 +149,7 @@ export declare class GrowthService {
                 version: number;
             };
             runId: string;
-            state: "completed" | "failed" | "cancelled" | "interrupted";
+            state: "completed" | "interrupted" | "failed" | "cancelled";
             gaps: string[];
         }[];
         stageRevision: number;
@@ -158,8 +158,8 @@ export declare class GrowthService {
         candidates: {
             id: string;
             version: number;
-            state: "proposed" | "held" | "trial" | "adopted" | "rejected" | "withdrawn" | "dormant" | "superseded";
-            kind: "interest" | "preference" | "view" | "habit" | "relationship" | "value-application";
+            state: "superseded" | "withdrawn" | "proposed" | "held" | "trial" | "adopted" | "rejected" | "dormant";
+            kind: "preference" | "view" | "interest" | "habit" | "relationship" | "value-application";
             applicability: string;
             maturity: string;
             available: boolean;
@@ -330,10 +330,10 @@ export declare class GrowthService {
         producer: string;
         kind: "accepted" | "objection" | "resolved";
         motivation: {
-            kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+            kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
-        category: "preference" | "scope" | "none" | "method" | "premise" | "missing-information";
+        category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
         blocking: boolean;
         reason: string;
         evidence: ({
@@ -372,7 +372,7 @@ export declare class GrowthService {
     };
     intent(context: ExecutionContextV3, pluginId?: string): {
         motivation: {
-            kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+            kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
         blocking: boolean;
@@ -387,10 +387,10 @@ export declare class GrowthService {
             producer: string;
             kind: "accepted" | "objection" | "resolved";
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
-            category: "preference" | "scope" | "none" | "method" | "premise" | "missing-information";
+            category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
             blocking: boolean;
             reason: string;
             evidence: ({

@@ -140,6 +140,8 @@ export class CapabilityRegistryV3 {
         }
         const keys = [];
         for (const channel of extension.channels ?? []) {
+            if (channel.processingSignal !== undefined && typeof channel.processingSignal !== 'function')
+                throw new Error('INVALID_DELIVERY_CONTRACT');
             if (channel.taskDelivery !== undefined && channel.taskDelivery !== 'simulated')
                 throw new Error('INVALID_DELIVERY_CONTRACT');
             if (channel.deliveryValidation !== undefined && channel.deliveryValidation !== 'per-segment')

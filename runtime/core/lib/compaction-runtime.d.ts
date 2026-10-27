@@ -582,13 +582,13 @@ declare const recordSchema: z.ZodUnion<[z.ZodUnion<[z.ZodDiscriminatedUnion<[z.Z
         }, z.core.$strict>>;
         fragments: z.ZodArray<z.ZodObject<{
             kind: z.ZodEnum<{
-                decision: "decision";
-                result: "result";
                 fact: "fact";
+                decision: "decision";
                 constraint: "constraint";
                 correction: "correction";
                 pending: "pending";
                 uncertainty: "uncertainty";
+                result: "result";
                 note: "note";
             }>;
             text: z.ZodString;
@@ -783,13 +783,13 @@ declare const recordSchema: z.ZodUnion<[z.ZodUnion<[z.ZodDiscriminatedUnion<[z.Z
             result: z.ZodObject<{
                 fragment: z.ZodObject<{
                     kind: z.ZodEnum<{
-                        decision: "decision";
-                        result: "result";
                         fact: "fact";
+                        decision: "decision";
                         constraint: "constraint";
                         correction: "correction";
                         pending: "pending";
                         uncertainty: "uncertainty";
+                        result: "result";
                         note: "note";
                     }>;
                     text: z.ZodString;
@@ -1247,7 +1247,7 @@ export declare class CompactionRuntime {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -1295,7 +1295,7 @@ export declare class CompactionRuntime {
             };
             fragments: {
                 ref: string;
-                kind: "pending" | "result" | "decision" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;

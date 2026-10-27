@@ -1,14 +1,13 @@
 import { z } from 'zod';
 /** This record is written only by core; the public anchor is its hashed locator. */
 export declare const ActivityAuthoritySchema: z.ZodObject<{
+    schemaVersion: z.ZodLiteral<1>;
     id: z.ZodUUID;
     kind: z.ZodEnum<{
         maintenance: "maintenance";
         execution: "execution";
     }>;
-    schemaVersion: z.ZodLiteral<1>;
     runId: z.ZodUUID;
-    intentVersion: z.ZodNumber;
     operationId: z.ZodUUID;
     scope: z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"conversation">;
@@ -20,6 +19,7 @@ export declare const ActivityAuthoritySchema: z.ZodObject<{
         taskId: z.ZodUUID;
         scopeKey: z.ZodString;
     }, z.core.$strict>], "kind">;
+    intentVersion: z.ZodNumber;
     policy: z.ZodObject<{
         producer: z.ZodString;
         id: z.ZodString;

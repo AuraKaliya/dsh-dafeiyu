@@ -47,21 +47,8 @@ export declare const archiveSchema: z.ZodObject<{
     body: z.ZodString;
     hash: z.ZodString;
     report: z.ZodObject<{
-        schemaVersion: z.ZodLiteral<1>;
-        completeness: z.ZodEnum<{
-            unknown: "unknown";
-            complete: "complete";
-            partial: "partial";
-        }>;
-        summary: z.ZodString;
-        effects: z.ZodEnum<{
-            unknown: "unknown";
-            partial: "partial";
-            none: "none";
-            applied: "applied";
-        }>;
-        receipts: z.ZodArray<z.ZodString>;
         sourceRefs: z.ZodArray<z.ZodString>;
+        schemaVersion: z.ZodLiteral<1>;
         outcome: z.ZodEnum<{
             unknown: "unknown";
             partial: "partial";
@@ -69,11 +56,24 @@ export declare const archiveSchema: z.ZodObject<{
             succeeded: "succeeded";
             running: "running";
         }>;
+        summary: z.ZodString;
+        completeness: z.ZodEnum<{
+            unknown: "unknown";
+            complete: "complete";
+            partial: "partial";
+        }>;
+        effects: z.ZodEnum<{
+            unknown: "unknown";
+            partial: "partial";
+            none: "none";
+            applied: "applied";
+        }>;
         resourceVersion: z.ZodString;
         diagnostics: z.ZodArray<z.ZodObject<{
             code: z.ZodString;
             message: z.ZodString;
         }, z.core.$strict>>;
+        receipts: z.ZodArray<z.ZodString>;
     }, z.core.$strict>;
     preview: z.ZodObject<{
         text: z.ZodString;

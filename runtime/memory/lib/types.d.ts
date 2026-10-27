@@ -2,16 +2,16 @@ import { z } from 'zod';
 import type { MemoryBoundaryPolicy } from '#dafeiyu/contracts';
 export declare const MEMORY_VERSION = "0.15.0";
 export declare const kindSchema: z.ZodEnum<{
-    preference: "preference";
     experience: "experience";
     knowledge: "knowledge";
+    preference: "preference";
     procedure: "procedure";
 }>;
 export declare const claimSchema: z.ZodEnum<{
-    inference: "inference";
-    reported_claim: "reported_claim";
-    self_report: "self_report";
     observation: "observation";
+    self_report: "self_report";
+    reported_claim: "reported_claim";
+    inference: "inference";
 }>;
 export declare const versionSchema: z.ZodNumber;
 export declare const sourceVersionSchema: z.ZodObject<{
@@ -56,16 +56,16 @@ export declare const revisionSchema: z.ZodObject<{
     id: z.ZodUUID;
     revision: z.ZodNumber;
     kind: z.ZodEnum<{
-        preference: "preference";
         experience: "experience";
         knowledge: "knowledge";
+        preference: "preference";
         procedure: "procedure";
     }>;
     claimType: z.ZodEnum<{
-        inference: "inference";
-        reported_claim: "reported_claim";
-        self_report: "self_report";
         observation: "observation";
+        self_report: "self_report";
+        reported_claim: "reported_claim";
+        inference: "inference";
     }>;
     content: z.ZodString;
     contentHash: z.ZodString;

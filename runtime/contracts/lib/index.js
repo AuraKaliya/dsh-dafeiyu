@@ -31,7 +31,7 @@ export * from './media.js';
 export * from './media-delivery.js';
 export const API_VERSION = 2;
 const id = z.string().min(1).max(160);
-export const MessageSchema = z.strictObject({
+export const MessagePartSchema = z.strictObject({
     id, occurredAt: z.iso.datetime({ offset: true }),
     conversation: ConversationSchema,
     sender: z.strictObject({ id, displayName: z.string().max(200) }),
@@ -40,6 +40,20 @@ export const MessageSchema = z.strictObject({
     media: z.array(MediaAttachmentSchema).max(8).optional(),
     replyTo: id.optional(),
 });
+/** A batch is a program envelope. Each source remains an authentic platform message. */
+export const MessageSchema = MessagePartSchema.extend({
+    batch: z.strictObject({ sources: z.array(MessagePartSchema).min(2).max(10) }).optional(),
+}).superRefine((message, ctx) => {
+    if (!message.batch)
+        return;
+    const sources = message.batch.sources, last = sources.at(-1);
+    if (new Set(sources.map(part => part.id)).size !== sources.length || sources.some(part => conversationKey('', part.conversation) !== conversationKey('', message.conversation) || part.sender.id !== message.sender.id)
+        || JSON.stringify({ ...message, batch: undefined }) !== JSON.stringify(last) || sources.reduce((n, part) => n + part.text.length, 0) > 32000 || sources.reduce((n, part) => n + (part.media?.length ?? 0), 0) > 8)
+        ctx.addIssue({ code: 'custom', message: 'Invalid authentic message batch' });
+});
+export const messageParts = (message) => message.batch?.sources ?? [message];
+export const messageMainText = (message) => message.batch ? message.batch.sources.map(part => part.mainText ?? '').join('\n') : message.mainText ?? '';
+export const messageDisplayText = (message) => message.batch ? message.batch.sources.map(part => `[原消息 ${part.id}；${part.occurredAt}${part.replyTo ? '；引用 ' + part.replyTo : ''}]\n${part.text}`).join('\n\n') : message.text;
 export const ObservationSchema = z.strictObject({
     conversation: ConversationSchema,
     type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled']),

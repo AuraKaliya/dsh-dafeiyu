@@ -7,9 +7,9 @@ export declare const ProfileManifestSchema: z.ZodObject<{
     agentId: z.ZodString;
     id: z.ZodUUID;
     state: z.ZodEnum<{
+        failed: "failed";
         initializing: "initializing";
         initialized: "initialized";
-        failed: "failed";
     }>;
     createdAt: z.ZodISODateTime;
     paths: z.ZodRecord<z.ZodString, z.ZodString>;
@@ -49,8 +49,8 @@ export declare const manifestFile: (config: PreparedHostConfig) => string;
 export declare function readManifest(config: PreparedHostConfig): ProfileManifest | null;
 export declare function writeManifest(config: PreparedHostConfig, value: ProfileManifest): void;
 export declare function storageFiles(config: PreparedHostConfig): ({
-    name: "memory" | "analysis" | "working" | "feedback" | "retrieval";
-    kind: "memory" | "analysis" | "working" | "feedback" | "retrieval";
+    name: "memory" | "analysis" | "feedback" | "retrieval" | "working";
+    kind: "memory" | "analysis" | "feedback" | "retrieval" | "working";
     file: string;
 } | {
     name: string;

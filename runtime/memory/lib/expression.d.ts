@@ -139,7 +139,7 @@ export declare class TaskExpression {
         target: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         };
         decisions: {
@@ -156,7 +156,7 @@ export declare class TaskExpression {
         target: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         };
         usage: string;
@@ -181,7 +181,7 @@ export declare class TaskExpression {
         target: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         };
         answer: string;
@@ -198,7 +198,7 @@ export declare class TaskExpression {
         target: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         };
         answer: string;
@@ -214,7 +214,7 @@ export declare class TaskExpression {
         target: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         };
         question: string;

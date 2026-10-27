@@ -13,7 +13,7 @@ import { CORE_VERSION } from './version.js';
 import type { FoundationSnapshot } from './foundation.js';
 import { foundationManifest } from './persona-manifest.js';
 
-const projectionSchema=z.strictObject({inboundId:z.uuid(),startedEventId:z.uuid(),reply:z.strictObject({id:z.string(),conversation:ConversationSchema,sourceMessageId:z.string(),text:z.string().min(1)}),
+const projectionSchema=z.strictObject({inboundId:z.uuid(),startedEventId:z.uuid(),reply:z.strictObject({id:z.string(),conversation:ConversationSchema,sourceMessageId:z.string(),text:z.string()}),
   sources:z.array(z.strictObject({kind:z.enum(['message','session','event']),id:z.string(),seq:z.number().int().nonnegative().optional(),route:z.string().optional()}))});
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 /** The journal owns delivery. The Run owns only the durable model execution and its projection. */

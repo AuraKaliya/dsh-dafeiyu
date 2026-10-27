@@ -11,9 +11,9 @@ export declare const TaskResultAnchorSchema: z.ZodObject<{
         channel: z.ZodString;
         account: z.ZodString;
         kind: z.ZodEnum<{
-            local: "local";
             private: "private";
             group: "group";
+            local: "local";
         }>;
         id: z.ZodString;
     }, z.core.$strict>;
@@ -68,9 +68,9 @@ export declare const NativeExpressionPacketSchema: z.ZodObject<{
             channel: z.ZodString;
             account: z.ZodString;
             kind: z.ZodEnum<{
-                local: "local";
                 private: "private";
                 group: "group";
+                local: "local";
             }>;
             id: z.ZodString;
         }, z.core.$strict>;
@@ -97,9 +97,9 @@ export declare const NativeExpressionPacketSchema: z.ZodObject<{
         parts: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
             kind: z.ZodLiteral<"asset">;
             delivery: z.ZodEnum<{
+                image: "image";
                 record: "record";
                 file: "file";
-                image: "image";
             }>;
             asset: z.ZodObject<{
                 schemaVersion: z.ZodLiteral<1>;

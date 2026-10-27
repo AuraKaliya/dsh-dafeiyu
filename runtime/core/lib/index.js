@@ -59,7 +59,7 @@ export class DafeiyuService extends Service {
         if (this.mediaPort)
             throw new Error('DUPLICATE_PROVIDER');
         const bound = Object.freeze({ ready: port.ready.bind(port), registerProvider: port.registerProvider.bind(port), acquire: port.acquire.bind(port), inspect: port.inspect.bind(port), read: port.read.bind(port), ...(port.voice ? { voice: port.voice.bind(port) } : {}), ...(port.voiceCurrent ? { voiceCurrent: port.voiceCurrent.bind(port) } : {}),
-            ...(port.replyDraft ? { replyDraft: port.replyDraft.bind(port) } : {}), ...(port.finalizeReply ? { finalizeReply: port.finalizeReply.bind(port) } : {}), ...(port.readReplyPart ? { readReplyPart: port.readReplyPart.bind(port) } : {}), ...(port.validateReply ? { validateReply: port.validateReply.bind(port) } : {}), ...(port.settleReply ? { settleReply: port.settleReply.bind(port) } : {}), ...(port.releaseReply ? { releaseReply: port.releaseReply.bind(port) } : {}), ...(port.nativeMaterial ? { nativeMaterial: port.nativeMaterial.bind(port) } : {}), ...(port.observedMaterial ? { observedMaterial: port.observedMaterial.bind(port) } : {}) });
+            ...(port.imageOriginal ? { imageOriginal: port.imageOriginal.bind(port) } : {}), ...(port.prepareReply ? { prepareReply: port.prepareReply.bind(port) } : {}), ...(port.replyDraft ? { replyDraft: port.replyDraft.bind(port) } : {}), ...(port.finalizeReply ? { finalizeReply: port.finalizeReply.bind(port) } : {}), ...(port.readReplyPart ? { readReplyPart: port.readReplyPart.bind(port) } : {}), ...(port.validateReply ? { validateReply: port.validateReply.bind(port) } : {}), ...(port.settleReply ? { settleReply: port.settleReply.bind(port) } : {}), ...(port.releaseReply ? { releaseReply: port.releaseReply.bind(port) } : {}), ...(port.nativeMaterial ? { nativeMaterial: port.nativeMaterial.bind(port) } : {}), ...(port.observedMaterial ? { observedMaterial: port.observedMaterial.bind(port) } : {}) });
         this.mediaPort = bound;
         return () => { if (this.mediaPort === bound)
             this.mediaPort = undefined; };
@@ -79,6 +79,10 @@ export class DafeiyuService extends Service {
         throw new Error('MEDIA_NOT_CONFIGURED'); return this.mediaPort.inspect(context, owner, MediaAssetRefSchema.parse(ref)); }
     readMedia(context, owner, input) { this.executionAuthority(context, owner); if (!this.mediaPort?.ready())
         throw new Error('MEDIA_NOT_CONFIGURED'); return this.mediaPort.read(context, owner, MediaReadSchema.parse(input)); }
+    originalImage(context, owner, exposureId) { this.executionAuthority(context, owner); if (!this.mediaPort?.ready() || !this.mediaPort.imageOriginal)
+        throw new Error('MEDIA_NOT_CONFIGURED'); return this.mediaPort.imageOriginal(context, owner, z.uuid().parse(exposureId)); }
+    prepareReplyMedia(context, owner, input) { this.executionAuthority(context, owner); if (!this.mediaPort?.ready() || !this.mediaPort.prepareReply)
+        throw new Error('MEDIA_NOT_CONFIGURED'); return this.mediaPort.prepareReply(context, input, owner); }
     mediaVoiceEvidence(context, owner, exposureId) { this.executionAuthority(context, owner); if (!this.mediaPort?.ready() || !this.mediaPort.voice)
         throw new Error('MEDIA_VOICE_NOT_CONFIGURED'); return this.mediaPort.voice(context, owner, z.uuid().parse(exposureId)); }
     mediaVoiceCurrent(evidence) { return this.mediaPort?.ready() === true && this.mediaPort.voiceCurrent?.(evidence) === true; }
@@ -251,10 +255,7 @@ export class DafeiyuService extends Service {
                 turnTimeoutMs: this.config.turnTimeoutMs, deliveryTimeoutMs: this.config.deliveryTimeoutMs, assertOpen: () => this.assertOpen(), persona: () => this.persona(), model: () => this.analysisModelRoute(),
                 sourceTracking: () => !!this.compactionBinding()?.provider.sources,
                 provider: () => [...this.extensions.values()].find(e => e.active && e.extension.taskExpressionProvider)?.extension.taskExpressionProvider,
-                channel: item => {
-                    const entry = this.extensions.get(item.extensionId), capability = entry?.extension.channels?.find(c => c.channel === item.message.conversation.channel && c.account === item.message.conversation.account);
-                    return entry?.active && capability ? { identity: entry, id: entry.extension.id, version: entry.extension.version, capability, signal: entry.controller.signal } : null;
-                },
+                channel: item => this.deliveryChannel(item),
                 enqueue: (route, work) => this.enqueueTaskDelivery(route, work) }, true);
         }
         catch (error) {
@@ -425,6 +426,8 @@ export class DafeiyuService extends Service {
     }
     capabilityResources(context, pluginId) { if (!this.executions)
         throw new Error('EXECUTION_NOT_CONFIGURED'); return this.executions.resources(context, pluginId); }
+    quoteReplySource(context, pluginId) { if (!this.executions)
+        throw new Error('EXECUTION_NOT_CONFIGURED'); return this.executions.quoteReplySource(context, pluginId); }
     authorizeCapabilityResource(context, pluginId, raw) {
         if (!this.executions)
             throw new Error('EXECUTION_NOT_CONFIGURED');
@@ -485,14 +488,11 @@ export class DafeiyuService extends Service {
         this.conversationRuns = new ConversationRuns(this.ctx, store, this.journal, this.config.agentId, run => this.validateRunPersona(run));
         this.executions = new ExecutionCoordinator({ agentId: this.config.agentId, store, journal: this.journal, runtime: this.runtime, registry: this.registryV3, scheduler: this.scheduler, options, personas: this.personas,
             repository: () => this.repositoryPort, memory: () => this.executionMemoryPort, accepting: () => this.accepting, assertAccepting: () => this.assertAccepting(), persona: () => this.persona(), model: this.analysisModelRoute(),
-            turnTimeoutMs: this.config.turnTimeoutMs, context: this.config.context, signal: this.controller.signal, media: () => this.mediaPort, projectConversation: () => this.conversationRuns.project(), settled: id => { void this.nativeTaskDelivery?.request(id, true).catch(() => { }); } });
+            turnTimeoutMs: this.config.turnTimeoutMs, context: this.config.context, signal: this.controller.signal, messageSignal: id => this.messageProcessingSignal(id), media: () => this.mediaPort, projectConversation: () => this.conversationRuns.project(), settled: id => { void this.nativeTaskDelivery?.request(id, true).catch(() => { }); } });
         this.nativeTaskDelivery = new NativeTaskDelivery({ ctx: this.ctx, store, contexts: this.contexts, cwd: this.config.dataDir, signal: this.controller.signal, timeoutMs: this.config.turnTimeoutMs * 2 + this.config.deliveryTimeoutMs,
             describe: id => this.executions.describeMessageResult(id), access: id => this.executions.nativeResultAccess(id), expression: () => this.nativeExpressionPort, accepting: () => this.accepting, flush: () => this.executions.flushEvents(),
             model: () => ({ provider: this.config.provider, model: this.config.model, ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }),
-            channel: item => {
-                const entry = this.extensions.get(item.extensionId), capability = entry?.extension.channels?.find(channel => channel.channel === item.message.conversation.channel && channel.account === item.message.conversation.account);
-                return entry?.active && capability ? { identity: entry, id: entry.extension.id, version: entry.extension.version, capability, signal: entry.controller.signal } : null;
-            },
+            channel: item => this.deliveryChannel(item),
             enqueue: (route, work) => this.enqueueTaskDelivery(route, work), acquire: () => this.scheduler.acquire(false),
             persona: (item, id, signal, guard) => this.targetPersona(item, id, signal, guard), media: () => this.mediaPort, mediaAccess: (authority, reply, signal) => this.prepareMediaReplyAccess(authority, reply, signal), });
     }
@@ -552,6 +552,7 @@ export class DafeiyuService extends Service {
         try {
             if (extension.channels?.length) {
                 const channels = extension.channels.map(channel => ({ channel: channel.channel, account: channel.account, deliver: channel.deliver.bind(channel),
+                    ...(channel.processingSignal ? { processingSignal: channel.processingSignal.bind(channel) } : {}),
                     ...(channel.description ? { description: channel.description } : {}), ...(channel.taskDelivery ? { taskDelivery: channel.taskDelivery } : {}), ...(channel.deliveryValidation ? { deliveryValidation: channel.deliveryValidation } : {}), ...(channel.deliverTaskResult ? { deliverTaskResult: channel.deliverTaskResult.bind(channel) } : {}), ...(channel.mediaDelivery ? { mediaDelivery: channel.mediaDelivery } : {}), ...(channel.deliverMedia ? { deliverMedia: channel.deliverMedia.bind(channel) } : {}) }));
                 bridge = { active: true, controller: new AbortController(), extension: { apiVersion: 2, id: extension.id, version: extension.version, agentId: extension.agentId, channels,
                         ...(extension.lifecycleReady ? { lifecycleReady: extension.lifecycleReady.bind(extension) } : {}) } };
@@ -709,6 +710,8 @@ export class DafeiyuService extends Service {
         const channelKeys = new Set([...existing.flatMap(ext => ext.channels ?? []).map(c => JSON.stringify([c.channel, c.account])), ...this.registryV3.channelKeys()]);
         const actionNames = new Set([...existing.flatMap(ext => ext.actions ?? []).map(action => action.name), ...this.registryV3.actionNames()]);
         for (const c of extension.channels ?? []) {
+            if (c.processingSignal !== undefined && typeof c.processingSignal !== 'function')
+                throw new Error('Invalid channel processing contract');
             if (c.taskDelivery !== undefined && c.taskDelivery !== 'simulated')
                 throw new Error('Task delivery requires simulated capability');
             if (c.deliveryValidation !== undefined && c.deliveryValidation !== 'per-segment')
@@ -749,6 +752,7 @@ export class DafeiyuService extends Service {
         extension = { ...extension,
             ...(extension.lifecycleReady ? { lifecycleReady: extension.lifecycleReady.bind(extension) } : {}),
             channels: (extension.channels ?? []).map(channel => ({ channel: channel.channel, account: channel.account,
+                ...(channel.processingSignal ? { processingSignal: channel.processingSignal.bind(channel) } : {}),
                 ...(channel.taskDelivery ? { taskDelivery: channel.taskDelivery } : {}),
                 ...(channel.deliveryValidation ? { deliveryValidation: channel.deliveryValidation } : {}),
                 ...(channel.deliverTaskResult ? { deliverTaskResult: channel.deliverTaskResult.bind(channel) } : {}),
@@ -963,6 +967,27 @@ export class DafeiyuService extends Service {
             }
         }
     }
+    messageProcessingSignal(id) {
+        const item = this.journal.get(id), source = this.extensions.get(item.extensionId);
+        if (!source?.active)
+            throw new Error('DEPENDENCY_UNAVAILABLE');
+        return source.extension.channels?.find(channel => channel.channel === item.message.conversation.channel
+            && channel.account === item.message.conversation.account)?.processingSignal?.(item.message);
+    }
+    deliveryChannel(item) {
+        const entry = this.extensions.get(item.extensionId), capability = entry?.extension.channels?.find(channel => channel.channel === item.message.conversation.channel && channel.account === item.message.conversation.account);
+        if (!entry?.active || !capability)
+            return null;
+        try {
+            const access = capability.processingSignal?.(item.message);
+            access?.throwIfAborted();
+            return { identity: entry, id: entry.extension.id, version: entry.extension.version, capability,
+                signal: access ? AbortSignal.any([entry.controller.signal, access]) : entry.controller.signal };
+        }
+        catch {
+            return null;
+        }
+    }
     validateRunPersona(run) { const binding = this.runStore?.personaBinding(run.id); if (binding?.kind === 'bound')
         this.personas.validateStored(run, binding.manifest, [], this.controller.signal, () => this.controller.signal.throwIfAborted()); }
     async processMessage(id) {
@@ -972,12 +997,15 @@ export class DafeiyuService extends Service {
         const source = this.extensions.get(item.extensionId);
         if (!source?.active)
             return;
+        const channel = source.extension.channels?.find(capability => capability.channel === item.message.conversation.channel && capability.account === item.message.conversation.account);
         if (item.state === 'accepted') {
             const accepted = this.journal.events(item.route).find(event => event.traceId === item.id && event.type === 'message.accepted');
             let started, run, result;
             try {
                 const persona = this.persona();
-                const signal = AbortSignal.any([this.controller.signal, source.controller.signal, AbortSignal.timeout(this.config.turnTimeoutMs)]);
+                const access = this.messageProcessingSignal(id);
+                const signal = AbortSignal.any([this.controller.signal, source.controller.signal, ...(access ? [access] : []), AbortSignal.timeout(this.config.turnTimeoutMs)]);
+                signal.throwIfAborted();
                 run = this.conversationRuns?.begin(item, persona, this.analysisModelRoute(), [...this.extensions.values()].map(entry => ({ id: entry.extension.id, version: entry.extension.version })), this.executions?.conversationSnapshot(source.extension.id), record => this.personas.prepare(record, persona, this.analysisModelRoute(), [], signal, () => { signal.throwIfAborted(); if (!source.active)
                     throw new Error('DEPENDENCY_UNAVAILABLE'); }).manifest);
                 if (run && this.runStore)
@@ -985,10 +1013,10 @@ export class DafeiyuService extends Service {
                         throw new Error('DEPENDENCY_UNAVAILABLE'); });
                 started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started', run ? { runId: run.id } : {}, accepted?.id ?? null));
                 this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
-                const channel = source.extension.channels?.find(capability => capability.channel === item.message.conversation.channel && capability.account === item.message.conversation.account);
                 const nativeActions = run ? this.executions?.conversationActions(run, source.extension.id, signal, () => { if (!source.active)
                     throw new Error('DEPENDENCY_UNAVAILABLE'); }) ?? [] : [];
-                result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description, undefined, nativeActions);
+                result = await this.runtime.run(item, persona, this.actions(item, started.id), signal, channel?.description, undefined, nativeActions, () => !!(run && this.mediaPort?.replyDraft?.(run.id)?.selected && this.runStore?.operations(run.id).some(op => op.action === 'qq_sticker_use' && op.plugin === 'qq-stickers' && op.state === 'finished' && op.outcome?.status === 'succeeded' && op.outcome.effects === 'confirmed')));
+                signal.throwIfAborted();
                 if (run)
                     this.personas.current(run.id)?.guard();
             }
@@ -1026,7 +1054,6 @@ export class DafeiyuService extends Service {
                 return;
             }
         }
-        const channel = source.extension.channels?.find(c => c.channel === item.message.conversation.channel && c.account === item.message.conversation.account);
         if (!channel || !source.active || this.controller.signal.aborted || this.fatal)
             return;
         const completed = this.journal.events(item.route).findLast(event => event.traceId === item.id && event.type === 'turn.completed');
@@ -1047,9 +1074,10 @@ export class DafeiyuService extends Service {
                     this.validateRunPersona(this.runStore.get(runId));
                 evidence.guard();
             };
+            const mediaSelection = (op) => op.plugin === 'media' && op.action === 'dafeiyu_media_reply' || op.plugin === 'qq-stickers' && op.action === 'qq_sticker_use';
             authority();
-            const mediaOperation = runId ? this.runStore?.operations(runId).findLast(op => op.plugin === 'media' && op.action === 'dafeiyu_media_reply' && op.outcome?.status === 'succeeded' && op.outcome.effects === 'confirmed') : undefined;
-            const uncertainMedia = runId && this.runStore?.operations(runId).some(op => op.plugin === 'media' && op.action === 'dafeiyu_media_reply' && (op.state === 'unknown' || op.outcome?.effects === 'unknown'));
+            const mediaOperation = runId ? this.runStore?.operations(runId).findLast(op => mediaSelection(op) && op.outcome?.status === 'succeeded' && op.outcome.effects === 'confirmed') : undefined;
+            const uncertainMedia = runId && this.runStore?.operations(runId).some(op => mediaSelection(op) && (op.state === 'unknown' || op.outcome?.effects === 'unknown'));
             if (uncertainMedia)
                 throw new Error('MEDIA_REPLY_OPERATION_UNCONFIRMED');
             const selection = mediaOperation ? z.object({ currentDraftId: z.uuid(), currentVersion: z.number().int().positive(), selected: z.number().int().nonnegative() }).parse(mediaOperation.outcome.data) : null;

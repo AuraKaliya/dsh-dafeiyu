@@ -3,18 +3,18 @@ import { z } from 'zod';
 import { redactContent, MediaAttachmentSchema } from '#dafeiyu/contracts';
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const key = z.string().min(1).max(120), routeSchema = z.string().min(1).max(2000);
-const metadataSchema = z.strictObject({ occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string().max(80)).max(16), truncated: z.boolean().nullable(), known: z.boolean(), media: z.array(MediaAttachmentSchema).max(8).optional() });
+const metadataSchema = z.strictObject({ occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string().max(80)).max(16), truncated: z.boolean().nullable(), known: z.boolean(), media: z.array(MediaAttachmentSchema).max(8).optional(), groupGeneration: z.number().int().nonnegative().optional(), history: z.literal(true).optional(), forwardIds: z.array(z.string().min(1).max(4096)).max(8).optional() });
 const refSchema = z.strictObject({ id: z.string().min(1).max(80), version: z.number().int().positive(), hash: z.string().length(64) });
 export const QqCacheProofSchema = z.strictObject({ route: routeSchema, parts: z.array(refSchema).max(20), hash: z.string().length(64) });
 const itemSchema = z.strictObject({ id: z.string(), sender: z.string(), receivedSequence: z.number().int().positive(), text: z.string(),
     occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string()), legacyMetadata: z.boolean(), cacheTextTruncated: z.boolean().nullable(),
-    media: z.array(MediaAttachmentSchema).max(8).optional(),
+    media: z.array(MediaAttachmentSchema).max(8).optional(), history: z.literal(true).optional(),
     range: z.strictObject({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), total: z.number().int().nonnegative() }) });
 const pageSchema = z.strictObject({ order: z.literal('received-newest-first'), watermark: z.number().int().nonnegative(), oldestCachedSequence: z.number().int().nonnegative(),
     messages: z.array(itemSchema).max(20), limitations: z.array(z.string()) });
-const querySchema = z.strictObject({ watermark: z.number().int().nonnegative(), sequence: z.number().int().nonnegative(), offset: z.number().int().nonnegative(), epoch: z.number().int().nonnegative(), limit: z.number().int().min(1).max(20) });
+const querySchema = z.strictObject({ watermark: z.number().int().nonnegative(), sequence: z.number().int().nonnegative(), offset: z.number().int().nonnegative(), epoch: z.number().int().nonnegative(), limit: z.number().int().min(1).max(20), observedAt: z.iso.datetime().optional() });
 const snapshotSchema = z.strictObject({ page: pageSchema, proof: QqCacheProofSchema, next: querySchema.nullable(), createdAt: z.iso.datetime() });
-export const QqBrowseInputSchema = z.strictObject({ requestId: key, limit: z.number().int().min(1).max(20).default(20), cursor: z.uuid().optional() });
+export const QqBrowseInputSchema = z.strictObject({ requestId: key, limit: z.number().int().min(1).max(20).default(20), cursor: z.uuid().optional(), includeRecentHistory: z.boolean().default(false) });
 const rowSchema = z.object({ seq: z.number().int().safe(), id: z.string(), sender: z.string(), text: z.string() });
 /** Actual received text, bounded short-lived views, and durable version facts; no model or long-term memory decisions. */
 export class QqCache {
@@ -41,6 +41,45 @@ export class QqCache {
     epoch(route) { return Number(this.db.prepare('SELECT epoch FROM qq_cache_state WHERE route=?').get(route)?.epoch ?? 0); }
     generation(route) { return route ? this.epoch(route) : Number(this.db.prepare('SELECT coalesce(sum(epoch),0) AS n FROM qq_cache_state').get()?.n); }
     known(route, id) { return !!this.db.prepare('SELECT 1 FROM qq_message_meta WHERE route=? AND id=?').get(route, id) || !!this.db.prepare('SELECT 1 FROM messages WHERE route=? AND id=?').get(route, id); }
+    completeHistoryMetadata(route, id, occurredAt, forwardIds) {
+        const row = this.db.prepare('SELECT m.sender,m.text,d.body,d.deleted FROM messages m JOIN qq_message_meta d ON d.route=m.route AND d.id=m.id WHERE m.route=? AND m.id=?').get(route, id);
+        if (!row || row.deleted === 1)
+            return;
+        const old = metadataSchema.parse(JSON.parse(String(row.body)));
+        if (old.occurredAt !== null && (!forwardIds?.length || old.forwardIds?.length))
+            return;
+        const body = metadataSchema.parse({ ...old, occurredAt: old.occurredAt ?? occurredAt, ...(!old.forwardIds?.length && forwardIds?.length ? { forwardIds } : {}) }), hash = digest({ sender: row.sender, text: row.text, ...body });
+        this.db.prepare('UPDATE qq_message_meta SET version=version+1,hash=?,body=? WHERE route=? AND id=?').run(hash, JSON.stringify(body), route, id);
+        this.bump(route);
+    }
+    messageProof(route, id) {
+        const row = this.db.prepare('SELECT seq,id,sender,text FROM messages WHERE route=? AND id=?').get(route, id);
+        if (!row)
+            throw new Error('SOURCE_STALE');
+        const meta = this.meta(route, rowSchema.parse(row));
+        if (meta.deleted)
+            throw new Error('SOURCE_STALE');
+        const parts = [{ id, version: meta.version, hash: meta.hash }];
+        return { route, parts, hash: digest({ route, parts }) };
+    }
+    forward(route, id, index) {
+        const row = this.db.prepare('SELECT body,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
+        if (!row || row.deleted === 1)
+            throw new Error('SOURCE_STALE');
+        const meta = metadataSchema.parse(JSON.parse(String(row.body))), handle = meta.forwardIds?.[index];
+        if (!handle)
+            throw new Error('FORWARD_NOT_AVAILABLE');
+        if (!meta.occurredAt || Date.parse(meta.occurredAt) < this.now() - 86400000)
+            throw new Error('FORWARD_OUTSIDE_WINDOW');
+        return handle;
+    }
+    groupAccess(route, id) {
+        const row = this.db.prepare('SELECT body FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
+        if (!row)
+            return null;
+        const metadata = metadataSchema.parse(JSON.parse(String(row.body)));
+        return metadata.groupGeneration === undefined || metadata.occurredAt === null ? null : { generation: metadata.groupGeneration, occurredAt: metadata.occurredAt };
+    }
     recalled(route, id) { return this.db.prepare('SELECT deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id)?.deleted === 1; }
     bump(route) { this.db.prepare('INSERT INTO qq_cache_state VALUES(?,1) ON CONFLICT(route) DO UPDATE SET epoch=epoch+1').run(route); }
     meta(route, row) {
@@ -58,7 +97,7 @@ export class QqCache {
         let text = sanitized.slice(0, 32000);
         if (/[\uD800-\uDBFF]$/.test(text))
             text = text.slice(0, -1);
-        const body = metadataSchema.parse({ occurredAt: metadata?.occurredAt ?? null, unsupported: [...new Set(metadata?.unsupported ?? [])].slice(0, 16).map(kind => redactContent(kind).value.slice(0, 80)), truncated: sanitized.length > text.length, known: metadata !== undefined, ...(metadata?.media ? { media: metadata.media } : {}) });
+        const body = metadataSchema.parse({ occurredAt: metadata?.occurredAt ?? null, unsupported: [...new Set(metadata?.unsupported ?? [])].slice(0, 16).map(kind => redactContent(kind).value.slice(0, 80)), truncated: sanitized.length > text.length, known: metadata !== undefined, ...(metadata?.media ? { media: metadata.media } : {}), ...(metadata?.groupGeneration === undefined ? {} : { groupGeneration: metadata.groupGeneration }), ...(metadata?.history ? { history: true } : {}), ...(metadata?.forwardIds?.length ? { forwardIds: metadata.forwardIds } : {}) });
         const hash = digest({ sender, text, ...body });
         return this.atomic(() => {
             const old = this.db.prepare('SELECT version,hash,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
@@ -117,11 +156,11 @@ export class QqCache {
             throw new Error('SOURCE_STALE');
         return { id, ...value, expiresAt: new Date(Number(row.expires_at)).toISOString() };
     }
-    browse(route, owner, raw) {
+    browse(route, owner, raw, recentOnly = false) {
         routeSchema.parse(route);
         z.string().min(1).max(4000).parse(owner);
         const input = QqBrowseInputSchema.parse(raw);
-        const fingerprint = digest({ route, input });
+        const fingerprint = digest({ route, input, recentOnly });
         return this.atomic(() => {
             this.db.prepare('DELETE FROM qq_browse_snapshots WHERE expires_at<=? OR instance_id<>?').run(this.now(), this.instance);
             const prior = this.db.prepare('SELECT id,fingerprint FROM qq_browse_snapshots WHERE instance_id=? AND owner=? AND request_id=?').get(this.instance, owner, input.requestId);
@@ -134,7 +173,7 @@ export class QqCache {
                 throw new Error('SNAPSHOT_CAPACITY_EXCEEDED');
             const maximum = Number(this.db.prepare('SELECT coalesce(max(seq),0) AS n FROM messages WHERE route=?').get(route)?.n);
             const oldest = Number(this.db.prepare('SELECT coalesce(min(seq),0) AS n FROM messages WHERE route=?').get(route)?.n);
-            let query = { watermark: maximum, sequence: maximum, offset: 0, epoch: this.epoch(route), limit: input.limit };
+            let query = { watermark: maximum, sequence: maximum, offset: 0, epoch: this.epoch(route), limit: input.limit, ...(recentOnly ? { observedAt: new Date(this.now()).toISOString() } : {}) };
             if (input.cursor) {
                 const previous = this.snapshot(owner, input.cursor);
                 if (previous.proof.route !== route || previous.next?.limit !== input.limit || previous.next.epoch !== this.epoch(route))
@@ -142,10 +181,14 @@ export class QqCache {
                 query = previous.next;
             }
             const page = { order: 'received-newest-first', watermark: query.watermark, oldestCachedSequence: oldest, messages: [],
-                limitations: ['仅实际收到的至多200条缓存；不含离线历史或平台全量记录。', '仅文字；媒体种类不等于已读取媒体内容。', '未知时间／旧元信息不可推断，文字范围以每条range为准。'] };
+                limitations: ['至多200条本地缓存，可能含显式回看追加的最近24小时历史；不是平台全量记录。', '按本地接收/追加顺序分页，聊天发生时间以occurredAt为准；媒体种类不等于已读取媒体内容。', '未知时间／旧元信息不可推断，文字范围以每条range为准。'] };
             const refs = [];
             let next = null;
-            const rows = this.db.prepare('SELECT seq,id,sender,text FROM messages WHERE route=? AND seq<=? AND seq<=? ORDER BY seq DESC LIMIT ?').all(route, query.watermark, query.sequence, input.limit + 1).map(row => rowSchema.parse(row));
+            const rows = (query.observedAt
+                ? this.db.prepare("SELECT m.seq,m.id,m.sender,m.text FROM messages m JOIN qq_message_meta d ON d.route=m.route AND d.id=m.id WHERE m.route=? AND m.seq<=? AND m.seq<=? AND julianday(json_extract(d.body,'$.occurredAt'))>=julianday(?) ORDER BY m.seq DESC LIMIT ?").all(route, query.watermark, query.sequence, new Date(Date.parse(query.observedAt) - 86400000).toISOString(), input.limit + 1)
+                : this.db.prepare('SELECT seq,id,sender,text FROM messages WHERE route=? AND seq<=? AND seq<=? ORDER BY seq DESC LIMIT ?').all(route, query.watermark, query.sequence, input.limit + 1)).map(row => rowSchema.parse(row));
+            if (query.observedAt)
+                page.limitations.push('本次观察时间 ' + query.observedAt + '，只呈现其前24小时内时间明确的缓存；时间未知的旧缓存不呈现。');
             for (const row of rows) {
                 if (page.messages.length >= input.limit) {
                     next = { ...query, sequence: row.seq, offset: 0 };
@@ -158,7 +201,7 @@ export class QqCache {
                 if (start > points.length)
                     throw new Error('CURSOR_STALE');
                 const item = { id: row.id, sender: row.sender, receivedSequence: row.seq, text: '', occurredAt: meta.occurredAt, unsupported: meta.unsupported,
-                    legacyMetadata: !meta.known, cacheTextTruncated: meta.truncated, ...(meta.media ? { media: meta.media } : {}), range: { start, end: start, total: points.length } };
+                    legacyMetadata: !meta.known, cacheTextTruncated: meta.truncated, ...(meta.media ? { media: meta.media } : {}), ...(meta.history ? { history: true } : {}), range: { start, end: start, total: points.length } };
                 let low = start, high = points.length;
                 while (low < high) {
                     const end = Math.ceil((low + high) / 2), candidate = { ...item, text: points.slice(start, end).join(''), range: { ...item.range, end } };
@@ -180,7 +223,7 @@ export class QqCache {
             }
             if (!page.messages.length && rows.length)
                 throw new Error('PAGE_BUDGET_EXCEEDED');
-            const proof = { route, parts: refs, hash: digest({ route, parts: refs }) }, body = snapshotSchema.parse({ page, proof, next, createdAt: new Date(this.now()).toISOString() });
+            const proof = { route, parts: refs, hash: digest({ route, parts: refs }) }, body = snapshotSchema.parse({ page, proof, next, createdAt: query.observedAt ?? new Date(this.now()).toISOString() });
             const id = randomUUID();
             this.db.prepare('INSERT INTO qq_browse_snapshots VALUES(?,?,?,?,?,?,?)').run(id, this.instance, owner, input.requestId, fingerprint, JSON.stringify(body), this.now() + this.ttl);
             return this.snapshot(owner, id);

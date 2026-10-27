@@ -4,7 +4,7 @@ import type { QqStore } from './store.js';
 
 export const QqAccountIdSchema = z.string().regex(/^[1-9]\d{4,14}$/);
 export const GroupSyncConfigSchema = z.strictObject({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   mode: z.enum(['allowlist', 'joined']).default('allowlist'),
   intervalMs: z.number().int().min(5000).max(3600000).default(30000),
   maxStaleMs: z.number().int().min(5000).max(7200000).default(120000),
@@ -14,10 +14,16 @@ export const GroupSyncConfigSchema = z.strictObject({
   }
 });
 export type GroupSyncConfig = z.output<typeof GroupSyncConfigSchema>;
-export const GroupListSchema = z.array(z.strictObject({ id: QqAccountIdSchema, name: z.string().max(200) })).max(2000)
+const GroupInfoSchema = z.strictObject({ id: QqAccountIdSchema, name: z.string().max(200),
+  msgMask: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.null()]).default(null) });
+export const GroupListSchema = z.array(GroupInfoSchema).max(2000)
   .refine(groups => new Set(groups.map(group => group.id)).size === groups.length, 'Duplicate group IDs');
 export type GroupInfo = z.infer<typeof GroupListSchema>[number];
-export const GroupSnapshotSchema = z.strictObject({ account: QqAccountIdSchema, at: z.iso.datetime(), revision: z.number().int().positive(), groups: GroupListSchema });
+export type GroupInput = z.input<typeof GroupInfoSchema>;
+export const groupReceivesMessages = (group: GroupInfo): boolean => group.msgMask === 1 || group.msgMask === 4;
+const SnapshotGroupsSchema = z.array(GroupInfoSchema.extend({ acceptedAfter: z.number().int().nonnegative().default(0), generation: z.number().int().nonnegative().default(0) })).max(2000)
+  .refine(groups => new Set(groups.map(group => group.id)).size === groups.length, 'Duplicate group IDs');
+export const GroupSnapshotSchema = z.strictObject({ account: QqAccountIdSchema, at: z.iso.datetime(), revision: z.number().int().positive(), groups: SnapshotGroupsSchema });
 export type GroupSnapshot = z.infer<typeof GroupSnapshotSchema>;
 export const GroupSyncStateSchema = z.enum(['disabled', 'unavailable', 'current', 'stale']);
 
@@ -30,6 +36,7 @@ interface DirectoryOptions {
   rejectIdentity(): void;
   /** Monotonic clock seam for local tests, never a model argument. */
   clock?: () => number;
+  wallClock?: () => number;
 }
 
 /** A remembered membership snapshot is history; only a fresh response in this process grants access. */
@@ -42,6 +49,8 @@ export class GroupDirectory {
   private snapshot: GroupSnapshot | null;
   private verifiedAt: number | null = null;
   private error: string | null = null;
+  private readonly signals = new Map<string, AbortController>();
+  private readonly ingressAfter = new Map<string, number>();
   constructor(private readonly options: DirectoryOptions) {
     this.clock = options.clock ?? (() => performance.now());
     this.snapshot = options.store.groupSnapshot(options.account);
@@ -53,15 +62,32 @@ export class GroupDirectory {
     return age >= 0 && age < this.options.config.maxStaleMs ? 'current' : 'stale';
   }
   effective(): string[] {
-    if (!this.options.config.enabled) return [...this.options.allowed];
-    if (this.state() !== 'current') return [];
-    return (this.snapshot?.groups ?? []).map(group => group.id).filter(id => this.options.config.mode === 'joined' || this.options.allowed.includes(id));
+    if (!this.options.config.enabled || this.state() !== 'current') { this.revokeAll(); return []; }
+    return (this.snapshot?.groups ?? []).filter(group => groupReceivesMessages(group)
+      && (this.options.config.mode === 'joined' || this.options.allowed.includes(group.id))).map(group => group.id);
   }
-  info(id:string):GroupInfo|null {const group=this.snapshot?.groups.find(group=>group.id===id);return group?{...group}:null;}
+  info(id:string):GroupInfo|null {const group=this.snapshot?.groups.find(group=>group.id===id);return group?{id:group.id,name:group.name,msgMask:group.msgMask}:null;}
+  accepts(id: string, occurredAt: number): boolean {
+    return Number.isFinite(occurredAt) && this.effective().includes(id) && occurredAt >= (this.ingressAfter.get(id) ?? Infinity);
+  }
+  generation(id: string): number {
+    const group = this.snapshot?.groups.find(group => group.id === id);
+    if (!group || !this.effective().includes(id)) throw new Error('GROUP_ACCESS_REVOKED');
+    return group.generation;
+  }
+  /** Existing accepted work uses the durable activation boundary, not the reconnect ingress cutoff. */
+  processingSignal(id: string, occurredAt: number): AbortSignal {
+    const group = this.snapshot?.groups.find(group => group.id === id), controller = this.signals.get(id);
+    if (!Number.isFinite(occurredAt) || !this.effective().includes(id) || !group || occurredAt < group.acceptedAfter || !controller || controller.signal.aborted) throw new Error('GROUP_ACCESS_REVOKED');
+    return controller.signal;
+  }
+  private revokeAll(): void { for (const controller of this.signals.values()) controller.abort(); this.signals.clear(); }
   status() {
     return { enabled: this.options.config.enabled, mode: this.options.config.mode, state: this.state(), paused: !this.running,
       lastSuccessAt: this.snapshot?.at ?? null, verifiedThisProcess: this.verifiedAt !== null, revision: this.snapshot?.revision ?? null,
-      joinedIds: this.snapshot?.groups.map(group => group.id) ?? [], effectiveIds: this.effective(), error: this.error };
+      joinedIds: this.snapshot?.groups.map(group => group.id) ?? [], effectiveIds: this.effective(),
+      assistantIds: this.snapshot?.groups.filter(group => group.msgMask === 2).map(group => group.id) ?? [],
+      unknownIds: this.snapshot?.groups.filter(group => group.msgMask === null).map(group => group.id) ?? [], error: this.error };
   }
   async start(): Promise<void> {
     if (!this.options.config.enabled || this.controller.signal.aborted) return;
@@ -79,18 +105,27 @@ export class GroupDirectory {
   private async performRefresh(): Promise<void> {
     let persisting = false;
     try {
+      const before = new Set(this.effective());
       const groups = GroupListSchema.parse(await this.options.fetchGroups(this.controller.signal));
       this.controller.signal.throwIfAborted();
       persisting = true;
-      const snapshot = this.options.store.saveGroups(this.options.account, groups, new Date().toISOString());
-      this.snapshot = snapshot; this.verifiedAt = this.clock(); this.error = null;
+      const now = this.options.wallClock?.() ?? Date.now();
+      const snapshot = this.options.store.saveGroups(this.options.account, groups, new Date(now).toISOString());
+      this.snapshot = snapshot; this.verifiedAt = this.clock(); this.error = groups.some(group => group.msgMask === null) ? 'GROUP_SETTINGS_UNKNOWN' : null;
+      const effective = new Set(this.effective());
+      for (const [id, controller] of this.signals) if (!effective.has(id)) { controller.abort(); this.signals.delete(id); this.ingressAfter.delete(id); }
+      for (const id of effective) {
+        if (!this.signals.has(id)) this.signals.set(id, new AbortController());
+        if (!before.has(id)) this.ingressAfter.set(id, Math.ceil(now / 1000) * 1000);
+      }
     } catch (error) {
       if (this.controller.signal.aborted) return;
       if (error instanceof Error && error.message === 'ACCOUNT_MISMATCH') {
-        this.verifiedAt = null; this.error = 'ACCOUNT_MISMATCH'; this.options.rejectIdentity();
+        this.verifiedAt = null; this.revokeAll(); this.error = 'ACCOUNT_MISMATCH'; this.options.rejectIdentity();
       } else {
         if (persisting) this.verifiedAt = null; // A newly observed removal must not leave an older grant usable.
-        this.error = persisting ? 'GROUP_SNAPSHOT_FAILED' : 'GROUP_SYNC_FAILED';
+        this.error = persisting ? 'GROUP_SNAPSHOT_FAILED' : error instanceof Error && ['GROUP_SETTINGS_UNAVAILABLE', 'GROUP_RESPONSE_INVALID'].includes(error.message) ? error.message : 'GROUP_SYNC_FAILED';
+        this.effective();
       }
     }
   }
@@ -104,6 +139,7 @@ export class GroupDirectory {
   }
   pause(): void {
     this.running = false;
+    this.revokeAll();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null; this.controller.abort();
   }

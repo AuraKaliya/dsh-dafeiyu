@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 export declare const QQ_APPLICATION_ID = 1145458993;
-export declare const QQ_SCHEMA_VERSION = 5;
+export declare const QQ_SCHEMA_VERSION = 8;
 export interface QqSchemaInspection {
     version: number;
     applicationId: number;

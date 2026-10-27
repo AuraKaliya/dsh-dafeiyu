@@ -9,7 +9,7 @@ export const qqMediaHash = (value) => createHash('sha256').update(canonical(valu
 export const qqTextHash = (text) => createHash('sha256').update(text).digest('hex');
 const state = z.enum(['pending', 'sending', 'sent', 'unknown']);
 const part = z.union([z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(4000) }), ReplyMediaPartSchema]);
-const planSchema = z.strictObject({ version: z.literal(2), replyId: z.string(), target: ConversationSchema, sourceMessageId: z.string(), textHash: z.string().length(64), manifest: ReplyMediaManifestSchema, parts: z.array(part).min(2).max(72) });
+const planSchema = z.strictObject({ version: z.literal(2), replyId: z.string(), target: ConversationSchema, sourceMessageId: z.string(), textHash: z.string().length(64), manifest: ReplyMediaManifestSchema, parts: z.array(part).min(1).max(72) });
 const progressPart = z.strictObject({ position: z.number().int().nonnegative(), state, receipt: z.string().nullable(), code: z.string().nullable() });
 /** Builds fixed bytes/identity metadata, never authorizes those bytes or invokes a platform. */
 export function qqMediaDeliveryPlan(reply) {
@@ -23,7 +23,7 @@ export function qqMediaDeliveryPlan(reply) {
     }
     else if (manifest.anchor.kind !== 'reply' || reply.id !== manifest.anchor.inboundId + ':reply')
         throw new Error('DELIVERY_MANIFEST_MISMATCH');
-    return planSchema.parse({ version: 2, replyId: reply.id, target: reply.conversation, sourceMessageId: reply.sourceMessageId, textHash: manifest.textHash, manifest, parts: [...splitQqText(reply.text).map(text => ({ kind: 'text', text })), ...manifest.parts] });
+    return planSchema.parse({ version: 2, replyId: reply.id, target: reply.conversation, sourceMessageId: reply.sourceMessageId, textHash: manifest.textHash, manifest, parts: [...(reply.text ? splitQqText(reply.text) : []).map(text => ({ kind: 'text', text })), ...manifest.parts] });
 }
 export class QqMediaDeliveryLedger {
     db;

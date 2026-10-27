@@ -29,7 +29,7 @@ export declare class NativeExpression implements NativeExpressionPort {
             target: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -51,12 +51,12 @@ export declare class NativeExpression implements NativeExpressionPort {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "record" | "file" | "image";
+                delivery: "image" | "file" | "record";
                 asset: {
                     schemaVersion: 1;
                     id: string;
                     version: number;
-                    kind: "image" | "audio" | "video" | "document";
+                    kind: "image" | "document" | "audio" | "video";
                     sha256: string;
                     bytes: number;
                     mime: string;
@@ -79,7 +79,7 @@ export declare class NativeExpression implements NativeExpressionPort {
             target: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -101,12 +101,12 @@ export declare class NativeExpression implements NativeExpressionPort {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "record" | "file" | "image";
+                delivery: "image" | "file" | "record";
                 asset: {
                     schemaVersion: 1;
                     id: string;
                     version: number;
-                    kind: "image" | "audio" | "video" | "document";
+                    kind: "image" | "document" | "audio" | "video";
                     sha256: string;
                     bytes: number;
                     mime: string;

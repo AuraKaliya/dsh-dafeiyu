@@ -245,7 +245,7 @@ export declare class ExecutionMemoryState {
     private appendIntent;
     intent(access: PersonaAccess): {
         motivation: {
-            kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+            kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
         blocking: boolean;
@@ -260,10 +260,10 @@ export declare class ExecutionMemoryState {
             producer: string;
             kind: "accepted" | "objection" | "resolved";
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
-            category: "preference" | "scope" | "none" | "method" | "premise" | "missing-information";
+            category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
             blocking: boolean;
             reason: string;
             evidence: ({
@@ -312,10 +312,10 @@ export declare class ExecutionMemoryState {
         producer: string;
         kind: "accepted" | "objection" | "resolved";
         motivation: {
-            kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+            kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
-        category: "preference" | "scope" | "none" | "method" | "premise" | "missing-information";
+        category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
         blocking: boolean;
         reason: string;
         evidence: ({
@@ -363,10 +363,10 @@ export declare class ExecutionMemoryState {
         producer: string;
         kind: "accepted" | "objection" | "resolved";
         motivation: {
-            kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+            kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
-        category: "preference" | "scope" | "none" | "method" | "premise" | "missing-information";
+        category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
         blocking: boolean;
         reason: string;
         evidence: ({

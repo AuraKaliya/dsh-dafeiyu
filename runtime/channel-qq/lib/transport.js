@@ -40,6 +40,7 @@ export class QqSegmentedTransport {
         catch {
             throw new Error('DELIVERY_AUTHORITY_REVOKED');
         } };
+        let delayed = false;
         for (let position = 0; position < plan.segments.length; position++) {
             const progress = this.host.ledger.progress(reply.id);
             if (progress.unknown || progress.state === 'sending')
@@ -48,6 +49,11 @@ export class QqSegmentedTransport {
                 continue;
             let invoked = false;
             try {
+                guard();
+                if (!delayed && progress.confirmed === 0) {
+                    await this.host.beforeSend?.(reply, signal);
+                    delayed = true;
+                }
                 guard();
                 await this.host.check(reply, signal);
                 guard();

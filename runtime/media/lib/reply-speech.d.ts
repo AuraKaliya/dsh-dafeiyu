@@ -27,7 +27,7 @@ export declare class ReplySpeech {
             scene: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             key: string;
@@ -36,7 +36,7 @@ export declare class ReplySpeech {
             roots: string[];
             detail: z.core.util.JSONType;
         };
-        kind: "image" | "audio" | "video" | "document";
+        kind: "audio" | "image" | "video" | "document";
         name: string | null;
         mimeHint: string | null;
         bytesHint: number | null;
@@ -55,7 +55,7 @@ export declare class ReplySpeech {
             scene: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             key: string;
@@ -64,7 +64,7 @@ export declare class ReplySpeech {
             roots: string[];
             detail: z.core.util.JSONType;
         };
-        kind: "image" | "audio" | "video" | "document";
+        kind: "audio" | "image" | "video" | "document";
         name: string | null;
         mimeHint: string | null;
         bytesHint: number | null;
@@ -77,7 +77,7 @@ export declare class ReplySpeech {
             schemaVersion: 1;
             id: string;
             version: number;
-            kind: "image" | "audio" | "video" | "document";
+            kind: "audio" | "image" | "video" | "document";
             sha256: string;
             bytes: number;
             mime: string;
@@ -92,7 +92,7 @@ export declare class ReplySpeech {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 key: string;
@@ -101,7 +101,7 @@ export declare class ReplySpeech {
                 roots: string[];
                 detail: z.core.util.JSONType;
             };
-            kind: "image" | "audio" | "video" | "document";
+            kind: "audio" | "image" | "video" | "document";
             name: string | null;
             mimeHint: string | null;
             bytesHint: number | null;
@@ -120,7 +120,7 @@ export declare class ReplySpeech {
             scene: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             key: string;
@@ -129,7 +129,7 @@ export declare class ReplySpeech {
             roots: string[];
             detail: z.core.util.JSONType;
         };
-        kind: "image" | "audio" | "video" | "document";
+        kind: "audio" | "image" | "video" | "document";
         name: string | null;
         mimeHint: string | null;
         bytesHint: number | null;

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GroupListSchema, QqAccountIdSchema } from './groups.js';
+import { parseSnowLumaGroups, SNOWLUMA_GROUP_LIST_REQUEST } from './snowluma-groups.js';
 /** No remote OneBot endpoints or credential-bearing URLs in this local development connector. */
 export function loopbackURL(value, protocol) {
     const url = new URL(value);
@@ -21,7 +21,8 @@ export class OneBot {
         this.botId = botId;
         this.timeoutMs = timeoutMs;
     }
-    async call(action, params, signal) {
+    call(action, params, signal) { return this.request(action, params, signal); }
+    async request(action, params, signal) {
         const timeout = AbortSignal.timeout(this.timeoutMs);
         const response = await fetch(new URL(action, this.base), { method: 'POST', redirect: 'error',
             // Local processing can outlast an idle socket's server timeout. Avoid reusing that socket;
@@ -35,13 +36,14 @@ export class OneBot {
             throw new Error('ONEBOT_INVALID_RESPONSE');
         const chunks = [];
         let bytes = 0;
+        const maxResponse = action === 'get_record' ? 32 * 1024 ** 2 : 2 * 1024 ** 2;
         try {
             while (true) {
                 const part = await reader.read();
                 if (part.done)
                     break;
                 bytes += part.value.byteLength;
-                if (bytes > 2 * 1024 ** 2) {
+                if (bytes > maxResponse) {
                     await reader.cancel();
                     throw new Error('ONEBOT_RESPONSE_LIMIT');
                 }
@@ -73,9 +75,27 @@ export class OneBot {
     }
     async groups(signal) {
         await this.verify(signal);
-        const response = await this.call('get_group_list', {}, signal);
-        const list = z.array(z.object({ group_id: platformId.pipe(QqAccountIdSchema), group_name: z.string().max(200) })).max(2000).parse(response);
+        let response;
+        try {
+            response = await this.request('send_packet', SNOWLUMA_GROUP_LIST_REQUEST, signal);
+        }
+        catch (error) {
+            signal.throwIfAborted();
+            throw new Error('GROUP_SETTINGS_UNAVAILABLE');
+        }
+        const list = parseSnowLumaGroups(response);
         await this.verify(signal);
-        return GroupListSchema.parse(list.map(group => ({ id: group.group_id, name: group.group_name })));
+        return list;
+    }
+    async history(scene, anchor, signal) {
+        if (scene.account !== this.botId || !['private', 'group'].includes(scene.kind) || !/^[1-9]\d{4,14}$/.test(scene.id))
+            throw new Error('TARGET_NOT_ALLOWED');
+        const messageId = anchor === null ? 0 : Number(anchor);
+        if (!Number.isSafeInteger(messageId))
+            throw new Error('HISTORY_INVALID_ANCHOR');
+        await this.verify(signal);
+        const data = await this.request(scene.kind === 'group' ? 'get_group_msg_history' : 'get_friend_msg_history', { [scene.kind === 'group' ? 'group_id' : 'user_id']: Number(scene.id), message_id: messageId, count: 20, reverse_order: true }, signal);
+        await this.verify(signal);
+        return data;
     }
 }

@@ -16,7 +16,7 @@ export declare class QqMediaStore {
     remember(scene: Conversation, messageId: string, sender: string, envelopeHash: string, parts: readonly {
         type: string;
         data: Record<string, unknown>;
-    }[]): string[];
+    }[], positionOffset?: number): string[];
     private row;
     describe(id: string): {
         ref: {

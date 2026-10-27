@@ -109,14 +109,14 @@ declare const configSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const MemoryPluginConfigSchema: z.ZodObject<{
+    analysis: z.ZodOptional<z.ZodObject<{
+        timeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxPending: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     maintenance: z.ZodOptional<z.ZodObject<{
         timeoutMs: z.ZodDefault<z.ZodNumber>;
         maxInputBytes: z.ZodDefault<z.ZodNumber>;
         maxOutputBytes: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strict>>;
-    analysis: z.ZodOptional<z.ZodObject<{
-        timeoutMs: z.ZodDefault<z.ZodNumber>;
-        maxPending: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     feedback: z.ZodOptional<z.ZodObject<{
         maxArchiveBytes: z.ZodDefault<z.ZodNumber>;
@@ -124,18 +124,6 @@ export declare const MemoryPluginConfigSchema: z.ZodObject<{
         maxPageChars: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     context: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;
-    retrieval: z.ZodOptional<z.ZodObject<{
-        endpoint: z.ZodURL;
-        python: z.ZodString;
-        modelDir: z.ZodString;
-        serviceFile: z.ZodString;
-        pythonPackages: z.ZodOptional<z.ZodString>;
-        profileFile: z.ZodOptional<z.ZodString>;
-        timeoutMs: z.ZodDefault<z.ZodNumber>;
-        maxDocuments: z.ZodDefault<z.ZodNumber>;
-        maxChunks: z.ZodDefault<z.ZodNumber>;
-        maxCacheEntries: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strict>>;
     compaction: z.ZodOptional<z.ZodPipe<z.ZodObject<{
         inputTokens: z.ZodNumber;
         thresholdRatio: z.ZodDefault<z.ZodNumber>;
@@ -194,6 +182,18 @@ export declare const MemoryPluginConfigSchema: z.ZodObject<{
         initialMaxGroups?: number | undefined;
         initialMaxFragments?: number | undefined;
     }>>>;
+    retrieval: z.ZodOptional<z.ZodObject<{
+        endpoint: z.ZodURL;
+        python: z.ZodString;
+        modelDir: z.ZodString;
+        serviceFile: z.ZodString;
+        pythonPackages: z.ZodOptional<z.ZodString>;
+        profileFile: z.ZodOptional<z.ZodString>;
+        timeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxDocuments: z.ZodDefault<z.ZodNumber>;
+        maxChunks: z.ZodDefault<z.ZodNumber>;
+        maxCacheEntries: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     sourceTracking: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strict>;
 export type Config = z.input<typeof configSchema>;
@@ -233,17 +233,17 @@ export declare class MemoryService extends Service {
     runtimeHealth(): {
         lifecycle: import("#dafeiyu/contracts").ServicePhase;
         analysis: {
-            state: "failed" | "stopped" | "ready" | "paused";
+            state: "failed" | "paused" | "stopped" | "ready";
             active: boolean;
         } | {
             state: "not-configured";
             active: false;
         };
         maintenance: {
-            state: "closed" | "ready" | "paused";
+            state: "paused" | "closed" | "ready";
             active: number;
             requests: Record<string, number>;
-            scheduler: "not-configured" | "connected";
+            scheduler: "connected" | "not-configured";
         } | {
             state: "not-configured";
             active: number;
@@ -269,7 +269,7 @@ export declare class MemoryService extends Service {
     private evidence;
     private value;
     private commit;
-    create(context: ActionContext, raw: unknown): Promise<{
+    create(context: ActionContext, raw: unknown): Promise<Failure | {
         auditPending: boolean;
         visibleNow: boolean;
         deletionScope: "memory-item-and-revisions";
@@ -282,8 +282,8 @@ export declare class MemoryService extends Service {
         generation?: number | undefined;
         duplicate: boolean;
         status: "ok";
-    } | Failure>;
-    revise(context: ActionContext, raw: unknown): Promise<{
+    }>;
+    revise(context: ActionContext, raw: unknown): Promise<Failure | {
         auditPending: boolean;
         visibleNow: boolean;
         deletionScope: "memory-item-and-revisions";
@@ -296,9 +296,9 @@ export declare class MemoryService extends Service {
         generation?: number | undefined;
         duplicate: boolean;
         status: "ok";
-    } | Failure>;
+    }>;
     private change;
-    delete(context: ActionContext, raw: unknown): {
+    delete(context: ActionContext, raw: unknown): Failure | {
         auditPending: boolean;
         visibleNow: boolean;
         deletionScope: "memory-item-and-revisions";
@@ -311,8 +311,8 @@ export declare class MemoryService extends Service {
         generation?: number | undefined;
         duplicate: boolean;
         status: "ok";
-    } | Failure;
-    restore(context: ActionContext, raw: unknown): {
+    };
+    restore(context: ActionContext, raw: unknown): Failure | {
         auditPending: boolean;
         visibleNow: boolean;
         deletionScope: "memory-item-and-revisions";
@@ -325,7 +325,7 @@ export declare class MemoryService extends Service {
         generation?: number | undefined;
         duplicate: boolean;
         status: "ok";
-    } | Failure;
+    };
     private find;
     search(context: ActionContext, raw: unknown): Failure | {
         items: {
@@ -355,8 +355,8 @@ export declare class MemoryService extends Service {
             useRestriction: "evidence_only" | "historical_evidence_only" | "deleted_lookup_only";
             id: string;
             revision: number;
-            kind: "preference" | "experience" | "knowledge" | "procedure";
-            claimType: "inference" | "reported_claim" | "self_report" | "observation";
+            kind: "experience" | "knowledge" | "preference" | "procedure";
+            claimType: "observation" | "self_report" | "reported_claim" | "inference";
             content: string;
             contentHash: string;
             sources: ({
@@ -395,7 +395,7 @@ export declare class MemoryService extends Service {
         generation: number;
         nextCursor: string | null;
         status: "ok";
-        mode: "normal" | "deleted";
+        mode: "deleted" | "normal";
         untrustedEvidence: boolean;
     };
     searchDeleted(context: ActionContext, raw: unknown): Failure | {
@@ -426,8 +426,8 @@ export declare class MemoryService extends Service {
             useRestriction: "evidence_only" | "historical_evidence_only" | "deleted_lookup_only";
             id: string;
             revision: number;
-            kind: "preference" | "experience" | "knowledge" | "procedure";
-            claimType: "inference" | "reported_claim" | "self_report" | "observation";
+            kind: "experience" | "knowledge" | "preference" | "procedure";
+            claimType: "observation" | "self_report" | "reported_claim" | "inference";
             content: string;
             contentHash: string;
             sources: ({
@@ -466,7 +466,7 @@ export declare class MemoryService extends Service {
         generation: number;
         nextCursor: string | null;
         status: "ok";
-        mode: "normal" | "deleted";
+        mode: "deleted" | "normal";
         untrustedEvidence: boolean;
     };
     private open;
@@ -499,8 +499,8 @@ export declare class MemoryService extends Service {
             useRestriction: "evidence_only" | "historical_evidence_only" | "deleted_lookup_only";
             id: string;
             revision: number;
-            kind: "preference" | "experience" | "knowledge" | "procedure";
-            claimType: "inference" | "reported_claim" | "self_report" | "observation";
+            kind: "experience" | "knowledge" | "preference" | "procedure";
+            claimType: "observation" | "self_report" | "reported_claim" | "inference";
             content: string;
             contentHash: string;
             sources: ({
@@ -566,8 +566,8 @@ export declare class MemoryService extends Service {
             useRestriction: "evidence_only" | "historical_evidence_only" | "deleted_lookup_only";
             id: string;
             revision: number;
-            kind: "preference" | "experience" | "knowledge" | "procedure";
-            claimType: "inference" | "reported_claim" | "self_report" | "observation";
+            kind: "experience" | "knowledge" | "preference" | "procedure";
+            claimType: "observation" | "self_report" | "reported_claim" | "inference";
             content: string;
             contentHash: string;
             sources: ({
@@ -662,7 +662,7 @@ export declare class MemoryService extends Service {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     ingressPluginId: string | null;
@@ -734,7 +734,7 @@ export declare class MemoryService extends Service {
                     conversation: {
                         channel: string;
                         account: string;
-                        kind: "local" | "private" | "group";
+                        kind: "private" | "group" | "local";
                         id: string;
                     };
                     ingressPluginId: string | null;
@@ -822,7 +822,7 @@ export declare class MemoryService extends Service {
         duplicate: boolean;
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -837,7 +837,7 @@ export declare class MemoryService extends Service {
     analysisStatus(context: ActionContext, id: unknown): Failure | {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -857,9 +857,9 @@ export declare class MemoryService extends Service {
             overview: string;
             gaps: string[];
             claims: {
-                action: "revise" | "none" | "add";
-                kind: "preference" | "experience" | "knowledge" | "procedure";
-                claimType: "inference" | "reported_claim" | "self_report" | "observation";
+                action: "add" | "revise" | "none";
+                kind: "experience" | "knowledge" | "preference" | "procedure";
+                claimType: "observation" | "self_report" | "reported_claim" | "inference";
                 subject: string;
                 content: string;
                 support: {
@@ -906,7 +906,7 @@ export declare class MemoryService extends Service {
                 revision: number;
                 contentHash: string;
             };
-            origin: "memory" | "event" | "user" | "tool";
+            origin: "memory" | "user" | "tool" | "event";
             authorId?: string | undefined;
             version?: number | undefined;
         }[];
@@ -924,7 +924,7 @@ export declare class MemoryService extends Service {
         }[];
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -939,7 +939,7 @@ export declare class MemoryService extends Service {
     analysisCancel(context: ActionContext, id: unknown): Failure | {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "cancelled" | "queued" | "running" | "committing";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;

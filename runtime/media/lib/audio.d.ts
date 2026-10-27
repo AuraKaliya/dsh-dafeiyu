@@ -10,6 +10,7 @@ export declare const audioConfigSchema: z.ZodObject<{
             sha256: z.ZodString;
         }, z.core.$strict>;
         language: z.ZodDefault<z.ZodString>;
+        memoryBytes: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     events: z.ZodOptional<z.ZodObject<{
         python: z.ZodString;
@@ -23,6 +24,7 @@ export declare const audioConfigSchema: z.ZodObject<{
         }, z.core.$strict>;
         onnxruntimeVersion: z.ZodString;
         numpyVersion: z.ZodString;
+        memoryBytes: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type AudioConfig = z.output<typeof audioConfigSchema>;

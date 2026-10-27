@@ -7,8 +7,8 @@ export declare const BILI_OWNER_TABLES: readonly ["bili_owner_binding", "bili_ow
 declare const sourceSchema: z.ZodObject<{
     id: z.ZodString;
     state: z.ZodEnum<{
-        "before-start": "before-start";
         pending: "pending";
+        "before-start": "before-start";
         accepted: "accepted";
         unsupported: "unsupported";
         recalled: "recalled";
@@ -95,7 +95,7 @@ export declare class BiliOwnerStore {
     pending(): BiliOwnerInbound[];
     accepted(id: string, coreInboundId: string, now?: number): {
         id: string;
-        state: "before-start" | "pending" | "accepted" | "unsupported" | "recalled";
+        state: "pending" | "before-start" | "accepted" | "unsupported" | "recalled";
         version: number;
         coreInboundId: string | null;
         message: {
@@ -112,7 +112,7 @@ export declare class BiliOwnerStore {
     };
     recall(id: string, now?: number): {
         id: string;
-        state: "before-start" | "pending" | "accepted" | "unsupported" | "recalled";
+        state: "pending" | "before-start" | "accepted" | "unsupported" | "recalled";
         version: number;
         coreInboundId: string | null;
         message: {

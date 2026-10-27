@@ -67,7 +67,7 @@ export declare class ServerExecutorService extends Service {
     result(context: ExecutionContextV3, raw: unknown): ActionOutcome;
     private actions;
     recover(): {
-        state: "completed" | "failed" | "cancelled" | "unknown";
+        state: "unknown" | "completed" | "cancelled" | "failed";
         effects: "unknown" | "none" | "confirmed";
         sessionId: string | null;
         exit: {

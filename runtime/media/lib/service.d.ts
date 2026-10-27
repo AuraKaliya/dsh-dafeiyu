@@ -32,6 +32,7 @@ export declare const mediaConfigSchema: z.ZodObject<{
                 sha256: z.ZodString;
             }, z.core.$strict>;
             language: z.ZodDefault<z.ZodString>;
+            memoryBytes: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         events: z.ZodOptional<z.ZodObject<{
             python: z.ZodString;
@@ -45,6 +46,7 @@ export declare const mediaConfigSchema: z.ZodObject<{
             }, z.core.$strict>;
             onnxruntimeVersion: z.ZodString;
             numpyVersion: z.ZodString;
+            memoryBytes: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
     documents: z.ZodOptional<z.ZodObject<{
@@ -99,7 +101,7 @@ export declare class MediaService extends Service implements MediaPort {
         schemaVersion: 1;
         id: string;
         version: number;
-        kind: "image" | "audio" | "video" | "document";
+        kind: "audio" | "image" | "video" | "document";
         sha256: string;
         bytes: number;
         mime: string;
@@ -122,8 +124,8 @@ export declare class MediaService extends Service implements MediaPort {
         taskEpoch: number | null;
         sourceId: string;
         sourceVersion: number;
-        kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
+        kind: "audio" | "image" | "video" | "document";
+        state: "deleted" | "staging" | "ready" | "evicted" | "failed";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -131,7 +133,7 @@ export declare class MediaService extends Service implements MediaPort {
             schemaVersion: 1;
             id: string;
             version: number;
-            kind: "image" | "audio" | "video" | "document";
+            kind: "audio" | "image" | "video" | "document";
             sha256: string;
             bytes: number;
             mime: string;
@@ -140,10 +142,10 @@ export declare class MediaService extends Service implements MediaPort {
         coverage: {
             acquiredBytes: number;
             processed: {
-                kind: "image" | "audio" | "frame" | "page" | "paragraph" | "row";
+                kind: "audio" | "image" | "frame" | "page" | "paragraph" | "row";
                 start: number;
                 end: number;
-                unit: "index" | "milliseconds" | "whole-image";
+                unit: "milliseconds" | "index" | "whole-image";
             }[];
             exposed: boolean;
             gaps: string[];
@@ -163,10 +165,10 @@ export declare class MediaService extends Service implements MediaPort {
         coverage: {
             acquiredBytes: number;
             processed: {
-                kind: "image" | "audio" | "frame" | "page" | "paragraph" | "row";
+                kind: "audio" | "image" | "frame" | "page" | "paragraph" | "row";
                 start: number;
                 end: number;
-                unit: "index" | "milliseconds" | "whole-image";
+                unit: "milliseconds" | "index" | "whole-image";
             }[];
             exposed: boolean;
             gaps: string[];
@@ -176,7 +178,7 @@ export declare class MediaService extends Service implements MediaPort {
             schemaVersion: 1;
             id: string;
             version: number;
-            kind: "image" | "audio" | "video" | "document";
+            kind: "audio" | "image" | "video" | "document";
             sha256: string;
             bytes: number;
             mime: string;
@@ -210,7 +212,7 @@ export declare class MediaService extends Service implements MediaPort {
         understood: boolean;
     } | {
         metadata: {
-            kind: "unknown" | "image" | "audio" | "video";
+            kind: "audio" | "image" | "video" | "unknown";
             width: number | null;
             height: number | null;
             durationMs: number | null;
@@ -226,13 +228,44 @@ export declare class MediaService extends Service implements MediaPort {
     }>;
     private readAudio;
     private prepareReplyAsset;
-    prepareReply(context: ExecutionContextV3, input: unknown): Promise<{
+    prepareReply(context: ExecutionContextV3, input: unknown, owner?: string): Promise<{
         draftId: string;
         version: number;
         currentDraftId: string;
         currentVersion: number;
         selected: number;
         cancelled: boolean;
+    }>;
+    imageOriginal(context: ExecutionContextV3, owner: string, exposureId: string): Promise<{
+        data: Buffer<ArrayBuffer>;
+        mime: string;
+        source: {
+            ref: {
+                provider: string;
+                key: string;
+            };
+            origin: {
+                provider: string;
+                scene: {
+                    channel: string;
+                    account: string;
+                    kind: "private" | "group" | "local";
+                    id: string;
+                };
+                key: string;
+                version: number;
+                hash: string;
+                roots: string[];
+                detail: z.core.util.JSONType;
+            };
+            kind: "audio" | "image" | "video" | "document";
+            name: string | null;
+            mimeHint: string | null;
+            bytesHint: number | null;
+            durationMsHint: number | null;
+            rangeReadable: boolean;
+            publicContent: boolean;
+        };
     }>;
     replyDraft(runId: string): {
         id: string;
@@ -265,7 +298,7 @@ export declare class MediaService extends Service implements MediaPort {
         target: {
             channel: string;
             account: string;
-            kind: "local" | "private" | "group";
+            kind: "private" | "group" | "local";
             id: string;
         };
         sourceMessageId: string;
@@ -281,7 +314,7 @@ export declare class MediaService extends Service implements MediaPort {
             target: {
                 channel: string;
                 account: string;
-                kind: "local" | "private" | "group";
+                kind: "private" | "group" | "local";
                 id: string;
             };
             intentVersion: number;
@@ -300,7 +333,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -311,7 +344,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -322,7 +355,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -343,12 +376,12 @@ export declare class MediaService extends Service implements MediaPort {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "record" | "file" | "image";
+            delivery: "image" | "record" | "file";
             asset: {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -374,7 +407,7 @@ export declare class MediaService extends Service implements MediaPort {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 key: string;
@@ -388,7 +421,7 @@ export declare class MediaService extends Service implements MediaPort {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "local" | "private" | "group";
+                    kind: "private" | "group" | "local";
                     id: string;
                 };
                 key: string;
@@ -405,7 +438,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;
@@ -414,7 +447,7 @@ export declare class MediaService extends Service implements MediaPort {
                 schemaVersion: 1;
                 id: string;
                 version: number;
-                kind: "image" | "audio" | "video" | "document";
+                kind: "audio" | "image" | "video" | "document";
                 sha256: string;
                 bytes: number;
                 mime: string;

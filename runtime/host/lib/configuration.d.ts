@@ -31,14 +31,14 @@ export declare const pluginSchemas: {
         execution: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>;
     readonly memory: z.ZodObject<{
+        analysis: z.ZodOptional<z.ZodObject<{
+            timeoutMs: z.ZodDefault<z.ZodNumber>;
+            maxPending: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         maintenance: z.ZodOptional<z.ZodObject<{
             timeoutMs: z.ZodDefault<z.ZodNumber>;
             maxInputBytes: z.ZodDefault<z.ZodNumber>;
             maxOutputBytes: z.ZodDefault<z.ZodNumber>;
-        }, z.core.$strict>>;
-        analysis: z.ZodOptional<z.ZodObject<{
-            timeoutMs: z.ZodDefault<z.ZodNumber>;
-            maxPending: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         feedback: z.ZodOptional<z.ZodObject<{
             maxArchiveBytes: z.ZodDefault<z.ZodNumber>;
@@ -46,18 +46,6 @@ export declare const pluginSchemas: {
             maxPageChars: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         context: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;
-        retrieval: z.ZodOptional<z.ZodObject<{
-            endpoint: z.ZodURL;
-            python: z.ZodString;
-            modelDir: z.ZodString;
-            serviceFile: z.ZodString;
-            pythonPackages: z.ZodOptional<z.ZodString>;
-            profileFile: z.ZodOptional<z.ZodString>;
-            timeoutMs: z.ZodDefault<z.ZodNumber>;
-            maxDocuments: z.ZodDefault<z.ZodNumber>;
-            maxChunks: z.ZodDefault<z.ZodNumber>;
-            maxCacheEntries: z.ZodDefault<z.ZodNumber>;
-        }, z.core.$strict>>;
         compaction: z.ZodOptional<z.ZodPipe<z.ZodObject<{
             inputTokens: z.ZodNumber;
             thresholdRatio: z.ZodDefault<z.ZodNumber>;
@@ -116,6 +104,18 @@ export declare const pluginSchemas: {
             initialMaxGroups?: number | undefined;
             initialMaxFragments?: number | undefined;
         }>>>;
+        retrieval: z.ZodOptional<z.ZodObject<{
+            endpoint: z.ZodURL;
+            python: z.ZodString;
+            modelDir: z.ZodString;
+            serviceFile: z.ZodString;
+            pythonPackages: z.ZodOptional<z.ZodString>;
+            profileFile: z.ZodOptional<z.ZodString>;
+            timeoutMs: z.ZodDefault<z.ZodNumber>;
+            maxDocuments: z.ZodDefault<z.ZodNumber>;
+            maxChunks: z.ZodDefault<z.ZodNumber>;
+            maxCacheEntries: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         sourceTracking: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>;
     readonly activity: z.ZodObject<{
@@ -137,6 +137,16 @@ export declare const pluginSchemas: {
         maintenance: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>;
     readonly media: z.ZodObject<{
+        ffmpeg: import("zod").ZodString;
+        ffprobe: import("zod").ZodString;
+        maxBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
+        maxAssetBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
+        timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
+        vision: import("zod").ZodOptional<import("zod").ZodObject<{
+            provider: import("zod").ZodString;
+            model: import("zod").ZodString;
+            reasoningEffort: import("zod").ZodOptional<import("zod").ZodString>;
+        }, import("zod/v4/core").$strict>>;
         audio: import("zod").ZodOptional<import("zod").ZodObject<{
             whisper: import("zod").ZodOptional<import("zod").ZodObject<{
                 node: import("zod").ZodString;
@@ -147,6 +157,7 @@ export declare const pluginSchemas: {
                     sha256: import("zod").ZodString;
                 }, import("zod/v4/core").$strict>;
                 language: import("zod").ZodDefault<import("zod").ZodString>;
+                memoryBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
             }, import("zod/v4/core").$strict>>;
             events: import("zod").ZodOptional<import("zod").ZodObject<{
                 python: import("zod").ZodString;
@@ -160,17 +171,8 @@ export declare const pluginSchemas: {
                 }, import("zod/v4/core").$strict>;
                 onnxruntimeVersion: import("zod").ZodString;
                 numpyVersion: import("zod").ZodString;
+                memoryBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
             }, import("zod/v4/core").$strict>>;
-        }, import("zod/v4/core").$strict>>;
-        ffmpeg: import("zod").ZodString;
-        ffprobe: import("zod").ZodString;
-        maxBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
-        maxAssetBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
-        timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
-        vision: import("zod").ZodOptional<import("zod").ZodObject<{
-            provider: import("zod").ZodString;
-            model: import("zod").ZodString;
-            reasoningEffort: import("zod").ZodOptional<import("zod").ZodString>;
         }, import("zod/v4/core").$strict>>;
         documents: import("zod").ZodOptional<import("zod").ZodObject<{
             python: import("zod").ZodString;
@@ -251,6 +253,11 @@ export declare const pluginSchemas: {
             maxReadBytes: z.ZodDefault<z.ZodNumber>;
             voiceDirectives: z.ZodDefault<z.ZodBoolean>;
         }, z.core.$strict>>;
+        stickers: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+            maxEntries: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         botId: z.ZodString;
         ownerId: z.ZodString;
         groupIds: z.ZodArray<z.ZodString>;
@@ -268,6 +275,13 @@ export declare const pluginSchemas: {
             enabled: z.ZodDefault<z.ZodBoolean>;
             snapshotTtlMs: z.ZodDefault<z.ZodNumber>;
             maxSnapshots: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        replyDelay: z.ZodDefault<z.ZodBoolean>;
+        messageBatch: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            quietMs: z.ZodDefault<z.ZodNumber>;
+            maxWaitMs: z.ZodDefault<z.ZodNumber>;
+            maxMessages: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         tasks: z.ZodPrefault<z.ZodObject<{
             enabled: z.ZodDefault<z.ZodBoolean>;
