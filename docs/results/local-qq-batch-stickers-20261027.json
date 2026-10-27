@@ -1,6 +1,6 @@
 {
   "date": "2026-10-27",
-  "status": "implementation-tested-deployment-pending",
+  "status": "deployed-local-ready-qq-online",
   "localOnly": true,
   "serverAccess": false,
   "snowlumaModified": false,
@@ -20,5 +20,29 @@
     "realQqPlatformScenarioAcceptance": false,
     "reports": ["59537d22-7989-4ef1-be3e-eb72abbb7965", "a38cfcb2-7bed-46d9-933b-492b04b09ecb", "a2e60604-b31d-4f36-9b79-a9bdeece690a", "e3778e59-0b03-440a-a51e-bb2688cea444", "ad3f0e70-2368-4425-9681-09ab85d10599"]
   },
-  "deployment": null
+  "deployment": {
+    "sourceRevision": "b6fb872bf09022b6b4da61880100f1f61bfc01f6",
+    "root": "D:/DSH/DaFeiYu-Local",
+    "migrationId": "384cb7fc-d167-40bc-898e-324f0c598f79",
+    "migrationVerified": true,
+    "oldTableContentsPreservedBeforeStartup": true,
+    "identityPreserved": true,
+    "memoryStoresPreserved": 4,
+    "existingSessionFilesPreserved": 3,
+    "existingJournalEventsRetained": 289,
+    "pidAtVerification": 46572,
+    "phase": "ready",
+    "qqState": "online",
+    "groupSync": "current",
+    "groupIntervalMs": 30000,
+    "joinedGroupsAtVerification": 7,
+    "assistantGroupsAtVerification": 4,
+    "effectiveGroupsAtVerification": 3,
+    "stickerFeatureRegistered": true,
+    "stickerActionsAuthorized": true,
+    "initialLibraryEntries": 0,
+    "arbitraryMediaSendEnabled": false,
+    "newModelCallsForDeployment": 0,
+    "evidenceDirectory": "D:/DSH/DaFeiYu-Local/deployment/qq-batch-stickers-20261027"
+  }
 }
