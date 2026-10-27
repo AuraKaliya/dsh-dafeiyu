@@ -1,14 +1,16 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
-import { NativeExpressionPacketSchema,ContextItemSchema,conversationKey,qqVisibleText } from '@dafeiyu/contracts';
+import { NativeExpressionPacketSchema,NativeVerificationFeedbackSchema,ContextItemSchema,conversationKey,qqVisibleText,redactJson } from '@dafeiyu/contracts';
 import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply } from '@dafeiyu/contracts';
 import type { ContextCoordinator } from './context.js';
 import type { RuntimeStore } from './runtime-store.js';
 import type { DeliveryChannel } from './task-delivery.js';
 import { nativeDeliveryHash } from './native-delivery-store.js';
 import { renderTaskResult,renderPublicProgress } from './target-renderer.js';
+import type {DeliveryRepair} from './target-renderer.js';
 import { readPersistedResult } from './agent-session.js';
 import { z } from 'zod';
+export const NATIVE_RENDER_ATTEMPTS=2;
 interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:string;signal:AbortSignal;timeoutMs:number;sendTimeoutMs:number;
   feedbackSource(runId:string):{item:PendingMessage;taskId:string;state:string;error:string|null;operations:readonly {state:string;status:string|null;effects:string|null}[]}|null;
   describe(runId:string):{item:PendingMessage;anchor:TaskResultAnchor;autoDeliver:boolean|undefined}|null;
@@ -88,11 +90,20 @@ export class NativeTaskDelivery {
       const guard=()=>{persona.guard();if(nativeDeliveryHash(this.host.model())!==material.modelHash)throw new Error('SOURCE_STALE');};guard();
       if(record.state==='accepted'){
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
-        this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'rendering',deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().render).toISOString()});this.host.flush();
-        const rendered=await renderTaskResult(this.host.ctx,model,this.host.cwd,record.id,persona.text,persona.items,packet,signal,guard,access.requestMaxBytes);guard();
-        this.host.store.nativeDeliveries.rendered(runId,rendered.resultRef);this.host.flush();
-        this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'verification',deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().verification).toISOString()});this.host.flush();
-        await provider.verify(access,packet.id,['qq','local-owner'].includes(record.anchor.target.channel)?(qqVisibleText(rendered.text)||rendered.text):rendered.text,signal,guard);guard();this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();
+        let repair:DeliveryRepair|undefined;
+        for(let attempt=0;attempt<NATIVE_RENDER_ATTEMPTS;attempt++){
+          this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'rendering',attempt,deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().render).toISOString()});this.host.flush();
+          const rendered=await renderTaskResult(this.host.ctx,model,this.host.cwd,record.id,persona.text,persona.items,packet,signal,guard,access.requestMaxBytes,repair);guard();
+          this.host.store.nativeDeliveries.candidate(runId,rendered.resultRef);this.host.flush();
+          this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'verification',attempt,deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().verification).toISOString()});this.host.flush();
+          try{await provider.verify(access,packet.id,['qq','local-owner'].includes(record.anchor.target.channel)?(qqVisibleText(rendered.text)||rendered.text):rendered.text,signal,guard);}
+          catch(error){const feedback=NativeVerificationFeedbackSchema.safeParse(error instanceof Error&&error.message==='delivery_unfaithful'?error.cause:null);
+            if(!feedback.success)throw error;const safe=redactJson(z.json().parse(feedback.data));
+            this.host.store.appendExecutionEvent(runId,'native.delivery.verification-rejected',{attempt,renderRef:rendered.resultRef,feedback:safe.value});this.host.flush();
+            if(attempt+1>=NATIVE_RENDER_ATTEMPTS||safe.redacted)throw error;guard();
+            repair={previousAnswer:rendered.text,issues:feedback.data.issues};this.host.store.nativeDeliveries.repair(runId);this.host.flush();continue;}
+          guard();this.host.store.nativeDeliveries.rendered(runId,rendered.resultRef);this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();break;
+        }
       }
       record=this.host.store.nativeDeliveries.get(runId)!;if(record.state!=='ready'||nativeDeliveryHash(record.material)!==nativeDeliveryHash(material)||!record.renderRef)throw new Error('SOURCE_STALE');
       const body=this.host.store.nativeDeliveries.verifyCredential(runId);if(await readPersistedResult(this.host.ctx,record.renderRef)!==body)throw new Error('DELIVERY_BODY_MISMATCH');guard();

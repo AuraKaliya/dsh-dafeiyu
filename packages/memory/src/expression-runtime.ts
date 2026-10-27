@@ -27,7 +27,7 @@ export async function verifyPersonaDelivery(ctx:Context,input:ExpressionModelInp
   if(finish!=='stop')throw new Error(finish==='error'?'DELIVERY_VERIFICATION_MODEL_ERROR':finish==='aborted'?'DELIVERY_VERIFICATION_ABORTED':'DELIVERY_VERIFICATION_INCOMPLETE');
   const parsed=z.strictObject({faithful:z.boolean(),issues:z.array(z.string().max(300)).max(16)}).safeParse((()=>{try{return JSON.parse(output.trim().replace(/^```(?:json)?\s*/u,'').replace(/\s*```$/u,''));}catch{return null;}})());
   if(!parsed.success)throw new Error('DELIVERY_VERIFICATION_INVALID_RESULT');
-  if(!parsed.data.faithful||parsed.data.issues.length)throw new Error('delivery_unfaithful');return;
+  if(!parsed.data.faithful||parsed.data.issues.length)throw new Error('delivery_unfaithful',{cause:{kind:'delivery-fidelity',issues:parsed.data.issues}});return;
   }}catch(error){if(timer.aborted&&!signal.aborted)throw new Error('DELIVERY_VERIFICATION_TIMEOUT');throw error;}
 }
 /** Two fresh, tool-free DSH transport requests. No host prompt, task text, history or previous answer is inherited. */

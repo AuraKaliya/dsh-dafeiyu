@@ -26,7 +26,7 @@ import type { MessageTaskBinding } from '@dafeiyu/contracts';
 import type { NativeExpressionPort } from '@dafeiyu/contracts';
 import type { MediaPort,MediaAccess,MediaSourceProvider,MediaAssetRef,MediaReplyAccess } from '@dafeiyu/contracts';
 import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema } from '@dafeiyu/contracts';
-import { NativeTaskDelivery } from './native-task-delivery.js';
+import { NativeTaskDelivery,NATIVE_RENDER_ATTEMPTS } from './native-task-delivery.js';
 import { LifecycleModeSchema, ServiceGate } from '@dafeiyu/contracts';
 import type { ExtensionV3, ExtensionHandleV3 } from '@dafeiyu/contracts';
 import { CapabilityRegistryV3 } from './registry-v3.js';
@@ -350,7 +350,7 @@ export class DafeiyuService extends Service {
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registryV3,scheduler:this.scheduler,options,personas:this.personas,
       repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
       turnTimeoutMs:this.config.turnTimeoutMs,assessmentTimeoutMs:this.config.phaseTimeouts.assessment,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),progress:id=>this.nativeTaskDelivery?.progress(id)??Promise.resolve(null),settled:id=>{if(this.runStore?.get(id).state==='failed')void this.nativeTaskDelivery?.progress(id).catch(()=>{});else void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
-    this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
+    this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:NATIVE_RENDER_ATTEMPTS*(this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification)+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
       feedbackSource:id=>this.executions!.feedbackSource(id),
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),

@@ -194,8 +194,8 @@ export class ExecutionCoordinator {
   }
   private progressFacts(receipt:Json|null){return {kind:'program-feedback-receipt',purpose:'intermediate-status-only',doesNotDescribeFinalDelivery:true,receipt,
     note:'这里只记录执行中的阶段通知；未发送阶段通知不表示最终结果发送失败。最终正文仍须经人格整理和核验。'};}
-  private resultWorkflow(runId:string){const used=[...new Set(this.d.store.operations(runId).map(op=>op.action))],registered=new Set(this.d.registry.actionNames());
-    return {kind:'result-workflow',finalDelivery:'after-persona-render-and-verification',actions:used.map(name=>({name,registered:registered.has(name)})),
+  private resultWorkflow(runId:string){const operations=this.d.store.operations(runId),used=[...new Set(operations.map(op=>op.action))],registered=new Map(this.d.registry.actions().map(action=>[action.id,action]));
+    return {kind:'result-workflow',finalDelivery:'after-persona-render-and-verification',actions:used.map(name=>({name,registered:registered.has(name),declaredEffects:registered.get(name)?.effects??null,outcomes:[...new Map(operations.filter(op=>op.action===name).map(op=>{const outcome={status:op.outcome?.status??null,effects:op.outcome?.effects??null};return [runtimeHash(outcome),outcome];})).values()]})),
       note:'此材料用于生成最终答复，最终发送在正文核验之后；此时没有最终回执不表示发送失败。动作已注册与平台调用成功是两件事，暂停、超时或页面不可用不能推断缺少插件。'};}
   private assessmentStatus(runId:string){const value=z.object({assessment:TaskAssessmentSchema,at:z.string()}).safeParse(this.d.store.readInput(runId,'task-assessment'));return value.success?{goalStatus:value.data.assessment.goalStatus,next:value.data.assessment.next,at:value.data.at}:null;}
   reconcileCapabilityChange(raw:unknown){

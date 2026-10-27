@@ -23,6 +23,14 @@ test('native delivery binds one immutable anchor and credential, retaining facts
   }finally{store.close();}
 });
 
+test('unapproved candidates can be replaced before sealing, but never after approval or send',async()=>{
+  const store=new RuntimeStore(await file(),identity,{create:true});try{const {run,anchor,ref}=setup(store);store.nativeDeliveries.create(anchor);store.nativeDeliveries.start(run.id,{packetId:randomUUID(),sourceStamp:digest,foundationHash:digest,personaHash:digest,modelHash:digest});
+    store.nativeDeliveries.candidate(run.id,{...ref,sessionId:'rejected-first'});assert.equal(store.nativeDeliveries.get(run.id)?.renderRef,null);assert.throws(()=>store.nativeDeliveries.approve(run.id,body),/STATE_CONFLICT/);
+    store.nativeDeliveries.repair(run.id);store.nativeDeliveries.candidate(run.id,ref);store.nativeDeliveries.rendered(run.id,ref);store.nativeDeliveries.approve(run.id,body);
+    assert.equal(store.nativeDeliveries.verifyCredential(run.id),body);assert.throws(()=>store.nativeDeliveries.repair(run.id),/STATE_CONFLICT/);store.nativeDeliveries.sending(run.id);assert.throws(()=>store.nativeDeliveries.repair(run.id),/STATE_CONFLICT/);
+  }finally{store.close();}
+});
+
 test('runtime v2 migration is explicit and preserves every old Run before adding an empty native delivery table',async()=>{
   const path=await file(),store=new RuntimeStore(path,identity,{create:true}),{run}=setup(store);store.close();const old=new DatabaseSync(path);old.exec('DROP TABLE native_deliveries;PRAGMA user_version=2;');const before=old.prepare('SELECT * FROM runs').all();old.close();const bytes=await readFile(path);
   assert.throws(()=>new RuntimeStore(path,identity),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),bytes);const upgraded=new RuntimeStore(path,identity,{migrate:true});try{assert.equal(upgraded.get(run.id).state,'completed');assert.deepEqual(upgraded.nativeDeliveries.list(),[]);}finally{upgraded.close();}

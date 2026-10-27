@@ -67,6 +67,19 @@ test('failed independent verification never creates a send credential or perform
   const id=runId(h),status=h.core.messageTaskDeliveryStatus(id)!;assert.equal(status.state,'rejected');assert.equal(status.error,'DELIVERY_UNFAITHFUL');assert.equal(h.platform.sent.length,2);assert.ok(h.platform.sent.every(sent=>!sentText(sent).includes(reply)&&!sentText(sent).includes('EXECUTOR_REPORT_SENTINEL')));
   const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{const row=db.prepare('SELECT body,credential FROM native_deliveries').get()!;assert.equal(row.body,null);assert.equal(row.credential,null);}finally{db.close();}
   const calls=h.adapter.requests.length;await h.core.deliverMessageTaskResult(id);assert.equal(h.adapter.requests.length,calls);
+  assert.equal(h.adapter.requests.filter(request=>render(request.sessionId)).length,2);assert.equal(h.adapter.requests.filter(request=>verify(request.sessionId)).length,2);
+});
+
+for(const revoke of [false,true])test(`one unapproved wording repair ${revoke?'stops on source recall':'is independently verified and delivered once'}`,async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);let chat=0,renders=0,checks=0;
+  h.setResponse(async request=>{if(render(request.sessionId)){renders++;if(renders===2){assert.match(JSON.stringify(request.messages),/previousCandidateUnapproved/);assert.match(JSON.stringify(request.messages),/总数与折叠数混淆/);assert.equal(request.tools?.length??0,0);}return textReply(renders===1?'虚构数据：折叠1600条。':'虚构数据：总数1600条，其中折叠1100条。');}
+    if(verify(request.sessionId)){checks++;if(checks===1){if(revoke){const source=h.core.journal.list()[0]!.message.id;h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:Number(source)});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);}return textReply('{"faithful":false,"issues":["总数与折叠数混淆，应为总数1600、其中折叠1100。"]}');}assert.match(JSON.stringify(request.messages),/其中折叠1100/);return textReply('{"faithful":true,"issues":[]}');}
+    if(native(request.sessionId))return textReply('虚构数据：总数1600条，其中折叠1100条。');
+    return ++chat===1?call('qq_task_submit',{requestId:'wording-repair'}):textReply('已受理');});
+  await h.message('任务：转述一组虚构数据',{trigger:true});const id=runId(h),status=h.core.messageTaskDeliveryStatus(id)!;
+  if(revoke){assert.notEqual(status.state,'sent');assert.equal(renders,1);assert.ok(!JSON.stringify(h.platform.sent).includes('其中折叠1100'));}
+  else{assert.equal(status.state,'sent');assert.equal(renders,2);assert.equal(checks,2);assert.equal(h.platform.sent.filter(sent=>sentText(sent).includes('其中折叠1100')).length,1);assert.ok(!h.platform.sent.some(sent=>sentText(sent)==='虚构数据：折叠1600条。'));
+    assert.ok(h.core.journal.executionEvents('dafeiyu',status.taskId).some(event=>event.type==='native.delivery.verification-rejected'));}
 });
 
 for(const mode of ['recover-cutoff','repeated-cutoff','invalid-json'] as const)test(`delivery verifier ${mode} keeps the candidate gated and exposes the actual failure phase`,async t=>{
