@@ -1,0 +1,641 @@
+{
+  "at": "2026-10-27T16:40:20.428Z",
+  "baseline": "7325deb2ab38c058c994a6254e61ecb1b066e717",
+  "scope": "read-only source and runtime metadata review; no tests, builds, model calls or platform writes",
+  "configuration": {
+    "context": {
+      "maxBytes": 16000,
+      "requestMaxBytes": 1000000,
+      "prepareTimeoutMs": 5000,
+      "outputReserveBytes": 16000,
+      "regions": {
+        "memory:qq-expression": {
+          "maxBytes": 6000,
+          "priority": 420,
+          "required": false
+        }
+      },
+      "compactionInputTokens": 48000
+    },
+    "growthRegion": {
+      "maxBytes": 4000,
+      "priority": 400
+    },
+    "memory": [
+      {
+        "id": "memory-growth",
+        "sourceTracking": true,
+        "workingContextConfigured": true,
+        "retrievalConfigured": false,
+        "maintenanceConfigured": true
+      }
+    ]
+  },
+  "journal": {
+    "totals": {
+      "context.compaction.checked": 74,
+      "context.admitted": 74,
+      "context.sources.retired": 6,
+      "turn.failed": 1
+    },
+    "regions": {
+      "memory:working": {
+        "calls": 74,
+        "available": 0,
+        "selected": 0,
+        "invalid": 0,
+        "overBudget": 0,
+        "unavailable": 0
+      },
+      "native-task-results:delivered-results": {
+        "calls": 74,
+        "available": 43,
+        "selected": 43,
+        "invalid": 0,
+        "overBudget": 0,
+        "unavailable": 0
+      },
+      "memory:growth": {
+        "calls": 74,
+        "available": 0,
+        "selected": 0,
+        "invalid": 0,
+        "overBudget": 0,
+        "unavailable": 0
+      },
+      "memory:evidence": {
+        "calls": 74,
+        "available": 0,
+        "selected": 0,
+        "invalid": 0,
+        "overBudget": 0,
+        "unavailable": 0
+      },
+      "memory:task-workspace": {
+        "calls": 74,
+        "available": 0,
+        "selected": 0,
+        "invalid": 0,
+        "overBudget": 0,
+        "unavailable": 0
+      },
+      "memory:qq-expression": {
+        "calls": 45,
+        "available": 16,
+        "selected": 16,
+        "invalid": 0,
+        "overBudget": 0,
+        "unavailable": 0
+      },
+      "core-delivery-recovery:pending-replies": {
+        "calls": 2,
+        "available": 2,
+        "selected": 2,
+        "invalid": 0,
+        "overBudget": 0,
+        "unavailable": 0
+      }
+    },
+    "latestAdmissions": [
+      {
+        "seq": 1329,
+        "at": "2026-10-27T13:19:39.124Z",
+        "bytes": 1661,
+        "requestBytes": 174353,
+        "retired": 0,
+        "nativeRegions": [
+          "dafeiyu:feedback-guard:v1"
+        ],
+        "decisions": [
+          {
+            "owner": "memory",
+            "region": "working",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 500
+          },
+          {
+            "owner": "native-task-results",
+            "region": "delivered-results",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 450
+          },
+          {
+            "owner": "memory",
+            "region": "qq-expression",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 420
+          },
+          {
+            "owner": "memory",
+            "region": "growth",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 400
+          },
+          {
+            "owner": "memory",
+            "region": "evidence",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 8000,
+            "priority": 200
+          },
+          {
+            "owner": "memory",
+            "region": "task-workspace",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 100
+          }
+        ]
+      },
+      {
+        "seq": 1344,
+        "at": "2026-10-27T13:19:47.273Z",
+        "bytes": 1661,
+        "requestBytes": 187105,
+        "retired": 0,
+        "nativeRegions": [
+          "dafeiyu:feedback-guard:v1"
+        ],
+        "decisions": [
+          {
+            "owner": "memory",
+            "region": "working",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 500
+          },
+          {
+            "owner": "native-task-results",
+            "region": "delivered-results",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 450
+          },
+          {
+            "owner": "memory",
+            "region": "qq-expression",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 420
+          },
+          {
+            "owner": "memory",
+            "region": "growth",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 400
+          },
+          {
+            "owner": "memory",
+            "region": "evidence",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 8000,
+            "priority": 200
+          },
+          {
+            "owner": "memory",
+            "region": "task-workspace",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 100
+          }
+        ]
+      },
+      {
+        "seq": 1363,
+        "at": "2026-10-27T16:26:22.325Z",
+        "bytes": 2433,
+        "requestBytes": 179152,
+        "retired": 1,
+        "nativeRegions": [
+          "dafeiyu:feedback-guard:v1"
+        ],
+        "decisions": [
+          {
+            "owner": "memory",
+            "region": "working",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 500
+          },
+          {
+            "owner": "native-task-results",
+            "region": "delivered-results",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 450
+          },
+          {
+            "owner": "memory",
+            "region": "qq-expression",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 420
+          },
+          {
+            "owner": "memory",
+            "region": "growth",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 400
+          },
+          {
+            "owner": "memory",
+            "region": "evidence",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 8000,
+            "priority": 200
+          },
+          {
+            "owner": "core-delivery-recovery",
+            "region": "pending-replies",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 100
+          },
+          {
+            "owner": "memory",
+            "region": "task-workspace",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 100
+          }
+        ]
+      },
+      {
+        "seq": 1378,
+        "at": "2026-10-27T16:26:33.120Z",
+        "bytes": 2433,
+        "requestBytes": 142269,
+        "retired": 0,
+        "nativeRegions": [
+          "dafeiyu:feedback-guard:v1"
+        ],
+        "decisions": [
+          {
+            "owner": "memory",
+            "region": "working",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 500
+          },
+          {
+            "owner": "native-task-results",
+            "region": "delivered-results",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 450
+          },
+          {
+            "owner": "memory",
+            "region": "qq-expression",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 6000,
+            "priority": 420
+          },
+          {
+            "owner": "memory",
+            "region": "growth",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 400
+          },
+          {
+            "owner": "memory",
+            "region": "evidence",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 8000,
+            "priority": 200
+          },
+          {
+            "owner": "core-delivery-recovery",
+            "region": "pending-replies",
+            "available": 1,
+            "selected": 1,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 100
+          },
+          {
+            "owner": "memory",
+            "region": "task-workspace",
+            "available": 0,
+            "selected": 0,
+            "invalid": 0,
+            "overBudget": 0,
+            "unavailable": false,
+            "maxBytes": 4000,
+            "priority": 100
+          }
+        ]
+      }
+    ]
+  },
+  "memory": {
+    "counts": [
+      {
+        "table": "memory_items",
+        "count": 1
+      },
+      {
+        "table": "persona_candidates",
+        "count": 0
+      },
+      {
+        "table": "persona_trial_selections",
+        "count": 0
+      },
+      {
+        "table": "execution_contributions",
+        "count": 0
+      },
+      {
+        "table": "execution_memory_requests",
+        "count": 0
+      }
+    ],
+    "kinds": [
+      {
+        "kind": "preference",
+        "deleted": 0,
+        "count": 1
+      }
+    ]
+  },
+  "working": {
+    "states": 0
+  },
+  "sessions": [
+    {
+      "lastAt": 1793118397723,
+      "events": 767,
+      "tools": 42,
+      "toolSchemaBytes": 39962,
+      "lastSystemBytes": 3049,
+      "toolResults": 48,
+      "compaction": {
+        "below-threshold": 62,
+        "protected-or-insufficient": 1
+      }
+    },
+    {
+      "lastAt": 1793095507958,
+      "events": 13,
+      "tools": 0,
+      "toolSchemaBytes": 2,
+      "lastSystemBytes": 2987,
+      "toolResults": 0,
+      "compaction": {}
+    },
+    {
+      "lastAt": 1793095466768,
+      "events": 207,
+      "tools": 44,
+      "toolSchemaBytes": 67886,
+      "lastSystemBytes": 4133,
+      "toolResults": 23,
+      "compaction": {
+        "below-threshold": 2,
+        "protected-or-insufficient": 19
+      }
+    },
+    {
+      "lastAt": 1793095185025,
+      "events": 13,
+      "tools": 0,
+      "toolSchemaBytes": 2,
+      "lastSystemBytes": 2987,
+      "toolResults": 0,
+      "compaction": {}
+    },
+    {
+      "lastAt": 1793095177331,
+      "events": 45,
+      "tools": 42,
+      "toolSchemaBytes": 66339,
+      "lastSystemBytes": 4133,
+      "toolResults": 3,
+      "compaction": {
+        "below-threshold": 3,
+        "protected-or-insufficient": 1
+      }
+    },
+    {
+      "lastAt": 1793064849756,
+      "events": 153,
+      "tools": 39,
+      "toolSchemaBytes": 38172,
+      "lastSystemBytes": 3049,
+      "toolResults": 1,
+      "compaction": {
+        "below-threshold": 11
+      }
+    },
+    {
+      "lastAt": 1793056205266,
+      "events": 81,
+      "tools": 35,
+      "toolSchemaBytes": 61574,
+      "lastSystemBytes": 3804,
+      "toolResults": 7,
+      "compaction": {
+        "below-threshold": 8
+      }
+    },
+    {
+      "lastAt": 1793053396528,
+      "events": 18,
+      "tools": 25,
+      "toolSchemaBytes": 50117,
+      "lastSystemBytes": 3804,
+      "toolResults": 0,
+      "compaction": {
+        "below-threshold": 1
+      }
+    }
+  ],
+  "sources": [
+    {
+      "path": "packages/core/src/context.ts",
+      "sha256": "4acade241b1700c827c07bbc6950cdea806319c582b1647b0480d0bf582fe977"
+    },
+    {
+      "path": "packages/core/src/context-runtime.ts",
+      "sha256": "ebb3206e58e805e88abd0061d982849785cd8686b16cf67b5b65ba6532c8f08d"
+    },
+    {
+      "path": "packages/core/src/runtime.ts",
+      "sha256": "4f91448a216a041c5633a6fb676f6887bf3e6a3588425121a63a8ed160c74888"
+    },
+    {
+      "path": "packages/core/src/native-runtime.ts",
+      "sha256": "aec84c486e457fa390d831dcafb7cb49eb2f102c65f88529b1a7d949e5831ef8"
+    },
+    {
+      "path": "packages/core/src/execution-coordinator.ts",
+      "sha256": "5a6c340ff981babed2046211d6efe8890defac348acf035b0a65ec081709b649"
+    },
+    {
+      "path": "packages/core/src/persona-runtime.ts",
+      "sha256": "ae6a2d1a09e03514d82d226fe2bb10aaeb2745c5e4721ae370645868d0f253dd"
+    },
+    {
+      "path": "packages/core/src/target-renderer.ts",
+      "sha256": "6fe7f10e1a8b943b94a0b8fd650d6ed4ecfbfefdd3645c4c73b456832c31be52"
+    },
+    {
+      "path": "packages/core/src/task-assessment.ts",
+      "sha256": "f52084188009102bca1974d8b97385bebdb630d15dac71e54646016f781eb1a6"
+    },
+    {
+      "path": "packages/core/src/conversation-recovery.ts",
+      "sha256": "3edc72762aca35bbfd51f9fe56691e76799e3937af9826f11b32c3978033b8a1"
+    },
+    {
+      "path": "packages/core/src/compaction-runtime.ts",
+      "sha256": "d655d552d1dcc8c7dcea93f8aa001ac31409e5c7065e3631d6769cccc1018cde"
+    },
+    {
+      "path": "packages/core/src/provenance.ts",
+      "sha256": "af5d55135a6482427196d72baca32309a26b45ace6db65e53bbecb51933feae8"
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "sha256": "ca7bd1ec6acc822e32152e50ab0fa3caa3a14d8661935ad57a036c4412282392"
+    },
+    {
+      "path": "packages/core/src/native-task-delivery.ts",
+      "sha256": "2ddcfdcfb2771e240384746401bf3298caa4b8f373126ed550a3e384c876d7c0"
+    },
+    {
+      "path": "packages/memory/src/working.ts",
+      "sha256": "42c07a8343d1c586d3adbf2373bdb8859a98ace0d92ac7a06b386b8805b4dc7d"
+    },
+    {
+      "path": "packages/memory/src/qq-expression.ts",
+      "sha256": "a8d0acbca65c279846a2eb2e304d72af496d8519768e0abd18b80e90f3667907"
+    },
+    {
+      "path": "packages/memory/src/persona-store.ts",
+      "sha256": "3d520d5699b8caf9de5cf427d273c9ee08156170fb97f4b6ac27fc2af2416296"
+    },
+    {
+      "path": "packages/memory/src/execution-memory-state.ts",
+      "sha256": "f28efba534c531c983ff789c9c3b2aeb4c7a4bba0ced57fa150d32ebcc048a47"
+    },
+    {
+      "path": "packages/host/src/runtime.ts",
+      "sha256": "4125dc94e7997e82c4786da17757f04ba70b87a7926b0f3783e9680646d637ad"
+    },
+    {
+      "path": "packages/contracts/src/context.ts",
+      "sha256": "2f2e8c727cd9e02540ca494206325f7ae14cbf3bf436799c13c0d38c9f80ca1a"
+    }
+  ],
+  "preservedUserDocument": {
+    "path": "docs/memory-phase-1.md",
+    "sha256": "cb9a2383531a39461c50d7ca8f58c6c1879cf12a0a0dafdf8cfa5b387911f730"
+  }
+}
