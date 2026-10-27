@@ -14,6 +14,7 @@ import { ACTIVITY_ACTIONS } from '@dafeiyu/activity';
 import { MEDIA_ACTIONS } from '@dafeiyu/media';
 import { readInstallationSettings,checkInstallationFiles } from './settings.js';
 import type { InstallationSettings } from './settings.js';
+import {attachLocalOwnerControl} from './local-owner.js';
 
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const metadataSchema=z.strictObject({schemaVersion:z.literal(1),instanceId:z.uuid(),profileId:z.string(),agentId:z.string(),createdAt:z.iso.datetime(),identityHash:z.string().length(64),
@@ -106,5 +107,7 @@ export async function startInstallation(settingsFile:string,options:Installation
   const prepared=prepareInstallation(settingsFile,options);
   if(!prepared.inspection.ready)throw new Error(prepared.inspection.codes[0]??'INSTALL_NOT_READY');
   const createBiliOwnerPorts=runtime.createBiliOwnerPorts??ownerPorts(prepared.settings);
-  return ManagedHost.start(prepared.prepared,{...runtime,...(createBiliOwnerPorts?{createBiliOwnerPorts}:{})});
+  return ManagedHost.start(prepared.prepared,{...runtime,...(createBiliOwnerPorts?{createBiliOwnerPorts}:{}),installChannels:async(ctx,config)=>{
+    await runtime.installChannels?.(ctx,config);if(prepared.settings.localOwnerControl){const close=attachLocalOwnerControl(ctx,prepared.settings,config.config.agent.id);ctx.effect(()=>close);}
+  }});
 }

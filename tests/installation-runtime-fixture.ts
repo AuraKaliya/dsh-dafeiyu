@@ -19,7 +19,7 @@ const server=createServer(async(request,response)=>{
 });
 const wss=new WebSocketServer({server});wss.on('connection',socket=>socket.send(JSON.stringify({post_type:'message',self_id:12345678,message_id:7,message_type:'private',user_id:87654321,time:1793000000,message:[{type:'text',data:{text:'这是虚构的安装连接检查。'}}],sender:{nickname:'虚构用户'}})));
 await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));const address=server.address();assert.ok(address&&typeof address!=='string');
-const settings={schemaVersion:1,dataDir:data,model:{model:'unused',credentialStore:join(root,'unused.yaml')},qq:{botId:'12345678',ownerId:'87654321',tokenFile:join(root,'onebot.token'),httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`}};
+const settings={schemaVersion:1,dataDir:data,localOwnerControl:true,model:{model:'unused',credentialStore:join(root,'unused.yaml')},qq:{botId:'12345678',ownerId:'87654321',tokenFile:join(root,'onebot.token'),httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`}};
 await writeFile(file,JSON.stringify(settings));await writeFile(settings.qq.tokenFile,token);
 const options={scripted:true,foundationTemplate:resolve('profiles/persona.foundation.md')};let host:Awaited<ReturnType<typeof startInstallation>>|undefined;
 try{

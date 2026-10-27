@@ -62,6 +62,8 @@ export interface HostRuntimeOptions {
   readonly createBiliOwnerPorts?:()=>Promise<BiliOwnerPorts>;
   /** Trusted program hook, awaited before Core/Memory or channel admission; never loaded from profile JSON. */
   readonly installModelAdmission?:(ctx:Context,config:PreparedHostConfig)=>void|Promise<void>;
+  /** Trusted native ingress registration, before policy validation and Core admission. */
+  readonly installChannels?:(ctx:Context,config:PreparedHostConfig)=>void|Promise<void>;
   readonly onPhase?:(phase:HostPhase,host:ManagedHost)=>void;
   readonly onModelCall?:(call:{provider:string;model:string;purpose:string;status:'started'|'completed'|'failed'})=>void;
 }
@@ -155,6 +157,7 @@ export class ManagedHost {
       else{try{const ports=await this.options.createBiliOwnerPorts();this.biliOwnerValue=await openBiliOwnerChannel(ctx,{agentId:this.config.config.agent.id,profileId:this.config.config.profileId,dataDir:this.config.paths.core,createStore:false,settings:biliOwner},ports);this.biliOwnerValue.holdIngress();this.plugin('channel-bili-owner','starting');}
         catch(error){if(this.health.find(plugin=>plugin.id==='channel-bili-owner')?.required)throw error;this.biliOwnerValue=undefined;this.plugin('channel-bili-owner','degraded',stableCode(error,'HOST_BILI_OWNER_UNAVAILABLE'));}}
     }else if(biliOwner)this.plugin('channel-bili-owner','disabled','HOST_SINGLE_RUN');
+    if(this.mode==='daemon')await this.options.installChannels?.(ctx,this.config);
     if(this.mode==='daemon'&&biliOwner&&!this.biliOwnerValue&&this.biliOwnerPendingWork())throw new Error('HOST_BILI_OWNER_PENDING_WORK_REQUIRES_CHANNEL');
     const producerActive=(producer:string)=>producer==='activity'?!!this.activityValue&&this.mode==='daemon':producer==='channel-qq'?!!this.qqValue:producer==='qq-tasks'?!!this.qqValue?.getStatus().tasks.registered:producer==='channel-bili-owner'?!!this.biliOwnerValue:producer==='bili-owner-tasks'?!!this.biliOwnerValue&&!!biliOwner?.tasks.enabled:producer==='channel-simulator'?!!simulator&&this.mode==='daemon':true;
     const absentChannelActions=new Set<string>([...(!this.qqValue&&qq?[...QQ.QQ_ACTIONS,...QQ.QQ_TASK_ACTIONS,...QQ.QQ_MEDIA_ACTIONS,...QQ.QQ_PROGRESS_ACTIONS]:[]),...(!this.biliOwnerValue&&biliOwner?[...BILI_OWNER_TASK_ACTIONS]:[])]);
