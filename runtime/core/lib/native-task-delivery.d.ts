@@ -59,7 +59,7 @@ export declare class NativeTaskDelivery {
         deliveryId: string;
         runId: string;
         taskId: string;
-        state: "accepted" | "interrupted" | "rendering" | "ready" | "sending" | "partial" | "uncertain" | "verifying" | "sent" | "not-sent" | "rejected";
+        state: "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain" | "rejected" | "interrupted";
         version: number;
         receiptId: string | null;
         error: string | null;

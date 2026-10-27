@@ -14,8 +14,8 @@ export declare const ToolFeedbackSchema: z.ZodObject<{
     effects: z.ZodEnum<{
         unknown: "unknown";
         none: "none";
-        applied: "applied";
         partial: "partial";
+        applied: "applied";
     }>;
     completeness: z.ZodEnum<{
         unknown: "unknown";

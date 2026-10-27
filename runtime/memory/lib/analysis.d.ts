@@ -23,7 +23,7 @@ export declare class MemoryAnalysis {
     quiesce(): void;
     cancelRunning(): void;
     get health(): {
-        state: "failed" | "paused" | "stopped" | "ready";
+        state: "ready" | "failed" | "paused" | "stopped";
         active: boolean;
     };
     start(): void;
@@ -34,7 +34,7 @@ export declare class MemoryAnalysis {
         duplicate: boolean;
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -47,7 +47,7 @@ export declare class MemoryAnalysis {
     status(context: ActionContext, id: unknown): {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -69,7 +69,7 @@ export declare class MemoryAnalysis {
             overview: string;
             gaps: string[];
             claims: {
-                action: "add" | "revise" | "none";
+                action: "revise" | "none" | "add";
                 kind: "experience" | "knowledge" | "preference" | "procedure";
                 claimType: "observation" | "self_report" | "reported_claim" | "inference";
                 subject: string;
@@ -136,7 +136,7 @@ export declare class MemoryAnalysis {
         }[];
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -149,7 +149,7 @@ export declare class MemoryAnalysis {
     cancel(context: ActionContext, id: unknown): {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;

@@ -188,11 +188,11 @@ export declare const TaskResolutionSchema: z.ZodObject<{
 }, z.core.$strict>;
 export declare const ExecutionMotivationSchema: z.ZodObject<{
     kind: z.ZodEnum<{
+        unknown: "unknown";
+        maintenance: "maintenance";
         "explicit-task": "explicit-task";
         "self-exploration": "self-exploration";
-        unknown: "unknown";
         "conversation-invitation": "conversation-invitation";
-        maintenance: "maintenance";
         mixed: "mixed";
     }>;
     basis: z.ZodDefault<z.ZodArray<z.ZodString>>;

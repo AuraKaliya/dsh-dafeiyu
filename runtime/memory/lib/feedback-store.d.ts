@@ -65,8 +65,8 @@ export declare const archiveSchema: z.ZodObject<{
         effects: z.ZodEnum<{
             unknown: "unknown";
             none: "none";
-            applied: "applied";
             partial: "partial";
+            applied: "applied";
         }>;
         resourceVersion: z.ZodString;
         diagnostics: z.ZodArray<z.ZodObject<{

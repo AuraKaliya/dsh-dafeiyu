@@ -51,7 +51,7 @@ export declare class NativeExpression implements NativeExpressionPort {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "image" | "file" | "record";
+                delivery: "record" | "file" | "image";
                 asset: {
                     schemaVersion: 1;
                     id: string;
@@ -101,7 +101,7 @@ export declare class NativeExpression implements NativeExpressionPort {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "image" | "file" | "record";
+                delivery: "record" | "file" | "image";
                 asset: {
                     schemaVersion: 1;
                     id: string;

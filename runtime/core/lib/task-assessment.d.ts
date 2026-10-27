@@ -9,14 +9,14 @@ export declare function assessTask(ctx: Context, model: AgentOptions, cwd: strin
     resultRef: RunResultRef;
 }, facts: Json): Promise<{
     assessment: {
-        goalStatus: "met" | "partial" | "unmet" | "uncertain";
+        goalStatus: "partial" | "uncertain" | "met" | "unmet";
         summary: string;
         evidenceIds: string[];
         limitations: string[];
         unfinished: string[];
         requiredCapabilities: string[];
         retainExperience: boolean;
-        next: "deliver" | "continue" | "wait" | "capability-change";
+        next: "continue" | "deliver" | "wait" | "capability-change";
     };
     resultRef: {
         sessionId: string;

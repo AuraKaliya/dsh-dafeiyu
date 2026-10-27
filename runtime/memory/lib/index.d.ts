@@ -113,17 +113,17 @@ export declare const MemoryPluginConfigSchema: z.ZodObject<{
         timeoutMs: z.ZodDefault<z.ZodNumber>;
         maxPending: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
-    maintenance: z.ZodOptional<z.ZodObject<{
-        timeoutMs: z.ZodDefault<z.ZodNumber>;
-        maxInputBytes: z.ZodDefault<z.ZodNumber>;
-        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strict>>;
     feedback: z.ZodOptional<z.ZodObject<{
         maxArchiveBytes: z.ZodDefault<z.ZodNumber>;
         maxBriefBytes: z.ZodDefault<z.ZodNumber>;
         maxPageChars: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     context: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;
+    maintenance: z.ZodOptional<z.ZodObject<{
+        timeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxInputBytes: z.ZodDefault<z.ZodNumber>;
+        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     compaction: z.ZodOptional<z.ZodPipe<z.ZodObject<{
         inputTokens: z.ZodNumber;
         thresholdRatio: z.ZodDefault<z.ZodNumber>;
@@ -233,16 +233,18 @@ export declare class MemoryService extends Service {
     runtimeHealth(): {
         lifecycle: import("#dafeiyu/contracts").ServicePhase;
         analysis: {
-            state: "failed" | "paused" | "stopped" | "ready";
+            state: "ready" | "failed" | "paused" | "stopped";
             active: boolean;
         } | {
             state: "not-configured";
             active: false;
         };
         maintenance: {
-            state: "paused" | "closed" | "ready";
+            state: "ready" | "paused" | "closed";
             active: number;
-            requests: Record<string, number>;
+            requests: {
+                [k: string]: number;
+            };
             scheduler: "connected" | "not-configured";
         } | {
             state: "not-configured";
@@ -395,7 +397,7 @@ export declare class MemoryService extends Service {
         generation: number;
         nextCursor: string | null;
         status: "ok";
-        mode: "deleted" | "normal";
+        mode: "normal" | "deleted";
         untrustedEvidence: boolean;
     };
     searchDeleted(context: ActionContext, raw: unknown): Failure | {
@@ -466,7 +468,7 @@ export declare class MemoryService extends Service {
         generation: number;
         nextCursor: string | null;
         status: "ok";
-        mode: "deleted" | "normal";
+        mode: "normal" | "deleted";
         untrustedEvidence: boolean;
     };
     private open;
@@ -822,7 +824,7 @@ export declare class MemoryService extends Service {
         duplicate: boolean;
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -837,7 +839,7 @@ export declare class MemoryService extends Service {
     analysisStatus(context: ActionContext, id: unknown): Failure | {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -857,7 +859,7 @@ export declare class MemoryService extends Service {
             overview: string;
             gaps: string[];
             claims: {
-                action: "add" | "revise" | "none";
+                action: "revise" | "none" | "add";
                 kind: "experience" | "knowledge" | "preference" | "procedure";
                 claimType: "observation" | "self_report" | "reported_claim" | "inference";
                 subject: string;
@@ -924,7 +926,7 @@ export declare class MemoryService extends Service {
         }[];
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -939,7 +941,7 @@ export declare class MemoryService extends Service {
     analysisCancel(context: ActionContext, id: unknown): Failure | {
         status: "ok";
         jobId: string;
-        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
+        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;

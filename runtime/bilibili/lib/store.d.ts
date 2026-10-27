@@ -12,13 +12,13 @@ export declare const BiliPageSchema: z.ZodObject<{
     id: z.ZodUUID;
     owner: z.ZodString;
     kind: z.ZodEnum<{
-        media: "media";
-        video: "video";
-        search: "search";
         discover: "discover";
+        search: "search";
+        video: "video";
         comments: "comments";
         subtitles: "subtitles";
         danmaku: "danmaku";
+        media: "media";
     }>;
     sourceKey: z.ZodString;
     sourceVersion: z.ZodNumber;
@@ -61,7 +61,7 @@ export declare class BiliStore {
     begin(context: ExecutionContextV3, requestId: string, input: unknown): {
         id: string;
         owner: string;
-        kind: "media" | "video" | "search" | "discover" | "comments" | "subtitles" | "danmaku";
+        kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
         sourceKey: string;
         sourceVersion: number;
         fetchedAt: string;
@@ -76,7 +76,7 @@ export declare class BiliStore {
             scene: {
                 channel: string;
                 account: string;
-                kind: "private" | "group" | "local";
+                kind: "local" | "private" | "group";
                 id: string;
             };
             key: string;
@@ -90,7 +90,7 @@ export declare class BiliStore {
     complete(context: ExecutionContextV3, requestId: string, value: Omit<BiliPage, 'id' | 'owner' | 'fetchedAt' | 'sourceVersion'>, now?: number, related?: (page: BiliPage) => void): {
         id: string;
         owner: string;
-        kind: "media" | "video" | "search" | "discover" | "comments" | "subtitles" | "danmaku";
+        kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
         sourceKey: string;
         sourceVersion: number;
         fetchedAt: string;
@@ -105,7 +105,7 @@ export declare class BiliStore {
             scene: {
                 channel: string;
                 account: string;
-                kind: "private" | "group" | "local";
+                kind: "local" | "private" | "group";
                 id: string;
             };
             key: string;
@@ -120,7 +120,7 @@ export declare class BiliStore {
     pages(owner: string): {
         id: string;
         owner: string;
-        kind: "media" | "video" | "search" | "discover" | "comments" | "subtitles" | "danmaku";
+        kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
         sourceKey: string;
         sourceVersion: number;
         fetchedAt: string;
@@ -135,7 +135,7 @@ export declare class BiliStore {
             scene: {
                 channel: string;
                 account: string;
-                kind: "private" | "group" | "local";
+                kind: "local" | "private" | "group";
                 id: string;
             };
             key: string;
@@ -191,7 +191,7 @@ export declare class BiliStore {
                 scene: {
                     channel: string;
                     account: string;
-                    kind: "private" | "group" | "local";
+                    kind: "local" | "private" | "group";
                     id: string;
                 };
                 key: string;
@@ -200,7 +200,7 @@ export declare class BiliStore {
                 roots: string[];
                 detail: z.core.util.JSONType;
             };
-            kind: "image" | "audio" | "video" | "document";
+            kind: "video" | "image" | "audio" | "document";
             name: string | null;
             mimeHint: string | null;
             bytesHint: number | null;

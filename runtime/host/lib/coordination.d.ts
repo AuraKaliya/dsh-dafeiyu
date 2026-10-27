@@ -11,8 +11,8 @@ declare const ownerSchema: z.ZodObject<{
         path: z.ZodString;
         identity: z.ZodString;
         kind: z.ZodEnum<{
-            directory: "directory";
             file: "file";
+            directory: "directory";
         }>;
     }, z.core.$strict>>;
     startedAt: z.ZodISODateTime;
@@ -29,7 +29,7 @@ export declare function conflict(resources: readonly HostResource[], file?: stri
     resources: {
         path: string;
         identity: string;
-        kind: "directory" | "file";
+        kind: "file" | "directory";
     }[];
     startedAt: string;
 } | undefined;

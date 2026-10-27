@@ -3,14 +3,14 @@ import type { Conversation, SourceRef } from '#dafeiyu/contracts';
 import type { Journal } from '#dafeiyu/journal';
 export declare const deliveryDigest: (v: unknown) => string;
 declare const stateSchema: z.ZodEnum<{
-    interrupted: "interrupted";
-    uncertain: "uncertain";
     rendering: "rendering";
     ready: "ready";
     sending: "sending";
     sent: "sent";
     "not-sent": "not-sent";
+    uncertain: "uncertain";
     rejected: "rejected";
+    interrupted: "interrupted";
 }>;
 export type TaskDeliveryState = z.infer<typeof stateSchema>;
 export declare const deliveryBindingSchema: z.ZodObject<{
@@ -61,7 +61,7 @@ export declare class DeliveryStore {
     }): {
         id: string;
         taskId: string;
-        state: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
+        state: "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain" | "rejected" | "interrupted";
         binding: {
             material: {
                 jobId: string;
@@ -101,7 +101,7 @@ export declare class DeliveryStore {
     }, binding: DeliveryBinding): {
         id: string;
         taskId: string;
-        state: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
+        state: "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain" | "rejected" | "interrupted";
         binding: {
             material: {
                 jobId: string;
@@ -137,7 +137,7 @@ export declare class DeliveryStore {
     get(id: string): {
         id: string;
         taskId: string;
-        state: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
+        state: "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain" | "rejected" | "interrupted";
         binding: {
             material: {
                 jobId: string;
@@ -173,7 +173,7 @@ export declare class DeliveryStore {
     status(taskId: string, id: string): {
         deliveryId: string;
         jobId: string;
-        status: "interrupted" | "uncertain" | "rendering" | "ready" | "sending" | "sent" | "not-sent" | "rejected";
+        status: "rendering" | "ready" | "sending" | "sent" | "not-sent" | "uncertain" | "rejected" | "interrupted";
         receiptId: string | null;
         simulationOnly: boolean;
     };

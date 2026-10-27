@@ -102,6 +102,11 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         maxReadBytes: z.ZodDefault<z.ZodNumber>;
         voiceDirectives: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>>;
+    stickers: z.ZodPrefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        maxBytes: z.ZodDefault<z.ZodNumber>;
+        maxEntries: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     botId: z.ZodString;
     ownerId: z.ZodString;
     groupIds: z.ZodArray<z.ZodString>;
@@ -126,11 +131,6 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         quietMs: z.ZodDefault<z.ZodNumber>;
         maxWaitMs: z.ZodDefault<z.ZodNumber>;
         maxMessages: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strict>>;
-    stickers: z.ZodPrefault<z.ZodObject<{
-        enabled: z.ZodDefault<z.ZodBoolean>;
-        maxBytes: z.ZodDefault<z.ZodNumber>;
-        maxEntries: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     tasks: z.ZodPrefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

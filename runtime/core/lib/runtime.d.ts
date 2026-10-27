@@ -61,14 +61,14 @@ export declare class DshRuntime {
     }>;
     assessExecution(frame: TaskExecutionFrame, draft: Awaited<ReturnType<DshRuntime['runExecution']>>, facts: Json): Promise<{
         assessment: {
-            goalStatus: "met" | "partial" | "unmet" | "uncertain";
+            goalStatus: "partial" | "uncertain" | "met" | "unmet";
             summary: string;
             evidenceIds: string[];
             limitations: string[];
             unfinished: string[];
             requiredCapabilities: string[];
             retainExperience: boolean;
-            next: "deliver" | "continue" | "wait" | "capability-change";
+            next: "continue" | "deliver" | "wait" | "capability-change";
         };
         resultRef: {
             sessionId: string;
@@ -292,7 +292,7 @@ export declare class DshRuntime {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -340,7 +340,7 @@ export declare class DshRuntime {
             };
             fragments: {
                 ref: string;
-                kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;

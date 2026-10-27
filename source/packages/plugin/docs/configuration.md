@@ -6,6 +6,8 @@
 
 当前版本没有图形初始化表单，安装和启用插件本身不代表已配置成功。先退出DSH，再在当前profile的 `cordis.patch.yml` 序列末尾加入以下一项；已有同ID项时修改原项，不重复添加。默认桌面profile位于 `~/.dsh/profiles/desktop/`。
 
+组合包由DSH内置插件管理器安装，保持基座与插件SDK依赖隔离。插件等待DSH官方应用就绪后才加载自身桥接和配置、创建运行进程；等待期间停用会取消启动。下面的独立运行安装命令用于单独的安装目录。
+
 ```yaml
 - id: dsh-dafeiyu
   name: dsh-dafeiyu

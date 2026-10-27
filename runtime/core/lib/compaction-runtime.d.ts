@@ -1247,7 +1247,7 @@ export declare class CompactionRuntime {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -1295,7 +1295,7 @@ export declare class CompactionRuntime {
             };
             fragments: {
                 ref: string;
-                kind: "pending" | "decision" | "result" | "fact" | "constraint" | "correction" | "uncertainty" | "note";
+                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;

@@ -132,7 +132,7 @@ export declare class ExecutionCoordinator {
     submitMessageTask(context: ExecutionContextV3, pluginId: string, raw: unknown): {
         taskId: string;
         runId: string;
-        state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+        state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
         motivation: "explicit-task" | "self-exploration";
         sourceInboundId: string;
     };
@@ -142,14 +142,14 @@ export declare class ExecutionCoordinator {
     messageTaskStatus(context: ExecutionContextV3, pluginId: string, raw: unknown): {
         taskId: string;
         runId: string;
-        state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+        state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
         version: number;
         taskVersion: number;
         intentVersion: number;
         taskState: "completed" | "active" | "paused";
         title: string;
         goal: string;
-        motivation: "explicit-task" | "self-exploration" | "unknown" | "conversation-invitation" | "maintenance" | "mixed";
+        motivation: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
         resultCurrent: boolean;
         phase: {
             phase: z.core.util.JSONType | undefined;
@@ -160,15 +160,15 @@ export declare class ExecutionCoordinator {
             elapsedMs: number;
         } | null;
         assessment: {
-            goalStatus: "met" | "partial" | "unmet" | "uncertain";
-            next: "deliver" | "continue" | "wait" | "capability-change";
+            goalStatus: "partial" | "uncertain" | "met" | "unmet";
+            next: "continue" | "deliver" | "wait" | "capability-change";
             at: string;
         } | null;
         delivery: {
             deliveryId: string;
             runId: string;
             taskId: string;
-            state: "accepted" | "interrupted" | "rendering" | "ready" | "sending" | "partial" | "uncertain" | "verifying" | "sent" | "not-sent" | "rejected";
+            state: "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain" | "rejected" | "interrupted";
             version: number;
             receiptId: string | null;
             error: string | null;
@@ -184,11 +184,11 @@ export declare class ExecutionCoordinator {
     feedbackSource(runId: string): {
         item: import("#dafeiyu/contracts").PendingMessage;
         taskId: string;
-        state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+        state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
         error: string | null;
         operations: {
             state: "unknown" | "started" | "finished";
-            status: "unknown" | "failed" | "cancelled" | "partial" | "succeeded" | null;
+            status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
             effects: "unknown" | "none" | "confirmed" | null;
         }[];
     } | null;
@@ -243,7 +243,7 @@ export declare class ExecutionCoordinator {
             run: Readonly<{
                 id: string;
             }>;
-            state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
         };
         openTask: (id: string) => Readonly<{
             id: string;
@@ -264,7 +264,7 @@ export declare class ExecutionCoordinator {
         status: (ref: RunRef) => {
             id: string;
             taskId: string | null;
-            state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
             version: number;
             result: {
                 sessionId: string;
@@ -278,7 +278,7 @@ export declare class ExecutionCoordinator {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "failed" | "cancelled" | "partial" | "succeeded" | null;
+                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -290,7 +290,7 @@ export declare class ExecutionCoordinator {
         cancel: (ref: RunRef, input: unknown) => {
             id: string;
             taskId: string | null;
-            state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
             version: number;
             result: {
                 sessionId: string;
@@ -304,7 +304,7 @@ export declare class ExecutionCoordinator {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "failed" | "cancelled" | "partial" | "succeeded" | null;
+                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -315,7 +315,7 @@ export declare class ExecutionCoordinator {
         pause: (ref: RunRef, input: unknown) => {
             id: string;
             taskId: string | null;
-            state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
             version: number;
             result: {
                 sessionId: string;
@@ -329,7 +329,7 @@ export declare class ExecutionCoordinator {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "failed" | "cancelled" | "partial" | "succeeded" | null;
+                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -344,7 +344,7 @@ export declare class ExecutionCoordinator {
             run: Readonly<{
                 id: string;
             }>;
-            state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
         };
         acceptWake: (raw: unknown, task: TaskRef) => {
             task: Readonly<{
@@ -353,7 +353,7 @@ export declare class ExecutionCoordinator {
             run: Readonly<{
                 id: string;
             }>;
-            state: "accepted" | "queued" | "running" | "waiting" | "cancelling" | "completed" | "failed" | "cancelled" | "interrupted";
+            state: "accepted" | "interrupted" | "waiting" | "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
         };
     }>;
     bindWake(provider: WakeAuthorityProvider): () => void;
@@ -402,8 +402,10 @@ export declare class ExecutionCoordinator {
             hash: string;
         };
         body: {
-            id: string;
             schemaVersion: 1;
+            id: string;
+            runId: string;
+            operationId: string;
             scope: {
                 kind: "conversation";
                 agentId: string;
@@ -415,8 +417,6 @@ export declare class ExecutionCoordinator {
                 scopeKey: string;
             };
             intentVersion: number;
-            runId: string;
-            operationId: string;
             kind: "media-reply-authority";
             payloadHash: string;
             inboundHash: string | null;

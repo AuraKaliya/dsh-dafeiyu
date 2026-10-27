@@ -70,7 +70,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     put(destination,'source/package.json',JSON.stringify(development,null,2)+'\n');
     for(const file of ['package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
     for(const file of files(join(repository,'scripts/testing')))put(destination,'source/'+portable(relative(repository,file)),readFileSync(file));
-    const selected=['installation.test.ts','installation-runtime-fixture.ts','plugin-integration.test.ts','bili-owner-production.test.ts','bili-owner-production-fixture.ts','bili-owner-production-lease-child.ts'];
+    const selected=['plugin-startup.test.ts','installation.test.ts','installation-runtime-fixture.ts','plugin-integration.test.ts','bili-owner-production.test.ts','bili-owner-production-fixture.ts','bili-owner-production-lease-child.ts'];
     const visited=new Set();function testFile(path){if(visited.has(path))return;visited.add(path);const bytes=readFileSync(join(repository,'tests',path),'utf8');put(destination,'source/tests/'+path,bytes);
       for(const match of bytes.matchAll(/(?:from\s*|import\()\s*['"](\.\/[^'"]+)['"]/g)){const dependency=portable(join(dirname(path),match[1])).replace(/\.js$/,'.ts');if(existsSync(join(repository,'tests',dependency)))testFile(dependency);}}
     selected.forEach(testFile);put(destination,'source/tests/tooling/README.md','Public smoke suite; full internal acceptance evidence is not distributed.\n');

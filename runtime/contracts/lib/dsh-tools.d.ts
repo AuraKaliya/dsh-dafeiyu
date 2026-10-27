@@ -49,8 +49,8 @@ export declare const DshCapabilityChangeSchema: z.ZodObject<{
     id: z.ZodUUID;
     state: z.ZodEnum<{
         unknown: "unknown";
-        applied: "applied";
         failed: "failed";
+        applied: "applied";
         "restart-required": "restart-required";
     }>;
     authorization: z.ZodObject<{
@@ -70,11 +70,11 @@ export declare const DshCapabilityChangeSchema: z.ZodObject<{
         goal: z.ZodString;
         motivation: z.ZodObject<{
             kind: z.ZodEnum<{
+                unknown: "unknown";
+                maintenance: "maintenance";
                 "explicit-task": "explicit-task";
                 "self-exploration": "self-exploration";
-                unknown: "unknown";
                 "conversation-invitation": "conversation-invitation";
-                maintenance: "maintenance";
                 mixed: "mixed";
             }>;
             basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -110,8 +110,8 @@ export declare const DshCapabilityChangeSchema: z.ZodObject<{
             }, z.core.$strict>;
             senderId: z.ZodString;
             modality: z.ZodEnum<{
-                voice: "voice";
                 text: "text";
+                voice: "voice";
             }>;
             sourceHash: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{

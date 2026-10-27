@@ -26,7 +26,7 @@ export declare class BiliMedia implements MediaSourceProvider {
                     provider: string;
                     key: string;
                 };
-                kind: "audio" | "video";
+                kind: "video" | "audio";
                 codec: string;
                 quality: number;
                 bytes: number | null;

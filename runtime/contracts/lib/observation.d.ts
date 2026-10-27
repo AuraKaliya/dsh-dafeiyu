@@ -1,10 +1,10 @@
 import { z } from 'zod';
 export declare const ReadProgressSchema: z.ZodObject<{
     state: z.ZodEnum<{
-        failed: "failed";
         unread: "unread";
         observed: "observed";
         unavailable: "unavailable";
+        failed: "failed";
     }>;
     subject: z.ZodEnum<{
         reference: "reference";

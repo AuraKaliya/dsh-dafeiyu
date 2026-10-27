@@ -263,7 +263,7 @@ export declare class ExecutionMemoryState {
                 kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
-            category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
+            category: "preference" | "none" | "method" | "scope" | "premise" | "missing-information";
             blocking: boolean;
             reason: string;
             evidence: ({
@@ -315,7 +315,7 @@ export declare class ExecutionMemoryState {
             kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
-        category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
+        category: "preference" | "none" | "method" | "scope" | "premise" | "missing-information";
         blocking: boolean;
         reason: string;
         evidence: ({
@@ -366,7 +366,7 @@ export declare class ExecutionMemoryState {
             kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
-        category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
+        category: "preference" | "none" | "method" | "scope" | "premise" | "missing-information";
         blocking: boolean;
         reason: string;
         evidence: ({

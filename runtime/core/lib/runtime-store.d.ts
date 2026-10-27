@@ -10,14 +10,14 @@ export declare const RuntimeIdentitySchema: z.ZodObject<{
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
 export declare const RunStateSchema: z.ZodEnum<{
     accepted: "accepted";
+    interrupted: "interrupted";
+    waiting: "waiting";
     queued: "queued";
     running: "running";
-    waiting: "waiting";
     cancelling: "cancelling";
     completed: "completed";
     failed: "failed";
     cancelled: "cancelled";
-    interrupted: "interrupted";
 }>;
 export type RunState = z.infer<typeof RunStateSchema>;
 export declare const RunDefinitionSchema: z.ZodObject<{
@@ -437,7 +437,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
+            status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;
@@ -467,7 +467,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
+            status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;
@@ -523,7 +523,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
+            status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;
@@ -553,7 +553,7 @@ export declare class RuntimeStore {
         state: "unknown" | "started" | "finished";
         startedEventId: string;
         outcome: {
-            status: "failed" | "cancelled" | "unknown" | "partial" | "succeeded";
+            status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded";
             effects: "unknown" | "none" | "confirmed";
             completeness: "unknown" | "partial" | "complete";
             data: z.core.util.JSONType;

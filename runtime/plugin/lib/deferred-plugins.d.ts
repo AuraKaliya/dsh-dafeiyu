@@ -5,12 +5,12 @@ declare const rowSchema: z.ZodObject<{
     createdAt: z.ZodISODateTime;
     updatedAt: z.ZodISODateTime;
     state: z.ZodEnum<{
-        unknown: "unknown";
         queued: "queued";
         applying: "applying";
         applied: "applied";
         failed: "failed";
         "restart-required": "restart-required";
+        unknown: "unknown";
     }>;
     ownerPid: z.ZodDefault<z.ZodNullable<z.ZodNumber>>;
     hostPid: z.ZodDefault<z.ZodNullable<z.ZodNumber>>;
@@ -33,11 +33,11 @@ declare const rowSchema: z.ZodObject<{
         goal: z.ZodString;
         motivation: z.ZodObject<{
             kind: z.ZodEnum<{
+                unknown: "unknown";
+                maintenance: "maintenance";
                 "explicit-task": "explicit-task";
                 "self-exploration": "self-exploration";
-                unknown: "unknown";
                 "conversation-invitation": "conversation-invitation";
-                maintenance: "maintenance";
                 mixed: "mixed";
             }>;
             basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -73,8 +73,8 @@ declare const rowSchema: z.ZodObject<{
             }, z.core.$strict>;
             senderId: z.ZodString;
             modality: z.ZodEnum<{
-                voice: "voice";
                 text: "text";
+                voice: "voice";
             }>;
             sourceHash: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
@@ -128,7 +128,7 @@ export declare class DeferredPluginChanges {
         id: string;
         createdAt: string;
         updatedAt: string;
-        state: "unknown" | "queued" | "applying" | "applied" | "failed" | "restart-required";
+        state: "queued" | "applying" | "applied" | "failed" | "restart-required" | "unknown";
         ownerPid: number | null;
         hostPid: number | null;
         catalogVersion: string | null;
@@ -149,7 +149,7 @@ export declare class DeferredPluginChanges {
             };
             goal: string;
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
             policy: {
@@ -178,7 +178,7 @@ export declare class DeferredPluginChanges {
                     id: string;
                 };
                 senderId: string;
-                modality: "voice" | "text";
+                modality: "text" | "voice";
                 sourceHash: string;
             } | {
                 kind: "activity-wake";
@@ -216,14 +216,14 @@ export declare class DeferredPluginChanges {
     };
     status(): {
         id: string;
-        state: "unknown" | "queued" | "applying" | "applied" | "failed" | "restart-required";
+        state: "queued" | "applying" | "applied" | "failed" | "restart-required" | "unknown";
         updatedAt: string;
     }[];
     notifications(): {
         id: string;
         createdAt: string;
         updatedAt: string;
-        state: "unknown" | "queued" | "applying" | "applied" | "failed" | "restart-required";
+        state: "queued" | "applying" | "applied" | "failed" | "restart-required" | "unknown";
         ownerPid: number | null;
         hostPid: number | null;
         catalogVersion: string | null;
@@ -244,7 +244,7 @@ export declare class DeferredPluginChanges {
             };
             goal: string;
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
             policy: {
@@ -273,7 +273,7 @@ export declare class DeferredPluginChanges {
                     id: string;
                 };
                 senderId: string;
-                modality: "voice" | "text";
+                modality: "text" | "voice";
                 sourceHash: string;
             } | {
                 kind: "activity-wake";

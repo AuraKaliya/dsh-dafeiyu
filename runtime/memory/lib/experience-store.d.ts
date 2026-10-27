@@ -47,7 +47,7 @@ export declare class ExperienceStore {
             reason: string;
             goal: string;
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
             sources: ({
@@ -269,7 +269,7 @@ export declare class ExperienceStore {
                     requestId: string;
                 };
                 motivation: {
-                    kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                    kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                     basis: string[];
                 };
                 type: "run.running" | "run.completed" | "run.waiting" | "run.failed" | "run.cancelled" | "run.interrupted" | "evidence.changed";
@@ -353,7 +353,7 @@ export declare class ExperienceStore {
             reason: string;
             goal: string;
             motivation: {
-                kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
             sources: ({
@@ -575,7 +575,7 @@ export declare class ExperienceStore {
                     requestId: string;
                 };
                 motivation: {
-                    kind: "unknown" | "explicit-task" | "self-exploration" | "conversation-invitation" | "maintenance" | "mixed";
+                    kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                     basis: string[];
                 };
                 type: "run.running" | "run.completed" | "run.waiting" | "run.failed" | "run.cancelled" | "run.interrupted" | "evidence.changed";

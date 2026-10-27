@@ -2,8 +2,8 @@ import { z } from 'zod';
 /** Model judgments are persisted separately from execution facts and delivery receipts. */
 export declare const TaskAssessmentSchema: z.ZodObject<{
     goalStatus: z.ZodEnum<{
-        met: "met";
         partial: "partial";
+        met: "met";
         unmet: "unmet";
         uncertain: "uncertain";
     }>;
@@ -14,8 +14,8 @@ export declare const TaskAssessmentSchema: z.ZodObject<{
     requiredCapabilities: z.ZodDefault<z.ZodArray<z.ZodString>>;
     retainExperience: z.ZodDefault<z.ZodBoolean>;
     next: z.ZodEnum<{
-        deliver: "deliver";
         continue: "continue";
+        deliver: "deliver";
         wait: "wait";
         "capability-change": "capability-change";
     }>;

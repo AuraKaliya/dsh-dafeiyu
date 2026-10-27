@@ -26,7 +26,7 @@ export declare class WorkingMemory {
         hash: string;
         item: {
             id: string;
-            category: "goal" | "result" | "constraint" | "correction" | "pending" | "gap";
+            category: "result" | "goal" | "constraint" | "correction" | "pending" | "gap";
             text: string;
             sources: {
                 evidence: {

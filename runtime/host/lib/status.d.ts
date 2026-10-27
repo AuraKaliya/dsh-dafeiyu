@@ -33,10 +33,10 @@ declare const snapshotSchema: z.ZodObject<{
         state: z.ZodEnum<{
             disabled: "disabled";
             failed: "failed";
+            configured: "configured";
             ready: "ready";
             degraded: "degraded";
             stopped: "stopped";
-            configured: "configured";
             starting: "starting";
             "not-configured": "not-configured";
         }>;
@@ -277,7 +277,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
         plugins: {
             id: string;
             required: boolean;
-            state: "disabled" | "failed" | "ready" | "degraded" | "stopped" | "configured" | "starting" | "not-configured";
+            state: "disabled" | "failed" | "configured" | "ready" | "degraded" | "stopped" | "starting" | "not-configured";
             version: string | null;
             code: string | null;
         }[];
@@ -404,7 +404,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
         };
         schemas: {
             journal: 2;
-            memory: 8 | 12 | 9 | 10 | 11;
+            memory: 8 | 9 | 10 | 11 | 12;
             runtime: 3 | 4 | 2;
             activity?: 1 | null | undefined;
             media?: 2 | null | undefined;

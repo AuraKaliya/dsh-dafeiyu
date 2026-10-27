@@ -201,9 +201,9 @@ export declare const WakeOccurrenceBodySchema: z.ZodObject<{
     dueAt: z.ZodISODateTime;
     createdAt: z.ZodISODateTime;
     reason: z.ZodEnum<{
-        resume: "resume";
-        maintenance: "maintenance";
         time: "time";
+        maintenance: "maintenance";
+        resume: "resume";
         condition: "condition";
     }>;
     eventId: z.ZodNullable<z.ZodString>;

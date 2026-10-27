@@ -2,8 +2,7 @@ import Schema from '@deepseek-ai/schemastery';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute } from 'node:path';
-import { attachDshBridge } from './bridge-parent.js';
-import { readInstallationSettings } from './settings.js';
+import { deferPluginStart } from './startup.js';
 export const name = 'dsh-dafeiyu';
 export const inject = ['agents', 'tools', 'sessions', 'sessionPersistence'];
 export const Config = Schema.object({
@@ -18,19 +17,33 @@ export function apply(ctx, config) {
     }
     if (!isAbsolute(config.settingsFile))
         throw new Error('INSTALL_SETTINGS_ABSOLUTE_PATH_REQUIRED');
-    let bridgeEnabled = false;
-    try {
-        bridgeEnabled = readInstallationSettings(config.settingsFile).dshTools;
-    }
-    catch {
-        ctx.logger.warn('INSTALL_CONFIGURATION_REQUIRED：请检查大肥鱼配置文件。');
-        return;
-    }
-    return ctx.effect(() => {
+    return ctx.effect(() => deferPluginStart(ctx.get('appReady'), async (signal) => {
+        const { readInstallationSettings } = await import('./settings.js');
+        signal.throwIfAborted();
+        let bridgeEnabled = false;
+        try {
+            bridgeEnabled = readInstallationSettings(config.settingsFile).dshTools;
+        }
+        catch {
+            ctx.logger.warn('INSTALL_CONFIGURATION_REQUIRED：请检查大肥鱼配置文件。');
+            return () => { };
+        }
+        const bridge = bridgeEnabled ? await import('./bridge-parent.js') : undefined;
+        signal.throwIfAborted();
         const child = spawn(config.nodePath, [fileURLToPath(new URL('../bin/dafeiyu.mjs', import.meta.url)), 'start', '--settings', config.settingsFile], { windowsHide: true, env: { ...process.env, DAFEIYU_DSH_BRIDGE: bridgeEnabled ? '1' : '' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
-        const closeBridge = bridgeEnabled ? attachDshBridge(ctx, child, config.settingsFile) : async () => { };
         let closed = false;
         const finished = new Promise(resolve => { child.once('close', () => { closed = true; resolve(); }); child.once('error', () => { ctx.logger.error('INSTALL_NODE_UNAVAILABLE：请检查Node.js路径与版本。'); closed = true; resolve(); }); });
+        let closeBridge;
+        try {
+            closeBridge = bridge ? bridge.attachDshBridge(ctx, child, config.settingsFile) : async () => { };
+        }
+        catch (error) {
+            if (!closed) {
+                child.kill();
+                await finished;
+            }
+            throw error;
+        }
         child.on('message', (value) => {
             if (!value || typeof value !== 'object' || !('code' in value) || typeof value.code !== 'string' || !/^[A-Z][A-Z0-9_]{0,99}$/.test(value.code))
                 return;
@@ -62,5 +75,5 @@ export function apply(ctx, config) {
                 await closeBridge();
             }
         };
-    });
+    }, error => ctx.logger.warn(error instanceof Error && /^[A-Z][A-Z0-9_]{0,99}$/.test(error.message) ? error.message : 'INSTALL_START_FAILED')));
 }

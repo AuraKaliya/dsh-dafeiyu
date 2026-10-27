@@ -48,11 +48,11 @@ export declare const MaintenanceLifecycleSchema: z.ZodObject<{
     }, z.core.$strict>], "kind">;
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
+            unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
-            unknown: "unknown";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -179,11 +179,11 @@ export declare const MaintenanceSnapshotSchema: z.ZodObject<{
     goal: z.ZodString;
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
+            unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
-            unknown: "unknown";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -412,11 +412,11 @@ export declare const MaintenanceSnapshotSchema: z.ZodObject<{
         }, z.core.$strict>], "kind">;
         motivation: z.ZodObject<{
             kind: z.ZodEnum<{
+                unknown: "unknown";
+                maintenance: "maintenance";
                 "explicit-task": "explicit-task";
                 "self-exploration": "self-exploration";
-                unknown: "unknown";
                 "conversation-invitation": "conversation-invitation";
-                maintenance: "maintenance";
                 mixed: "mixed";
             }>;
             basis: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -536,11 +536,11 @@ export declare const ExperienceRevisionSchema: z.ZodObject<{
     goal: z.ZodString;
     motivation: z.ZodObject<{
         kind: z.ZodEnum<{
+            unknown: "unknown";
+            maintenance: "maintenance";
             "explicit-task": "explicit-task";
             "self-exploration": "self-exploration";
-            unknown: "unknown";
             "conversation-invitation": "conversation-invitation";
-            maintenance: "maintenance";
             mixed: "mixed";
         }>;
         basis: z.ZodDefault<z.ZodArray<z.ZodString>>;

@@ -1,7 +1,9 @@
 import { z } from 'zod';
 export declare const mediaAuthorityBodySchema: z.ZodObject<{
-    id: z.ZodUUID;
     schemaVersion: z.ZodLiteral<1>;
+    id: z.ZodUUID;
+    runId: z.ZodUUID;
+    operationId: z.ZodUUID;
     scope: z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"conversation">;
         agentId: z.ZodString;
@@ -13,8 +15,6 @@ export declare const mediaAuthorityBodySchema: z.ZodObject<{
         scopeKey: z.ZodString;
     }, z.core.$strict>], "kind">;
     intentVersion: z.ZodNumber;
-    runId: z.ZodUUID;
-    operationId: z.ZodUUID;
     kind: z.ZodLiteral<"media-reply-authority">;
     payloadHash: z.ZodString;
     inboundHash: z.ZodNullable<z.ZodString>;

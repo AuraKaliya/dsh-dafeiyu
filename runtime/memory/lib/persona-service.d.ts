@@ -151,7 +151,7 @@ export declare class GrowthService {
                 version: number;
             };
             runId: string;
-            state: "completed" | "interrupted" | "failed" | "cancelled";
+            state: "completed" | "failed" | "cancelled" | "interrupted";
             gaps: string[];
         }[];
         stageRevision: number;
@@ -161,7 +161,7 @@ export declare class GrowthService {
             id: string;
             version: number;
             state: "superseded" | "withdrawn" | "proposed" | "held" | "trial" | "adopted" | "rejected" | "dormant";
-            kind: "preference" | "view" | "interest" | "habit" | "relationship" | "value-application";
+            kind: "preference" | "interest" | "view" | "habit" | "relationship" | "value-application";
             applicability: string;
             maturity: string;
             available: boolean;
@@ -335,7 +335,7 @@ export declare class GrowthService {
             kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
-        category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
+        category: "preference" | "none" | "method" | "scope" | "premise" | "missing-information";
         blocking: boolean;
         reason: string;
         evidence: ({
@@ -392,7 +392,7 @@ export declare class GrowthService {
                 kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
-            category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
+            category: "preference" | "none" | "method" | "scope" | "premise" | "missing-information";
             blocking: boolean;
             reason: string;
             evidence: ({

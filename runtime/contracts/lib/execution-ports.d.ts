@@ -23,8 +23,8 @@ export declare const ExecutionInputSchema: z.ZodObject<{
     text: z.ZodString;
     proofHash: z.ZodString;
     kind: z.ZodEnum<{
-        "execution-source": "execution-source";
         "selected-memory": "selected-memory";
+        "execution-source": "execution-source";
     }>;
     sourceRef: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"memory">;

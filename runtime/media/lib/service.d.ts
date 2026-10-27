@@ -125,7 +125,7 @@ export declare class MediaService extends Service implements MediaPort {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "deleted" | "failed" | "staging" | "ready" | "evicted";
+        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -175,7 +175,7 @@ export declare class MediaService extends Service implements MediaPort {
             completeness: "unknown" | "complete" | "partial";
         };
         readProgress: {
-            state: "failed" | "observed" | "unread" | "unavailable";
+            state: "failed" | "unavailable" | "observed" | "unread";
             subject: "source-range" | "reference" | "provided-page";
             completeness: "unknown" | "complete" | "partial";
         };
@@ -217,7 +217,7 @@ export declare class MediaService extends Service implements MediaPort {
         understood: boolean;
     } | {
         metadata: {
-            kind: "image" | "audio" | "video" | "unknown";
+            kind: "unknown" | "image" | "audio" | "video";
             width: number | null;
             height: number | null;
             durationMs: number | null;
@@ -381,7 +381,7 @@ export declare class MediaService extends Service implements MediaPort {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "image" | "file" | "record";
+            delivery: "record" | "file" | "image";
             asset: {
                 schemaVersion: 1;
                 id: string;

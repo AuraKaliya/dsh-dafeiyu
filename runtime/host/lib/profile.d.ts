@@ -49,8 +49,8 @@ export declare const manifestFile: (config: PreparedHostConfig) => string;
 export declare function readManifest(config: PreparedHostConfig): ProfileManifest | null;
 export declare function writeManifest(config: PreparedHostConfig, value: ProfileManifest): void;
 export declare function storageFiles(config: PreparedHostConfig): ({
-    name: "memory" | "feedback" | "analysis" | "retrieval" | "working";
-    kind: "memory" | "feedback" | "analysis" | "retrieval" | "working";
+    name: "feedback" | "memory" | "analysis" | "retrieval" | "working";
+    kind: "feedback" | "memory" | "analysis" | "retrieval" | "working";
     file: string;
 } | {
     name: string;

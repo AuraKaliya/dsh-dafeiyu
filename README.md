@@ -1,6 +1,6 @@
 # 大肥鱼 · dsh-dafeiyu
 
-v0.22.0 预览版 · [更新说明](docs/release-notes.md)
+v0.22.1 预览版 · [更新说明](docs/release-notes.md)
 
 基于 DeepSeek Harness 的可成长智能体。通过交流与探索积累经历，由记忆与成长统一管理阶段人格、偏好和关系；核心使用这些状态，独立判断并执行明确任务。
 
