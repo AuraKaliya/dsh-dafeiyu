@@ -84,6 +84,7 @@ const quoteKey=(reply:Reply)=>reply.taskResult?'task:'+reply.taskResult.runId:re
 
 /** Explicitly scoped QQ transport. No model calls, shell tools, friend approvals or history replay. */
 export class QqChannel extends Service {
+  private localOwnerTransport:QqSegmentedTransport|undefined;
   private readonly config: z.output<typeof configSchema>;
   private readonly api: OneBot;
   private readonly store: QqStore;
@@ -336,6 +337,27 @@ export class QqChannel extends Service {
     const messages=result.messages.map(({parts,...node})=>{const selected=parts.filter(p=>['image','record','video','file'].includes(p.type)).slice(0,remaining);remaining-=selected.length;
       const media=this.media?.remember(scene,messageId,sender,{forward:proof.hash,node:node.index,parts:selected},selected,1000+(index*20+node.index)*1000);
       return {...node,kinds:[...new Set(parts.map(p=>p.type))],...(media?.attachments.length?{media:media.attachments}:{})};});return {...result,messages};}
+  /** Program-only local delegation transport. The source remains local-owner, never a forged QQ inbound. */
+  deliverLocalOwner(reply:Reply,signal:AbortSignal,authority?:()=>void):Promise<DeliveryResult>{
+    if(typeof authority!=='function'||reply.media)return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
+    const check=async(value:Reply,workSignal:AbortSignal)=>{workSignal.throwIfAborted();authority();
+      if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');
+      const scene=value.conversation;if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='private'||scene.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');
+      const source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},value.sourceMessageId);
+      if(!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('SOURCE_MESSAGE_NOT_FOUND');
+      if(value.taskResult&&(value.taskResult.inboundId!==source.id||conversationKey(this.config.agentId,value.taskResult.target)!==conversationKey(this.config.agentId,scene)||Date.parse(value.taskResult.expiresAt)<=Date.now()))throw new Error('SOURCE_STALE');
+      await this.api.verify(workSignal);authority();};
+    // Each invocation supplies its own authority; the transport only retains immutable ledger state.
+    this.localOwnerTransport??=new QqSegmentedTransport({ledger:this.store.delivery,
+      ...(this.config.replyDelay?{beforeSend:(value:Reply,workSignal:AbortSignal)=>waitForQqReply(value.text,workSignal),betweenMessages:waitBetweenQqMessages}:{}),
+      check:async(value,workSignal)=>{if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');if(value.conversation.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');await this.api.verify(workSignal);},
+      send:async(_value,text,workSignal)=>z.object({message_id:platformId}).parse(await this.api.call('send_private_msg',{user_id:Number(this.config.ownerId),message:[{type:'text',data:{text}}]},workSignal)).message_id,
+      confirmed:(value,text,receipt)=>{const target={channel:'qq',account:this.config.botId,kind:'private' as const,id:this.config.ownerId};this.store.remember(this.cacheRoute(target),receipt,this.config.botId,value.taskResult?'[本地主人委托的任务结果已交付；正文须经任务来源核验。]':text,{occurredAt:new Date().toISOString(),unsupported:value.taskResult?['task-result-body-withheld']:[]});}});
+    const guarded=()=>{authority();const scene=reply.conversation,source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},reply.sourceMessageId);
+      if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='private'||scene.id!==this.config.ownerId||!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');};
+    const work=check(reply,signal).then(()=>this.localOwnerTransport!.deliver(reply,signal,guarded)).catch(()=>({status:'not-sent' as const,code:'LOCAL_OWNER_DELIVERY_REJECTED'}));
+    this.sending.add(work);void work.finally(()=>this.sending.delete(work));return work;
+  }
   deliver(reply: Reply, signal: AbortSignal, authority?:()=>void): Promise<DeliveryResult> {
     if(this.stopped)return Promise.resolve({status:'not-sent',code:'CHANNEL_OFFLINE'});
     if(reply.media||this.store.mediaDelivery.progress(reply.id))return Promise.resolve({status:'not-sent',code:'MEDIA_DELIVERY_AUTHORITY_REQUIRED'});

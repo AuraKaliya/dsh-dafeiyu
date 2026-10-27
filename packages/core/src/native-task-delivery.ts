@@ -92,7 +92,7 @@ export class NativeTaskDelivery {
         const rendered=await renderTaskResult(this.host.ctx,model,this.host.cwd,record.id,persona.text,persona.items,packet,signal,guard,access.requestMaxBytes);guard();
         this.host.store.nativeDeliveries.rendered(runId,rendered.resultRef);this.host.flush();
         this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'verification',deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().verification).toISOString()});this.host.flush();
-        await provider.verify(access,packet.id,record.anchor.target.channel==='qq'?(qqVisibleText(rendered.text)||rendered.text):rendered.text,signal,guard);guard();this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();
+        await provider.verify(access,packet.id,['qq','local-owner'].includes(record.anchor.target.channel)?(qqVisibleText(rendered.text)||rendered.text):rendered.text,signal,guard);guard();this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();
       }
       record=this.host.store.nativeDeliveries.get(runId)!;if(record.state!=='ready'||nativeDeliveryHash(record.material)!==nativeDeliveryHash(material)||!record.renderRef)throw new Error('SOURCE_STALE');
       const body=this.host.store.nativeDeliveries.verifyCredential(runId);if(await readPersistedResult(this.host.ctx,record.renderRef)!==body)throw new Error('DELIVERY_BODY_MISMATCH');guard();
