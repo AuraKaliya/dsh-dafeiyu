@@ -45,7 +45,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
       for(const key of ['node','python','moduleDirectory'])if(value[key])value[key]=absolute(value[key]) as string;
       for(const key of ['model','labels']){const nested=value[key];if(nested&&typeof nested==='object'&&!Array.isArray(nested)&&nested.path)nested.path=absolute(nested.path) as string;}}}
     plugins.push({id:'media',required:true,config:media});}
-  if(bili)plugins.push({id:'bilibili',required:true,config:{...(bili.capabilities?{capabilities:{...(bili.session?{session:bili.session}:{})}}:{}),...(bili.channel?{channel:{accountUid:bili.channel.accountUid,ownerUid:bili.channel.ownerUid,tasks:{enabled:bili.capabilities}}}:{})}});
+  if(bili)plugins.push({id:'bilibili',required:true,config:{...(bili.capabilities?{capabilities:{...bili.requestPolicy,...(bili.session?{session:bili.session}:{})}}:{}),...(bili.channel?{channel:{accountUid:bili.channel.accountUid,ownerUid:bili.channel.ownerUid,tasks:{enabled:bili.capabilities}}}:{})}});
   const policies:unknown[]=[{id:'conversation',producers:['channel-qq',...(bili?.channel?['channel-bili-owner']:[])],actions:conversation,allowLocalWrite:true},
     {id:'qq-task',producers:['qq-tasks'],actions,allowLocalWrite:true,resources},
     {id:'local-task',producers:['host-cli'],actions,allowLocalWrite:true,resources:[...resources,{channel:'qq',account:settings.qq.botId,kind:'private',id:settings.qq.ownerId}]}];

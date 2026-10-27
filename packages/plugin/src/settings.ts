@@ -2,6 +2,7 @@ import { readFileSync,statSync } from 'node:fs';
 import { dirname,resolve } from 'node:path';
 import { z } from 'zod';
 import { QqBatchConfigSchema,QqStickersConfigSchema } from '@dafeiyu/qq';
+import { BiliRetryPolicySchema } from '@dafeiyu/bilibili';
 
 const path=z.string().trim().min(1).max(4096),uid=z.string().regex(/^[1-9][0-9]{0,19}$/),qq=z.string().regex(/^[1-9][0-9]{4,14}$/);
 export const InstallationSettingsSchema=z.strictObject({
@@ -15,6 +16,7 @@ export const InstallationSettingsSchema=z.strictObject({
     groupIds:z.array(qq).max(10).default([]),joinedGroups:z.boolean().default(false),replyDelay:z.boolean().default(true),naturalNames:z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
     media:z.strictObject({cacheRoots:z.array(path).max(8).default([]),httpsHosts:z.array(z.string()).max(16).default([]),sendEnabled:z.boolean().default(false),voiceDirectives:z.boolean().default(false)}).optional()}).refine(value=>value.botId!==value.ownerId,'Bot and owner must differ'),
   bilibili:z.strictObject({capabilities:z.boolean().default(true),
+    requestPolicy:z.strictObject({minIntervalMs:z.number().int().min(100).max(60000).optional(),retry:BiliRetryPolicySchema.optional()}).optional(),
     session:z.strictObject({file:path,expectedUid:uid}).optional(),
     channel:z.strictObject({accountUid:uid,ownerUid:uid,sessionFile:path}).refine(value=>value.accountUid!==value.ownerUid,'Account and owner must differ').optional()}).optional(),
   media:z.record(z.string(),z.json()).optional(),

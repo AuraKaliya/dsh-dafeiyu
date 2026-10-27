@@ -181,7 +181,7 @@ export class ManagedHost {
     this.executorHealth();this.biliOwnerHealth();
     this.biliHealth();
     this.phase=this.health.some(p=>p.state==='degraded')?'degraded':'ready';}
-  private biliHealth(){if(this.biliValue){const blocked=(this.biliValue.health.backoffUntil??0)>Date.now();this.plugin('bilibili',blocked?'degraded':'ready',blocked?'HOST_BILI_BACKOFF':null);}}
+  private biliHealth(){if(this.biliValue){const held=this.biliValue.health.diagnosticRequired,blocked=held||(this.biliValue.health.backoffUntil??0)>Date.now();this.plugin('bilibili',blocked?'degraded':'ready',held?'HOST_BILI_DIAGNOSTIC_REQUIRED':blocked?'HOST_BILI_BACKOFF':null);}}
   /** Missing optional IO must not turn retained private work into stale-source failures during global recovery. */
   private biliOwnerPendingWork():boolean{
     if(this.core.journal.list(['accepted','processing','reply-ready','sending']).some(item=>item.extensionId==='channel-bili-owner'))return true;

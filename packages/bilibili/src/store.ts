@@ -7,9 +7,10 @@ import { configureSqlite } from '@dafeiyu/journal';
 import { PersonaSourceRefSchema,MediaSourceDescriptionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema } from '@dafeiyu/contracts';
 import type { ResourceProof,ExecutionContextV3,MediaSourceDescription,PersonaSourceRef } from '@dafeiyu/contracts';
 import { BILI_SCENE } from './config.js';
+import { BiliDiagnostics,initializeBiliDiagnostics } from './diagnostics.js';
 
-export const BILI_APPLICATION_ID=0x44464236,BILI_SCHEMA_VERSION=1;
-export const BILI_TABLES=['bili_metadata','bili_clock','bili_requests','bili_sources','bili_revisions','bili_pages','bili_media','bili_outbox'] as const;
+export const BILI_APPLICATION_ID=0x44464236,BILI_SCHEMA_VERSION=2;
+export const BILI_TABLES=['bili_metadata','bili_clock','bili_requests','bili_sources','bili_revisions','bili_pages','bili_media','bili_outbox','bili_http_attempts','bili_http_control'] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 function canonical(value:unknown):string{const v=z.json().parse(value);return v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';}
 export const biliHash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest('hex');
@@ -21,15 +22,18 @@ export type BiliPage=z.infer<typeof BiliPageSchema>;
 const requestState=z.enum(['pending','completed','failed','interrupted']);
 export class BiliStore {
   private readonly db:DatabaseSync;
+  readonly diagnostics:BiliDiagnostics;
   private readonly checking=new Set<string>();
   readonly identity:z.infer<typeof identitySchema>;
   constructor(file:string,identity:z.infer<typeof identitySchema>,create=false,private readonly maxPages=4096){this.identity=identitySchema.parse(identity);z.number().int().min(1).max(65536).parse(maxPages);
     if(!existsSync(file)&&!create)throw new Error('BILI_MIGRATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});this.db=new DatabaseSync(file);
     try{this.db.exec('PRAGMA busy_timeout=5000;');const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),app=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
       if(!version&&!app&&create&&!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get()){configureSqlite(this.db);this.atomic(()=>this.initialize());}
-      else if(version!==1||app!==BILI_APPLICATION_ID)throw new Error('BILI_SCHEMA_UNSUPPORTED');
+      else if(![1,2].includes(version)||app!==BILI_APPLICATION_ID)throw new Error('BILI_SCHEMA_UNSUPPORTED');
       if(biliHash(JSON.parse(String(this.db.prepare('SELECT body FROM bili_metadata WHERE id=1').get()?.body)))!==biliHash(this.identity))throw new Error('BILI_IDENTITY_MISMATCH');
+      if(version===1){if(!create)throw new Error('BILI_MIGRATION_REQUIRED');this.atomic(()=>{initializeBiliDiagnostics(this.db);this.db.exec('PRAGMA user_version=2');});}
       for(const t of BILI_TABLES)this.db.prepare(`SELECT * FROM ${t} LIMIT 0`).all();configureSqlite(this.db);
+      this.diagnostics=new BiliDiagnostics(this.db);
     }catch(e){this.db.close();throw e;}}
   private initialize(){this.db.exec(`CREATE TABLE bili_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
     CREATE TABLE bili_clock(id INTEGER PRIMARY KEY CHECK(id=1),next_at INTEGER NOT NULL,blocked_until INTEGER NOT NULL,error TEXT);
@@ -40,7 +44,8 @@ export class BiliStore {
     CREATE TABLE bili_pages(id TEXT PRIMARY KEY,owner TEXT NOT NULL,body TEXT NOT NULL,hash TEXT NOT NULL,observation TEXT);
     CREATE TABLE bili_media(key TEXT PRIMARY KEY,description TEXT NOT NULL,hash TEXT NOT NULL,locator TEXT NOT NULL,expires_at INTEGER NOT NULL);
     CREATE TABLE bili_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,body TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0);
-    PRAGMA application_id=${BILI_APPLICATION_ID};PRAGMA user_version=1;`);
+    PRAGMA application_id=${BILI_APPLICATION_ID};PRAGMA user_version=2;`);
+    initializeBiliDiagnostics(this.db);
     for(const table of ['bili_metadata','bili_revisions'])this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable Bili history');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain Bili history');END;`);
     this.db.exec("CREATE TRIGGER bili_page_immutable BEFORE UPDATE OF id,owner,body,hash ON bili_pages BEGIN SELECT RAISE(ABORT,'Immutable Bili page');END;");this.db.prepare('INSERT INTO bili_metadata VALUES(1,?)').run(JSON.stringify(this.identity));}
   private atomic<T>(fn:()=>T){this.db.exec('BEGIN IMMEDIATE');try{const result=fn();this.db.exec('COMMIT');return result;}catch(e){this.db.exec('ROLLBACK');throw e;}}

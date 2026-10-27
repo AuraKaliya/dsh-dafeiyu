@@ -163,7 +163,7 @@ async function applyLocked(plan:MigrationPlan,options:{afterStep?:(kind:StorageK
     else if(current.exists&&!(manifest&&((item.kind==='runtime'&&current.version===RUNTIME_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['runtime_metadata'].includes(row.table)).every(row=>row.rows===0))||
       (item.kind==='activity'&&current.version===ACTIVITY_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['activity_metadata','activity_clock'].includes(row.table)).every(row=>row.rows===0))||
       (item.kind==='media'&&current.version===MEDIA_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>row.table!=='media_metadata').every(row=>row.rows===0))||
-      (item.kind==='bilibili'&&current.version===BILI_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['bili_metadata','bili_clock'].includes(row.table)).every(row=>row.rows===0))||
+      (item.kind==='bilibili'&&current.version===BILI_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['bili_metadata','bili_clock','bili_http_control'].includes(row.table)).every(row=>row.rows===0))||
       (item.kind==='executor'&&current.version===EXECUTOR_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['executor_metadata','executor_clock'].includes(row.table)).every(row=>row.rows===0))||
       (item.kind==='bili-owner'&&current.version===BILI_OWNER_SCHEMA_VERSION&&rowsSnapshot(item.file).filter(row=>!['bili_owner_binding','bili_owner_poll'].includes(row.table)).every(row=>row.rows===0)))))throw new Error('MIGRATION_SOURCE_APPEARED');}
   const sessions=await sessionsSnapshot(plan.bundle.sessionsDir);if(JSON.stringify(sessions)!==JSON.stringify(plan.sessions))throw new Error('MIGRATION_SESSION_CHANGED');
