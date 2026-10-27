@@ -24,7 +24,7 @@ test('core completion persists selected memory references, actual goal and motiv
   try{const accepted=h.port.submitTask(request);await h.core.whenIdle();assert.equal(h.port.status(accepted.run).state,'completed');
     const requests=rows(directory,'SELECT state,body FROM maintenance_requests');assert.equal(requests.length,1);assert.equal(requests[0]?.state,'waiting-scheduler');
     const body=JSON.parse(String(requests[0]!.body));assert.equal(body.goal,request.goal);assert.equal(body.motivation.kind,'explicit-task');assert.equal(body.sources.length,1);assert.equal(body.sources[0].kind,'memory');
-    assert.equal(body.event.operations[0].status,'succeeded');assert.equal(rows(directory,'SELECT * FROM experience_items').length,0);assert.equal(h.adapter.requests.length,2);
+    assert.equal(body.event.operations[0].status,'succeeded');assert.equal(rows(directory,'SELECT * FROM experience_items').length,0);assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,2);assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-assessment-')).length,1);
     assert.equal(rows(directory,'SELECT * FROM maintenance_events').length,2);
   }finally{await h.close();}
 });
@@ -51,7 +51,7 @@ test('lost event acknowledgement replays once after restart, then on-demand main
     const port=h.core.executionProducer('local-test',{motivation:{kind:'maintenance',basis:['on-demand-fixture']}}),task=port.openTask(accepted.task.id);
     const maintained=port.submitTask({requestId:'maintenance',taskId:task.id,expectedVersion:1,policyId:'test-policy'},task);await h.core.whenIdle();
     assert.equal(port.status(maintained.run).state,'completed');assert.equal(rows(directory,'SELECT state FROM maintenance_requests')[0]?.state,'completed');assert.equal(rows(directory,'SELECT * FROM maintenance_requests').length,1);
-    assert.equal(rows(directory,'SELECT * FROM maintenance_watermarks').length,1);assert.equal(rows(directory,'SELECT * FROM experience_items').length,0);assert.equal(h.adapter.requests.length,2);
+    assert.equal(rows(directory,'SELECT * FROM maintenance_watermarks').length,1);assert.equal(rows(directory,'SELECT * FROM experience_items').length,0);assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,2);assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-assessment-')).length,1);
   }finally{await h.close();}
 });
 

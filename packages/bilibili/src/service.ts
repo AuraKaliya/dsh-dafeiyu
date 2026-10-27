@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { ReadProgressSchema } from '@dafeiyu/contracts';
 import { ServiceGate,CapabilitySelectionSchema,PersonaRequestIdSchema,ExecutionScopeSchema,RunOriginSchema,redactContent } from '@dafeiyu/contracts';
 import type { ExecutionContextV3,ActionCapabilityV3,ResourceProof,PersonaAccess } from '@dafeiyu/contracts';
 import { BiliConfigSchema,BILI_SCENE,BvidSchema,NumberIdSchema,code } from './config.js';
@@ -52,7 +53,7 @@ export class BiliService extends Service {
     else{const page=this.store.page(biliOwner(context),input.source.pageId);this.exposed(access,page);const id=input.source.fieldId,field=page.fields.find(f=>f.id===id);if(!field)throw new Error('BILI_QUERY_SOURCE_UNAVAILABLE');text=field.text;}
     const chars=Array.from(text),end=input.end??chars.length;if(end<=input.start||end>chars.length||end-input.start>100)throw new Error('BILI_QUERY_RANGE_INVALID');const query=chars.slice(input.start,end).join('').trim();if(!query||redactContent(query).redacted)throw new Error('BILI_QUERY_PRIVATE_INPUT');return query;}
   private observed(context:ExecutionContextV3,page:BiliPage){const guard=this.guard(context),view=pageView(page),text=JSON.stringify(view);if(text.length>8000)throw new Error('BILI_PAGE_LIMIT');guard();const items=z.object({items:z.array(z.unknown())}).safeParse(page.data),count=items.success?items.data.items.length:1;
-    const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'bilibili',{requestId:'page:'+page.id,proof:this.store.proof(page),text,occurredAt:page.fetchedAt,coverage:page.coverage,counts:{received:count,processed:count}});this.store.bindObservation(page,observation.source);return {pageId:page.id,page:view,observation};}
+    const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'bilibili',{requestId:'page:'+page.id,proof:this.store.proof(page),text,occurredAt:page.fetchedAt,coverage:page.coverage,counts:{received:count,processed:count}});this.store.bindObservation(page,observation.source);return {pageId:page.id,page:view,readProgress:ReadProgressSchema.parse({state:'observed',subject:'provided-page',completeness:'complete'}),observation};}
   private async readPage(context:ExecutionContextV3,id:string,fingerprint:unknown,kind:BiliPage['kind'],sourceKey:string,read:(signal:AbortSignal,guard:()=>void)=>Promise<{data:unknown;fields:BiliPage['fields'];coverage:string[];register?:(page:BiliPage)=>void}>,parents:ResourceProof[]=[]){const active=this.guard(context),guard=()=>{active();if(parents.some(p=>!this.store.current(p)))throw new Error('SOURCE_STALE');},old=this.store.begin(context,id,fingerprint);if(old)return this.observed(context,old);
     try{guard();const signal=AbortSignal.any([context.signal,this.controller.signal]),result=await read(signal,guard);guard();const value={kind,sourceKey,data:z.json().parse(result.data),fields:result.fields,coverage:result.coverage,parents};if(JSON.stringify(pageView({...value,id:'',owner:'',sourceVersion:1,fetchedAt:new Date().toISOString()})).length>7800)throw new Error('BILI_PAGE_LIMIT');const page=this.store.complete(context,id,value,Date.now(),result.register);return this.observed(context,page);
     }catch(e){this.store.fail(context,id,code(e));throw e;}}

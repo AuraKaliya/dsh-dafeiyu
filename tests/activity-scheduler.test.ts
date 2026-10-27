@@ -32,7 +32,7 @@ test('a due plan runs through real DSH without QQ, and may pause its future sche
     step++;if(phase==='plan')return step===1?call('dafeiyu_activity_plan',planInput(f.now()+60000)):textReply('计划已保存');
     assert.match(JSON.stringify(options.messages),/activity-occurrence/);return step===1?call('dafeiyu_activity_update',{id,requestId:'rest',expectedVersion:1,state:'paused'}):textReply('我决定先休息，下次再探索');
   });
-  try{f.h.port.submitTask(request);await f.h.core.whenIdle();id=String(read(f.directory,'SELECT id FROM activity_schedules')[0]!.id);assert.equal(f.h.adapter.requests.length,2);
+  try{f.h.port.submitTask(request);await f.h.core.whenIdle();id=String(read(f.directory,'SELECT id FROM activity_schedules')[0]!.id);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,2);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-assessment-')).length,1);
     f.start();await f.tick();assert.equal(read(f.directory,'SELECT * FROM activity_occurrences').length,0);phase='explore';step=0;f.advance(60000);await f.tick();await f.h.core.whenIdle();
     const occurrence=read(f.directory,'SELECT state FROM activity_occurrences')[0];assert.equal(occurrence?.state,'completed');assert.equal(f.activity.store.get(id).status,'paused');assert.equal(f.h.core.journal.list().length,0);
     const count=f.h.adapter.requests.length;f.advance(3600000);await f.tick();await f.h.core.whenIdle();assert.equal(f.h.adapter.requests.length,count);assert.equal(f.activity.health.error,null);
@@ -72,7 +72,7 @@ test('task completion with selected evidence is scheduled for maintenance while 
 
 test('metadata-only task events settle without an auxiliary model or another Core Run',async()=>{
   const f=await fixture(()=>textReply('没有选择可保存内容'),{settings:{maintenance:true}});
-  try{f.h.port.submitTask(request);await f.h.core.whenIdle();f.start();await f.tick();assert.equal(f.h.adapter.requests.length,1);assert.equal(read(f.directory,'SELECT * FROM activity_schedules').length,0);
+  try{f.h.port.submitTask(request);await f.h.core.whenIdle();f.start();await f.tick();assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-assessment-')).length,1);assert.equal(read(f.directory,'SELECT * FROM activity_schedules').length,0);
     assert.equal(read(f.directory,'SELECT state FROM maintenance_requests','memory')[0]?.state,'completed');assert.equal(read(f.directory,'SELECT * FROM experience_items','memory').length,0);}
   finally{await f.close();}
 });
@@ -160,5 +160,16 @@ test('maintenance cannot reintroduce a revoked planning source through its deriv
     f.h.port.updateTask(parent.task,{requestId:'revoke-parent',expectedVersion:1,status:'paused'});const calls=f.h.adapter.requests.length;
     await f.tick();f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.equal(f.h.adapter.requests.length,calls);
     assert.equal(read(f.directory,"SELECT status FROM activity_schedules WHERE id<>(SELECT id FROM activity_schedules ORDER BY rowid LIMIT 1)")[0]?.status,'blocked');
+  }finally{await f.close();}
+});
+
+
+test('a capability loading wait keeps the original activity authority without an independent resume',async()=>{
+  let f:Awaited<ReturnType<typeof fixture>>,phase='plan',step=0;
+  f=await fixture(()=>phase==='plan'&&++step===1?call('dafeiyu_activity_plan',planInput(f.now()+60000)):textReply('已保存当前阶段'));
+  f.h.adapter.assessmentResponse=()=>textReply(JSON.stringify({goalStatus:'partial',summary:'等待需要的能力加载。',evidenceIds:[],limitations:[],unfinished:[],requiredCapabilities:['fixture_future_tool'],next:phase==='plan'?'deliver':'capability-change'}));
+  try{f.h.port.submitTask(request);await f.h.core.whenIdle();const id=String(read(f.directory,'SELECT id FROM activity_schedules')[0]!.id);
+    phase='explore';f.start();f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'waiting');
+    const calls=f.h.adapter.requests.length;f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.notEqual(f.activity.store.get(id).status,'blocked');assert.equal(f.h.adapter.requests.length,calls);assert.equal(f.activity.health.error,null);
   }finally{await f.close();}
 });

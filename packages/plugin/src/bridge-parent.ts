@@ -11,7 +11,7 @@ import { dirname,join } from 'node:path';
 import { DeferredPluginChanges } from './deferred-plugins.js';
 import { readInstallationSettings } from './settings.js';
 import { z } from 'zod';
-import { DshBridgeRequestSchema,DshToolCatalogSchema,ExternalTaskAuthorizationSchema,redactJson } from '@dafeiyu/contracts';
+import { DshBridgeRequestSchema,DshToolCatalogSchema,ExternalTaskAuthorizationSchema,DshCapabilityChangeSchema,redactJson } from '@dafeiyu/contracts';
 import type { DshToolCatalog,Json } from '@dafeiyu/contracts';
 
 interface Presets {mount(scope:Context,id:string):Promise<{id:string}>}
@@ -49,41 +49,50 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
       return await owner.sessionPersistence.stat(sessionId)?owner.agents.resume({resumeSessionId:sessionId,setup}):owner.agents.create({sessionId,meta:{cwd:dirname(settings.dataDir),agentPreset:'cordis'},setup});
     })();handles.set(key,promise);promise.catch(()=>handles.delete(key));}return promise;
   };
-  const catalog=async(h:AgentHandle,signal:AbortSignal):Promise<DshToolCatalog>=>{
+  const catalog=async(h:AgentHandle,signal:AbortSignal,taskId?:string):Promise<DshToolCatalog>=>{
     const tools=ctx.tools.schemas(h.agent).filter(tool=>!excluded.test(tool.name));
     const registry=ctx.get('skills') as {snapshot(input:{scope:AgentHandle['agent'];cwd:string;signal:AbortSignal}):Promise<unknown>}|undefined;
     const snapshot=registry&&tools.some(tool=>tool.name==='skill')?z.object({skills:z.array(z.object({name:z.string(),description:z.string(),invocation:z.object({modelInvocable:z.boolean()})})),complete:z.boolean()}).parse(await registry.snapshot({scope:h.agent,cwd:dirname(settings.dataDir),signal})):null;
     const skills=snapshot?.skills.filter(item=>item.invocation.modelInvocable).map(item=>({name:item.name,description:item.description,load:{name:'skill',arguments:{name:item.name}}}));
-    return DshToolCatalogSchema.parse({version:hash({tools,skills:skills??null}),tools,...(skills?{skills,skillsComplete:snapshot?.complete}:{}),pluginChanges:changes.status()});
+    const directories=ctx.get('workingDirectory') as {ensure(agent:AgentHandle['agent'],signal:AbortSignal):Promise<string>}|undefined;
+    const workingDirectory=directories?await directories.ensure(h.agent,signal):dirname(settings.dataDir),environment={workingDirectory,developmentDirectory:join(dirname(settings.dataDir),'development',taskId??'shared'),platform:process.platform};
+    return DshToolCatalogSchema.parse({version:hash({tools,skills:skills??null,workingDirectory}),tools,environment,...(skills?{skills,skillsComplete:snapshot?.complete}:{}),pluginChanges:changes.status()});
   };
+  const announced=new Set<string>(),lastAttempt=new Map<string,number>();
+  const notifyChanges=async()=>{for(const row of changes.notifications()){
+    const current=await catalog(await handle(row.authorization.taskId),AbortSignal.timeout(10000),row.authorization.taskId),key=hash([row.id,row.state,current.version]);if(announced.has(key)||Date.now()-(lastAttempt.get(key)??0)<5000||closed||!child.connected)continue;
+    const change=DshCapabilityChangeSchema.parse({id:row.id,state:row.state,authorization:row.authorization,catalogVersion:current.version,toolNames:current.tools.map(tool=>tool.name),runtimeReloaded:row.hostPid!==null&&row.hostPid!==process.pid});
+    child.send({type:'dsh.capability-change',change,key});lastAttempt.set(key,Date.now());
+  }};
   const receive=(raw:unknown)=>{
+    const acknowledgement=z.object({type:z.literal('dsh.capability-change-ack'),key:z.string().length(64)}).safeParse(raw);if(acknowledgement.success){if(lastAttempt.has(acknowledgement.data.key))announced.add(acknowledgement.data.key);return;}
     const validation=z.object({type:z.literal('dsh.update-authority-result'),id:z.uuid(),valid:z.boolean()}).safeParse(raw);if(validation.success){validations.get(validation.data.id)?.(validation.data.valid);validations.delete(validation.data.id);return;}
-    const idle=z.object({type:z.literal('dsh.idle'),idle:z.literal(true)}).safeParse(raw);if(idle.success&&!closed){void changes.idle(validate).catch(()=>ctx.logger.warn('DSH_PLUGIN_CHANGE_RECORD_FAILED'));return;}
+    const idle=z.object({type:z.literal('dsh.idle'),idle:z.literal(true)}).safeParse(raw);if(idle.success&&!closed){const work=(async()=>{await changes.idle(validate);await notifyChanges();})();jobs.add(work);void work.catch(()=>ctx.logger.warn('DSH_PLUGIN_CHANGE_RECORD_FAILED')).finally(()=>jobs.delete(work));return;}
     const parsed=DshBridgeRequestSchema.safeParse(raw);if(!parsed.success||closed)return;const message=parsed.data;
     if(message.type==='dsh.cancel'){controllers.get(message.id)?.abort();return;}
     if(controllers.has(message.id))return;const controller=new AbortController();controllers.set(message.id,controller);
     const work=(async()=>{try{
-      if(message.type==='dsh.catalog'){send(message.id,z.json().parse(await catalog(await handle('catalog'),controller.signal)));return;}
+      if(message.type==='dsh.catalog'){send(message.id,z.json().parse(await catalog(await handle(message.taskId??'catalog'),controller.signal,message.taskId)));return;}
       const authorization=ExternalTaskAuthorizationSchema.parse(message.authorization);
       if(authorization.action.owner!=='dsh-tools'||authorization.action.id!=='dsh_tool_call'||authorization.source.kind==='owner-message'&&(authorization.source.senderId!==settings.qq.ownerId||authorization.source.conversation.account!==settings.qq.botId))throw new Error('DSH_AUTHORITY_INVALID');
-      const h=await handle(authorization.taskId),current=await catalog(h,controller.signal),tool=current.tools.find(tool=>tool.name===message.call.name);
+      const h=await handle(authorization.taskId),current=await catalog(h,controller.signal,authorization.taskId),tool=current.tools.find(tool=>tool.name===message.call.name);
       if(!tool||message.call.catalogVersion!==current.version)throw new Error('DSH_CATALOG_CHANGED');
       const args:unknown=JSON.parse(message.call.argumentsJson);if(validateJsonSchemaValue(tool.parameters,args).length)throw new Error('DSH_TOOL_ARGUMENTS_INVALID');controller.signal.throwIfAborted();
       const management=z.object({action:z.string()}).safeParse(args);
       if(tool.name==='plugin_manager'&&management.success&&!management.data.action.startsWith('list_')){
-        const row=changes.enqueue(authorization,z.json().parse(args));send(message.id,{isError:false,value:{queued:true,updateId:row.id,state:row.state,note:'宿主会在本轮QQ反馈与任务交付完成、确认空闲和来源仍有效后，通过DSH插件管理器执行。当前尚未安装成功；不直接覆盖运行插件。'}});return;
+        const row=changes.enqueue(authorization,z.json().parse(args),current.version);send(message.id,{isError:false,effect:'confirmed',handoff:{kind:'plugin-change',id:row.id,taskId:authorization.taskId,runId:authorization.runId,catalogVersion:current.version},value:{queued:true,updateId:row.id,state:row.state,note:'变更已持久交接，尚未安装。程序在检查点和必要反馈完成、空闲且来源有效时使用DSH安装器；加载后核对实际能力再恢复任务。'}});return;
       }
       // The source and operation are recorded before dispatch. ToolRuntime retains all DSH policy hooks.
       h.agent.session.append('plugin:dafeiyu/dsh-dispatch',{schemaVersion:1,runId:authorization.runId,operationId:authorization.operationId,tool:tool.name,source:z.json().parse(authorization.source)});
       const result=await ctx.agents.withInitiator(h.agent,()=>ctx.tools.execute({callId:ToolCallId(message.id),name:tool.name,arguments:args,agent:h.agent,signal:controller.signal}));
       const readOnly=readTools.has(tool.name)||tool.name==='plugin_manager'&&management.success&&management.data.action.startsWith('list_');
       const fact={schemaVersion:1 as const,runId:authorization.runId,operationId:authorization.operationId,tool:tool.name,isError:result.isError,effect:readOnly?'none' as const:result.isError?'unknown' as const:'confirmed' as const};
-      h.agent.session.append('plugin:dafeiyu/dsh-completed',fact);await ctx.sessions.flush(h.agent.session);
       let value:Json;try{
-        const projected=redactJson(z.json().parse({isError:fact.isError,effect:fact.effect,value:result.value??result.content})).value;
+        h.agent.session.append('plugin:dafeiyu/dsh-completed',fact);if(!await ctx.sessions.flush(h.agent.session))throw new Error('DSH_RECEIPT_FLUSH_FAILED');
+        const projected=redactJson(z.json().parse({isError:fact.isError,effect:fact.effect,value:result.value===undefined?result.content:result.value})).value;
         value=Buffer.byteLength(JSON.stringify(projected))<=4*1024*1024?projected:{isError:fact.isError,effect:fact.effect,value:null,processing:{state:'unavailable',code:'DSH_RESULT_STORAGE_LIMIT'}};
       }catch{value={isError:fact.isError,effect:fact.effect,value:null,processing:{state:'failed',code:'DSH_RESULT_PROJECTION_FAILED'}};}
-      await ctx.sessions.flush(h.agent.session);send(message.id,value);
+      send(message.id,value);
     }catch(error){send(message.id,null,code(error));}finally{controllers.delete(message.id);}})();
     jobs.add(work);void work.finally(()=>jobs.delete(work));
   };

@@ -197,6 +197,11 @@ export class RuntimeStore {
   bindInput(runId:string,id:string,body:unknown):void{const value=z.json().parse(body);this.transaction(()=>{const run=this.get(runId);if(!['accepted','queued','running','cancelling'].includes(run.state))throw new Error('RUN_NOT_RUNNING');
     const old=this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId,id);if(old){if(runtimeHash(JSON.parse(string(old.body)))!==runtimeHash(value))throw new Error('INPUT_BINDING_CONFLICT');return;}this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,id,JSON.stringify(value));});}
   readInput(runId:string,id:string):Json|null{this.get(runId);const row=this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId,id);return row?z.json().parse(JSON.parse(string(row.body))):null;}
+  /** Core-only immutable receipt for a deferred capability change; never model supplied run output. */
+  bindCapabilityReceipt(runId:string,id:string,body:unknown){const value=z.json().parse(body),key='capability-change:'+z.uuid().parse(id)+':'+runtimeHash(value);return this.transaction(()=>{
+    const run=this.get(runId);if(run.definition.scope.kind!=='task'||run.state!=='waiting')throw new Error('RUN_NOT_QUIESCENT');
+    if(this.readInput(runId,key)!==null)return false;this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,key,JSON.stringify(value));return true;
+  });}
   /** A program-only maintenance authority record, never new model output in a finished Run. */
   bindMaintenanceAnchor(runId:string,id:string,body:unknown):void{const value=z.json().parse(body);this.transaction(()=>{
     const run=this.get(runId);if(run.definition.scope.kind!=='task'||!id.startsWith('activity-anchor:'))throw new Error('SCOPE_DENIED');
@@ -205,6 +210,10 @@ export class RuntimeStore {
   });}
   findContext(id:string):Json|null{this.open();const row=this.db.prepare('SELECT body FROM run_inputs WHERE input_id=? ORDER BY rowid DESC LIMIT 1').get(id);return row?z.json().parse(JSON.parse(string(row.body))):null;}
   appendExecutionEvent(runId:string,type:string,data:Record<string,Json>):string{return this.transaction(()=>{this.get(runId);return this.event(runId,type,data);});}
+  phaseStatus(runId:string){this.get(runId);const types=['task.stage','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted',...['ready','sending','sent','not-sent','partial','uncertain','rejected','interrupted'].map(state=>'native.delivery.'+state)];
+    const row=this.db.prepare("SELECT body FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type') IN ("+types.map(()=>'?').join(',')+") ORDER BY ordinal DESC LIMIT 1").get(runId,...types);if(!row)return null;
+    const event=eventSchema.parse(JSON.parse(string(row.body))),phase=event.type==='task.stage'?event.data.phase:event.type==='run.completed'?'execution-ended':event.type.split('.').at(-1)!;
+    const active=['exploration','assessment','rendering','verification','ready','sending','waiting'].includes(String(phase));return {phase,startedAt:event.at,deadlineAt:event.data.deadlineAt??null,elapsedMs:active?Math.max(0,Date.now()-Date.parse(event.at)):0};}
   /** Reads the immutable lifecycle fact, even after its outbox delivery was acknowledged. */
   latestRunEvent(runId:string,state:RunState){this.get(runId);RunStateSchema.parse(state);const row=this.db.prepare("SELECT id,body FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')=? ORDER BY ordinal DESC LIMIT 1").get(runId,`run.${state}`);
     if(!row)return null;const event=eventSchema.parse(JSON.parse(string(row.body)));if(event.id!==row.id||event.runId!==runId||event.type!==`run.${state}`)throw new Error('RUN_EVENT_BINDING_CONFLICT');return event;

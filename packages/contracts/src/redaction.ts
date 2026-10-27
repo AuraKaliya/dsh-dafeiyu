@@ -31,7 +31,7 @@ export function redactJson(input: Json): Redacted<Json> {
 /** Parse complete JSON before redaction, so a credential cannot leak across text page boundaries. */
 export function redactContent(text: string): Redacted<string> {
   try {
-    const parsed: Json = JSON.parse(text);
+    const parsed: Json = JSON.parse(text,(_key:string,value:unknown,context?:{source?:string})=>typeof value==='number'&&!Number.isSafeInteger(value)&&context?.source?context.source:value);
     if(parsed===null||typeof parsed!=='object')return redactText(text);
     const result = redactJson(parsed);
     return result.redacted ? { value: JSON.stringify(result.value, null, 2), redacted: true } : { value: text, redacted: false };

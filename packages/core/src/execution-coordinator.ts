@@ -13,6 +13,7 @@ import type { CapabilityRegistryV3,BoundActionV3 } from './registry-v3.js';
 import type { RunScheduler } from './run-scheduler.js';
 import type { NativeAction,TaskExecutionFrame } from './execution-frame.js';
 import { TaskAssessmentSchema } from '@dafeiyu/contracts';
+import { DshCapabilityChangeSchema } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
 import { SourceDependencySchema,MaintenanceLifecycleSchema,ActivityAnchorSchema,TaskCreateSchema } from '@dafeiyu/contracts';
@@ -42,6 +43,7 @@ interface Dependencies {
   projectConversation?:()=>Promise<void>;
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
   settled?:(runId:string)=>void;
+  progress?:(runId:string)=>Promise<Json>;
   media?:()=>import('@dafeiyu/contracts').MediaPort|undefined;
 }
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null}
@@ -167,6 +169,10 @@ export class ExecutionCoordinator {
     if(candidates.size>64)throw new Error('CAPACITY_EXCEEDED');
     const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
     const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
+    const progress=this.d.store.readInput(run.id,'automatic-progress'),retention=this.d.store.readInput(run.id,'assessment-retention');
+    if(progress)operationalEvidence.push({id:'PROGRESS',kind:'reported',text:JSON.stringify({kind:'program-feedback-receipt',receipt:progress})});
+    if(retention)operationalEvidence.push({id:'RETENTION',kind:'reported',text:JSON.stringify({kind:'assessment-retention',result:retention,note:'保存的是有来源的模型评价；经历整理和人格采用仍有独立流程。'})});
+    if(run.state==='waiting')operationalEvidence.push({id:'STATE',kind:'reported',text:JSON.stringify({state:run.state,error:run.error,note:'程序等待状态，不表示目标已经满足。'})});
     const reviewed=z.object({assessment:TaskAssessmentSchema}).safeParse(this.d.store.readInput(run.id,'task-assessment'));
     const selectedSourceIds=reviewed.success?reviewed.data.assessment.evidenceIds.flatMap(id=>this.d.store.operation(id).outcome?.sources.map(ref=>ref.id)??[]):[];
     const expression:NativeExpressionAccess={execution:access,anchor,question:source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),...(reviewed.success?{assessment:reviewed.data.assessment}:{}),...(selectedSourceIds.length?{selectedSourceIds}:{}),guard};
@@ -174,10 +180,32 @@ export class ExecutionCoordinator {
   }
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
-      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',assessment:this.assessmentStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',phase:this.d.store.phaseStatus(run.id),assessment:this.assessmentStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+  feedbackSource(runId:string){const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
+    if(!source||source.kind!=='explicit-task'||source.conversation.channel!=='qq'||run.definition.scope.kind!=='task')return null;
+    const {item}=this.validateMessageSource(source),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
+    if(task.epoch!==run.definition.intentVersion||task.status!=='active')return null;
+    return {item,taskId:task.id,state:run.state,error:run.error,operations:this.d.store.operations(run.id).map(op=>({state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null}))};
+  }
   private assessmentStatus(runId:string){const value=z.object({assessment:TaskAssessmentSchema,at:z.string()}).safeParse(this.d.store.readInput(runId,'task-assessment'));return value.success?{goalStatus:value.data.assessment.goalStatus,next:value.data.assessment.next,at:value.data.at}:null;}
+  reconcileCapabilityChange(raw:unknown){
+    const change=DshCapabilityChangeSchema.parse(raw),authorization=change.authorization;
+    if(change.id!==authorization.operationId||!this.externalTaskSourceCurrent(authorization,'dsh-tools'))return {accepted:false,resumedRunId:null};
+    const run=this.d.store.get(authorization.runId);if(run.state!=='waiting'||run.error!=='TASK_CAPABILITY_CHANGE_PENDING')return {accepted:false,resumedRunId:null};
+    const reviewed=z.object({assessment:TaskAssessmentSchema}).parse(this.d.store.readInput(run.id,'task-assessment'));
+    const facts={id:change.id,state:change.state,catalogVersion:change.catalogVersion,runtimeReloaded:change.runtimeReloaded,available:reviewed.assessment.requiredCapabilities.filter(name=>change.toolNames.includes(name))};
+    if(this.d.store.bindCapabilityReceipt(run.id,change.id,facts)){this.d.store.appendExecutionEvent(run.id,'task.capability-change',facts);this.flushEvents();}
+    if(!['applied','restart-required'].includes(change.state)||change.state==='restart-required'&&!change.runtimeReloaded||reviewed.assessment.requiredCapabilities.some(name=>!change.toolNames.includes(name)))return {accepted:true,resumedRunId:null};
+    if(this.d.store.list().some(next=>next.definition.parentRunId===run.id))return {accepted:true,resumedRunId:null};
+    const memory=this.d.memory(),task=this.repository().readState(this.d.agentId,authorization.taskId),access=this.d.personas.access(run,this.inputsFor(run),this.d.signal,()=>this.validateMessageAncestors(run));
+    if(memory?.intent(access).blocking)return {accepted:true,resumedRunId:null};
+    const checkpoint=this.d.store.checkpoints(run.id).at(-1);if(!checkpoint)return {accepted:true,resumedRunId:null};
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),request=this.d.store.request(run.requestKey);
+    const resumed=this.submit(request.producer,ExecutionRequestSchema.parse({requestId:runtimeHash(['capability-resume',run.id,change.id]),taskId:task.id,expectedVersion:task.version,policyId:run.definition.policyId,inputRefs:saved.input.inputRefs,data:{capabilityChange:facts}}),{kind:'continuation',parentRunId:run.id,checkpointId:checkpoint},run.id,checkpoint,this.motivation(run),saved.messageSource);
+    return {accepted:true,resumedRunId:resumed.run.id};
+  }
   controlMessageTask(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskControlSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
-    if(item.message.sender.id!==binding.ownerId||directive.kind!==input.action&&directive.kind!=='submit')throw new Error('TASK_DIRECTIVE_REQUIRED');
+    if(item.message.sender.id!==binding.ownerId||directive.kind!==input.action&&directive.kind!=='submit'&&!(input.action==='resume'&&directive.kind==='resolve'))throw new Error('TASK_DIRECTIVE_REQUIRED');
     if(redactJson(z.json().parse(directive)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
     const latest=this.findMessageTask(binding,item.message.conversation,input.taskId),requestId=runtimeHash([item.id,input.taskId,input.action,input.objectionId??null]),producer=`message-control:${binding.id}`,old=this.d.store.findRequest(producer,requestId);
     const run=old?this.d.store.get(z.object({runId:z.uuid()}).parse(old.payload).runId):latest;
@@ -185,7 +213,15 @@ export class ExecutionCoordinator {
     const receiptId=`message-control:${control.id}`,receipt=this.d.store.readInput(context.runId,receiptId);if(receipt)return z.record(z.string(),z.json()).parse(receipt);
     const port=this.producer(binding.id),taskRef=port.openTask(input.taskId);let resumed:{task:TaskRef;run:RunRef;state:string}|undefined,changed=false;
     try {
-    if(input.action==='resolve'){
+    if(input.action==='resume'){
+      const task=this.repository().readState(this.d.agentId,input.taskId);if(task.version!==input.expectedVersion||task.status!=='active'||task.epoch!==run.definition.intentVersion)throw new Error('VERSION_CONFLICT');
+      if(!['waiting','failed','interrupted'].includes(run.state))throw new Error('RUN_NOT_QUIESCENT');
+      if(this.d.store.operations(run.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('OPERATION_UNCERTAIN');
+      if(this.messageIntent(run)?.blocking)throw new Error('TASK_OBJECTION_UNRESOLVED');
+      const checkpoint=this.d.store.checkpoints(run.id).at(-1),parent=savedSchema.parse(this.d.store.request(run.requestKey).payload).messageSource;if(!checkpoint||!parent)throw new Error('SOURCE_STALE');
+      const source=MessageTaskSourceSchema.parse({...parent,control:{inboundId:item.id,messageHash:runtimeHash(item.message),...(voice?{voice}:{})}});this.validateMessageSource(source);
+      resumed=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([control.id,'resume']),taskId:task.id,expectedVersion:task.version,policyId:binding.policyId}),{kind:'continuation',parentRunId:run.id,checkpointId:checkpoint},run.id,checkpoint,this.motivation(run),source);
+    }else if(input.action==='resolve'){
       const task=this.repository().readState(this.d.agentId,input.taskId);if(task.version!==input.expectedVersion||task.status!=='active'||run.definition.intentVersion!==task.epoch)throw new Error('VERSION_CONFLICT');
       if(run.state!=='waiting')throw new Error('RUN_NOT_QUIESCENT');
       if(this.d.store.operations(run.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('OPERATION_UNCERTAIN');
@@ -483,7 +519,7 @@ export class ExecutionCoordinator {
         const inputs=repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules),inputHash=runtimeHash(inputs),authorityVersion=runtimeHash(policy);
         trialInputs=inputs;
         const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&(action.effects==='external-write'?this.externalActionAllowed(run,policy,action):action.effects!=='local-write'||policy.allowLocalWrite));
-        const contributors=this.d.registry.contributors().filter(entry=>entry.owner!=='dsh-tools'||actions.some(action=>action.owner==='dsh-tools')),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
+        const contributors=this.d.registry.contributors().filter(entry=>entry.owner!=='dsh-tools'||actions.some(action=>action.owner==='dsh-tools'&&action.id==='dsh_tool_call')),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
         const messageSignal=saved.messageSource?this.d.messageSignal?.(saved.messageSource.inboundId):run.definition.origin.kind==='message'?this.d.messageSignal?.(run.definition.origin.inboundId):undefined;
@@ -521,7 +557,7 @@ export class ExecutionCoordinator {
         const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validate(evidence.exposed()))throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
         let stage=0,previousAssessment:import('@dafeiyu/contracts').TaskAssessment|undefined;
         for(;;){
-          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'exploration',stage,at:new Date().toISOString()});this.flushEvents();
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'exploration',stage,deadlineAt:new Date(Date.parse(run.updatedAt)+this.d.turnTimeoutMs).toISOString()});this.flushEvents();
           let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
           const frame:TaskExecutionFrame={mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:task.goal,inputs,actions:bound,guard:admittedGuard,...(this.d.assessmentTimeoutMs?{assessmentTimeoutMs:this.d.assessmentTimeoutMs}:{}),
             program:z.json().parse({...z.record(z.string(),z.json()).parse(program),stage:{kind:'exploration',index:stage,previousAssessment:previousAssessment??null}}),contexts,evidence,
@@ -529,9 +565,9 @@ export class ExecutionCoordinator {
             checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
           const result=await this.d.runtime.runExecution(frame);admittedGuard();this.d.store.bindInput(id,`draft-result:${stage}`,result.resultRef);
           const operations=this.d.store.operations(id).map(op=>({id:op.id,action:op.action,state:op.state,outcome:op.outcome}));
-          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'assessment',stage,at:new Date().toISOString()});this.flushEvents();
+          this.d.store.appendExecutionEvent(id,'task.stage',{phase:'assessment',stage,deadlineAt:new Date(Math.min(Date.parse(run.updatedAt)+this.d.turnTimeoutMs,Date.now()+(this.d.assessmentTimeoutMs??60000))).toISOString()});this.flushEvents();
           let reviewed:Awaited<ReturnType<DshRuntime['assessExecution']>>;
-          try{reviewed=await this.d.runtime.assessExecution(frame,result,z.json().parse({operations,blocking:memory?.intent(access).blocking??false,coverage:{complete:true}}));
+            try{reviewed=await this.d.runtime.assessExecution(frame,result,z.json().parse({operations,programFeedback:this.d.store.readInput(id,'automatic-progress'),blocking:memory?.intent(access).blocking??false,coverage:{complete:true}}));
             if(reviewed.assessment.evidenceIds.some(ref=>!operations.some(op=>op.id===ref)))throw new Error('TASK_ASSESSMENT_EVIDENCE_INVALID');
           }catch(e){admittedGuard();if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
             this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.checkpoint(id,{kind:'assessment-pending',draft:result.resultRef});
@@ -540,6 +576,10 @@ export class ExecutionCoordinator {
           this.d.store.bindInput(id,`task-assessment:${stage}`,record);
           if(reviewed.assessment.next==='continue'){previousAssessment=reviewed.assessment;stage++;continue;}
           this.d.store.bindInput(id,'task-assessment',record);
+          if(reviewed.assessment.retainExperience&&memory?.recordAssessment){try{
+            const judgmentAccess=evidence.access({...access,producer:'core-result-assessment',admittedSources:[...access.admittedSources,...evidence.sourceRefs()]});
+            const ref=memory.recordAssessment(judgmentAccess,reviewed.assessment);this.d.store.bindInput(id,'assessment-source',ref);this.d.store.bindInput(id,'assessment-retention',{state:'selected-for-experience',sourceId:ref.id});
+          }catch(e){this.d.store.bindInput(id,'assessment-retention',{state:'failed',code:safeCode(e)});this.d.store.appendExecutionEvent(id,'task.assessment-retention-failed',{code:safeCode(e)});}}
           if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
           admittedGuard();run=this.d.store.get(id);this.d.store.bindInput(id,'result-sources',evidence.exposed());
           const waiting=memory?.intent(access).blocking||['wait','capability-change'].includes(reviewed.assessment.next);
@@ -552,7 +592,7 @@ export class ExecutionCoordinator {
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
-      }finally{this.evidence.delete(id);try{this.d.personas.completeTrial(this.d.store,id,trialInputs,this.d.signal);}finally{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
+      }finally{this.evidence.delete(id);try{this.d.personas.completeTrial(this.d.store,id,trialInputs,this.d.signal);}finally{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting','failed'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
     }finally{release();}
   }
   private previousContinuity(run:StoredRun,access:PersonaAccess,foundationHash:string){const memory=this.d.memory();if(!memory)return null;
@@ -603,7 +643,10 @@ export class ExecutionCoordinator {
         origin:freezeOrigin(run.definition.origin),scope:Object.freeze({...run.definition.scope}),intentVersion:run.definition.intentVersion,grant,signal:AbortSignal.any([signal,toolSignal,action.signal])});
       this.grants.set(context,{action,runId:run.id,guard,commitGuard});this.flushEvents();
       try{if(run.definition.scope.kind==='conversation')await this.d.projectConversation?.();guard();const outcome=await action.execute(input,context);
-        this.d.store.finishOperation(operation.id,outcome);this.flushEvents();let value:Json;try{value=result(operation.id,callId,outcome);}catch(error){this.evidence.get(run.id)?.invalidate();throw error;}guard();return value;
+        this.d.store.finishOperation(operation.id,outcome);this.flushEvents();let value:Json;try{value=result(operation.id,callId,outcome);}catch(error){this.evidence.get(run.id)?.invalidate();throw error;}guard();
+        if(run.definition.scope.kind==='task'&&action.owner!=='qq-progress'&&Date.now()-Date.parse(run.createdAt)>30000&&this.d.progress&&!this.d.store.readInput(run.id,'automatic-progress-attempt')&&!this.d.store.operations(run.id).some(op=>op.plugin==='qq-progress'&&op.outcome?.effects==='confirmed')){
+          this.d.store.bindInput(run.id,'automatic-progress-attempt',{at:new Date().toISOString()});try{this.d.store.bindInput(run.id,'automatic-progress',await this.d.progress(run.id));}catch{/* A status failure never changes the actual tool result. */}guard();}
+        return value;
       }catch(error){if(this.d.store.operation(operation.id).state==='started')this.d.store.finishOperation(operation.id,{status:'unknown',effects:action.effects==='read'?'none':'unknown',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:safeCode(error)});
         throw new Error(safeCode(error));
       }finally{this.grants.delete(context);this.flushEvents();}
@@ -660,6 +703,7 @@ export class ExecutionCoordinator {
         const operations=type==='run.running'?[]:this.d.store.operations(run.id);
         const entry=MaintenanceLifecycleSchema.parse({id:event.id,scope:run.definition.scope,runId:run.id,taskEpoch:run.definition.intentVersion,
           origin:run.definition.origin,motivation:this.motivation(run),type,goal,at:event.at,
+          ...(this.d.store.readInput(run.id,'assessment-source')?{assessmentSource:PersonaSourceRefSchema.parse(this.d.store.readInput(run.id,'assessment-source'))}:{}),
           operations:operations.slice(0,256).map(op=>({id:op.id,action:op.action,status:op.outcome?.status??(op.state==='started'?'started':'unknown'),
             effects:op.outcome?.effects??'unknown',completeness:op.outcome?.completeness??'unknown'})),omittedOperations:Math.max(0,operations.length-256)});
         lifecycle?.(entry);for(const observer of this.lifecycleObservers.values())observer(structuredClone(entry));

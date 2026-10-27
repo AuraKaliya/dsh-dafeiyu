@@ -14,5 +14,5 @@ export function createDshBridgeClient():DshToolsPort{
     try{const result=await new Promise<Json>((resolve,reject)=>{pending.set(id,{resolve,reject});invoked=true;process.send!({type,id,...data},undefined,{},(error:Error|null)=>{if(error){pending.delete(id);reject(new Error('DSH_BRIDGE_DISCONNECTED'));}});if(signal.aborted)abort();});signal.throwIfAborted();return result;}
     finally{signal.removeEventListener('abort',abort);pending.delete(id);}
   };
-  return {catalog:async signal=>DshToolCatalogSchema.parse(await request('dsh.catalog',{},AbortSignal.any([signal,AbortSignal.timeout(10000)]))),execute:async(call,authority,signal)=>{authority.guard();const value=await request('dsh.call',{call,authorization:authority.authorization},signal);authority.guard();return value;}};
+  return {catalog:async(signal,taskId)=>DshToolCatalogSchema.parse(await request('dsh.catalog',taskId?{taskId}:{},AbortSignal.any([signal,AbortSignal.timeout(10000)]))),execute:async(call,authority,signal)=>{authority.guard();const value=await request('dsh.call',{call,authorization:authority.authorization},signal);authority.guard();return value;}};
 }

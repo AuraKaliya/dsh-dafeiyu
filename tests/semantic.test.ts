@@ -47,11 +47,13 @@ test('two fusions force original-source rebuild; rebuild reads no parent prose a
   assert.deepEqual(fragmentDependencies(next),fragmentDependencies(h.a.view));assert.ok(resolveFragmentProof(h.session(),h.a.ref,h.scope));
   const composed=compose(h,[next]);assert.ok(resolveFragmentView(h.session(),summaryReference(composed.manifestSeq,composed.manifest),h.scope));
 });
-test('missing qualifiers fail before verification; incompatibility and unsupported conclusions fail independent review',async t=>{
+test('program-carried qualifiers preserve exact clauses while independent review rejects contradictory conclusions',async t=>{
   const h=await semanticFixture();t.after(h.close);const plan=h.plan();assert.ok(plan);
-  h.setCompactionResponse(()=>textReply(JSON.stringify({fragment:{kind:'fact',text:'项目已经验收，可以群发。'}})));
-  await assert.rejects(generateSummaryRewrite(h.session(),plan,h.provider,new AbortController().signal,h.validate),/qualifier/);
-  assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).includes('memory-semantic-verify')).length,0);
+  h.setCompactionResponse(r=>textReply(JSON.stringify(String(r.sessionId).includes('-generate-')?{fragment:{kind:'fact',text:'项目已经验收，可以群发。'}}:{compatible:true,faithful:false,issues:['正文与原文限定矛盾，附带引文不能使其成立']})));
+  await assert.rejects(generateSummaryRewrite(h.session(),plan,h.provider,new AbortController().signal,h.validate),/Semantic verification rejected/);
+  assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).includes('memory-semantic-verify')).length,1);
+  h.setCompactionResponse(r=>textReply(JSON.stringify(String(r.sessionId).includes('-generate-')?{fragment:{kind:'note',text:'保留当前讨论及其限制。'}}:{compatible:true,faithful:true,issues:[]})));
+  const retained=await generateSummaryRewrite(h.session(),plan,h.provider,new AbortController().signal,h.validate);assert.ok(retained.qualifiers.every(q=>retained.fragment.text.includes(q.text)));
   for(const verdict of [{compatible:false,faithful:true,issues:[]},{compatible:true,faithful:false,issues:['扩大权限']}]){
     h.setCompactionResponse(r=>textReply(JSON.stringify(String(r.sessionId).includes('-generate-')?{fragment:acceptedResult(plan.request).fragment}:verdict)));
     await assert.rejects(generateSummaryRewrite(h.session(),plan,h.provider,new AbortController().signal,h.validate));

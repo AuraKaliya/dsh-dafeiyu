@@ -135,6 +135,7 @@ export class ActivityScheduler {
     if(status.state==='running'&&reason){const pause=this.store.pauseIntent(occurrence.body.id,occurrence.runId,reason,status.version,now);
       port.pause(ref,{requestId:pause.requestId,expectedVersion:pause.expectedVersion,reason:`活动让出：${reason}`});continue;}
     if(status.state!=='waiting')continue;
+    if(status.error==='TASK_CAPABILITY_CHANGE_PENDING')continue; // The installer/loading handoff owns this continuation; keep its wake authority live.
     const pause=this.store.pausedBy(occurrence.body.id,occurrence.runId);
     if(!pause){this.store.block(current.body.id,'ACTIVITY_WAITING_DISCUSSION',now);continue;}
     if(pause.reason==='time-budget'||used>=this.store.config.maxActiveMs){this.store.block(current.body.id,'ACTIVITY_TIME_BUDGET',now);continue;}

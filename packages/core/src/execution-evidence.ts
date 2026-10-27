@@ -58,6 +58,7 @@ export class ExecutionEvidence {
       const record=contextRecord.safeParse(this.store.findContext(`context:${runtimeHash(dep)}`));if(!record.success||Date.parse(record.data.item.expiresAt)<=Date.now()||runtimeHash(this.dependency(record.data))!==runtimeHash(dep))return false;
       if(dep.owner==='memory'&&dep.region==='growth')return dep.id==='persona:availability'||this.personas.historical(this.access(),dep);
       if(dep.owner==='memory'&&dep.region==='execution')return this.memory()?.validateContext(this.access(),record.data.item)??false;
+      if(dep.owner==='dsh-tools'&&dep.region==='capabilities')return true; // Immutable operational declarations; dispatch checks the current catalog separately.
       return this.registry.contributors().some(entry=>entry.owner===dep.owner&&entry.context.id===dep.region&&entry.active()&&entry.context.validate(this.base.view,record.data.item));
     }
     return dep.kind==='ephemeral'&&dep.traceId===this.run.id;

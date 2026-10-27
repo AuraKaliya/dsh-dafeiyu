@@ -92,6 +92,7 @@ export class CapabilityRegistryV3 {
           if (meta.requiresTask && !context.taskId) throw new Error('TASK_REQUIRED');
           const parsed=validateInput(raw);
           const result = ActionOutcomeSchema.parse(await execute(parsed, context));
+          result.receipts=result.receipts.filter(receipt=>!redactJson(receipt).redacted);
           try{if (result.data !== null) result.data = z.json().parse(parseOutput(result.data));}catch{return {...result,status:'partial',completeness:'unknown',data:null,sources:[],errorCode:'ACTION_RESULT_INVALID'};}
           // Preserve a returned receipt even if cancellation/unload arrived while the operation ran.
           // The coordinator persists the fact before checking continued admission.

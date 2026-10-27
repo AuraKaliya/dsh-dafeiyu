@@ -9,7 +9,8 @@ import { nativeDeliveryHash } from './native-delivery-store.js';
 import { renderTaskResult,renderPublicProgress } from './target-renderer.js';
 import { readPersistedResult } from './agent-session.js';
 import { z } from 'zod';
-interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:string;signal:AbortSignal;timeoutMs:number;
+interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:string;signal:AbortSignal;timeoutMs:number;sendTimeoutMs:number;
+  feedbackSource(runId:string):{item:PendingMessage;taskId:string;state:string;error:string|null;operations:readonly {state:string;status:string|null;effects:string|null}[]}|null;
   describe(runId:string):{item:PendingMessage;anchor:TaskResultAnchor;autoDeliver:boolean|undefined}|null;
   access(runId:string):Promise<NativeExpressionAccess>;expression():NativeExpressionPort|undefined;
   persona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
@@ -18,11 +19,12 @@ interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:s
   media():MediaPort|undefined;mediaAccess(authority:MediaReplyAuthority,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>;
 }
 const codes=new Set(['SOURCE_STALE','DEPENDENCY_UNAVAILABLE','DELIVERY_BINDING_CONFLICT','DELIVERY_RENDER_ALREADY_EXISTS','DELIVERY_TOOLS_FORBIDDEN','DELIVERY_CAPACITY','MODEL_INCOMPLETE','PERSISTENCE_FAILED','DELIVERY_CREDENTIAL_INVALID','DELIVERY_BODY_MISMATCH','NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL','NATIVE_EXPRESSION_UNAVAILABLE','NATIVE_EXPRESSION_CAPACITY','PRIVATE_INPUT_REJECTED','DELIVERY_UNFAITHFUL','DELIVERY_VERIFICATION_INCOMPLETE','MEDIA_TARGET_DENIED','MEDIA_SOURCE_SUPPRESSED','MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH']);
-const code=(error:unknown)=>error instanceof Error&&(codes.has(error.message.toUpperCase())||error.message==='DELIVERY_VERIFICATION_TIMEOUT')?error.message.toUpperCase():'NATIVE_DELIVERY_FAILED';
+const code=(error:unknown)=>error instanceof Error&&(codes.has(error.message.toUpperCase())||['DELIVERY_VERIFICATION_TIMEOUT','DELIVERY_RENDER_TIMEOUT'].includes(error.message))?error.message.toUpperCase():'NATIVE_DELIVERY_FAILED';
 const resultSchema=z.discriminatedUnion('status',[z.object({status:z.literal('sent'),receiptId:z.string().min(1).max(256)}),z.object({status:z.literal('not-sent'),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/)}),z.object({status:z.literal('unknown'),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/)})]);
 const terminal=new Set(['sent','not-sent','partial','uncertain','rejected','interrupted']);
 /** One intent per completed native Run, a clean persona turn, verification, then anchored transport. */
 export class NativeTaskDelivery {
+  private readonly notices=new Map<string,Promise<import('@dafeiyu/contracts').Json>>();
   private readonly active=new Map<string,Promise<ReturnType<RuntimeStore['nativeDeliveries']['status']>>>();
   private readonly views=new WeakMap<ContextRequest,Map<string,{hash:string;guard:()=>void}>>();
   private readonly unregister:()=>void;
@@ -32,7 +34,7 @@ export class NativeTaskDelivery {
     // These are program effect receipts, not inferences from the old result they may have invalidated.
     const conversationRun=this.host.store.findRequest('conversation',scope.traceId)?.runId;
     if(conversationRun)for(const operation of this.host.store.operations(conversationRun).filter(op=>op.plugin==='qq-tasks'&&op.action==='qq_task_control'&&op.outcome).slice(-8).reverse()){
-      const result=operation.outcome!,data=z.object({taskId:z.uuid(),action:z.enum(['cancel','revise','resolve']),taskVersion:z.number(),intentVersion:z.number(),taskState:z.string(),runId:z.uuid()}).safeParse(result.data);
+      const result=operation.outcome!,data=z.object({taskId:z.uuid(),action:z.enum(['cancel','revise','resolve','resume']),taskVersion:z.number(),intentVersion:z.number(),taskState:z.string(),runId:z.uuid()}).safeParse(result.data);
       const item=ContextItemSchema.parse({id:`task-control:${operation.id}`,version:'1',text:JSON.stringify({kind:'task-control-receipt',status:result.status,effects:result.effects,data:data.success?data.data:null,code:result.errorCode??null,note:'核心保存的本轮任务控制回执。效果未知时不得当成未执行并重复写入。'}),expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:`dafeiyu:operation:${operation.id}`,version:'1',hash:nativeDeliveryHash(result)}]});
       views.set(item.id,{hash:nativeDeliveryHash(item),guard:()=>{this.host.contexts.scopeFor(request);if(nativeDeliveryHash(this.host.store.operation(operation.id).outcome)!==nativeDeliveryHash(result))throw new Error('SOURCE_STALE');}});items.push(item);
     }
@@ -56,8 +58,20 @@ export class NativeTaskDelivery {
     const work=this.execute(runId,description.item,automatic).finally(()=>this.active.delete(runId));this.active.set(runId,work);return work;
   }
   activate(){for(const runId of this.host.store.nativeDeliveryCandidates())if(this.host.describe(runId)?.autoDeliver)void this.request(runId,true).catch(()=>{});}
-  async whenIdle(){while(this.active.size)await Promise.allSettled([...this.active.values()]);}
-  get pending(){return this.active.size;}
+  async whenIdle(){while(this.active.size||this.notices.size)await Promise.allSettled([...this.active.values(),...this.notices.values()]);}
+  get pending(){return this.active.size+this.notices.size;}
+  progress(runId:string):Promise<import('@dafeiyu/contracts').Json>{const existing=this.notices.get(runId);if(existing)return existing;const work=this.statusNotice(runId).finally(()=>this.notices.delete(runId));this.notices.set(runId,work);return work;}
+  private async statusNotice(runId:string):Promise<import('@dafeiyu/contracts').Json>{
+    const source=this.host.feedbackSource(runId);if(!source||this.host.signal.aborted)return {status:'not-sent',code:'STATUS_SOURCE_UNAVAILABLE'};
+    const channel=this.host.channel(source.item);if(!channel)return {status:'not-sent',code:'STATUS_CHANNEL_UNAVAILABLE'};
+    const signal=AbortSignal.any([this.host.signal,channel.signal,AbortSignal.timeout(this.host.ctx.dafeiyu.phaseTimeouts().feedback)]);
+    const guard=()=>{signal.throwIfAborted();const current=this.host.feedbackSource(runId);if(!current||current.state!==source.state||this.host.channel(source.item)?.identity!==channel.identity)throw new Error('SOURCE_STALE');};
+    try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,runId,persona.text,persona.items,
+      {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。'})}]},signal,()=>{guard();persona.guard();},32000);
+      const receipt=await this.host.enqueue(source.item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'task-status:'+runId,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text:result.text},signal,()=>{guard();persona.guard();});});
+      this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status});this.host.flush();return z.json().parse(receipt);
+    }catch{return {status:'not-sent',code:'STATUS_NOT_SENT'};}
+  }
   close(){this.unregister();}
   private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire();let invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
     try{let record=this.host.store.nativeDeliveries.get(runId)!;if(terminal.has(record.state))return this.host.store.nativeDeliveries.status(runId);
@@ -74,8 +88,10 @@ export class NativeTaskDelivery {
       const guard=()=>{persona.guard();if(nativeDeliveryHash(this.host.model())!==material.modelHash)throw new Error('SOURCE_STALE');};guard();
       if(record.state==='accepted'){
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
+        this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'rendering',deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().render).toISOString()});this.host.flush();
         const rendered=await renderTaskResult(this.host.ctx,model,this.host.cwd,record.id,persona.text,persona.items,packet,signal,guard,access.requestMaxBytes);guard();
         this.host.store.nativeDeliveries.rendered(runId,rendered.resultRef);this.host.flush();
+        this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'verification',deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().verification).toISOString()});this.host.flush();
         await provider.verify(access,packet.id,record.anchor.target.channel==='qq'?(qqVisibleText(rendered.text)||rendered.text):rendered.text,signal,guard);guard();this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();
       }
       record=this.host.store.nativeDeliveries.get(runId)!;if(record.state!=='ready'||nativeDeliveryHash(record.material)!==nativeDeliveryHash(material)||!record.renderRef)throw new Error('SOURCE_STALE');
@@ -86,9 +102,9 @@ export class NativeTaskDelivery {
         const sendMedia=channel.capability.deliverMedia.bind(channel.capability);
         const draft=media.replyDraft(runId);if(!draft||draft.id!==packet.media.draftId||draft.version!==packet.media.draftVersion)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaAccess=await this.host.mediaAccess(draft.authority,reply,signal);
         const manifest=await media.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaId=manifest.id;const authorized=()=>{guard();mediaAccess!.guard();if(this.host.media()!==media)throw new Error('SOURCE_STALE');media!.validateReply!(mediaAccess!,manifest.id);};authorized();
-        result=await this.host.enqueue(item.route,async()=>{authorized();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
-          return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),signal,authorized,position=>{authorized();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));});
-      }else{result=await this.host.enqueue(item.route,async()=>{guard();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;return resultSchema.parse(await sendTaskResult(reply,record.anchor,signal,guard));});}
+        result=await this.host.enqueue(item.route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();authorized();};check();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
+          return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),sending,check,position=>{check();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));});
+      }else{result=await this.host.enqueue(item.route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();guard();};check();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;return resultSchema.parse(await sendTaskResult(reply,record.anchor,sending,check));});}
       this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
     }catch(error){const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
@@ -102,7 +118,7 @@ export class NativeTaskDelivery {
     const row=this.host.store.nativeDeliveries.get(runId),channel=this.host.channel(item);if(!row||!channel||row.error==='SOURCE_STALE')return;
     const signal=AbortSignal.any([this.host.signal,channel.signal,AbortSignal.timeout(30000)]);
     const guard=()=>{signal.throwIfAborted();const description=this.host.describe(runId);if(!description||description.item.id!==item.id||this.host.channel(item)?.identity!==channel.identity||this.host.store.nativeDeliveries.get(runId)?.version!==row.version)throw new Error('SOURCE_STALE');};
-    try{guard();const persona=this.host.persona(item,row.id+'-status',signal,guard),message=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,row.id+'-status',persona.text,persona.items,
+    try{guard();const persona=this.host.persona(item,row.id,signal,guard),message=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,row.id,persona.text,persona.items,
       {target:row.anchor.target,taskId:row.anchor.taskId,runId,inboundId:item.id,question:'向原会话说明本次任务的实际交付状态及当前限制。',taskState:row.state,
         evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,workPreserved:true,note:'程序未取得最终回复的发送回执；内部工作保留。仅说明状态，不复述未通过核验的草稿。'})}]},signal,()=>{guard();persona.guard();},32000);
       const receipt=await this.host.enqueue(item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'native-status:'+row.id,conversation:row.anchor.target,sourceMessageId:item.message.id,text:message.text},signal,()=>{guard();persona.guard();});});
