@@ -46,15 +46,15 @@ test('the declared model window still rejects oversized history below the byte c
     {provider:'fixture',id:'fixture',name:'fixture',context:{contextWindow:65536},defaultMaxTokens:8192}),/MODEL_CONTEXT_CAPACITY/);
 });
 test('unified persona preparation cannot silently drop an already qualified selected personality',()=>{
-  const runtime=new PersonaRuntime(ContextBudgetSchema.parse({assembly:{mode:'unified'},regions:{'memory:growth':{maxBytes:1000}}})),id=randomUUID();
+  const runtime=new PersonaRuntime(ContextBudgetSchema.parse({assembly:{},regions:{'memory:growth':{maxBytes:1000}}})),id=randomUUID();
   const entry:PreparedPersonaEntry={candidate:{id,version:1},contentRef:{kind:'memory',id,agentId:'fixture',scopeKey:'scope',version:1,revision:1,contentHash:'a'.repeat(64)},dependencies:[],item:item('qualified',1400)};
   runtime.bind({ready:()=>true,prepare:()=>({stageRevision:1,selectionVersion:1,entries:[entry],omitted:0}),validate:()=>true});
   const access:PersonaAccess={view:{runId:randomUUID(),taskId:null,scope:{kind:'conversation',agentId:'fixture',route:'scope'},origin:{kind:'message',inboundId:randomUUID(),conversation:{channel:'fixture',account:'local',kind:'group',id:'scope'}},signal:new AbortController().signal},producer:'fixture',operationId:randomUUID(),startedEventId:null,intentVersion:0,motivation:{kind:'unknown',basis:[]},inputs:[],admittedSources:[],guard:()=>{}};
   assert.throws(()=>runtime.prepareTarget(access),/PERSONA_CONTEXT_CAPACITY/);
 });
 test('unified preparation applies one deadline across optional contributors',async t=>{
-  const h=await memoryFixture(undefined,{context:{}},undefined,{assembly:{mode:'unified',deadlineMs:60}});t.after(h.close);
-  const coordinator=new ContextCoordinator('dafeiyu',h.core.journal,{assembly:{mode:'unified',deadlineMs:60},prepareTimeoutMs:1000});
+  const h=await memoryFixture(undefined,{context:{}},undefined,{assembly:{deadlineMs:60}});t.after(h.close);
+  const coordinator=new ContextCoordinator('dafeiyu',h.core.journal,{assembly:{deadlineMs:60},prepareTimeoutMs:1000});
   let prepared=0;const dispose=coordinator.register('deadline-fixture','1',['first','second','third'].map(id=>({id,kind:'evidence' as const,
     prepare:async request=>{prepared++;await new Promise<void>((resolve,reject)=>{const timer=setTimeout(resolve,45);request.signal.addEventListener('abort',()=>{clearTimeout(timer);reject(new Error('cancelled'));},{once:true});});return [item(id)];},validate:()=>true})));t.after(dispose);
   h.setResponse(()=>textReply('fixture'));const receipt=h.simulator.send('a','fixture',{id:randomUUID()});await h.core.whenIdle();

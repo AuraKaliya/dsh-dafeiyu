@@ -5,7 +5,7 @@ import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { MessageSchema } from '@dafeiyu/contracts';
-import type { ExecutionContextV3,ExtensionV3 } from '@dafeiyu/contracts';
+import type { ExecutionContext,Extension } from '@dafeiyu/contracts';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { executionHarness } from './execution-fixture.js';
 import { call,textReply } from './harness.js';
@@ -29,21 +29,21 @@ test('a native timeline action only observes its current task and ordinary timel
 });
 
 test('v3 channel-only extensions use the existing reply ledger and revoke their ingress handle',async()=>{
-  const h=await executionHarness(await root(),undefined,undefined,true,{sourceTracking:true});const sent:string[]=[];
-  try{const spec:ExtensionV3={protocolVersion:3,id:'v3-channel',version:'1',agentId:'dafeiyu',channels:[{channel:'fixture-v3',account:'local',deliveryValidation:'per-segment',deliver:async(reply,_signal,authority)=>{assert.equal(typeof authority,'function');authority!();sent.push(reply.text);return {status:'sent',receiptId:'fixture-receipt'};}}]};
-    const handle=h.core.registerExtensionV3(spec);assert.ok(handle.ingest);const input=MessageSchema.parse({id:'one',occurredAt:new Date().toISOString(),conversation:{channel:'fixture-v3',account:'local',kind:'local',id:'room'},sender:{id:'fictional-user',displayName:'虚构用户'},text:'执行普通聊天'});
+  const h=await executionHarness(await root(),undefined,undefined,true,{});const sent:string[]=[];
+  try{const spec:Extension={protocolVersion:4,id:'v3-channel',version:'1',agentId:'dafeiyu',channels:[{channel:'fixture-v3',account:'local',deliveryValidation:'per-segment',deliver:async(reply,_signal,authority)=>{assert.equal(typeof authority,'function');authority!();sent.push(reply.text);return {status:'sent',receiptId:'fixture-receipt'};}}]};
+    const handle=h.core.registerExtension(spec);assert.ok(handle.ingest);const input=MessageSchema.parse({id:'one',occurredAt:new Date().toISOString(),conversation:{channel:'fixture-v3',account:'local',kind:'local',id:'room'},sender:{id:'fictional-user',displayName:'虚构用户'},text:'执行普通聊天'});
     const accepted=handle.ingest(input);await h.core.whenIdle();assert.equal(h.core.journal.get(accepted.id).state,'delivered');assert.equal(sent.length,1);assert.equal(h.core.getStatus().extensions.filter(id=>id==='v3-channel').length,1);
     assert.throws(()=>handle.ingest!({...input,id:'two',conversation:{...input.conversation,account:'foreign'}}),/SCOPE_DENIED/);
-    handle.dispose();const replacement=h.core.registerExtensionV3(spec);assert.throws(()=>handle.ingest!({...input,id:'two'}),/CAPABILITY_UNAVAILABLE/);replacement.dispose();
+    handle.dispose();const replacement=h.core.registerExtension(spec);assert.throws(()=>handle.ingest!({...input,id:'two'}),/CAPABILITY_UNAVAILABLE/);replacement.dispose();
   }finally{await h.close();}
 });
 
 test('unloading an action signals cancellation and a same-name replacement cannot revive the old context',async()=>{
-  const entered=deferred();let captured:ExecutionContextV3|undefined;
+  const entered=deferred();let captured:ExecutionContext|undefined;
   const spec={id:'fixture',version:'1',actions:[{id:'fixture_wait',version:'1',description:'等待取消',effects:'read' as const,inputSchema:z.strictObject({}),outputSchema:z.strictObject({value:z.number()}),
-    execute:async(_input:unknown,context:ExecutionContextV3)=>{captured=context;entered.resolve();await new Promise<void>(resolve=>context.signal.addEventListener('abort',()=>resolve(),{once:true}));return success;}}]};
+    execute:async(_input:unknown,context:ExecutionContext)=>{captured=context;entered.resolve();await new Promise<void>(resolve=>context.signal.addEventListener('abort',()=>resolve(),{once:true}));return success;}}]};
   const h=await executionHarness(await root(),()=>call('fixture_wait',{}),spec);
-  try{const run=h.port.submitTask(request);await entered.promise;h.extensionHandle!.dispose();h.core.registerExtensionV3({...spec,protocolVersion:3,agentId:'dafeiyu'});await h.core.whenIdle();
+  try{const run=h.port.submitTask(request);await entered.promise;h.extensionHandle!.dispose();h.core.registerExtension({...spec,protocolVersion:4,agentId:'dafeiyu'});await h.core.whenIdle();
     assert.equal(captured?.signal.aborted,true);assert.throws(()=>h.core.executionAuthority(captured!,'fixture'),/SCOPE_DENIED/);assert.notEqual(h.port.status(run.run).state,'completed');assert.equal(h.port.status(run.run).operations[0]?.status,'succeeded');
   }finally{await h.close();}
 });

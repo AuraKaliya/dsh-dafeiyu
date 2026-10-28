@@ -82,7 +82,7 @@ test('native and foreign plugin nodes are barriers and their regions remain inta
   const b=await seedCheckpoint(h,'B来源',[{kind:'fact',text:'B_ONLY'}]);assert.equal(prepare(h,[a.view,b.view]),null);
   assert.ok(summaryCompositionRuns(h.session(),a.memory.scope).every(r=>!(r.includes(a.ref)&&r.includes(b.ref))));
   h.ctx.systemPrompt.context({name:'native-c3',order:1,required:true,text:'NATIVE_C3_KEEP'});
-  const extension=h.core.registerExtension({id:'second-c3',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{id:'status',kind:'operational-fact',
+  const extension=h.core.registerExtension({id:'second-c3',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{id:'status',kind:'operational-fact',
     prepare:async()=>[{id:'status',version:'1',text:'SECOND_C3_KEEP',expiresAt:new Date(Date.now()+600000).toISOString(),sources:[{ref:'fictional:status',version:'1',hash:'test'}]}],validate:()=>true}]});t.after(()=>extension.dispose());
   compose(h,[b.view]);h.mutate(a.memory,'delete',1);await h.run('继续');assert.match(h.visible(),/NATIVE_C3_KEEP/);assert.match(h.visible(),/SECOND_C3_KEEP/);assert.match(h.visible(),/FOREIGN_SURFACE_KEEP/);
 });

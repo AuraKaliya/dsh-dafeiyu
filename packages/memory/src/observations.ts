@@ -14,23 +14,6 @@ const sourceSchema=z.strictObject({key:z.string(),producerVersion:z.string(),occ
   .refine(v=>v.retention==='text'?v.text!==null&&digest(v.text)===v.hash:v.text===null,'Invalid retained source body');
 export const observationSourceRef=(id:string)=>`dafeiyu:observation-source:${id}`;
 const sourceId=(ref:string)=>z.uuid().parse(/^dafeiyu:observation-source:(.+)$/.exec(ref)?.[1]);
-export function migrateObservations(db:DatabaseSync):void {
-  const version=db.prepare('PRAGMA user_version').get()?.user_version;
-if(version===3||version===4||version===5||version===6||version===7||version===8||version===9||version===10||version===11||version===12||version===13){for(const table of ['observation_sources','observation_activities','observation_contributions','observation_source_requests'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
-  if(version!==2)throw new Error('Unsupported observation database');
-  db.exec(`CREATE TABLE observation_sources(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,source_key TEXT NOT NULL,version INTEGER NOT NULL,deleted INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,UNIQUE(agent_id,route,source_key));
-    CREATE TABLE observation_activities(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,receipt TEXT NOT NULL,UNIQUE(agent_id,route,plugin,request_id));
-    CREATE TABLE observation_contributions(memory_id TEXT PRIMARY KEY REFERENCES memory_items(id),activity_id TEXT NOT NULL REFERENCES observation_activities(id),contribution_id TEXT NOT NULL,body TEXT NOT NULL);
-    CREATE TABLE observation_source_requests(agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,route,plugin,request_id));
-    CREATE TRIGGER observation_source_body_immutable BEFORE UPDATE OF id,agent_id,route,plugin,source_key,body,body_hash ON observation_sources BEGIN SELECT RAISE(ABORT,'Immutable observation source'); END;
-    CREATE TRIGGER observation_source_no_delete BEFORE DELETE ON observation_sources BEGIN SELECT RAISE(ABORT,'Use logical deletion'); END;
-    CREATE TRIGGER observation_activity_immutable BEFORE UPDATE OF id,agent_id,route,plugin,request_id,fingerprint,body ON observation_activities BEGIN SELECT RAISE(ABORT,'Immutable observation activity'); END;
-    CREATE TRIGGER observation_activity_no_delete BEFORE DELETE ON observation_activities BEGIN SELECT RAISE(ABORT,'Retain observation activity'); END;
-    CREATE TRIGGER observation_receipt_once BEFORE UPDATE OF receipt ON observation_activities WHEN OLD.receipt<>'{}' OR NEW.receipt='{}' BEGIN SELECT RAISE(ABORT,'Immutable observation receipt'); END;
-    CREATE TRIGGER observation_contribution_immutable BEFORE UPDATE ON observation_contributions BEGIN SELECT RAISE(ABORT,'Immutable contribution'); END;
-    CREATE TRIGGER observation_contribution_no_delete BEFORE DELETE ON observation_contributions BEGIN SELECT RAISE(ABORT,'Retain contribution'); END;
-    PRAGMA user_version=3;`);
-}
 
 /** Shares the memory transaction and outbox: an activity and its selected contributions
  * either all commit or none do. Counts/interest decisions remain producer-reported facts. */

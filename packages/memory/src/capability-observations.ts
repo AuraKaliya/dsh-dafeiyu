@@ -18,18 +18,6 @@ const recordSchema=z.strictObject({schemaVersion:z.literal(1),kind:z.enum(['obse
   rawRetained:z.literal(false)});
 type RecordBody=z.infer<typeof recordSchema>;
 type Validator=(scope:TimelineScope,body:RecordBody,access:PersonaAccess|undefined)=>boolean;
-export function migrateCapabilityObservations(db:DatabaseSync):void {
-  const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===9||version===10||version===11||version===12||version===13){for(const table of ['capability_observations','capability_selections'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
-  if(version!==8)throw new Error('Unsupported capability observation database');
-  db.exec(`CREATE TABLE capability_observations(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,content_hash TEXT NOT NULL,UNIQUE(agent_id,scope_key,producer,request_id));
-    CREATE TABLE capability_selections(agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,scope_key,producer,request_id));
-    CREATE TRIGGER capability_observation_immutable BEFORE UPDATE ON capability_observations BEGIN SELECT RAISE(ABORT,'Immutable capability observation'); END;
-    CREATE TRIGGER capability_observation_retain BEFORE DELETE ON capability_observations BEGIN SELECT RAISE(ABORT,'Retain capability provenance'); END;
-    CREATE TRIGGER capability_selection_immutable BEFORE UPDATE ON capability_selections BEGIN SELECT RAISE(ABORT,'Immutable capability selection'); END;
-    PRAGMA user_version=9;`);
-  db.prepare('INSERT INTO memory_schema_migrations VALUES(9,?,0,?)').run(new Date().toISOString(),'add-scoped-capability-observations-without-raw-unselected-content-v1');
-}
 
 /** Observation receipts retain hashes/coverage. Only an explicit selection creates a memory item. */
 export class CapabilityObservations {
@@ -104,7 +92,7 @@ export class CapabilityObservations {
   record(authority:CapabilityObservationAccess,input:z.output<typeof CapabilityObservationSchema>){const access=authority.execution;
     return this.withAccess(access,()=>this.memory.atomic(()=>{authority.guard();if(redactJson(input).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
       const history=authority.inheritExecutionHistory?z.array(SourceDependencySchema).max(4096).parse(access.historyDependencies??[]):[];
-      if(authority.inheritExecutionHistory&&(!access.historyTracked||history.some(dep=>['unavailable','legacy','ephemeral'].includes(dep.kind))||!access.validateHistory?.(history)))throw new Error('HISTORY_UNTRACKED');
+      if(authority.inheritExecutionHistory&&(!access.historyTracked||history.some(dep=>['unavailable','ephemeral'].includes(dep.kind))||!access.validateHistory?.(history)))throw new Error('HISTORY_UNTRACKED');
       const {text,...metadata}=input,body=recordSchema.parse({schemaVersion:1,kind:'observed',scope:access.view.scope,origin:access.view.origin,runId:access.view.runId,operationId:access.operationId,
         producer:access.producer,proof:input.proof,observedHash:textHash(text),occurredAt:input.occurredAt,counts:input.counts,coverage:input.coverage,history,parent:null,selection:null,rawRetained:false});
       const result=this.insert(access,'observe:'+input.requestId,digest({...metadata,observedHash:body.observedHash,...(authority.inheritExecutionHistory?{derivedHistoryHash:digest(history)}:{})}),body);
@@ -119,7 +107,7 @@ export class CapabilityObservations {
         ||conversationKey(scope.agentId,row.body.proof.scene)!==conversationKey(scope.agentId,authority.scene))throw new Error('SOURCE_STALE');
       const history=access.historyDependencies??[];
       if(!access.historyTracked||!history.some(dep=>(dep.kind==='capability'||dep.kind==='execution-source')&&digest(dep.ref)===digest(row.ref)))throw new Error('OBSERVATION_NOT_EXPOSED');
-      if(input.mode==='summary'&&(history.some(dep=>['unavailable','legacy','ephemeral'].includes(dep.kind))||!access.validateHistory?.(history)))throw new Error('HISTORY_UNTRACKED');
+      if(input.mode==='summary'&&(history.some(dep=>['unavailable','ephemeral'].includes(dep.kind))||!access.validateHistory?.(history)))throw new Error('HISTORY_UNTRACKED');
       if(input.mode==='none'||input.mode==='original'){if(input.text!==undefined||input.start!==undefined||input.end!==undefined)throw new Error('INVALID_INPUT');}
       if(input.mode==='summary'&&(!input.text||input.start!==undefined||input.end!==undefined))throw new Error('INVALID_INPUT');
       const fingerprint=digest(input),prior=this.db.prepare('SELECT fingerprint,receipt FROM capability_selections WHERE agent_id=? AND scope_key=? AND producer=? AND request_id=?').get(scope.agentId,scope.route,access.producer,input.requestId);

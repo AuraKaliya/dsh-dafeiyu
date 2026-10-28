@@ -1,3 +1,5 @@
+import {z} from 'zod';
+import {fixtureAction} from './fixture-action.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -65,7 +67,7 @@ test('event metadata stays readable but only its legitimate message source can s
 
 test('independent tool receipts remain valid memory sources until their actual input is withdrawn',async t=>{
   const h=await provenanceFixture();t.after(h.close);let calls=0,step=0;
-  const handle=h.core.registerExtension({id:'b05-proof',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{name:'b05_proof',description:'本机虚构独立回执',fields:{},execute:async()=>{calls++;return {receipt:'LOCAL_PROOF_Q17',count:2};}}]});t.after(()=>handle.dispose());
+  const handle=h.core.registerExtension({id:'b05-proof',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'b05-proof',{id:'b05_proof',description:'本机虚构独立回执',inputSchema:z.strictObject({}),work:async()=>{calls++;return {receipt:'LOCAL_PROOF_Q17',count:2};}})]});t.after(()=>handle.dispose());
   h.setResponse(()=>++step===1?call('b05_proof',{}):textReply('本机操作结束'));
   const receipt=h.simulator.send('a','仅运行一次虚构工具',{id:randomUUID()});await h.core.whenIdle();const item=h.core.journal.get(receipt.id),source=toolSource(h,item);
   const opened=await h.probe('a',context=>h.timeline.open(context,{ref:source.ref}));if(opened.status!=='ok')throw new Error('Missing receipt');assert.equal(opened.memoryUse,'primary-candidate');

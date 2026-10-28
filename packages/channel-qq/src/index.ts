@@ -2,7 +2,7 @@ import {backgroundContributor} from './context-background.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
-import { API_VERSION, LifecycleModeSchema, conversationKey,TaskResultAnchorSchema,messageParts,QQ_EXPRESSION_DEFAULTS,QQ_SEQUENCE_INSTRUCTIONS } from '@dafeiyu/contracts';
+import { API_VERSION, conversationKey,TaskResultAnchorSchema,messageParts,QQ_EXPRESSION_DEFAULTS,QQ_SEQUENCE_INSTRUCTIONS } from '@dafeiyu/contracts';
 import type { Conversation, DeliveryResult, ExtensionHandle, Reply,TaskResultAnchor,ReplyMediaManifest,InboundMessage } from '@dafeiyu/contracts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -62,12 +62,11 @@ const configSchema = z.strictObject({
   tasks: QqTasksConfigSchema.prefault({}),
   media:QqMediaConfigSchema.prefault({}),
   httpURL: z.string(), wsURL: z.string(), tokenFile: z.string(), dataDir: z.string(),
-  lifecycleMode:LifecycleModeSchema.default('legacy'),
   requestTimeoutMs: z.number().int().min(100).max(30000).default(10000),
   reconnectMs: z.number().int().min(100).max(60000).default(3000),
 });
 export type Config = z.input<typeof configSchema>;
-export const QqPluginConfigSchema=configSchema.omit({agentId:true,dataDir:true,lifecycleMode:true});
+export const QqPluginConfigSchema=configSchema.omit({agentId:true,dataDir:true});
 const segmentSchema = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
 const messageSchema = z.object({
   post_type: z.literal('message'), self_id: platformId, message_id: platformId.pipe(z.string().max(80)),
@@ -122,8 +121,8 @@ export class QqChannel extends Service {
   private counters = { received: 0, accepted: 0, ignored: 0, unsupported: 0, delivered: 0, segmentsConfirmed:0, reconnects: 0, recalled: 0 };
   constructor(ctx: Context, raw: Config) {
     super(ctx, 'dafeiyuQQ'); this.config = configSchema.parse(raw);
-    if((this.config.capabilities.enabled||this.config.tasks.enabled)&&this.config.lifecycleMode!=='managed')throw new Error('QQ_CAPABILITIES_REQUIRE_MANAGED');
-    if(this.config.media.enabled&&(!this.config.capabilities.enabled||this.config.lifecycleMode!=='managed'))throw new Error('QQ_MEDIA_REQUIRE_CAPABILITIES');
+    if((this.config.capabilities.enabled||this.config.tasks.enabled)&&false)throw new Error('QQ_CAPABILITIES_REQUIRE_MANAGED');
+    if(this.config.media.enabled&&(!this.config.capabilities.enabled||false))throw new Error('QQ_MEDIA_REQUIRE_CAPABILITIES');
     if(this.config.media.sendEnabled&&!this.config.media.enabled)throw new Error('QQ_MEDIA_SEND_DEPENDENCY_REQUIRED');
     if(this.config.stickers.enabled&&!this.config.media.enabled)throw new Error('QQ_STICKER_MEDIA_REQUIRED');
     if(this.config.media.voiceDirectives&&(!this.config.media.enabled||!this.config.tasks.enabled))throw new Error('QQ_VOICE_TASK_DEPENDENCY_REQUIRED');
@@ -140,7 +139,7 @@ export class QqChannel extends Service {
         confirmed:(reply,text,receipt)=>{this.counters.segmentsConfirmed++;if(this.store.delivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
           if(reply.taskResult)this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,'[任务交付占位：正文须经核心任务来源验证后回查，不能据此推断任务内容。]',{occurredAt:null,unsupported:['task-result-body-withheld']});
           else this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text);}});
-      this.mediaTransport=new QqMediaTransport({ledger:this.store.mediaDelivery,...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),legacyProgress:id=>this.store.delivery.progress(id),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,part,data,signal)=>this.sendMediaPart(reply,part,data,signal),confirmed:(reply,part,receipt)=>{
+      this.mediaTransport=new QqMediaTransport({ledger:this.store.mediaDelivery,...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),textProgress:id=>this.store.delivery.progress(id),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,part,data,signal)=>this.sendMediaPart(reply,part,data,signal),confirmed:(reply,part,receipt)=>{
         if(part.kind==='image'&&this.config.stickers.enabled)this.store.stickers.used(reply.conversation,part.asset,reply.id);
         this.counters.segmentsConfirmed++;if(this.store.mediaDelivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
         const text=reply.taskResult?'[任务媒体交付占位：须经核心来源校验后回查，不能从此推断任务内容。]':part.kind==='text'?part.text:'[已发送受控媒体部件：'+part.kind+'；此占位不包含原媒体内容。]';
@@ -148,8 +147,8 @@ export class QqChannel extends Service {
       this.groups = new GroupDirectory({ account: this.config.botId, allowed: this.config.groupIds, config: this.config.groupSync, store: this.store,
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
-      this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
-        contexts:[backgroundContributor(ctx,{store:this.store,allowed:scene=>this.allowed(scene),accepts:(scene,time,generation)=>scene.kind==='group'&&this.groups.accepts(scene.id,time)&&generation===this.groups.generation(scene.id)})],
+      this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', protocolVersion:4, agentId: this.config.agentId,
+        conversationContexts:[backgroundContributor(ctx,{store:this.store,allowed:scene=>this.allowed(scene),accepts:(scene,time,generation)=>scene.kind==='group'&&this.groups.accepts(scene.id,time)&&generation===this.groups.generation(scene.id)})],
         channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',deliveryProgress:id=>{const p=this.deliveryStatus(id);if(!p)return null;const segments='segments'in p?p.segments:p.parts;return {confirmed:p.confirmed,pending:p.pending,unknown:p.unknown,canResume:p.unknown===0&&p.pending>0&&segments.some(s=>s.state==='pending'&&s.code==='DELIVERY_INTERRUPTED_BY_MESSAGE')};},
           processingSignal: message => this.processingSignal(message),
           description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
@@ -199,7 +198,7 @@ export class QqChannel extends Service {
   /** Program-side refresh; no model invocation, privilege expansion or history replay. */
   refreshGroups(): Promise<void> { return this.groups.refresh(); }
   async start(): Promise<void> {
-    if(this.config.lifecycleMode==='managed'&&this.ctx.dafeiyu.lifecycleState!=='active')throw new Error('HOST_NOT_READY');
+    if(this.ctx.dafeiyu.lifecycleState!=='active')throw new Error('HOST_NOT_READY');
     if(this.quiescing||this.stopped)throw new Error('CHANNEL_STOPPING');
     await this.connect();
   }
@@ -440,4 +439,4 @@ export class QqChannel extends Service {
     await Promise.allSettled([...this.sending]);this.closedDeliveryCounts=this.deliveryCounts();this.store.close();
   }
 }
-export async function apply(ctx: Context, config: Config): Promise<void> { const channel = new QqChannel(ctx, config); if(config.lifecycleMode!=='managed')await channel.start(); }
+export async function apply(ctx: Context, config: Config): Promise<void> { const channel = new QqChannel(ctx, config);  }

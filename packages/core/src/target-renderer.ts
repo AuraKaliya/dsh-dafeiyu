@@ -23,7 +23,7 @@ export async function renderPublicProgress(ctx:Context,model:AgentOptions,cwd:st
 async function renderTargetMessage(ctx:Context,model:AgentOptions,cwd:string,id:string,foundation:string,growth:readonly ContextItem[],material:TargetMaterial,signal:AbortSignal,guard:()=>void,requestMaxBytes:number){
   const timer=AbortSignal.timeout(material.progress?ctx.dafeiyu.phaseTimeouts().feedback:ctx.dafeiyu.phaseTimeouts().render);signal=AbortSignal.any([signal,timer]);
   let handoff:ReturnType<typeof stageHandoff>|undefined;
-  if(material.progress&&ctx.dafeiyu.contextAssembly().mode==='unified'){const inbound=ctx.dafeiyu.journal.get(material.inboundId);if(JSON.stringify(inbound.message.conversation)!==JSON.stringify(material.target))throw new Error('DELIVERY_BINDING_CONFLICT');handoff=stageHandoff('feedback',material.question,null,inbound.message,{state:material.taskState});}
+  if(material.progress){const inbound=ctx.dafeiyu.journal.get(material.inboundId);if(JSON.stringify(inbound.message.conversation)!==JSON.stringify(material.target))throw new Error('DELIVERY_BINDING_CONFLICT');handoff=stageHandoff('feedback',material.question,null,inbound.message,{state:material.taskState});}
   const sessionId=`${material.progress?'dafeiyu-progress-v1':'dafeiyu-delivery-v3'}-${id}${material.repair?'-repair-1':''}`;guard();
   if(await ctx.sessionPersistence.stat(SessionId(sessionId)))throw new Error('DELIVERY_RENDER_ALREADY_EXISTS');
   const info=await ctx.llm.resolveModelInfo(model.provider!,model.model!,signal),effort=material.progress?'low':'high';

@@ -5,7 +5,7 @@ import { ContinuityCheckpointSchema,ContextItemSchema,ExecutionContributionSchem
 import type { PersonaAccess,PersonaSourceRef,ContinuityCheckpoint,TaskIntentEvent } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import type { ExecutionSources } from './execution-sources.js';
-import type { PersonaResolver } from './persona-store.js';
+import type { PersonaResolver } from './material.js';
 import { personaDigest,personaScope,sourceKey } from './persona-digest.js';
 
 export const evidenceSelectionSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().nonnegative(),entries:z.array(PersonaSourceRefSchema).max(16),reason:z.string().trim().min(1).max(1000)});
@@ -25,8 +25,7 @@ export class ExecutionMemoryState {
   private bump(access:PersonaAccess){this.db.prepare('INSERT INTO scope_generations VALUES(?,?,1) ON CONFLICT(agent_id,route) DO UPDATE SET generation=generation+1').run(access.view.scope.agentId,personaScope(access.view.scope));}
   generation(access:PersonaAccess){const scope=this.task(access);return this.memory.generation({agentId:scope.agentId,route:scope.scopeKey})
     +Number(this.db.prepare('SELECT coalesce(sum(state_version),0) AS n FROM execution_sources WHERE scope_key=?').get(scope.scopeKey)?.n)
-    +Number(this.db.prepare('SELECT coalesce(sum(revision),0) AS n FROM persona_profiles WHERE agent_id=?').get(scope.agentId)?.n)
-    +Number(this.db.prepare('SELECT coalesce(sum(version),0) AS n FROM growth_selections WHERE agent_id=? AND scope_key=?').get(scope.agentId,scope.scopeKey)?.n);}
+    +Number(this.db.prepare('SELECT coalesce(sum(version),0) AS n FROM memory_self WHERE agent_id=?').get(scope.agentId)?.n);}
   private writeHistory(kind:string,id:string,history:readonly import('@dafeiyu/contracts').SourceDependency[]){this.db.prepare('INSERT INTO persona_dependencies VALUES(?,?,?,?,?)').run(kind,id,1,'history',JSON.stringify(history));}
   private historyValid(access:PersonaAccess,kind:string,id:string,hash:string|undefined){if(!hash)return false;const row=this.db.prepare('SELECT body FROM persona_dependencies WHERE owner_kind=? AND owner_id=? AND source_key=?').get(kind,id,'history');
     if(!row)return false;const history=z.array(SourceDependencySchema).parse(JSON.parse(String(row.body)));return personaDigest(history)===hash&&(!history.length||!!access.validateHistory?.(history));}
@@ -51,7 +50,7 @@ export class ExecutionMemoryState {
   },work);}
   memoryMaterial(access:PersonaAccess,ref:PersonaSourceRef){if(ref.kind!=='memory'||ref.scopeKey!==personaScope(access.view.scope)||ref.agentId!==access.view.scope.agentId||ref.authorization||ref.range||ref.selectionId)return null;
     return this.withSources(access,()=>{const item=this.memory.read({agentId:ref.agentId,route:ref.scopeKey},ref.id,'normal',ref.revision,'internal');
-      if(!item||item.boundary.schemaVersion!==2||item.version!==ref.version||item.contentHash!==ref.contentHash)return null;
+      if(!item||item.boundary.kind!=='task'||item.version!==ref.version||item.contentHash!==ref.contentHash)return null;
       const row=this.db.prepare('SELECT body FROM execution_contributions WHERE memory_id=?').get(ref.id);if(!row)return null;
       const body=z.object({source:PersonaSourceRefSchema,dependency:PersonaSourceRefSchema.optional()}).parse(JSON.parse(String(row.body))),material=this.resolve(access,body.dependency??body.source);
       return material?{text:item.content,dependencies:[body.dependency??body.source,...material.dependencies],rootSources:material.rootSources}:null;});

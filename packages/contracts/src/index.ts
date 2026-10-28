@@ -14,7 +14,6 @@ export * from './observation.js';
 export * from './task-workspace.js';
 export * from './task-memory.js';
 export * from './expression.js';
-export * from './delivery.js';
 export * from './lifecycle.js';
 export * from './execution.js';
 export * from './external-execution.js';
@@ -34,9 +33,8 @@ export * from './dsh-tools.js';
 export * from './bili-browser.js';
 export * from './qq-expression.js';
 export * from './task-assessment.js';
-import type { TaskExpressionProvider } from './expression.js';
+export * from './experience.js';
 import type { TaskMemoryProvider } from './task-memory.js';
-import type { TaskPluginAPI,TaskWorkspaceProvider } from './task-workspace.js';
 import type { MemoryObservationProvider,ObservationReceipt } from './observation.js';
 import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
@@ -44,7 +42,7 @@ import type { FeedbackProvider } from './feedback.js';
 import type { TaskResultAnchor } from './native-expression.js';
 import type { ReplyMediaManifest } from './media-delivery.js';
 
-export const API_VERSION = 2 as const;
+export const API_VERSION = 4 as const;
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 const id = z.string().min(1).max(160);
 export const MessagePartSchema = z.strictObject({
@@ -105,7 +103,6 @@ export interface ChannelCapability {
   readonly account: string;
   /** Actual transport capabilities/limits, independent of the model's own modalities. */
   readonly description?: string;
-  readonly taskDelivery?:'simulated';
   /** Opt-in for persistent reply source rebinding and checks before every transport part. */
   readonly deliveryValidation?:'per-segment';
   /** Text task transport enters a write window after each preflight and closes it when the request settles. */
@@ -119,52 +116,14 @@ export interface ChannelCapability {
   /** Separate from the legacy simulated-task contract; caller supplies a verified task-result anchor. */
   deliverTaskResult?(reply:Reply,anchor:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>;
 }
-export interface ActionContext {
+export interface ConversationAccess {
   readonly operationId: string;
   readonly conversation: Conversation;
   readonly sourceMessageId: string;
   readonly signal: AbortSignal;
 }
-/** Phase one supports named string fields only; richer schemas require an interface version change. */
-export interface ActionCapability {
-  readonly name: string;
-  readonly description: string;
-  readonly fields: Readonly<Record<string, { readonly description: string; readonly required: boolean }>>;
-  execute(args: Readonly<Record<string, string>>, context: ActionContext): Promise<Json>;
-  /** Opt in to structured feedback, or declare a provider-owned archive reader. Legacy tools are unchanged. */
-  readonly feedback?: 'structured-v1'|'archive-view';
-}
-export interface Extension {
-  readonly id: string;
-  readonly version: string;
-  readonly apiVersion: number;
-  readonly agentId: string;
-  /** Optional managed-host readiness; no change to legacy action or message contracts. */
-  readonly lifecycleReady?: () => boolean;
-  readonly channels?: readonly ChannelCapability[];
-  readonly actions?: readonly ActionCapability[];
-  readonly contexts?: readonly ContextContributor[];
-  readonly feedbackProvider?:FeedbackProvider;
-  readonly compactionProvider?: CompactionProvider;
-  readonly memoryObservationProvider?:MemoryObservationProvider;
-  readonly taskWorkspaceProvider?:TaskWorkspaceProvider;
-  readonly taskMemoryProvider?:TaskMemoryProvider;
-  readonly taskExpressionProvider?:TaskExpressionProvider;
-}
 export type MessageState = 'accepted' | 'processing' | 'reply-ready' | 'sending' | 'delivered' | 'handled' | 'failed' | 'uncertain';
 export interface Receipt { readonly id: string; readonly duplicate: boolean; readonly state: MessageState }
-/** An opaque handle binds ingestion to the registered extension, never to a claimed payload plugin ID. */
-export interface ExtensionHandle {
-  readonly tasks:TaskPluginAPI;
-  ingest(message: unknown): Receipt;
-  /** Records transport/processing facts without opening a model turn. */
-  observe(event: Observation): string;
-  /** Completed producer-selected observation; never starts a model turn. */
-  observeMemory(input:unknown,context?:ActionContext):ObservationReceipt;
-  openObservationSource(input:unknown,context?:ActionContext):Record<string,unknown>;
-  changeObservationSource(input:unknown,context?:ActionContext):Record<string,unknown>;
-  dispose(): void;
-}
 export interface EventRecord {
   readonly schemaVersion: 1;
   readonly seq: number;

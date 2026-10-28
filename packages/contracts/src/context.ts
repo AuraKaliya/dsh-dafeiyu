@@ -11,7 +11,6 @@ export const ContextHandoffSchema=z.strictObject({schemaVersion:z.literal(1),sta
   facts:z.record(z.string(),z.json()),note:z.string().max(2000)});
 export type ContextHandoff=z.infer<typeof ContextHandoffSchema>;
 export const ContextAssemblySchema=z.strictObject({
-  mode:z.enum(['legacy','unified']).default('legacy'),
   deadlineMs:z.number().int().min(50).max(30000).default(5000),
   recall:z.strictObject({enabled:z.boolean().default(true),strategy:z.enum(['lexical','hybrid']).default('lexical'),
     candidates:z.number().int().min(1).max(64).default(32),limit:z.number().int().min(1).max(12).default(6),

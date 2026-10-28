@@ -4,7 +4,7 @@ import { NativeExpressionPacketSchema,NativeVerificationFeedbackSchema,ContextIt
 import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply } from '@dafeiyu/contracts';
 import type { ContextCoordinator } from './context.js';
 import type { RuntimeStore } from './runtime-store.js';
-import type { DeliveryChannel } from './task-delivery.js';
+import type { DeliveryChannel } from './delivery-channel.js';
 import { nativeDeliveryHash } from './native-delivery-store.js';
 import { renderTaskResult,renderPublicProgress } from './target-renderer.js';
 import type {DeliveryRepair} from './target-renderer.js';
@@ -90,6 +90,12 @@ export class NativeTaskDelivery {
       const guard=()=>{persona.guard();if(nativeDeliveryHash(this.host.model())!==material.modelHash)throw new Error('SOURCE_STALE');};guard();
       if(record.state==='accepted'){
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
+        const completed=this.host.store.get(runId);
+        if(packet.resultIncluded&&completed.state==='completed'&&completed.result){
+          const text=await readPersistedResult(this.host.ctx,completed.result);guard();
+          this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'source-admission',expression:'main-agent'});
+          this.host.store.nativeDeliveries.rendered(runId,completed.result);this.host.store.nativeDeliveries.approve(runId,text);this.host.flush();
+        }else{
         let repair:DeliveryRepair|undefined;
         for(let attempt=0;attempt<NATIVE_RENDER_ATTEMPTS;attempt++){
           this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'rendering',attempt,deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().render).toISOString()});this.host.flush();
@@ -103,6 +109,7 @@ export class NativeTaskDelivery {
             if(attempt+1>=NATIVE_RENDER_ATTEMPTS||safe.redacted)throw error;guard();
             repair={previousAnswer:rendered.text,issues:feedback.data.issues};this.host.store.nativeDeliveries.repair(runId);this.host.flush();continue;}
           guard();this.host.store.nativeDeliveries.rendered(runId,rendered.resultRef);this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();break;
+        }
         }
       }
       record=this.host.store.nativeDeliveries.get(runId)!;if(record.state!=='ready'||nativeDeliveryHash(record.material)!==nativeDeliveryHash(material)||!record.renderRef)throw new Error('SOURCE_STALE');

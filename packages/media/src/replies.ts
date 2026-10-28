@@ -1,7 +1,7 @@
 import { randomUUID,createHash } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import { MediaReplyDraftInputSchema,ReplyMediaManifestSchema,NativeMediaMaterialSchema } from '@dafeiyu/contracts';
-import type { MediaAssetRef,MediaReplyAccess,MediaSourceDescription,ExecutionContextV3,ReplyMediaPart,ReplyMediaManifest,NativeExpressionAccess } from '@dafeiyu/contracts';
+import type { MediaAssetRef,MediaReplyAccess,MediaSourceDescription,ExecutionContext,ReplyMediaPart,ReplyMediaManifest,NativeExpressionAccess } from '@dafeiyu/contracts';
 import type { MediaStore } from './store.js';
 import { mediaHash } from './store.js';
 import { mediaDraftContentSchema } from './reply-store.js';
@@ -10,14 +10,14 @@ import type { MediaFiles } from './files.js';
 import type { ReplySpeech } from './reply-speech.js';
 
 interface Host {ctx:Context;store:MediaStore;files:MediaFiles;ready():boolean;
-  prepareAsset(context:ExecutionContextV3,asset:MediaAssetRef,as:'image'|'record'|'file',key:string,owner:string):Promise<{asset:MediaAssetRef;source:MediaSourceDescription}>;
+  prepareAsset(context:ExecutionContext,asset:MediaAssetRef,as:'image'|'record'|'file',key:string,owner:string):Promise<{asset:MediaAssetRef;source:MediaSourceDescription}>;
   sourceCurrent(source:MediaSourceDescription):boolean;speech?:ReplySpeech;}
 function filename(source:MediaSourceDescription,asset:MediaAssetRef){let name=(source.name??'attachment-'+asset.id.slice(0,8)+'.bin').normalize('NFKC').replace(/[\\/:\x00-\x1f]/g,'_').replace(/[. ]+$/g,'').slice(0,160);
   if(!name||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name))name='attachment-'+asset.id.slice(0,8)+'.bin';return name;}
 export class MediaReplies {
   constructor(private readonly host:Host){}
-  private write(context:ExecutionContextV3,owner:string){if(!this.host.ready())throw new Error('MEDIA_NOT_CONFIGURED');const access=this.host.ctx.dafeiyu.personaAccess(context,owner,'local-write');if(!access.historyTracked)throw new Error('HISTORY_UNTRACKED');return access;}
-  async prepare(context:ExecutionContextV3,raw:unknown,owner='media'){const input=MediaReplyDraftInputSchema.parse(raw),access=this.write(context,owner),temporary:string[]=[];const parts:MediaDraft['parts']=[];let persisted=false;
+  private write(context:ExecutionContext,owner:string){if(!this.host.ready())throw new Error('MEDIA_NOT_CONFIGURED');const access=this.host.ctx.dafeiyu.personaAccess(context,owner,'local-write');if(!access.historyTracked)throw new Error('HISTORY_UNTRACKED');return access;}
+  async prepare(context:ExecutionContext,raw:unknown,owner='media'){const input=MediaReplyDraftInputSchema.parse(raw),access=this.write(context,owner),temporary:string[]=[];const parts:MediaDraft['parts']=[];let persisted=false;
     try{for(const [index,part] of input.parts.entries()){
       if(part.kind==='final-voice'){if(!this.host.speech)throw new Error('MEDIA_TTS_NOT_CONFIGURED');parts.push({kind:'final-voice',voiceHash:this.host.speech.hash});continue;}
       const as=part.as??(part.asset.kind==='image'?'image':part.asset.kind==='audio'?'record':'file');const prepared=await this.host.prepareAsset(context,part.asset,as,'reply:'+mediaHash([input.requestId,input.expectedVersion,index]),owner);access.guard();
@@ -35,7 +35,7 @@ export class MediaReplies {
       const current=this.host.store.replies.current(context.runId)!.draft;return {draftId:draft.id,version:draft.version,currentDraftId:current.id,currentVersion:current.version,selected:current.parts.length,cancelled:!current.parts.length};
     }catch(error){if(persisted)throw new Error('MEDIA_DRAFT_PREPARATION_INCOMPLETE');throw error;}finally{for(const id of temporary)this.host.store.releaseLease(id,'draft-preparing');}
   }
-  status(context:ExecutionContextV3){this.host.ctx.dafeiyu.executionAuthority(context,'media');const value=this.host.store.replies.current(context.runId);return value?{draftId:value.draft.id,version:value.draft.version,selected:value.draft.parts.length,frozen:value.frozen}:{draftId:null,version:0,selected:0,frozen:false};}
+  status(context:ExecutionContext){this.host.ctx.dafeiyu.executionAuthority(context,'media');const value=this.host.store.replies.current(context.runId);return value?{draftId:value.draft.id,version:value.draft.version,selected:value.draft.parts.length,frozen:value.frozen}:{draftId:null,version:0,selected:0,frozen:false};}
   pending(runId:string){const value=this.host.store.replies.current(runId);return value?{id:value.draft.id,version:value.draft.version,selected:value.draft.parts.length,authority:value.draft.authority}:null;}
   native(access:NativeExpressionAccess){const current=this.host.store.replies.current(access.execution.view.runId);if(!current||!current.draft.parts.length){access.guard();return null;}const draft=current.draft;
     const payload=this.host.ctx.dafeiyu.validateNativeMediaReplyAuthority(draft.authority,access);if(payload!==mediaHash(mediaDraftContentSchema.strip().parse(draft)))throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');

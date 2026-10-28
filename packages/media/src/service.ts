@@ -6,7 +6,7 @@ import { randomUUID,createHash } from 'node:crypto';
 import { z } from 'zod';
 import { outputContract,ReadProgressSchema } from '@dafeiyu/contracts';
 import { MediaAcquireSchema,MediaReadSchema,MediaAssetRefSchema,MediaSourceDescriptionSchema,CapabilitySelectionSchema,ServiceGate,MediaVoiceEvidenceSchema,MediaReplyDraftInputSchema,ExecutionScopeSchema,RunOriginSchema } from '@dafeiyu/contracts';
-import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContextV3,ActionCapabilityV3,MediaVoiceEvidence,MediaReplyAccess,NativeExpressionAccess,PersonaAccess,PersonaSourceRef,Conversation,ReplyMediaManifest } from '@dafeiyu/contracts';
+import type { MediaPort,MediaSourceProvider,MediaAccess,MediaAssetRef,MediaSourceDescription,ExecutionContext,ActionCapability,MediaVoiceEvidence,MediaReplyAccess,NativeExpressionAccess,PersonaAccess,PersonaSourceRef,Conversation,ReplyMediaManifest } from '@dafeiyu/contracts';
 import { MediaStore,mediaHash } from './store.js';
 import type { StoredMediaSource,MediaExposure } from './store.js';
 import { MediaFiles,abortable } from './files.js';
@@ -51,7 +51,7 @@ export class MediaService extends Service implements MediaPort {
   private readonly gate=new ServiceGate();
   private readonly controller=new AbortController();
   private readonly providers=new Map<string,Readonly<MediaSourceProvider>>();
-  private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
+  private readonly handle:ReturnType<Context['dafeiyu']['registerExtension']>;
   private readonly unbind:()=>void;
   private tail:Promise<unknown>=Promise.resolve();
   private closing:Promise<void>|undefined;
@@ -68,7 +68,7 @@ export class MediaService extends Service implements MediaPort {
     this.replySpeech=this.config.tts?new ReplySpeech(ctx,this.store,this.files,this.config.tts,testBackends?.ttsWorker):undefined;
     if(this.replySpeech)this.providers.set('media',{id:'media',describe:key=>this.replySpeech!.describe(key),open:async()=>{throw new Error('MEDIA_REPLY_OUTPUT_PRIVATE');}});
     this.replies=new MediaReplies({ctx,store:this.store,files:this.files,ready:()=>this.ready(),prepareAsset:(c,a,as,key,owner)=>this.prepareReplyAsset(c,a,as,key,owner),sourceCurrent:source=>this.sourceCurrent(source),...(this.replySpeech?{speech:this.replySpeech}:{})});
-    try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'media',version:'0.1.0',agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['media.processing.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
+    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'media',version:'0.1.0',agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['media.processing.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
       resourceProofs:{current:proof=>this.ready()&&(proof.key.startsWith('reply-text:')?this.replySpeech?.current(proof)===true:this.store.validateExposure(proof,source=>this.sourceCurrent(source))),epoch:scope=>this.ready()?mediaHash([this.store.epoch(),[...this.providers.keys()],ctx.dafeiyu.capabilityResourceEpochWithout('media',scope)]):'closed'}});
       this.unbind=ctx.dafeiyu.bindMedia(this);
     }catch(error){this.images.close();this.store.close();throw error;}
@@ -79,14 +79,14 @@ export class MediaService extends Service implements MediaPort {
   registerProvider(provider:MediaSourceProvider){if(this.providers.has(provider.id))throw new Error('DUPLICATE_PROVIDER');if(provider.id==='media'||!MediaSourceDescriptionSchema.shape.ref.shape.provider.safeParse(provider.id).success)throw new Error('MEDIA_PROVIDER_INVALID');
     const bound=Object.freeze({id:provider.id,describe:provider.describe.bind(provider),open:provider.open.bind(provider)});this.providers.set(provider.id,bound);return ()=>{if(this.providers.get(provider.id)===bound)this.providers.delete(provider.id);};}
   private describe(ref:MediaSourceDescription['ref']){const provider=this.providers.get(ref.provider),raw=provider?.describe(ref.key);if(!provider||!raw)throw new Error('MEDIA_SOURCE_UNAVAILABLE');const description=MediaSourceDescriptionSchema.parse(raw);if(mediaHash(ref)!==mediaHash(description.ref))throw new Error('MEDIA_SOURCE_STALE');return {provider,description};}
-  private access(context:ExecutionContextV3,owner:string,description:MediaSourceDescription,provider:Readonly<MediaSourceProvider>){this.gate.assertActive();const access=this.ctx.dafeiyu.mediaAccess(context,owner,description.origin),fingerprint=mediaHash(description);
+  private access(context:ExecutionContext,owner:string,description:MediaSourceDescription,provider:Readonly<MediaSourceProvider>){this.gate.assertActive();const access=this.ctx.dafeiyu.mediaAccess(context,owner,description.origin),fingerprint=mediaHash(description);
     const guard=()=>{access.guard();if(!this.ready()||this.providers.get(provider.id)!==provider||mediaHash(provider.describe(description.ref.key))!==fingerprint)throw new Error('MEDIA_SOURCE_STALE');};guard();return {...access,guard};}
   private serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>{this.gate.assertActive();return work();}).finally(()=>this.flush());this.tail=result.catch(()=>{});return result;}
-  private async acquireWithin(context:ExecutionContextV3,owner:string,input:z.output<typeof MediaAcquireSchema>,signal:AbortSignal){const {provider,description}=this.describe(input.source),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description),cancel=new AbortController();
+  private async acquireWithin(context:ExecutionContext,owner:string,input:z.output<typeof MediaAcquireSchema>,signal:AbortSignal){const {provider,description}=this.describe(input.source),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description),cancel=new AbortController();
     try{const opened=await abortable(provider.open(input.source.key,null,AbortSignal.any([signal,cancel.signal])),signal);return await this.files.ingest(access,input.requestId,source,opened,signal);}finally{cancel.abort();}}
-  acquire(context:ExecutionContextV3,owner:string,input:z.output<typeof MediaAcquireSchema>){return this.serial(()=>this.acquireWithin(context,owner,input,AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)])));}
-  inspect(context:ExecutionContextV3,owner:string,ref:MediaAssetRef){const source=this.store.sourceForAsset(ref.id),{provider,description}=this.describe(source.description.ref),access=this.access(context,owner,description,provider);this.store.requireRef(access,ref);return this.store.read(access,ref.id);}
-  private async withInput<T>(context:ExecutionContextV3,owner:string,request:Input,work:(value:Prepared)=>Promise<T>):Promise<T>{
+  acquire(context:ExecutionContext,owner:string,input:z.output<typeof MediaAcquireSchema>){return this.serial(()=>this.acquireWithin(context,owner,input,AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)])));}
+  inspect(context:ExecutionContext,owner:string,ref:MediaAssetRef){const source=this.store.sourceForAsset(ref.id),{provider,description}=this.describe(source.description.ref),access=this.access(context,owner,description,provider);this.store.requireRef(access,ref);return this.store.read(access,ref.id);}
+  private async withInput<T>(context:ExecutionContext,owner:string,request:Input,work:(value:Prepared)=>Promise<T>):Promise<T>{
     const ref=request.source??this.store.sourceForAsset(request.asset!.id).description.ref,{provider,description}=this.describe(ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
     const cancel=new AbortController(),signal=AbortSignal.any([context.signal,this.controller.signal,cancel.signal,AbortSignal.timeout(this.config.timeoutMs)]);let broker:MediaRangeBroker|null=null,lease:string|null=null,parent=request.asset??null;
     try{let input:DecoderInput;
@@ -97,7 +97,7 @@ export class MediaService extends Service implements MediaPort {
       access.guard();return await work({input,access,source,parent,broker,signal});
     }finally{cancel.abort();if(broker)await broker.close();if(lease)this.store.releaseLease(lease,'process');}
   }
-  read(context:ExecutionContextV3,owner:string,input:Input){if(owner!=='media')return Promise.reject(new Error('MEDIA_READ_ACTION_REQUIRED'));return this.serial(()=>this.withInput(context,owner,input,async p=>{
+  read(context:ExecutionContext,owner:string,input:Input){if(owner!=='media')return Promise.reject(new Error('MEDIA_READ_ACTION_REQUIRED'));return this.serial(()=>this.withInput(context,owner,input,async p=>{
     if(input.mode==='inspect'){const metadata=await this.decoder.inspect(p.input,p.signal);p.access.guard();return {metadata,understood:false};}
     if(input.mode==='audio')return this.readAudio(context,input,p);
     if(input.mode==='document')return this.readDocument(context,input,p);
@@ -129,7 +129,7 @@ export class MediaService extends Service implements MediaPort {
       }finally{lease.close();}
     }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}finally{for(const lease of leases)this.store.releaseLease(lease,'analysis');}
   }));}
-  private async readAudio(context:ExecutionContextV3,input:Input,p:Prepared){if(!this.audio)throw new Error('MEDIA_AUDIO_NOT_CONFIGURED');if(!input.interval)throw new Error('MEDIA_AUDIO_INTERVAL_REQUIRED');
+  private async readAudio(context:ExecutionContext,input:Input,p:Prepared){if(!this.audio)throw new Error('MEDIA_AUDIO_NOT_CONFIGURED');if(!input.interval)throw new Error('MEDIA_AUDIO_INTERVAL_REQUIRED');
     const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
     const jobId=randomUUID();this.store.beginJob(p.access,jobId,fingerprint);let lease:string|null=null;
     try{const decoded=await this.decoder.audio(p.input,input.interval.startMs,input.interval.endMs,p.signal);
@@ -146,7 +146,7 @@ export class MediaService extends Service implements MediaPort {
       const observation=this.observed(context,p.access,exposure);this.store.finishJob(p.access,jobId,{exposureId:exposure.id,technicalCompleteness:processed.technicalCompleteness},null);return observation;
     }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}finally{if(lease)this.store.releaseLease(lease,'audio');}
   }
-  private async prepareReplyAsset(context:ExecutionContextV3,asset:MediaAssetRef,as:'image'|'record'|'file',key:string,owner:string){return this.withInput(context,owner,{requestId:key,asset,mode:'inspect'},async p=>{
+  private async prepareReplyAsset(context:ExecutionContext,asset:MediaAssetRef,as:'image'|'record'|'file',key:string,owner:string){return this.withInput(context,owner,{requestId:key,asset,mode:'inspect'},async p=>{
     const record=this.store.read(p.access,asset.id);if(as==='file'||record.processingHash!==null&&(as==='image'&&asset.mime==='image/png'&&asset.kind==='image'||as==='record'&&asset.mime==='audio/wav'&&asset.kind==='audio'))return {asset,source:p.source.description};
     const metadata=await this.decoder.inspect(p.input,p.signal);let data:Buffer,kind:'image'|'audio',mime:string;
     if(as==='image'&&p.source.description.ref.provider==='qq-stickers'&&metadata.kind==='image'&&['image/gif','image/png','image/jpeg','image/webp'].includes(asset.mime))return {asset,source:p.source.description};
@@ -155,8 +155,8 @@ export class MediaService extends Service implements MediaPort {
     const prepared=await this.files.ingest(p.access,key,p.source,{bytes:data.length,mime,stream:(async function*(){yield data;})()},p.signal,{kind,parent:asset,processingHash:mediaHash(['reply-normalization-v1',as,asset]),
       coverage:{acquiredBytes:data.length,processed:[],exposed:false,gaps:['已核验／归一化输出字节，不代表模型已理解'],completeness:'unknown'}});p.access.guard();return {asset:prepared,source:p.source.description};
   });}
-  prepareReply(context:ExecutionContextV3,input:unknown,owner='media'){return this.serial(()=>this.replies.prepare(context,input,owner));}
-  imageOriginal(context:ExecutionContextV3,owner:string,exposureId:string){return this.serial(async()=>{
+  prepareReply(context:ExecutionContext,input:unknown,owner='media'){return this.serial(()=>this.replies.prepare(context,input,owner));}
+  imageOriginal(context:ExecutionContext,owner:string,exposureId:string){return this.serial(async()=>{
     const description=this.store.exposureOrigin(exposureId),{provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),exposure=this.store.exposure(access,exposureId),observation=this.store.observation(exposureId);
     if(description.kind!=='image'||!z.object({mode:z.literal('image')}).safeParse(exposure.detail).success||!exposure.coverage.exposed)throw new Error('IMAGE_OBSERVATION_REQUIRED');
     if(!access.execution.historyTracked||!access.execution.historyDependencies?.some(d=>(d.kind==='capability'||d.kind==='execution-source')&&mediaHash(d.ref)===mediaHash(observation)))throw new Error('OBSERVATION_NOT_EXPOSED');
@@ -178,10 +178,10 @@ export class MediaService extends Service implements MediaPort {
     if(!this.ctx.dafeiyu.capabilityObservationCurrent({agentId:body.scope.agentId,route:body.scope.scopeKey},ref,createHash('sha256').update(view).digest('hex')))return null;
     access.guard();return {kind:body.assets.every(a=>a.kind==='document')?'reported' as const:'inference' as const,stamp:mediaHash({proof:this.store.exposureProof(body),target})};
   }catch{return null;}}
-  private observed(context:ExecutionContextV3,access:MediaAccess,exposure:MediaExposure){access.guard();const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'media',{requestId:exposure.id,proof:this.store.exposureProof(exposure),text:exposure.text,occurredAt:exposure.occurredAt,coverage:exposure.coverage.gaps,
+  private observed(context:ExecutionContext,access:MediaAccess,exposure:MediaExposure){access.guard();const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'media',{requestId:exposure.id,proof:this.store.exposureProof(exposure),text:exposure.text,occurredAt:exposure.occurredAt,coverage:exposure.coverage.gaps,
     counts:{received:exposure.assets.length,processed:exposure.assets.length}});this.store.bindObservation(access,exposure.id,observation.source);const cursor=z.object({next:z.object({offset:z.number(),textOffset:z.number()}).nullable()}).safeParse(exposure.detail);
     return {exposureId:exposure.id,text:exposure.text,coverage:exposure.coverage,readProgress:ReadProgressSchema.parse({state:'observed',subject:'source-range',completeness:exposure.coverage.completeness}),assets:exposure.assets,observation,...(cursor.success?{next:cursor.data.next}:{})};}
-  private async readDocument(context:ExecutionContextV3,input:Input,p:Prepared){if(!this.documents)throw new Error('MEDIA_DOCUMENTS_NOT_CONFIGURED');if(!('file'in p.input)||!p.parent)throw new Error('MEDIA_DOCUMENT_WHOLE_BYTES_REQUIRED');
+  private async readDocument(context:ExecutionContext,input:Input,p:Prepared){if(!this.documents)throw new Error('MEDIA_DOCUMENTS_NOT_CONFIGURED');if(!('file'in p.input)||!p.parent)throw new Error('MEDIA_DOCUMENT_WHOLE_BYTES_REQUIRED');
     const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
     const jobId=randomUUID();this.store.beginJob(p.access,jobId,fingerprint);
     try{const document=await this.documents.read({file:p.input.file,name:p.source.description.name??'document',offset:input.offset??0,textOffset:input.textOffset??0,limit:input.limit??4000},p.signal,p.access.guard);
@@ -192,16 +192,16 @@ export class MediaService extends Service implements MediaPort {
       this.store.finishJob(p.access,jobId,{exposureId:exposure.id},null);return result;
     }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}
   }
-  select(context:ExecutionContextV3,raw:unknown){const input=selectSchema.parse(raw),proof=this.store.exposureOrigin(input.exposureId),{provider,description}=this.describe(proof.ref),access=this.access(context,'media',description,provider),exposure=this.store.exposure(access,input.exposureId);
+  select(context:ExecutionContext,raw:unknown){const input=selectSchema.parse(raw),proof=this.store.exposureOrigin(input.exposureId),{provider,description}=this.describe(proof.ref),access=this.access(context,'media',description,provider),exposure=this.store.exposure(access,input.exposureId);
     const {exposureId,...selection}=input;return this.ctx.dafeiyu.selectCapabilityObservation(context,'media',description.origin.scene,selection,exposure.text);}
-  voice(context:ExecutionContextV3,owner:string,exposureId:string){const source=this.store.exposureOrigin(exposureId),{provider,description}=this.describe(source.ref),access=this.access(context,owner,description,provider),exposure=this.store.exposure(access,exposureId),result=voiceWitness(this.store,exposure);
+  voice(context:ExecutionContext,owner:string,exposureId:string){const source=this.store.exposureOrigin(exposureId),{provider,description}=this.describe(source.ref),access=this.access(context,owner,description,provider),exposure=this.store.exposure(access,exposureId),result=voiceWitness(this.store,exposure);
     if(!access.execution.historyTracked||!access.execution.historyDependencies?.some(d=>(d.kind==='capability'||d.kind==='execution-source')&&mediaHash(d.ref)===mediaHash(result.evidence.observation)))throw new Error('OBSERVATION_NOT_EXPOSED');
     if(!this.voiceCurrent(result.evidence))throw new Error('MEDIA_SOURCE_STALE');access.guard();return result;
   }
   voiceCurrent(raw:MediaVoiceEvidence){try{if(!this.ready())return false;const evidence=MediaVoiceEvidenceSchema.parse(raw),body=this.store.exposureWitness(evidence.exposure.key),actual=voiceWitness(this.store,body);
     return mediaHash(actual.evidence)===mediaHash(evidence)&&this.ctx.dafeiyu.capabilityResourceCurrent(evidence.exposure)&&this.ctx.dafeiyu.capabilityObservationCurrent({agentId:body.scope.agentId,route:body.scope.kind==='task'?body.scope.scopeKey:body.scope.route},evidence.observation);
   }catch{return false;}}
-  private actions():ActionCapabilityV3[]{const make=(id:string,inputSchema:z.ZodType,write:boolean,execute:(input:unknown,c:ExecutionContextV3)=>unknown|Promise<unknown>):ActionCapabilityV3=>({id,version:'1',description:({[MEDIA_ACTIONS[0]]:'按需取得已登记媒体源的字节，不表示已经理解。',[MEDIA_ACTIONS[1]]:'检查当前作用域内媒体资产及覆盖。',[MEDIA_ACTIONS[2]]:'读取实际图片、视频帧、音轨区间或文档片段。文档next.offset是单元序号，next.textOffset是该单元内Unicode字符位置；按返回游标继续。',[MEDIA_ACTIONS[3]]:'对已经读到的媒体观察选择不保存、原文、片段或摘要。'} as Record<string,string>)[id]!,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(i,c)=>{
+  private actions():ActionCapability[]{const make=(id:string,inputSchema:z.ZodType,write:boolean,execute:(input:unknown,c:ExecutionContext)=>unknown|Promise<unknown>):ActionCapability=>({id,version:'1',description:({[MEDIA_ACTIONS[0]]:'按需取得已登记媒体源的字节，不表示已经理解。',[MEDIA_ACTIONS[1]]:'检查当前作用域内媒体资产及覆盖。',[MEDIA_ACTIONS[2]]:'读取实际图片、视频帧、音轨区间或文档片段。文档next.offset是单元序号，next.textOffset是该单元内Unicode字符位置；按返回游标继续。',[MEDIA_ACTIONS[3]]:'对已经读到的媒体观察选择不保存、原文、片段或摘要。'} as Record<string,string>)[id]!,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(i,c)=>{
       try{const data=z.json().parse(await execute(i,c)),observation=z.object({observation:z.object({source:z.object({id:z.string(),scopeKey:z.string(),version:z.number(),contentHash:z.string()})})}).safeParse(data);
         return {status:'succeeded',effects:write?'confirmed':'none',completeness:id===MEDIA_ACTIONS[2]?'partial':'complete',data,sources:observation.success?[observation.data.observation.source]:[],receipts:[]};}
       catch(error){const code=failureCode(error);if(write&&!['INVALID_INPUT','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','SOURCE_STALE','MEDIA_SOURCE_STALE','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT','OBSERVATION_NOT_EXPOSED','HISTORY_UNTRACKED','SOURCE_SUPPRESSED','EMPTY_OBSERVATION','PRIVATE_INPUT_REJECTED','MEDIA_SIZE_LIMIT','MEDIA_CACHE_FULL','MEDIA_TTS_NOT_CONFIGURED','MEDIA_DRAFT_FROZEN','MEDIA_IMAGE_ASSET_REQUIRED','MEDIA_AUDIO_INTERVAL_REQUIRED'].includes(code))throw error;

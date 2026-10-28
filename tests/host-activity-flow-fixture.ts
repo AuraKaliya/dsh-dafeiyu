@@ -13,7 +13,7 @@ const {ScriptedModel,call,textReply}=await import('./harness.js');
 const activityActions=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status'];
 const config={schemaVersion:1,profileId:'activity-flow',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},
   modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},runtime:{turnTimeoutMs:60000,shutdownGraceMs:3000},diagnostics:{snapshotIntervalMs:100},
-  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{sourceTracking:true,maintenance:{}}},{id:'activity',required:true,config:{maintenance:true,tickMs:50}}],
+  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{maintenance:{}}},{id:'activity',required:true,config:{maintenance:true,tickMs:50}}],
   authorityPolicies:[{id:'local',producers:['host-cli'],actions:activityActions,allowLocalWrite:true},
     {id:'activity-explore',producers:['activity'],actions:[...activityActions,'fixture_observe'],allowLocalWrite:true},
     {id:'activity-maintenance',producers:['activity'],actions:['dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result'],allowLocalWrite:true}]};
@@ -37,9 +37,9 @@ const adapter=new ScriptedModel(options=>{
 });
 const options:HostRuntimeOptions={coordination,adapter,activityClock:{now:()=>now,monotonic:()=>monotonic},onPhase:(value,host)=>{phase=value;
   if(value==='recovering')assert.equal(calls,bootCalls);
-  if(value==='binding')host.core.registerExtensionV3({protocolVersion:3,id:'fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_observe',version:'1',description:'fictional sky source',effects:'local-write',inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_i,c)=>{
-    const source=host.ctx.dafeiyuMemory.persona!.recordObservation(c,{requestId:'star',text:observation,kind:'primary',resource:'fixture:sky',occurredAt:new Date().toISOString(),coverage:['fictional-window'],completeness:'partial'},'fixture');
-    const saved=host.ctx.dafeiyuMemory.persona!.contribute(c,{requestId:'keep',source:source.id,version:source.version,mode:'original',reason:'自己选择保留虚构观察'},'fixture');
+  if(value==='binding')host.core.registerExtension({protocolVersion:4,id:'fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_observe',version:'1',description:'fictional sky source',effects:'local-write',inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_i,c)=>{
+    const source=host.ctx.dafeiyuMemory.growth!.recordObservation(c,{requestId:'star',text:observation,kind:'primary',resource:'fixture:sky',occurredAt:new Date().toISOString(),coverage:['fictional-window'],completeness:'partial'},'fixture');
+    const saved=host.ctx.dafeiyuMemory.growth!.contribute(c,{requestId:'keep',source:source.id,version:source.version,mode:'original',reason:'自己选择保留虚构观察'},'fixture');
     return {status:'succeeded',effects:'confirmed',completeness:'partial',data:z.json().parse(saved),sources:[],receipts:[]};}}]});
 }};
 let host=await ManagedHost.start(prepared,{...options,mode:'single-run'});

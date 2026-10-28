@@ -3,16 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { z } from 'zod';
 import { API_VERSION } from '@dafeiyu/contracts';
-import type { Json,ToolFeedback,ActionContext } from '@dafeiyu/contracts';
+import type { Json,ToolFeedback,ConversationAccess } from '@dafeiyu/contracts';
 import { call,textReply } from './harness.js';
 import { memoryFixture } from './memory-fixture.js';
 
 export type FeedbackHarness=Awaited<ReturnType<typeof memoryFixture>>;
 export const report=(data:Json='虚构工具输出',extra:Partial<ToolFeedback>={}):ToolFeedback=>({schemaVersion:1,outcome:'succeeded',effects:'none',completeness:'complete',
   resourceVersion:'fictional-resource-v1',summary:'虚构查询完成',diagnostics:[],receipts:['FICTIONAL-RECEIPT'],sourceRefs:[],data,...extra});
-export function fixtureTool(h:FeedbackHarness,work:(context:ActionContext)=>Promise<Json>|Json,adapted=true){
+export function fixtureTool(h:FeedbackHarness,work:(context:ConversationAccess)=>Promise<Json>|Json,adapted=true){
   let calls=0;const name=`fixture_${randomUUID().replaceAll('-','')}`;
-  const handle=h.core.registerExtension({id:name.replaceAll('_','-'),version:'fixture-v1',agentId:'dafeiyu',apiVersion:API_VERSION,actions:[{
+  const handle=h.core.registerExtension({id:name.replaceAll('_','-'),version:'fixture-v1',agentId:'dafeiyu',protocolVersion:4,actions:[{
     name,description:'虚构工具反馈验收',fields:{},...(adapted?{feedback:'structured-v1' as const}:{}),execute:async(_args,context)=>{calls++;return work(context);},
   }]});
   return {name,handle,get calls(){return calls;}};

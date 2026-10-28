@@ -39,7 +39,7 @@ async function fixture(options:{modality?:boolean;readBytes?:boolean;revoke?:boo
         return call('dafeiyu_media_select',{requestId:'save',exposureId:String(row.id),observationId:String(observed.id),version:1,mode:'original',reason:'保留脚本样本的来源与局限'});
       }finally{db.close();memory.close();}}
     return textReply('处理完成，真实模型质量未验收');
-  },{id:'fixture',version:'1',resourceProofs:{current:proof=>valid&&proof.hash===description.origin.hash,epoch:()=>String(valid)}},true,{sourceTracking:true,extraActions:[...Media.MEDIA_ACTIONS],resources:[description.origin.scene],beforeActivate:async context=>{
+  },{id:'fixture',version:'1',resourceProofs:{current:proof=>valid&&proof.hash===description.origin.hash,epoch:()=>String(valid)}},true,{extraActions:[...Media.MEDIA_ACTIONS],resources:[description.origin.scene],beforeActivate:async context=>{
     ctx=context;ctx.llm.registerAdapter(['media-fixture'],new Vision());ctx.systemPrompt.section({name:'other-persona',order:0,text:'UNRELATED_PERSONA_SENTINEL'});
     await ctx.plugin(Media,{agentId:'dafeiyu',profileId:'test',dataDir,createStore:true,...tools,vision:{provider:'media-fixture',model:'scripted'}});
     ctx.dafeiyu.registerMediaProvider({id:'fixture',describe:key=>key==='image'?description:null,open:async()=>{opens++;return {bytes:image.data.length,mime:'image/png',stream:(async function*(){yield image.data;})()};}});

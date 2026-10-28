@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { ActionOutcomeSchema,ExecutionScopeSchema } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3,ExecutionContextV3,PersonaSourceRef,PersonaEntryRef } from '@dafeiyu/contracts';
+import type { ActionCapability,ExecutionContext,PersonaSourceRef,PersonaEntryRef } from '@dafeiyu/contracts';
 import { EvaluationCatalog } from '../../scripts/evaluation/catalog.ts';
 import { EvaluationWorkspace } from '../../scripts/evaluation/workspace.ts';
 import { openEvaluationRuntime,evaluationCall,evaluationText } from '../../scripts/evaluation/runtime.ts';
@@ -25,8 +25,8 @@ test('actual Core, Memory and scripted DSH produce an auditable three-Run tentat
       if(phase==='publish'&&step===1)return evaluationCall('fixture_proof_publish',{});
       return evaluationText(phase==='use'?'本次练习先核对局部事实，并保留了没有资料的范围；实际平台效果尚未知。':'已根据闭合试行评审采用仍暂定的认识，没有提升为稳定偏好。');},
     extension:ctx=>{
-      const persona=()=>{assert.ok(ctx.dafeiyuMemory.persona);return ctx.dafeiyuMemory.persona;};
-      const action=(id:string,execute:(context:ExecutionContextV3)=>unknown):ActionCapabilityV3=>({id,version:'1',description:'仅本机脚本后端接口对照；不是正式语义验收。',effects:'local-write',requiresTask:true,inputSchema:z.strictObject({}),outputSchema:z.json(),
+      const persona=()=>{assert.ok(ctx.dafeiyuMemory.growth);return ctx.dafeiyuMemory.growth;};
+      const action=(id:string,execute:(context:ExecutionContext)=>unknown):ActionCapability=>({id,version:'1',description:'仅本机脚本后端接口对照；不是正式语义验收。',effects:'local-write',requiresTask:true,inputSchema:z.strictObject({}),outputSchema:z.json(),
         execute:async(_input,context)=>ActionOutcomeSchema.parse({status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(execute(context)),sources:id==='fixture_proof_observe'&&state.source?[{id:state.source.id,scopeKey:state.source.scopeKey,version:state.source.version,contentHash:state.source.contentHash}]:[],receipts:[]})});
       return {id:extensionId,version:'1',actions:[
         action('fixture_proof_observe',context=>{

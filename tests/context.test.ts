@@ -37,7 +37,7 @@ async function turn(h:H,room='a'){
 function second(h:H){
   let state='SECOND_PLUGIN_VALID',version=1,enabled=true;
   const validUntil=expires();
-  const handle=h.core.registerExtension({id:'fictional-tasks',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
+  const handle=h.core.registerExtension({id:'fictional-tasks',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
     id:'progress',kind:'operational-fact',prepare:async request=>request.conversation.id==='a'&&enabled?[{
       id:'progress',version:String(version),text:state,expiresAt:validUntil,sources:[{ref:'fictional:task-progress',version:String(version),hash:'test'}],
     }]:[],validate:(_request,item)=>enabled&&item.version===String(version),
@@ -132,7 +132,7 @@ test('model loop reassembles after a tool clears selected evidence in the same t
 
 test('context scopes reject cloned and expired requests and model-supplied route fields',async t=>{
   const h=await memoryFixture(undefined,{context:{}});t.after(h.close);let saved:ContextRequest|undefined;
-  const handle=h.core.registerExtension({id:'scope-probe',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
+  const handle=h.core.registerExtension({id:'scope-probe',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
     id:'probe',kind:'operational-fact',prepare:async request=>{saved=request;assert.throws(()=>h.core.scopeForContext({...request}),/core-issued/);return [];},validate:()=>true,
   }]});t.after(()=>handle.dispose());await turn(h);assert.ok(saved);assert.throws(()=>h.core.scopeForContext(saved!),/core-issued/);
   const a=await remembered(h);assert.equal((await h.probe('a',c=>h.memory.selectContext(c,{requestId:randomUUID(),expectedVersion:0,taskId:'t',expiresAt:expires(),items:[],route:a.evidence.message.route}))).status,'invalid_input');
@@ -201,7 +201,7 @@ test('native DSH context growth is included in the final shared request budget',
 test('optional contributor timeout retires old data without disabling another plugin',async t=>{
   const h=await memoryFixture(undefined,{context:{}},undefined,{prepareTimeoutMs:50});t.after(h.close);const plugin=second(h);t.after(()=>plugin.handle.dispose());
   let slow=false;const fixedExpiry=expires();
-  const handle=h.core.registerExtension({id:'slow-fixture',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
+  const handle=h.core.registerExtension({id:'slow-fixture',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
     id:'result',kind:'evidence',prepare:async request=>{
       if(slow)await new Promise((_,reject)=>request.signal.addEventListener('abort',()=>reject(new Error('test timeout')),{once:true}));
       return [{id:'s',version:'1',text:'SLOW_OLD_CONTENT',expiresAt:fixedExpiry,sources:[{ref:'fictional:slow',version:'1',hash:'test'}]}];
@@ -213,7 +213,7 @@ test('optional contributor timeout retires old data without disabling another pl
 test('duplicate or invalid region registration does not displace a live contributor',async t=>{
   const h=await memoryFixture(undefined,{context:{}});t.after(h.close);const plugin=second(h);t.after(()=>plugin.handle.dispose());
   const c={id:'same',kind:'evidence' as const,prepare:async()=>[],validate:()=>true};
-  assert.throws(()=>h.core.registerExtension({id:'bad-regions',version:'1',agentId:'dafeiyu',apiVersion:API_VERSION,contexts:[c,c]}),/Duplicate/);
+  assert.throws(()=>h.core.registerExtension({id:'bad-regions',version:'1',agentId:'dafeiyu',protocolVersion:4,contexts:[c,c]}),/Duplicate/);
   await turn(h);assert.match(content(h),/SECOND_PLUGIN_VALID/);assert.ok(!h.core.getStatus().extensions.includes('bad-regions'));
 });
 
@@ -284,7 +284,7 @@ test('native refresh during asynchronous route resolution cannot duplicate manag
 test('unregister during preparation immediately revokes its live context authority',async t=>{
   const h=await memoryFixture(undefined,{context:{}});t.after(h.close);const plugin=second(h);t.after(()=>plugin.handle.dispose());
   let verified=false;
-  const handle=h.core.registerExtension({id:'revoking-provider',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
+  const handle=h.core.registerExtension({id:'revoking-provider',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
     id:'ephemeral',kind:'evidence',prepare:async request=>{
       h.core.scopeForContext(request);handle.dispose();assert.throws(()=>h.core.scopeForContext(request));verified=true;return [];
     },validate:()=>true,

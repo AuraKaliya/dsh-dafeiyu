@@ -5,7 +5,7 @@ import { join,resolve,relative,isAbsolute,sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ExecutionScopeSchema,PersonaSourceRefSchema,PersonaCandidateRevisionV1Schema,PersonaStageSchema,PersonaKindSchema } from '@dafeiyu/contracts';
-import type { ExecutionContextV3,PersonaSourceRef } from '@dafeiyu/contracts';
+import type { ExecutionContext,PersonaSourceRef } from '@dafeiyu/contracts';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
 import {MEMORY_SCHEMA_VERSION} from '@dafeiyu/memory/store';
 import type { EvaluationWorkspace } from './workspace.ts';
@@ -22,7 +22,7 @@ const requestFile='fixture/legacy-persona-request.json',markerFile='fixture/lega
 const preferenceB08='目前暂定偏好舒缓自然观察，允许继续比较。';
 
 /** Preparation records only a request; no production adoption gate is invoked or bypassed. */
-export async function requestLegacyPersonaSeed(root:string,fixtureId:'B04'|'B08'|'H03',context:ExecutionContextV3,contentRef:PersonaSourceRef){
+export async function requestLegacyPersonaSeed(root:string,fixtureId:'B04'|'B08'|'H03',context:ExecutionContext,contentRef:PersonaSourceRef){
   if(context.scope.kind!=='task'||context.taskId!==context.scope.taskId)throw new Error('EVALUATION_SEED_SCOPE_INVALID');
   const request=seedRequestSchema.parse({schemaVersion:1,kind:'evaluation-legacy-persona-request',seedId:randomUUID(),candidateId:randomUUID(),fixtureId,
     scope:context.scope,preparationRunId:context.runId,operationId:context.operationId,contentRef,personaKind:'interest',

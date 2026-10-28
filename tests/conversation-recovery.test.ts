@@ -1,3 +1,4 @@
+import {fixtureAction} from './fixture-action.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {z} from 'zod';
@@ -14,7 +15,7 @@ const failed=():StreamChunk[]=>[{type:'finish',reason:{kind:'error',failure:{cod
 function input(options:GenerateOptions):Record<string,unknown>{const m=options.messages.findLast(m=>m.role==='user'&&m.source?.kind==='user');return JSON.parse(m?.content.filter(c=>c.type==='text').map(c=>c.text).join('')??'{}') as Record<string,unknown>;}
 test('a failed QQ turn reports a persona status once, preserving failure and earlier operation receipts',async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);let calls=0,recoveries=0,writes=0;
-  h.core.registerExtension({id:'recovery-fixture',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{name:'fixture_write',description:'本机虚构写入',fields:{},execute:async()=>({saved:++writes})}]});
+  h.core.registerExtension({id:'recovery-fixture',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'recovery-fixture',{id:'fixture_write',description:'本机虚构写入',inputSchema:z.strictObject({}),work:async()=>({saved:++writes})})]});
   h.setResponse(options=>{if(String(options.sessionId).startsWith('dafeiyu-recovery-')){recoveries++;assert.equal(options.tools?.length??0,0);assert.doesNotMatch(JSON.stringify(input(options)),/PRIVATE_PROVIDER_DETAIL/);return textReply(JSON.stringify({next:'wait',message:'刚才的记录已经保存，后续回答没有完成；我保留了进度。'}));}return ++calls===1?call('fixture_write',{}):failed();});
   await h.message('请处理这件事',{trigger:true,id:'9401'});const item=h.core.journal.list()[0]!;assert.equal(item.state,'failed');assert.equal(writes,1);assert.equal(recoveries,1);assert.equal(h.platform.sent.length,1);
   const events=h.core.journal.events(item.route).filter(e=>e.traceId===item.id);assert.ok(events.some(e=>e.type==='turn.failed'));assert.equal(events.filter(e=>e.type==='recovery.notice.sent').length,1);assert.equal(events.find(e=>e.type==='recovery.notice.prepared')?.data.fallback,false);assert.equal(events.filter(e=>e.type==='operation.succeeded').length,1);

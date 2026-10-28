@@ -14,10 +14,10 @@ const accepted=journal.accept('dafeiyu','channel-simulator','fixture',{id:'ficti
   conversation:{channel:'simulator',account:'local',kind:'local',id:'fixture'},sender:{id:'fictional-user',displayName:'虚构测试用户'},text:'这是一条已接收的本地测试消息。'});journal.close();
 let h,query,timeline,memory;
 try{
-  h=await harness(coreRoot,undefined,undefined,10000,undefined,undefined,'managed');
+  h=await harness(coreRoot,undefined,undefined,10000,undefined,undefined,true);
   query=await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});
   timeline=await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});
-  memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed',analysis:{},context:{}});
+  memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),analysis:{},context:{}});
   await h.core.whenIdle();
   report.checks.push({name:'no-processing-during-registration',passed:h.adapter.requests.length===0&&h.core.journal.get(accepted.id).state==='accepted'});
   let rejected=false;try{h.simulator.send('fixture','未就绪不能受理',{id:'early'});}catch(error){rejected=error.message==='HOST_NOT_READY';}

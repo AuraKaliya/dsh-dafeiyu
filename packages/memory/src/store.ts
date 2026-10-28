@@ -1,4 +1,6 @@
-import {RecentStateStore,migrateRecentState} from './recent-state-store.js';
+import {createStorageSchema} from './storage-schema.js';
+import {Autobiography,createAutobiographySchema} from './autobiography.js';
+import {RecentStateStore} from './recent-state-store.js';
 export {verifyRecentStateSchema} from './recent-state-store.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
@@ -15,28 +17,21 @@ import type { Command, MutationReceipt, ReadMode, Revision, WriteContent,Evidenc
 import { MemoryBoundarySchema,boundaryAllows } from '@dafeiyu/contracts';
 import type { MemoryBoundary,MemoryAccessPurpose,MemoryWriteBinding } from '@dafeiyu/contracts';
 import { conservativeBoundary,restrictBoundary,boundaryDigest } from './boundary.js';
-import { migrateMemoryBoundaries } from './migrate-boundaries.js';
-import { ObservationStore,migrateObservations } from './observations.js';
-import { TaskWorkspace,migrateTaskWorkspaces } from './task-workspace.js';
-import { TaskMemory,migrateTaskMemory } from './task-memory.js';
+import { ObservationStore } from './observations.js';
+import { TaskWorkspace } from './task-workspace.js';
+import { TaskMemory } from './task-memory.js';
 import type { MemoryRetrieval } from './retrieval.js';
 import type { Context } from '@deepseek-ai/cordis';
-import { TaskExpression,migrateExpression } from './expression.js';
-import { migrateExecutionMemory } from './migrate-execution.js';
-import { migratePersona } from './migrate-persona.js';
-import { PersonaStore } from './persona-store.js';
-import type { PersonaResolver } from './persona-store.js';
+import { MemoryExpressionAccess } from './expression.js';
+import type { PersonaResolver } from './material.js';
 import { ExecutionSources } from './execution-sources.js';
 import { ExecutionMemoryState } from './execution-memory-state.js';
-import { CapabilityObservations, migrateCapabilityObservations } from './capability-observations.js';
-import { NativeExpression,migrateNativeExpression } from './native-expression.js';
-import { migrateExperience } from './migrate-experience.js';
+import { CapabilityObservations } from './capability-observations.js';
+import { NativeExpression } from './native-expression.js';
 import { ExperienceStore } from './experience-store.js';
-import { migratePersonaAdoption } from './migrate-persona-adoption.js';
-export { PERSONA_ADOPTION_TABLES, verifyPersonaAdoptionSchema } from './migrate-persona-adoption.js';
 
-export const MEMORY_APPLICATION_ID = 0x44464d31;
-export const MEMORY_SCHEMA_VERSION = 13;
+export const MEMORY_APPLICATION_ID = 0x44464d32;
+export const MEMORY_SCHEMA_VERSION = 1;
 const APPLICATION_ID = MEMORY_APPLICATION_ID;
 const string = (value: unknown): string => z.string().parse(value);
 const integer = (value: unknown): number => z.number().int().safe().parse(value);
@@ -74,55 +69,18 @@ export class MemoryStore {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     try {
-      // Schema reads can race a different process's migration too, not only writes.
-      this.db.exec('PRAGMA busy_timeout=5000;');
-      const app = this.db.prepare('PRAGMA application_id').get()?.application_id;
-      const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
-      const tables = this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
-      const fresh = app === 0 && version === 0 && tables === 0;
-      if (!fresh && (app !== APPLICATION_ID || (version !== 1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7&&version!==8&&version!==9&&version!==10&&version!==11&&version!==12&&version!==13))) throw new Error('Unsupported memory database identity or schema');
+      const app=this.db.prepare('PRAGMA application_id').get()?.application_id;
+      const version=this.db.prepare('PRAGMA user_version').get()?.user_version;
+      const count=this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
+      const fresh=app===0&&version===0&&count===0;
+      if(!fresh&&(app!==APPLICATION_ID||version!==MEMORY_SCHEMA_VERSION))throw new Error('INVALID_STORAGE');
       configureSqlite(this.db);
-      if (fresh) this.transaction(() => this.db.exec(`
-        CREATE TABLE memory_items(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,
-          agent_id TEXT NOT NULL,route TEXT NOT NULL,version INTEGER NOT NULL,head INTEGER NOT NULL,
-          deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),reason TEXT NOT NULL DEFAULT '');
-        CREATE INDEX items_scope ON memory_items(agent_id,route,ordinal);
-        CREATE TABLE memory_revisions(id TEXT NOT NULL REFERENCES memory_items(id),revision INTEGER NOT NULL,
-          body TEXT NOT NULL,event_id TEXT NOT NULL,PRIMARY KEY(id,revision));
-        CREATE TABLE dependencies(id TEXT NOT NULL,revision INTEGER NOT NULL,parent_id TEXT NOT NULL,parent_revision INTEGER NOT NULL,
-          PRIMARY KEY(id,revision,parent_id,parent_revision),
-          FOREIGN KEY(id,revision) REFERENCES memory_revisions(id,revision),
-          FOREIGN KEY(parent_id,parent_revision) REFERENCES memory_revisions(id,revision));
-        CREATE TABLE scope_generations(agent_id TEXT NOT NULL,route TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(agent_id,route));
-        CREATE TABLE memory_events(id TEXT PRIMARY KEY,body TEXT NOT NULL,reason TEXT NOT NULL);
-        CREATE TABLE outbox(event_id TEXT PRIMARY KEY REFERENCES memory_events(id),delivered INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE requests(agent_id TEXT NOT NULL,route TEXT NOT NULL,request_id TEXT NOT NULL,
-          fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,route,request_id));
-        CREATE TRIGGER items_no_delete BEFORE DELETE ON memory_items BEGIN SELECT RAISE(ABORT,'Use logical deletion'); END;
-        CREATE TRIGGER revisions_immutable_update BEFORE UPDATE ON memory_revisions BEGIN SELECT RAISE(ABORT,'Immutable revision'); END;
-        CREATE TRIGGER revisions_immutable_delete BEFORE DELETE ON memory_revisions BEGIN SELECT RAISE(ABORT,'Immutable revision'); END;
-        CREATE TRIGGER events_immutable_update BEFORE UPDATE ON memory_events BEGIN SELECT RAISE(ABORT,'Append-only memory event'); END;
-        CREATE TRIGGER events_immutable_delete BEFORE DELETE ON memory_events BEGIN SELECT RAISE(ABORT,'Append-only memory event'); END;
-        CREATE TRIGGER dependencies_immutable_update BEFORE UPDATE ON dependencies BEGIN SELECT RAISE(ABORT,'Immutable source dependency'); END;
-        CREATE TRIGGER dependencies_immutable_delete BEFORE DELETE ON dependencies BEGIN SELECT RAISE(ABORT,'Immutable source dependency'); END;
-        PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=1;
-      `));
-      this.transaction(()=>migrateMemoryBoundaries(this.db));
-      this.transaction(()=>migrateObservations(this.db));
+      if(fresh)this.transaction(()=>{createStorageSchema(this.db);createAutobiographySchema(this.db);this.db.exec(`PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=${MEMORY_SCHEMA_VERSION};`);});
       this.observations=new ObservationStore(this.db,work=>this.transaction(work),this);
-      this.transaction(()=>migrateTaskWorkspaces(this.db));
-      this.transaction(()=>migrateTaskMemory(this.db));
-      this.transaction(()=>migrateExpression(this.db));
-      this.transaction(()=>migrateExecutionMemory(this.db));
-      this.transaction(()=>migratePersona(this.db));
-      this.transaction(()=>migrateCapabilityObservations(this.db));
       this.capabilities=new CapabilityObservations(this.db,this);
-      this.transaction(()=>migrateNativeExpression(this.db));
-      this.transaction(()=>migrateExperience(this.db));
-      this.transaction(()=>migratePersonaAdoption(this.db));
-      this.transaction(()=>migrateRecentState(this.db));
     } catch (error) { this.db.close(); throw error; }
   }
+  autobiography(agentId:string){return new Autobiography(this.db,work=>this.transaction(work),agentId);}
   private transaction<T>(work: () => T): T {
     const depth=this.transactionDepth++,savepoint=`memory_nested_${depth}`;
     try{
@@ -141,15 +99,14 @@ export class MemoryStore {
   }
   taskMemory(tasks:TaskWorkspace,retrieval:MemoryRetrieval|null){return new TaskMemory(this.db,work=>this.transaction(work),this,tasks,retrieval);}
   recentStateStore(current:(runId:string,sources:readonly import('@dafeiyu/contracts').SourceDependency[])=>boolean){return new RecentStateStore(this.db,work=>this.transaction(work),current);}
-  personaStore(resolve:PersonaResolver){return new PersonaStore(this.db,work=>this.transaction(work),resolve);}
   experienceStore(resolve:PersonaResolver){return new ExperienceStore(this.db,work=>this.transaction(work),resolve);}
   executionSources(resolve:PersonaResolver){return new ExecutionSources(this.db,work=>this.transaction(work),resolve);}
   executionState(sources:ExecutionSources,resolve:PersonaResolver){return new ExecutionMemoryState(this.db,this,sources,resolve);}
   /** Trusted same-store composition; callers must keep this synchronous. */
   atomic<T>(work:()=>T):T{return this.transaction(work);}
   withExecutionValidator<T>(validator:NonNullable<MemoryStore['executionValidator']>,work:()=>T):T{const previous=this.executionValidator;this.executionValidator=validator;try{return work();}finally{this.executionValidator=previous;}}
-  taskExpression(tasks:TaskWorkspace,ctx:Context){return new TaskExpression(this.db,work=>this.transaction(work),this,tasks,ctx);}
-  nativeExpression(ctx:Context,expression:TaskExpression,ready:()=>boolean,flush:()=>void){return new NativeExpression(ctx,this.db,this,expression,ready,flush);}
+  expressionAccess(tasks:TaskWorkspace){return new MemoryExpressionAccess(this.db,this,tasks);}
+  nativeExpression(ctx:Context,expression:MemoryExpressionAccess,ready:()=>boolean,flush:()=>void){return new NativeExpression(ctx,this.db,this,expression,ready,flush);}
   private item(scope: TimelineScope, id: string): Item | null {
     const row = this.db.prepare('SELECT * FROM memory_items WHERE id=? AND agent_id=? AND route=?').get(id, scope.agentId, scope.route);
     return row ? { id: string(row.id), ordinal: integer(row.ordinal), version: integer(row.version), head: integer(row.head),
@@ -253,7 +210,7 @@ export class MemoryStore {
       }
     }
     const effectiveAccess:MemoryView['effectiveAccess']={
-      internalUse:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'internal'))?(boundaries[0]?.schemaVersion===2?{kind:'task',route:scope.route,taskId:boundaries[0].task.id}:{kind:'conversation',route:scope.route}):{kind:'none'},
+      internalUse:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'internal'))?(boundaries[0]?.kind==='task'?{kind:'task',route:scope.route,taskId:boundaries[0].task.id}:{kind:'conversation',route:scope.route}):{kind:'none'},
       externalExpression:!inaccessible&&boundaries.every(b=>boundaryAllows(b,scope,'expression'))?{kind:'conversation',route:scope.route}:{kind:'none'},
     };
     return { inaccessible,effectiveAccess, deleted: sourceDeleted||rows.some(row => row.deleted === 1), changed: sourceChanged||rows.some(row => row.head !== row.revision),

@@ -11,7 +11,7 @@ import { RuntimeStore } from '@dafeiyu/core/runtime-store';
 import { executionHarness } from './execution-fixture.js';
 import { textReply,call } from './harness.js';
 import { z } from 'zod';
-import type { ExecutionContextV3 } from '@dafeiyu/contracts';
+import type { ExecutionContext } from '@dafeiyu/contracts';
 
 const request={requestId:'first',title:'虚构任务',goal:'内部测试目标',policyId:'test-policy'};
 test('a crash boundary after Task create but before Run binding resumes the same durable request',async()=>{
@@ -48,7 +48,7 @@ test('managed chat allows an explicitly authorized task-free v3 action and strip
     {type:'block-end',index:0,block:{type:'reasoning',text:'PRIVATE_THOUGHT_SENTINEL'}},...textReply('合法回复').map(chunk=>
       'index'in chunk?{...chunk,index:chunk.index+1}:chunk.type==='finish'?{...chunk,replayState:{response:{value:'OPAQUE_SENTINEL'}}}:chunk)],
     {id:'fixture',version:'1',actions:[{id:'chat_fixture',version:'1',description:'虚构聊天能力',effects:'read',inputSchema:z.strictObject({}),outputSchema:z.strictObject({value:z.number()}),
-      execute:async(_raw,context:ExecutionContextV3)=>{count++;assert.equal(context.taskId,null);assert.equal(context.scope.kind,'conversation');h.core.executionAuthority(context,'fixture');return {status:'succeeded',effects:'none',completeness:'complete',data:{value:4},sources:[],receipts:[]};}}]});
+      execute:async(_raw,context:ExecutionContext)=>{count++;assert.equal(context.taskId,null);assert.equal(context.scope.kind,'conversation');h.core.executionAuthority(context,'fixture');return {status:'succeeded',effects:'none',completeness:'complete',data:{value:4},sources:[],receipts:[]};}}]});
   try{await h.ctx.plugin(Simulator,{agentId:'dafeiyu',account:'local'});const accepted=h.ctx.dafeiyuSimulator.send('fixture','调用虚构能力',{id:'fixture-message'});await h.core.whenIdle();
     const item=h.core.journal.get(accepted.id);assert.equal(item.state,'delivered');assert.equal(count,1);const reader=await h.ctx.sessionPersistence.open(SessionId(item.sessionId),'read');
     try{const json=JSON.stringify(await reader.read());assert.ok(!json.includes('PRIVATE_THOUGHT_SENTINEL'));assert.ok(!json.includes('OPAQUE_SENTINEL'));assert.ok(json.includes('合法回复'));}finally{await reader.close();}

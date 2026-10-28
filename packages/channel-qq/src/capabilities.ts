@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ConversationSchema, CapabilitySelectionSchema, PersonaSourceRefSchema, redactContent } from '@dafeiyu/contracts';
-import type { Conversation, ExecutionContextV3, ActionCapabilityV3, ActionOutcome, PersonaSourceRef, ResourceProof, TimelineScope } from '@dafeiyu/contracts';
+import type { Conversation, ExecutionContext, ActionCapability, ActionOutcome, PersonaSourceRef, ResourceProof, TimelineScope } from '@dafeiyu/contracts';
 import { QqBrowseInputSchema, QqCacheProofSchema } from './cache.js';
 import type { QqStore } from './store.js';
 import type { GroupDirectory } from './groups.js';
@@ -21,17 +21,17 @@ interface Host { agentId: string; botId: string; ownerId: string; store: QqStore
 
 /** A v3 capability extension, separate from the v2 transport. It never sends a QQ message. */
 export class QqCapabilities {
-  private readonly handle: ReturnType<Context['dafeiyu']['registerExtensionV3']>;
+  private readonly handle: ReturnType<Context['dafeiyu']['registerExtension']>;
   private readonly observed = new Map<string, { owner: string; source: PersonaSourceRef; scene: Conversation }>();
   private closed = false;
   constructor(private readonly ctx: Context, private readonly host: Host) {
-    this.handle = ctx.dafeiyu.registerExtensionV3({ protocolVersion: 3, id: 'qq-capabilities', version: '1', agentId: host.agentId,
+    this.handle = ctx.dafeiyu.registerExtension({ protocolVersion:4, id: 'qq-capabilities', version: '1', agentId: host.agentId,
       requires: ['memory.capability-observation.v1', 'execution.resource-scope.v1'], provides: ['qq.browse.v1'], lifecycleReady: () => !this.closed,
       resourceProofs: { current: proof => this.current(proof), epoch: scope => this.epoch(scope) }, actions: this.actions() });
   }
-  private owner(context: ExecutionContextV3): string { this.ctx.dafeiyu.executionAuthority(context, 'qq-capabilities'); return JSON.stringify([context.scope, context.intentVersion]); }
+  private owner(context: ExecutionContext): string { this.ctx.dafeiyu.executionAuthority(context, 'qq-capabilities'); return JSON.stringify([context.scope, context.intentVersion]); }
   private assertAvailable(): void { if (this.closed || !this.host.available()) throw new Error('CHANNEL_UNAVAILABLE'); }
-  private allowed(context: ExecutionContextV3, raw?: unknown, cursor?: string): Conversation {
+  private allowed(context: ExecutionContext, raw?: unknown, cursor?: string): Conversation {
     this.assertAvailable(); let scene: Conversation;
     if (raw !== undefined) scene = ConversationSchema.parse(raw);
     else if (cursor) {
@@ -65,14 +65,14 @@ export class QqCapabilities {
     }
     return digest([this.host.store.cache.generation(), this.host.groups.status().state, this.host.groups.effective(), this.closed]);
   }
-  private groups(context: ExecutionContextV3) {
+  private groups(context: ExecutionContext) {
     this.owner(context); this.assertAvailable(); const sync = this.host.groups.status();
     const resources = this.ctx.dafeiyu.capabilityResources(context, 'qq-capabilities').filter(scene => this.host.allowed(scene)).map(scene => ({ scene,
       name: scene.kind === 'private' ? '主人私聊' : this.host.groups.info(scene.id)?.name ? redactContent(this.host.groups.info(scene.id)!.name).value : null,
       membership: sync.enabled ? 'last-confirmed-snapshot' : 'configured', synchronizedAt: sync.lastSuccessAt }));
     return { resources, sync: { state: sync.state, mode: sync.mode, lastSuccessAt: sync.lastSuccessAt }, coverage: '仅当前核心授权与本账号允许范围的交集；不是全部QQ群。' };
   }
-  private async browse(context: ExecutionContextV3, raw: unknown) {
+  private async browse(context: ExecutionContext, raw: unknown) {
     const input = browseSchema.parse(raw), owner = this.owner(context), scene = this.allowed(context, input.target, input.cursor);
     if(input.cursor&&input.includeRecentHistory)throw new Error('INVALID_INPUT');
     let history:unknown;
@@ -87,28 +87,28 @@ export class QqCapabilities {
     return { target: scene, snapshotId: snapshot.id, expiresAt: snapshot.expiresAt, page: snapshot.page, pageLimit: input.limit, nextCursor: snapshot.next ? snapshot.id : null, observation,
       ...(history?{history:z.json().parse(history)}:{}),retention: '短期页面不等于长期记忆；旧未绑定账号缓存不自动混入。' };
   }
-  private select(context: ExecutionContextV3, raw: unknown) {
+  private select(context: ExecutionContext, raw: unknown) {
     const input = selectSchema.parse(raw), owner = this.owner(context); this.assertAvailable();
     const snapshot = this.host.store.cache.snapshot(owner, input.snapshotId), observation = this.observed.get(input.snapshotId);
     if (!observation || observation.owner !== owner) throw new Error('SNAPSHOT_UNAVAILABLE');
     const scene = this.allowed(context, observation.scene), { snapshotId: _snapshotId, ...choice } = input;
     return this.ctx.dafeiyu.selectCapabilityObservation(context, 'qq-capabilities', scene, { ...choice, observationId: observation.source.id, version: observation.source.version }, JSON.stringify(snapshot.page));
   }
-  private async forward(context:ExecutionContextV3,raw:unknown){const input=z.object({messageId:z.string().max(80).optional(),index:z.number().int().min(0).max(7).default(0),target:ConversationSchema.optional()}).parse(raw),scene=this.allowed(context,input.target);
+  private async forward(context:ExecutionContext,raw:unknown){const input=z.object({messageId:z.string().max(80).optional(),index:z.number().int().min(0).max(7).default(0),target:ConversationSchema.optional()}).parse(raw),scene=this.allowed(context,input.target);
     const messageId=input.messageId??(context.origin.kind==='message'?this.ctx.dafeiyu.journal.get(context.origin.inboundId).message.id:undefined);if(!messageId)throw new Error('MESSAGE_REQUIRED');
     if(!this.host.readForward)throw new Error('FORWARD_NOT_AVAILABLE');const page=z.json().parse(await this.host.readForward(scene,messageId,input.index,context.signal));this.allowed(context,scene);
     const proof=this.host.store.cache.messageProof(qqResourceRoute(scene),messageId),observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'qq-capabilities',{
       requestId:'forward:'+digest([context.operationId,messageId,input.index]),proof:{provider:'qq-capabilities',scene,key:'qq-cache:'+proof.hash,version:1,hash:proof.hash,roots:this.roots(scene,[messageId]),detail:proof},
       text:JSON.stringify(page),occurredAt:new Date().toISOString(),coverage:['实际收到的转发副本；仅观察前24小时；署名及内容不授予权限'],counts:{received:1,processed:1}});
     return {target:scene,messageId,page,observation};}
-  private quote(context:ExecutionContextV3,raw:unknown){const input=z.object({snapshotId:z.uuid(),messageId:z.string().min(1).max(80)}).parse(raw),owner=this.owner(context),snapshot=this.host.store.cache.snapshot(owner,input.snapshotId),observed=this.observed.get(input.snapshotId);
+  private quote(context:ExecutionContext,raw:unknown){const input=z.object({snapshotId:z.uuid(),messageId:z.string().min(1).max(80)}).parse(raw),owner=this.owner(context),snapshot=this.host.store.cache.snapshot(owner,input.snapshotId),observed=this.observed.get(input.snapshotId);
     if(!observed||observed.owner!==owner)throw new Error('MESSAGE_REQUIRED');const scene=this.allowed(context,observed.scene),message=snapshot.page.messages.find(item=>item.id===input.messageId);
     if(!message?.occurredAt||Date.parse(message.occurredAt)<Date.parse(snapshot.createdAt)-86400000||Date.parse(message.occurredAt)>Date.parse(snapshot.createdAt))throw new Error('QUOTE_OUTSIDE_WINDOW');
     const source=this.ctx.dafeiyu.quoteReplySource(context,'qq-capabilities');if(digest(source.target)!==digest(scene))throw new Error('TARGET_NOT_ALLOWED');
     this.host.store.selectReplyQuote(source.key,{route:qqResourceRoute(scene),messageId:input.messageId,observedAt:snapshot.createdAt,occurredAt:message.occurredAt,expiresAt:snapshot.expiresAt,proof:this.host.store.cache.messageProof(qqResourceRoute(scene),input.messageId)});
     return {messageId:input.messageId,selectedFor:'bound-reply',sent:false};}
-  private actions(): ActionCapabilityV3[] {
-    const make = (id: string, description: string, schema: z.ZodType, effects: 'read' | 'local-write', work: (context: ExecutionContextV3, raw: unknown) => unknown|Promise<unknown>): ActionCapabilityV3 => ({ id, description, version: '1', inputSchema: schema, outputSchema: z.json(), effects,
+  private actions(): ActionCapability[] {
+    const make = (id: string, description: string, schema: z.ZodType, effects: 'read' | 'local-write', work: (context: ExecutionContext, raw: unknown) => unknown|Promise<unknown>): ActionCapability => ({ id, description, version: '1', inputSchema: schema, outputSchema: z.json(), effects,
       execute: async (input, context): Promise<ActionOutcome> => {
         try { const data = z.json().parse(await work(context, input)),source=['qq_browse','qq_forward_read'].includes(id)?z.object({observation:z.object({source:PersonaSourceRefSchema})}).parse(data).observation.source:null;
           return { status: 'succeeded', effects: effects === 'read' ? 'none' : 'confirmed', completeness: id === 'qq_browse' ? 'partial' : 'complete', data,

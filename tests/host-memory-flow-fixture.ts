@@ -14,7 +14,7 @@ const {ScriptedModel,call,textReply}=await import('./harness.js');
 const actions=['fixture_observation','dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_experience_read','dafeiyu_experience_review','dafeiyu_memory_persona_candidate','dafeiyu_execution_source_state'];
 const config={schemaVersion:1,profileId:'memory-e4-fixture',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},
   modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},runtime:{turnTimeoutMs:30000,shutdownGraceMs:2000},diagnostics:{snapshotIntervalMs:100},
-  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{sourceTracking:true,maintenance:{}}}],
+  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{maintenance:{}}}],
   authorityPolicies:[{id:'local',producers:['host-cli'],actions,allowLocalWrite:true}]};
 await writeFile(join(root,'persona.md'),'这是虚构的本地测试底色。保持好奇和独立判断，爱世界，不假定真实经历。');
 await writeFile(file,JSON.stringify({...config,plugins:config.plugins.map(p=>p.id==='memory'?{...p,config:{maintenance:{}}}:p)}));
@@ -42,9 +42,9 @@ const adapter=new ScriptedModel(options=>{
   assert.ok(!JSON.stringify(options.messages).includes(sentinel));return textReply('旧经验来源不可用，不能补造正文');
 });
 const options:HostRuntimeOptions={coordination,adapter,onPhase:(value,host)=>{phase=value;
-  if(value==='binding')host.core.registerExtensionV3({protocolVersion:3,id:'fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_observation',version:'1',description:'virtual local observation',effects:'local-write',inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_i,c)=>{
-    const captured=host.ctx.dafeiyuMemory.persona!.recordObservation(c,{requestId:'observe',occurredAt:'2026-10-25T00:00:00.000Z',text:sentinel,kind:'primary',resource:'fixture:balloon',coverage:['fictional-window'],completeness:'partial'},'fixture');source=captured;
-    const data=host.ctx.dafeiyuMemory.persona!.contribute(c,{requestId:'select',source:captured.id,version:captured.version,mode:'original',reason:'明确选择保留观察'},'fixture');
+  if(value==='binding')host.core.registerExtension({protocolVersion:4,id:'fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_observation',version:'1',description:'virtual local observation',effects:'local-write',inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_i,c)=>{
+    const captured=host.ctx.dafeiyuMemory.growth!.recordObservation(c,{requestId:'observe',occurredAt:'2026-10-25T00:00:00.000Z',text:sentinel,kind:'primary',resource:'fixture:balloon',coverage:['fictional-window'],completeness:'partial'},'fixture');source=captured;
+    const data=host.ctx.dafeiyuMemory.growth!.contribute(c,{requestId:'select',source:captured.id,version:captured.version,mode:'original',reason:'明确选择保留观察'},'fixture');
     return {status:'succeeded',effects:'confirmed',completeness:'partial',data:z.json().parse(data),sources:[],receipts:[]};}}]});
 }};
 let host=await ManagedHost.start(prepared,options);

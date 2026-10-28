@@ -10,7 +10,7 @@ const segmentState=z.enum(['pending','sending','sent','unknown']);
 const segmentSchema=z.object({position:z.number().int().nonnegative(),state:segmentState,receipt:z.string().nullable(),code:z.string().nullable()});
 const planSchema=z.strictObject({version:z.literal(1),replyId:z.string(),target:ConversationSchema,anchor:z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('reply'),messageId:z.string()}),TaskResultAnchorSchema.extend({messageId:z.string()})]),bodyHash:z.string(),segments:z.array(z.string().min(1).max(4000)).min(1).max(64),originalText:z.string().max(32000).optional()});
 export type QqDeliveryPlan=z.infer<typeof planSchema>;
-export interface QqDeliveryProgress {replyId:string;planHash:string|null;state:'ready'|'sending'|'partial'|'uncertain'|'sent';total:number;confirmed:number;pending:number;unknown:number;legacy:boolean;segments:z.infer<typeof segmentSchema>[]}
+export interface QqDeliveryProgress {replyId:string;planHash:string|null;state:'ready'|'sending'|'partial'|'uncertain'|'sent';total:number;confirmed:number;pending:number;unknown:number;segments:z.infer<typeof segmentSchema>[]}
 
 /** Conservative short-message budget, Unicode-safe boundaries, exact reconstruction. */
 export function splitQqText(text:string):string[]{
@@ -39,19 +39,19 @@ export class QqDeliveryLedger {
     const plan=qqDeliveryPlan(reply),body=JSON.stringify(plan);
     return this.atomic(()=>{const previous=this.readPlan(reply.id);if(previous){if(previous.bodyHash!==plan.bodyHash||JSON.stringify(previous.target)!==JSON.stringify(plan.target)||JSON.stringify(previous.anchor)!==JSON.stringify(plan.anchor)||previous.segments.join('')!==plan.segments.join(''))throw new Error('DELIVERY_PLAN_CONFLICT');return previous;}
       if(this.db.prepare('SELECT 1 FROM qq_media_deliveries WHERE reply_id=?').get(reply.id))throw new Error('DELIVERY_PROTOCOL_CONFLICT');
-      if(this.db.prepare('SELECT 1 FROM receipts WHERE reply_id=?').get(reply.id))return null;
+      if(this.db.prepare('SELECT 1 FROM receipts WHERE reply_id=?').get(reply.id))throw new Error('INVALID_STORAGE');
       this.db.prepare('INSERT INTO qq_delivery_plans VALUES(?,?,?)').run(reply.id,digest(plan),body);
       const insert=this.db.prepare("INSERT INTO qq_delivery_segments VALUES(?,?,'pending',NULL,NULL)");plan.segments.forEach((_,position)=>insert.run(reply.id,position));return plan;
     });
   }
   progress(id:string):QqDeliveryProgress|null {
-    const plan=this.readPlan(id);if(!plan){const legacy=this.db.prepare('SELECT platform_id FROM receipts WHERE reply_id=?').get(id);return legacy?{replyId:id,planHash:null,state:'sent',total:1,confirmed:1,pending:0,unknown:0,legacy:true,segments:[{position:0,state:'sent',receipt:String(legacy.platform_id),code:null}]}:null;}
+    const plan=this.readPlan(id);if(!plan)return null;
     const segments=this.db.prepare('SELECT position,state,receipt,code FROM qq_delivery_segments WHERE reply_id=? ORDER BY position').all(id).map(row=>segmentSchema.parse(row));
     if(segments.length!==plan.segments.length||segments.some((segment,index)=>segment.position!==index||(segment.state==='sent'?!segment.receipt||segment.receipt.length>80||!/^[-]?\d+$/.test(segment.receipt):segment.receipt!==null)))throw new Error('DELIVERY_LEDGER_CORRUPT');
     const count=(state:z.infer<typeof segmentState>)=>segments.filter(segment=>segment.state===state).length,confirmed=count('sent'),pending=count('pending'),unknown=count('unknown');
-    return {replyId:id,planHash:digest(plan),state:unknown?'uncertain':count('sending')?'sending':confirmed===segments.length?'sent':confirmed?'partial':'ready',total:segments.length,confirmed,pending,unknown,legacy:false,segments};
+    return {replyId:id,planHash:digest(plan),state:unknown?'uncertain':count('sending')?'sending':confirmed===segments.length?'sent':confirmed?'partial':'ready',total:segments.length,confirmed,pending,unknown,segments};
   }
-  begin(id:string,position:number):void {this.atomic(()=>{const progress=this.progress(id);if(!progress||progress.legacy||progress.unknown||progress.state==='sending'||progress.segments.some(segment=>segment.position<position&&segment.state!=='sent'))throw new Error('DELIVERY_NOT_RESUMABLE');
+  begin(id:string,position:number):void {this.atomic(()=>{const progress=this.progress(id);if(!progress||progress.unknown||progress.state==='sending'||progress.segments.some(segment=>segment.position<position&&segment.state!=='sent'))throw new Error('DELIVERY_NOT_RESUMABLE');
     if(this.db.prepare("UPDATE qq_delivery_segments SET state='sending',code=NULL WHERE reply_id=? AND position=? AND state='pending'").run(id,position).changes!==1)throw new Error('DELIVERY_STATE_CONFLICT');});}
   confirm(id:string,position:number,receipt:string):void {z.string().regex(/^-?\d+$/).max(80).parse(receipt);this.atomic(()=>{
     if(this.db.prepare("UPDATE qq_delivery_segments SET state='sent',receipt=?,code=NULL WHERE reply_id=? AND position=? AND state='sending'").run(receipt,id,position).changes!==1)throw new Error('DELIVERY_STATE_CONFLICT');

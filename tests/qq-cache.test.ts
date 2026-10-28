@@ -20,7 +20,7 @@ test('QQ v2 migration preserves existing cache and receipts without inventing me
     PRAGMA user_version=2; PRAGMA application_id=${QQ_APPLICATION_ID};`);
   legacy.prepare('INSERT INTO messages(route,id,sender,text) VALUES(?,?,?,?)').run(route, '-10', 'old-sender', '旧缓存 token=fictional-legacy-key-123'); legacy.exec("INSERT INTO receipts VALUES('reply','-20')"); legacy.close();
   const before = await readFile(path); assert.equal(inspectStorage(path, 'qq').version, 2); assert.throws(() => new QqStore(path), /MIGRATION_REQUIRED/); assert.deepEqual(await readFile(path), before);
-  const store = new QqStore(path, { migrate: true });
+  const store = new QqStore(path, { });
   try {
     assert.equal(store.receipt('reply'), '-20'); const page = store.cache.browse(route, owner, { requestId: 'old' });
     assert.equal(page.page.messages[0]?.text, '旧缓存 token=[REDACTED]'); assert.equal(store.find(route, '-10')?.text, '旧缓存 token=[REDACTED]'); assert.equal(page.page.messages[0]?.occurredAt, null); assert.equal(page.page.messages[0]?.legacyMetadata, true); assert.equal(page.page.messages[0]?.cacheTextTruncated, null);

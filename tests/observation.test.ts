@@ -1,10 +1,12 @@
+import {z} from 'zod';
+import {fixtureAction} from './fixture-action.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID,createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { API_VERSION,conversationKey } from '@dafeiyu/contracts';
-import type { ExtensionHandle,ActionContext } from '@dafeiyu/contracts';
+import type { ExtensionHandle,ConversationAccess } from '@dafeiyu/contracts';
 import { observationFixture,observationReport,observationConversation } from './observation-fixture.js';
 import { call,textReply } from './harness.js';
 
@@ -95,10 +97,10 @@ test('scoped source lookup denies other conversations and state updates reject s
   assert.equal(h.handle.changeObservationSource({conversation:observationConversation,ref,requestId:'same',expectedVersion:1,action:'delete'}).duplicate,true);assert.equal(changed.version,2);
 });
 test('capability plugins without channels use only their own active core-issued action context',async t=>{
-  const h=await observationFixture();t.after(h.close);let handle:ExtensionHandle,saved:ActionContext|undefined,observed=false,memoryId:string|undefined;
-  handle=h.core.registerExtension({id:'fictional-explorer',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{name:'fictional_explore',description:'虚构观察',fields:{},execute:async(_args,context)=>{
+  const h=await observationFixture();t.after(h.close);let handle:ExtensionHandle,saved:ConversationAccess|undefined,observed=false,memoryId:string|undefined;
+  handle=h.core.registerExtension({id:'fictional-explorer',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'fictional-explorer',{id:'fictional_explore',description:'虚构观察',inputSchema:z.strictObject({}),work:async(_args,context)=>{
     saved=context;const report=observationReport({conversation:context.conversation});const receipt=handle.observeMemory(report,context);observed=receipt.contributions.length===1;memoryId=receipt.contributions[0]!.memoryId;return {activityId:receipt.activityId};
-  }}]});t.after(()=>handle.dispose());assert.throws(()=>handle.observeMemory(observationReport()),/owned channel/);
+  }})]});t.after(()=>handle.dispose());assert.throws(()=>handle.observeMemory(observationReport()),/owned channel/);
   let calls=0;h.setResponse(()=>++calls===1?call('fictional_explore',{}):textReply('虚构探索完成'));h.simulator.send('a','虚构探索',{id:randomUUID()});await h.core.whenIdle();assert.equal(observed,true);
   const events=h.core.journal.events(conversationKey('dafeiyu',saved!.conversation)),observedEvent=events.find(e=>e.type==='observation.recorded')!,parent=events.find(e=>e.id===observedEvent.causedBy)!;
   assert.equal(parent.type,'operation.started');assert.equal(parent.plugin,'fictional-explorer');assert.equal(observedEvent.traceId,parent.traceId);

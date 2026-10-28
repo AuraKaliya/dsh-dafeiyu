@@ -11,7 +11,7 @@ const refSchema = z.strictObject({ id: z.string().min(1).max(80), version: z.num
 export const QqCacheProofSchema = z.strictObject({ route: routeSchema, parts: z.array(refSchema).max(20), hash: z.string().length(64) });
 export type QqCacheProof = z.infer<typeof QqCacheProofSchema>;
 const itemSchema = z.strictObject({ id: z.string(), sender: z.string(), receivedSequence: z.number().int().positive(), text: z.string(),
-  occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string()), legacyMetadata: z.boolean(), cacheTextTruncated: z.boolean().nullable(),
+  occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string()), metadataKnown: z.boolean(), cacheTextTruncated: z.boolean().nullable(),
   media:z.array(MediaAttachmentSchema).max(8).optional(),history:z.literal(true).optional(),
   range: z.strictObject({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), total: z.number().int().nonnegative() }) });
 const pageSchema = z.strictObject({ order: z.literal('received-newest-first'), watermark: z.number().int().nonnegative(), oldestCachedSequence: z.number().int().nonnegative(),
@@ -153,7 +153,7 @@ export class QqCache {
         const points = Array.from(redactContent(row.text).value), start = row.seq === query.sequence ? query.offset : 0;
         if (start > points.length) throw new Error('CURSOR_STALE');
         const item = { id: row.id, sender: row.sender, receivedSequence: row.seq, text: '', occurredAt: meta.occurredAt, unsupported: meta.unsupported,
-          legacyMetadata: !meta.known, cacheTextTruncated: meta.truncated,...(meta.media?{media:meta.media}:{}),...(meta.history?{history:true as const}:{}), range: { start, end: start, total: points.length } };
+          metadataKnown: meta.known, cacheTextTruncated: meta.truncated,...(meta.media?{media:meta.media}:{}),...(meta.history?{history:true as const}:{}), range: { start, end: start, total: points.length } };
         let low = start, high = points.length;
         while (low < high) { const end = Math.ceil((low + high) / 2), candidate = { ...item, text: points.slice(start, end).join(''), range: { ...item.range, end } };
           if (JSON.stringify({ ...page, messages: [...page.messages, candidate] }).length <= 8000) low = end; else high = end - 1; }

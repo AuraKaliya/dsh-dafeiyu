@@ -10,15 +10,15 @@ const Memory=await import('@dafeiyu/memory');
 const {containsPrivateModelState}=await import('../build-tests/phase1-probe-fixture.js');
 const report={stage:'1D',kind:'real-model-real-dsh-fictional-capability',model,at:new Date().toISOString(),serverAccess:false,realPlatformAccess:false,formalPersona:false,checks:[],calls:[],passed:false};
 const receipts=[randomUUID(),randomUUID(),randomUUID()],steps=[];let host,memory,port,accepted;
-const extension={protocolVersion:3,id:'execution-fixture',version:'1',agentId:'dafeiyu',actions:[{id:'phase1d_step',version:'1',description:'本机虚构验收步骤，无外部副作用；receipt是真实执行回执，不可猜测。',effects:'local-write',requiresTask:true,
+const extension={protocolVersion:4,id:'execution-fixture',version:'1',agentId:'dafeiyu',actions:[{id:'phase1d_step',version:'1',description:'本机虚构验收步骤，无外部副作用；receipt是真实执行回执，不可猜测。',effects:'local-write',requiresTask:true,
   inputSchema:z.strictObject({stage:z.number().int().min(1).max(3),proof:z.string().max(100)}),outputSchema:z.strictObject({receipt:z.string()}),
   execute:async(raw,context)=>{host.core.executionAuthority(context,'execution-fixture');const input=z.object({stage:z.number(),proof:z.string()}).parse(raw);
     if(input.stage!==steps.length+1||input.proof!==(input.stage===1?'':receipts[input.stage-2]))throw new Error('FIXTURE_SEQUENCE');
     steps.push(input.stage);return {status:'succeeded',effects:'confirmed',completeness:'complete',data:{receipt:receipts[input.stage-1]},sources:[],receipts:[{id:receipts[input.stage-1],kind:'fictional-step'}]};}}]};
 const setup=async create=>{
-  host=await localHost(root,{simulator:false,realModel:true,timeline:true,lifecycleMode:'managed',timeout:240000});
-  memory=await host.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed'});
-  host.core.registerExtensionV3(extension);host.core.configureExecution({profileId:'phase1d-real',createStore:create,policies:[{id:'probe',producers:['probe-driver'],actions:['phase1d_step'],allowLocalWrite:true,sourceRules:[]}]});
+  host=await localHost(root,{simulator:false,realModel:true,timeline:true,timeout:240000});
+  memory=await host.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),});
+  host.core.registerExtension(extension);host.core.configureExecution({profileId:'phase1d-real',createStore:create,policies:[{id:'probe',producers:['probe-driver'],actions:['phase1d_step'],allowLocalWrite:true,sourceRules:[]}]});
   host.ctx.dafeiyuMemory.recover();host.ctx.dafeiyuMemory.activate();await host.core.recoverExecutions();host.core.recover();host.core.activate();port=host.core.executionProducer('probe-driver');
 };
 const close=async()=>{if(!host)return;const current=host;host=undefined;report.calls.push(...current.calls.map(({sessionId:_id,at:_at,...call})=>call));

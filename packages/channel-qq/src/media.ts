@@ -3,7 +3,7 @@ import { ReadProgressSchema } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import { ConversationSchema,MediaAttachmentSchema,ResourceProofSchema,PersonaSourceRefSchema,messageParts } from '@dafeiyu/contracts';
-import type { Conversation,ExecutionContextV3,MediaAttachment,ResourceProof } from '@dafeiyu/contracts';
+import type { Conversation,ExecutionContext,MediaAttachment,ResourceProof } from '@dafeiyu/contracts';
 import { QqMediaReader,QqMediaConfigSchema } from './media-reader.js';
 import { QQ_MEDIA_PROVIDER } from './media-store.js';
 import type { QqStore } from './store.js';
@@ -14,11 +14,11 @@ const listSchema=z.strictObject({messageId:z.string().min(1).max(80).optional(),
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 interface Host {agentId:string;store:QqStore;api:OneBot;settings:z.output<typeof QqMediaConfigSchema>;allowed(scene:Conversation):boolean;available():boolean;sourceEpoch():string;rejectIdentity():void}
 export class QqMedia {
-  private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
+  private readonly handle:ReturnType<Context['dafeiyu']['registerExtension']>;
   private readonly unregister:()=>void;
   private readonly controller=new AbortController();
   constructor(private readonly ctx:Context,private readonly host:Host){
-    const reader=new QqMediaReader(host.settings);this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:QQ_MEDIA_PROVIDER,agentId:host.agentId,version:'1',requires:['media.assets.v1','execution.resource-scope.v1'],provides:['qq.media.v1'],lifecycleReady:()=>!this.controller.signal.aborted,
+    const reader=new QqMediaReader(host.settings);this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:QQ_MEDIA_PROVIDER,agentId:host.agentId,version:'1',requires:['media.assets.v1','execution.resource-scope.v1'],provides:['qq.media.v1'],lifecycleReady:()=>!this.controller.signal.aborted,
       resourceProofs:{current:p=>this.current(p),epoch:()=>JSON.stringify([this.controller.signal.aborted,host.store.media.epoch(),host.sourceEpoch()])},actions:[{id:QQ_MEDIA_ACTIONS[0],version:'1',description:'列出本会话实际接收消息的媒体引用，默认本轮合并的全部原消息；元信息不表示已经看过。阅读和选择记忆使用dafeiyu_media_read/select。',inputSchema:listSchema,outputSchema:z.json(),effects:'read',execute:async(input,context)=>{
         try{const data=z.json().parse(this.list(context,input)),observed=z.object({observation:z.object({source:PersonaSourceRefSchema})}).safeParse(data),source=observed.success?observed.data.observation.source:null;
           return {status:'succeeded',effects:'none',completeness:'partial',data,sources:source?[{id:source.id,scopeKey:source.scopeKey,version:source.version,contentHash:source.contentHash}]:[],receipts:[]};}catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'QQ_MEDIA_UNAVAILABLE'};}}}]});
@@ -38,7 +38,7 @@ export class QqMedia {
     if(!this.host.allowed(scene)||!this.host.available())throw new Error('TARGET_NOT_ALLOWED');const ids=this.host.store.media.remember(scene,messageId,sender,createHash('sha256').update(JSON.stringify(envelope)).digest('hex'),parts,positionOffset),descriptions=ids.map(id=>this.host.store.media.describe(id));this.host.store.media.prune();
     return {attachments:descriptions.map(d=>MediaAttachmentSchema.parse({schemaVersion:1,source:d.ref,kind:d.kind,name:d.name})),positions:new Set(descriptions.map(d=>z.object({position:z.number()}).parse(d.origin.detail).position))};
   }
-  private list(context:ExecutionContextV3,raw:unknown){this.ctx.dafeiyu.executionAuthority(context,QQ_MEDIA_PROVIDER);const input=listSchema.parse(raw);
+  private list(context:ExecutionContext,raw:unknown){this.ctx.dafeiyu.executionAuthority(context,QQ_MEDIA_PROVIDER);const input=listSchema.parse(raw);
     const inbound=context.origin.kind==='message'?this.ctx.dafeiyu.journal.get(context.origin.inboundId):null;
     const target=input.target??inbound?.message.conversation;if(!target)throw new Error('RESOURCE_TARGET_REQUIRED');this.ctx.dafeiyu.authorizeCapabilityResource(context,QQ_MEDIA_PROVIDER,target);
     if(!this.host.allowed(target)||this.controller.signal.aborted)throw new Error('TARGET_NOT_ALLOWED');const messageId=input.messageId??inbound?.message.id;if(!messageId)throw new Error('MESSAGE_REQUIRED');

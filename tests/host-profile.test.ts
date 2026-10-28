@@ -43,7 +43,7 @@ test('Host validates QQ observation dependencies and policy before any connector
   const base={...f.config,paths:{...f.config.paths,channels:{'channel-qq':'./data/qq'}},authorityPolicies:[...f.config.authorityPolicies,policy]};
   assert.throws(await changed(f,{...base,plugins:[{id:'model-scripted',required:true},qq]}),/HOST_QQ_MEMORY_REQUIRED/);
   assert.throws(await changed(f,{...base,plugins:[...f.config.plugins,qq]}),/HOST_QQ_SOURCE_TRACKING_REQUIRED/);
-  const plugins=[...f.config.plugins.map(p=>p.id==='memory'?{...p,config:{sourceTracking:true}}:p),qq];
+  const plugins=[...f.config.plugins.map(p=>p.id==='memory'?{...p,config:{}}:p),qq];
   for(const authorityPolicies of [f.config.authorityPolicies,[{...policy,allowLocalWrite:false}],[{...policy,actions:['qq_browse']}]] )
     assert.throws(await changed(f,{...base,plugins,authorityPolicies}),/HOST_QQ_CAPABILITY_POLICY_REQUIRED/);
   const prepared=(await changed(f,{...base,plugins}))();assert.ok(prepared.order.indexOf('core-execution')<prepared.order.indexOf('channel-qq'));

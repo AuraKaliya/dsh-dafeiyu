@@ -35,7 +35,7 @@ test('QQ legacy inspection and rejected implicit migration leave the original fi
   const path = await file(); legacy(path); const before = await readFile(path);
   assert.equal(inspectStorage(path, 'qq').supported, true); assert.equal(inspectStorage(path, 'qq').version, 0);
   assert.throws(() => new QqStore(path), /QQ_MIGRATION_REQUIRED/); assert.deepEqual(await readFile(path), before);
-  const store = new QqStore(path, { migrate: true });
+  const store = new QqStore(path, { });
   try { assert.equal(store.find('fictional-room', '-321')?.text, '仅供迁移测试'); assert.equal(store.receipt('fictional-reply'), '-456'); assert.ok(store.handled('fictional-room', '-321')); }
   finally { store.close(); }
   const db = new DatabaseSync(path, { readOnly: true });
@@ -51,7 +51,7 @@ test('QQ refuses unknown, incomplete, forged and future schemas before persisten
   ]) {
     const path = await file(); legacy(path); const db = new DatabaseSync(path); db.exec(sql); db.close(); const before = await readFile(path);
     assert.equal(inspectStorage(path, 'qq').supported, false);
-    assert.throws(() => new QqStore(path, { migrate: true }), /QQ_STORAGE_UNSUPPORTED/);
+    assert.throws(() => new QqStore(path, { }), /QQ_STORAGE_UNSUPPORTED/);
     assert.deepEqual(await readFile(path), before);
   }
 });
@@ -88,7 +88,7 @@ test('Host init uses the QQ schema target and read-only inspection requests migr
 test('QQ v1 upgrades additively and stores account-bound membership without changing old receipts', async () => {
   const path = await file(); legacy(path); const db = new DatabaseSync(path); db.exec(`PRAGMA user_version=1; PRAGMA application_id=${QQ_APPLICATION_ID};`); db.close();
   const before = await readFile(path); assert.equal(inspectStorage(path, 'qq').supported, true); assert.throws(() => new QqStore(path), /MIGRATION_REQUIRED/); assert.deepEqual(await readFile(path), before);
-  const store = new QqStore(path, { migrate: true });
+  const store = new QqStore(path, { });
   try {
     assert.equal(store.groupSnapshot('12345678'), null);
     store.saveGroups('12345678', [{ id: '11223344', name: '虚构群' }], '2026-10-25T00:00:00.000Z');
@@ -103,7 +103,7 @@ test('QQ v5 migration preserves real records and marks legacy group settings unk
   created.saveGroups('12345678',[{id:'11223344',name:'原群',msgMask:1}],'2026-10-27T00:00:00.000Z');created.close();
   const old=new DatabaseSync(path);old.prepare('UPDATE qq_group_snapshots SET groups_json=?').run(JSON.stringify([{id:'11223344',name:'原群'}]));old.exec('DROP TABLE qq_message_batches;DROP TABLE qq_stickers;DROP TABLE qq_sticker_leases;DROP TABLE qq_reply_quotes; PRAGMA user_version=5');old.close();
   const before=await readFile(path);assert.throws(()=>new QqStore(path),/QQ_MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),before);
-  const migrated=new QqStore(path,{migrate:true});try{
+  const migrated=new QqStore(path,{});try{
     assert.equal(migrated.receipt('preserved'),'receipt');assert.equal(migrated.find('room','1')?.text,'保留原文');
     assert.equal(migrated.groupSnapshot('12345678')?.groups[0]?.msgMask,null);assert.equal(migrated.groupSnapshot('12345678')?.groups[0]?.generation,0);
     const resumed=migrated.saveGroups('12345678',[{id:'11223344',name:'原群',msgMask:1}],'2026-10-27T00:01:00.100Z');

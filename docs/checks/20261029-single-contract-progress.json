@@ -1,0 +1,29 @@
+{
+  "status": "development-in-progress",
+  "baselineCommit": "c212a6aa9396085bc2da4577d86882b2b43d35cf",
+  "scope": "project-local development only",
+  "implemented": [
+    "Single typed extension registration and invocation path",
+    "Owner-controlled lifecycle and one context assembly",
+    "Current-only database creation; migration entrypoints removed",
+    "Main DSH work loop owns task completion and ordinary final expression",
+    "Memory-owned seed, episodes, reflections and self-understanding",
+    "Persona runtime reads memory projections; trial/adoption workflow removed"
+  ],
+  "validation": {
+    "sourceBuild": "passed",
+    "targetedTests": 9,
+    "targetedFailures": 0,
+    "reportId": "7e611269-45d3-483e-be49-aecc8c80ffe4",
+    "realModel": false,
+    "realPlatform": false,
+    "serverAccess": false
+  },
+  "remaining": [
+    "Finish current-format source and configuration audit",
+    "Move runtime storage diagnostics behind owner ports",
+    "Port remaining regression fixtures and replace obsolete compatibility expectations",
+    "Validate channel delivery, recovery and scoped memory integration",
+    "Run the complete current local regression and public build verification"
+  ]
+}

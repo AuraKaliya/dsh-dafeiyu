@@ -1,3 +1,5 @@
+import {z} from 'zod';
+import {fixtureAction} from '../tests/fixture-action.js';
 import { mkdir, readFile, writeFile, rename, access } from 'node:fs/promises';
 import { resolve } from 'node:path';
 const stage = process.argv[2];
@@ -24,11 +26,7 @@ try {
   host = await localHost(root, { simulator: false, realModel: stage === 'C', timeline: process.argv.includes('--timeline'),
     adapter: new ScriptedModel(() => textReply('【本地接入验收·模拟模型】已收到这条消息，文字收发正常。')) });
 } catch(error) { accountLease.close(); throw error; }
-if(stage==='C')host.core.registerExtension({id:'qq-acceptance-tools',version:'0.2.0',apiVersion:2,agentId:'dafeiyu',actions:[{
-  name:'local_acceptance_echo',description:'本地验收用：原样回显text并返回实际回执，无外部副作用。',
-  fields:{text:{description:'回显文本',required:true}},
-  execute:async args=>({echo:args.text??'',receipt:'qq-local-accepted-42'}),
-}]});
+if(stage==='C')host.core.registerExtension({id:'qq-acceptance-tools',version:'0.2.0',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(host.core,'qq-acceptance-tools',{id:'local_acceptance_echo',description:'本地验收用：原样回显text并返回实际回执，无外部副作用。',inputSchema:z.strictObject({text:z.string().describe('回显文本')}),work:async args=>({echo:args.text??'',receipt:'qq-local-accepted-42'})})]});
 const startedAt = new Date().toISOString();
 let stopping = false;
 let writing = false;

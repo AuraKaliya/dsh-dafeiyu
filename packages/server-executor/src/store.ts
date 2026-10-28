@@ -22,7 +22,7 @@ export class ExecutorStore {
   readonly identity:z.infer<typeof ExecutorIdentitySchema>;
   constructor(file:string,identity:z.infer<typeof ExecutorIdentitySchema>,create=false){
     this.identity=Object.freeze(ExecutorIdentitySchema.parse(identity));
-    if(!existsSync(file)&&!create)throw new Error('EXECUTOR_MIGRATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});
+    if(!existsSync(file)&&!create)throw new Error('EXECUTOR_INITIALIZATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});
     this.db=new DatabaseSync(file);
     try{
       const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),application=Number(this.db.prepare('PRAGMA application_id').get()?.application_id),empty=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n)===0;

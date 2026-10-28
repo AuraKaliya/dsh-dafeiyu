@@ -40,7 +40,7 @@ if(['optional','required','qq','qq-groups','single'].includes(scenario??'')||cap
     ...(taskScenario?{tasks:{enabled:true,deliverResults:true}}:{}),
     ...(['qq','qq-groups'].includes(scenario??'')?{groupSync:{enabled:true,mode:'joined'},naturalNames:['大肥鱼']}:{} )}});
 }
-if(capabilities){config.plugins.find(p=>p.id==='memory')!.config={sourceTracking:true};config.authorityPolicies.push({id:'conversation',producers:['channel-qq'],actions:['qq_groups','qq_browse','qq_observe_select',...(taskScenario?['qq_task_submit','qq_task_status','qq_task_control']:[])],allowLocalWrite:true});}
+if(capabilities){config.plugins.find(p=>p.id==='memory')!.config={};config.authorityPolicies.push({id:'conversation',producers:['channel-qq'],actions:['qq_groups','qq_browse','qq_observe_select',...(taskScenario?['qq_task_submit','qq_task_status','qq_task_control']:[])],allowLocalWrite:true});}
 if(taskScenario)config.authorityPolicies.push({id:'qq-task',producers:['qq-tasks'],actions:['qq_browse','dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true});
 if(scenario==='minimal'){config.plugins=config.plugins.filter(p=>p.id!=='memory');config.plugins.find(p=>p.id==='timeline')!.config={execution:false};config.authorityPolicies=[];}
 if(scenario==='policy')config.authorityPolicies[0]!.actions=['missing_action'];

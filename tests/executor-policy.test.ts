@@ -9,7 +9,7 @@ import * as Timeline from '@dafeiyu/timeline';
 import * as Memory from '@dafeiyu/memory';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
 import { API_VERSION,HostConfigSchema,MessageTaskSubmitSchema,ExternalActionPoliciesSchema,ExternalTaskAuthorizationSchema } from '@dafeiyu/contracts';
-import type { ActionOutcome,ActivityAnchor,ExecutionContextV3,ExternalActionPolicy,ExternalTaskAuthority,HostConfig } from '@dafeiyu/contracts';
+import type { ActionOutcome,ActivityAnchor,ExecutionContext,ExternalActionPolicy,ExternalTaskAuthority,HostConfig } from '@dafeiyu/contracts';
 import { probeHost } from './phase1-probe-fixture.js';
 import { ScriptedModel,call,textReply } from './harness.js';
 import type { Response } from './harness.js';
@@ -26,16 +26,16 @@ type Policy=HostConfig['authorityPolicies'][number];
 
 /** Real Core/Memory/DSH with a fictional QQ ingress; no process, network, credentials or paid model. */
 async function fixture(options:{externalActions?:ExternalActionPolicy[]|null;allowLocalWrite?:boolean;requiresTask?:boolean;extensionId?:string;
-  execute?:(context:ExecutionContextV3)=>Promise<ActionOutcome>|ActionOutcome;directory?:string;create?:boolean}={}){
+  execute?:(context:ExecutionContext)=>Promise<ActionOutcome>|ActionOutcome;directory?:string;create?:boolean}={}){
   const directory=options.directory??await mkdtemp(join(testTempDir(),'executor-policy-'));let response:Response=()=>textReply('虚构完成');
   const adapter=new ScriptedModel(request=>response(request)),host=await probeHost(directory,adapter),ctx=host.ctx;
   let submission:{taskId:string;runId:string}|undefined,anchor:ActivityAnchor|undefined,invocations=0,messageId=0;
   try{
-    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(directory,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:10000});
+    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(directory,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',turnTimeoutMs:10000});
     await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});
-    await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(directory,'memory'),lifecycleMode:'managed',sourceTracking:true});
+    await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(directory,'memory'),});
     const core=ctx.dafeiyu,extensionId=options.extensionId??owner;
-    const extension=core.registerExtensionV3({protocolVersion:3,id:extensionId,version:'1',agentId:'dafeiyu',actions:[
+    const extension=core.registerExtension({protocolVersion:4,id:extensionId,version:'1',agentId:'dafeiyu',actions:[
       {id:actionId,version:'1',description:'本机虚构外部能力，无实际外部效果',requiresTask:options.requiresTask??true,effects:'external-write',inputSchema:z.strictObject({}),outputSchema:z.json(),
         execute:async(_raw,c)=>{invocations++;return options.execute?await options.execute(c):completed();}},
       {id:'fixture_anchor',version:'1',description:'取得真实持久活动锚点',requiresTask:true,effects:'local-write',inputSchema:z.strictObject({}),outputSchema:z.json(),
@@ -47,9 +47,9 @@ async function fixture(options:{externalActions?:ExternalActionPolicy[]|null;all
       allowLocalWrite:options.allowLocalWrite??true,sourceRules:[],resources:[],...(options.externalActions===null?{}:{externalActions:options.externalActions??[allowed]})};
     core.configureExecution({profileId:'fixture',createStore:options.create??true,policies:[policy,
       {id:'conversation',producers:['fixture-qq'],actions:['fixture_submit',actionId],allowLocalWrite:true,externalActions:[allowed]}]});
-    const channel=core.registerExtension({id:'fixture-qq',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',channels:[{channel:'qq',account,
+    const channel=core.registerExtension({id:'fixture-qq',version:'1',protocolVersion:4,agentId:'dafeiyu',channels:[{channel:'qq',account,
       deliver:async()=>({status:'sent',receiptId:'fictional-qq-receipt'})}]});
-    const tasks=core.registerExtensionV3({protocolVersion:3,id:'fixture-tasks',version:'1',agentId:'dafeiyu',actions:[{
+    const tasks=core.registerExtension({protocolVersion:4,id:'fixture-tasks',version:'1',agentId:'dafeiyu',actions:[{
       id:'fixture_submit',version:'1',description:'通过真实当前消息提交测试任务',effects:'local-write',inputSchema:MessageTaskSubmitSchema,outputSchema:z.json(),
       execute:async(raw,c)=>{try{submission=core.submitMessageTask(c,'fixture-tasks',raw);return {...completed(),data:z.json().parse(submission)};}
         catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:error instanceof Error?error.message:'FIXTURE_FAILED'};}}
@@ -93,7 +93,7 @@ test('external actions stay hidden without an exact name, owner and version or w
 });
 
 test('a real owner Task receives immutable current authority, while copied, foreign, read-only and expired grants fail',async()=>{
-  let h:Harness,authority:ExternalTaskAuthority|undefined,captured:ExecutionContextV3|undefined;
+  let h:Harness,authority:ExternalTaskAuthority|undefined,captured:ExecutionContext|undefined;
   h=await fixture({execute:c=>{captured=c;authority=h.core.authorizeExternalTask(c,owner);authority.guard();
     assert.throws(()=>h.core.authorizeExternalTask({...c},owner),/SCOPE_DENIED/);assert.throws(()=>h.core.authorizeExternalTask(c,'another'),/SCOPE_DENIED/);
     assert.deepEqual(ExternalTaskAuthorizationSchema.parse(authority.authorization),authority.authorization);assert.equal(runtimeHash(authority.authorization),authority.hash);
@@ -107,7 +107,7 @@ test('a real owner Task receives immutable current authority, while copied, fore
 });
 
 test('read-only external provenance stays valid while draining without reopening task admission or a finished write grant',async()=>{
-  let h:Harness,authority:ExternalTaskAuthority|undefined,context:ExecutionContextV3|undefined;
+  let h:Harness,authority:ExternalTaskAuthority|undefined,context:ExecutionContext|undefined;
   h=await fixture({execute:value=>{context=value;authority=h.core.authorizeExternalTask(value,owner);return completed();}});
   try{ownerTurn(h);await h.core.whenIdle();assert.ok(authority);assert.ok(context);const body=authority.authorization;
     assert.equal(h.core.externalTaskSourceCurrent(body,owner),true);
@@ -136,8 +136,8 @@ test('native submission and self-reported motivation cannot impersonate a real o
 test('an external action may use local observation mutation only when the same policy also allows local writes',async()=>{
   for(const allowLocalWrite of [false,true]){let h:Harness;h=await fixture({allowLocalWrite,execute:c=>{
     const authority=h.core.authorizeExternalTask(c,owner);authority.guard();
-    const source=h.memory.persona!.recordObservation(c,{requestId:'observation',kind:'primary',nature:'synthetic',text:'受管虚构观察',resource:'fixture:executor',occurredAt:new Date().toISOString(),coverage:['fixture'],completeness:'partial'},owner);
-    const mutate=()=>h.memory.persona!.changeSource(c,{requestId:'withdraw',id:source.id,expectedVersion:source.version,deleted:true},owner);
+    const source=h.memory.growth!.recordObservation(c,{requestId:'observation',kind:'primary',nature:'synthetic',text:'受管虚构观察',resource:'fixture:executor',occurredAt:new Date().toISOString(),coverage:['fixture'],completeness:'partial'},owner);
+    const mutate=()=>h.memory.growth!.changeSource(c,{requestId:'withdraw',id:source.id,expectedVersion:source.version,deleted:true},owner);
     if(allowLocalWrite){assert.doesNotThrow(()=>h.core.personaAccess(c,owner,'local-write'));assert.doesNotThrow(mutate);}
     else{assert.throws(()=>h.core.personaAccess(c,owner,'local-write'),/SCOPE_DENIED/);assert.throws(mutate,/SCOPE_DENIED/);}return completed();}});
     try{ownerTurn(h);await h.core.whenIdle();assert.equal(h.invocations,1);const db=new DatabaseSync(join(h.directory,'memory','memory.sqlite'),{readOnly:true});

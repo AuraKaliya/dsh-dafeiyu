@@ -1,3 +1,4 @@
+import {fixtureAction} from './fixture-action.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
@@ -14,8 +15,8 @@ import * as Memory from '@dafeiyu/memory';
 import * as QQ from '@dafeiyu/qq';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { API_VERSION, MessageSchema, ServiceGate, dependencyOrder, HostConfigSchema, ExecutionScopeSchema, taskScopeKey } from '@dafeiyu/contracts';
-import type { ExtensionV3 } from '@dafeiyu/contracts';
-import { CapabilityRegistryV3 } from '../packages/core/lib/registry-v3.js';
+import type { Extension } from '@dafeiyu/contracts';
+import { CapabilityRegistry } from '../packages/core/lib/registry-v3.js';
 import { AnalysisStore } from '../packages/memory/lib/analysis-store.js';
 import type { AnalysisJob } from '../packages/memory/lib/analysis-types.js';
 import { harness, textReply } from './harness.js';
@@ -24,8 +25,8 @@ const rootDirectory = () => mkdtemp(join(tmpdir(), 'dafeiyu-managed-'));
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 const message = () => MessageSchema.parse({ id: 'pending-fixture', occurredAt: '2026-10-24T08:00:00+08:00',
   conversation: { channel: 'simulator', account: 'local', kind: 'local', id: 'fixture' }, sender: { id: 'fictional-user', displayName: '虚构用户' }, text: '本地虚构输入' });
-const managed = (root: string) => harness(root, undefined, undefined, 5000, undefined, undefined, 'managed');
-const extension = (id = 'fixture-v3'): ExtensionV3 => ({ protocolVersion: 3, id, version: 'fixture', agentId: 'dafeiyu',
+const managed = (root: string) => harness(root, undefined, undefined, 5000, undefined, undefined, true);
+const extension = (id = 'fixture-v3'): Extension => ({ protocolVersion:4, id, version: 'fixture', agentId: 'dafeiyu',
   actions: [{ id: 'v3_fixture_action', version: '1', description: '虚构本地能力', effects: 'read', requiresTask: true,
     inputSchema: z.strictObject({ text: z.string().max(100) }), outputSchema: z.strictObject({ text: z.string() }),
     execute: async input => ({ status: 'succeeded', effects: 'none', completeness: 'complete', data: input, sources: [], receipts: [] }) }] });
@@ -60,7 +61,7 @@ test('host config is strict, keeps optional probe routes independent and contain
 });
 
 test('v3 registration snapshots metadata, enforces strict schemas and revokes disposed instances', () => {
-  const registry = new CapabilityRegistryV3(), reserved = { ids: [], actions: [], channels: [] };
+  const registry = new CapabilityRegistry(), reserved = { ids: [], actions: [], channels: [] };
   const spec = extension(), handle = registry.register('dafeiyu', spec, reserved), action = registry.actions()[0]; assert.ok(action);
   assert.equal(Object.isFrozen(action.input), true); assert.equal(Object.isFrozen(action.input.properties), true);
   assert.throws(() => registry.register('dafeiyu', extension('other-v3'), reserved), /DUPLICATE_ACTION/);
@@ -72,10 +73,10 @@ test('v3 registration snapshots metadata, enforces strict schemas and revokes di
 
 test('core v2 and v3 share names while legacy API_VERSION stays two', async t => {
   const h = await managed(await rootDirectory()); t.after(h.close);
-  assert.equal(API_VERSION, 2); const handle = h.core.registerExtensionV3(extension());
-  assert.throws(() => h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', apiVersion: 2, agentId: 'dafeiyu' }), /Duplicate extension/);
-  assert.throws(() => h.core.registerExtension({ id: 'other', version: 'fixture', apiVersion: 2, agentId: 'dafeiyu', actions: [{ name: 'v3_fixture_action', description: 'fixture', fields: {}, execute: async () => null }] }), /Duplicate or invalid action/);
-  handle.dispose(); const legacy = h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', apiVersion: 2, agentId: 'dafeiyu' }); legacy.dispose();
+  assert.equal(API_VERSION, 2); const handle = h.core.registerExtension(extension());
+  assert.throws(() => h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu' }), /Duplicate extension/);
+  assert.throws(() => h.core.registerExtension({ id: 'other', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu', actions: [fixtureAction(h.core,'other',{id:'v3_fixture_action',description:'fixture',inputSchema:z.strictObject({}),work:async () => null})] }), /Duplicate or invalid action/);
+  handle.dispose(); const legacy = h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu' }); legacy.dispose();
 });
 
 test('managed core rejects ingress without persistence and drains existing accepted message only after activation', async t => {
@@ -112,7 +113,7 @@ test('managed memory recovery and analysis worker wait for their own activation 
   const h = await managed(join(root, 'core'));
   const query = await h.ctx.plugin(Query, { path: join(root, 'query.sqlite'), openAt: 'never' });
   const timeline = await h.ctx.plugin(Timeline, { agentId: 'dafeiyu' });
-  const memory = await h.ctx.plugin(Memory, { agentId: 'dafeiyu', dataDir: memoryRoot, lifecycleMode: 'managed', analysis: {} });
+  const memory = await h.ctx.plugin(Memory, { agentId: 'dafeiyu', dataDir: memoryRoot, analysis: {} });
   t.after(async () => { h.core.quiesce(); await h.core.whenIdle(); await memory.dispose(); await timeline.dispose(); await query.dispose(); await h.close(); });
   const readState = () => { const db = new DatabaseSync(join(memoryRoot, 'analysis.sqlite'), { readOnly: true }); try { return db.prepare('SELECT state FROM jobs WHERE id=?').get(id)?.state; } finally { db.close(); } };
   assert.equal(readState(), 'running'); h.core.recover();
@@ -136,7 +137,7 @@ test('quiescing rejects new ingress while an already running conversation can fi
 
 test('a provider that becomes unavailable prevents new acceptance without a false storage failure', async t => {
   const h = await harness(await rootDirectory()); t.after(h.close); let ready = true;
-  const provider = h.core.registerExtension({ id: 'readiness-fixture', version: 'fixture', apiVersion: 2, agentId: 'dafeiyu', lifecycleReady: () => ready });
+  const provider = h.core.registerExtension({ id: 'readiness-fixture', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu', lifecycleReady: () => ready });
   ready = false;
   assert.equal(h.core.getStatus().state, 'degraded');
   assert.throws(() => h.simulator.send('fixture', '不得提前受理', { id: 'not-accepted' }), /DEPENDENCY_UNAVAILABLE/);
@@ -154,7 +155,7 @@ test('managed QQ connects only after explicit start and core readiness', async t
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture port missing');
   const h = await managed(join(root, 'core'));
   const qq = await h.ctx.plugin(QQ, { agentId: 'dafeiyu', botId: '1994142241', ownerId: '10000003', groupIds: [], tokenFile,
-    dataDir: join(root, 'qq'), httpURL: `http://127.0.0.1:${address.port}/`, wsURL: `ws://127.0.0.1:${address.port}/`, lifecycleMode: 'managed' });
+    dataDir: join(root, 'qq'), httpURL: `http://127.0.0.1:${address.port}/`, wsURL: `ws://127.0.0.1:${address.port}/`, });
   t.after(async () => { await qq.dispose(); await h.close(); for (const client of ws.clients) client.terminate(); await new Promise<void>(resolve => ws.close(() => resolve())); await new Promise<void>(resolve => server.close(() => resolve())); });
   await tick(); assert.equal(calls, 0); await assert.rejects(h.ctx.dafeiyuQQ.start(), /HOST_NOT_READY/);
   h.core.recover(); h.core.activate(); await h.ctx.dafeiyuQQ.start(); assert.ok(endpoints.includes('/get_login_info'));assert.ok(endpoints.includes('/get_status'));assert.ok(endpoints.every(path=>['/get_login_info','/get_status','/get_group_list','/send_packet'].includes(path)));

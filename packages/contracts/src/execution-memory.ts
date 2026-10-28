@@ -31,8 +31,7 @@ export interface ExecutionMemoryPort {
   intent(access:PersonaAccess):{motivation:PersonaAccess['motivation'];blocking:boolean;events:readonly import('./persona.js').TaskIntentEvent[]};
   resolveIntent(access:PersonaAccess,input:unknown):unknown;
   readonly compactionPolicy?:CompactionProvider['policy'];
-  summarize:CompactionProvider['summarize'];
-  summarizeFragments?:CompactionProvider['summarizeFragments'];
+  summarizeFragments:CompactionProvider['summarizeFragments'];
   /** Optional checked semantic rewrite; native tasks retain the same provenance guard. */
   rewrite?:CompactionProvider['rewrite'];
 }

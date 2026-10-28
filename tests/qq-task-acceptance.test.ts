@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { qqTaskDirective } from '@dafeiyu/qq';
-import type { ExecutionContextV3 } from '@dafeiyu/contracts';
+import type { ExecutionContext } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,otherGroup,outcomes,until,bot,group } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
 const receiptSchema=z.object({taskId:z.uuid(),runId:z.uuid(),motivation:z.string()});
@@ -44,7 +44,7 @@ test('self exploration keeps its own motivation and cannot borrow the owner task
 });
 
 test('task metadata is scoped to its real source conversation and expired or cloned invocation contexts cannot submit',async t=>{
-  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let step=0,captured:ExecutionContextV3|undefined;const original=h.core.submitMessageTask.bind(h.core);
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let step=0,captured:ExecutionContext|undefined;const original=h.core.submitMessageTask.bind(h.core);
   h.core.submitMessageTask=(context,plugin,input)=>{captured=context;assert.throws(()=>original({...context},plugin,input),/SCOPE_DENIED/);return original(context,plugin,input);};
   h.setResponse(request=>native(request)?textReply('内部完成'):++step===1?call('qq_task_submit',{requestId:'first',title:'隔离任务'}):textReply('已受理'));await h.message('请整理讨论',{trigger:true});
   const data=receiptSchema.parse(outcomes(h.adapter.requests.filter(request=>!native(request)&&!String(request.sessionId).startsWith('dafeiyu-assessment-')).at(-1)!).find(outcome=>receiptSchema.safeParse(outcome.data).success)!.data);

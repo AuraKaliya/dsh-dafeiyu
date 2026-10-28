@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ExperienceRevisionSchema,ExperienceReviewSchema,ExperienceRelationSchema,MaintenanceRequestInputSchema,
   MaintenanceSnapshotSchema,MaintenanceStateSchema,MaintenanceLifecycleSchema,MaintenanceSchedulingItemSchema,PersonaSourceRefSchema,redactJson } from '@dafeiyu/contracts';
 import type { PersonaAccess,PersonaSourceRef,ExperienceRevision,MaintenanceSnapshot,MaintenanceLifecycle,MaintenanceState } from '@dafeiyu/contracts';
-import type { PersonaResolver } from './persona-store.js';
+import type { PersonaResolver } from './material.js';
 import { personaDigest,personaScope,uniqueSources,sourceKey } from './persona-digest.js';
 
 export interface ExperienceDraft {

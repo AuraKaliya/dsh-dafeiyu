@@ -1,3 +1,4 @@
+import {fixtureAction} from './fixture-action.js';
 import { readCompactionEvents } from '@dafeiyu/core';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -83,7 +84,7 @@ test('summary failures keep valid source history, close the DSH bracket and resp
 test('native and second-plugin regions remain verbatim across repeated incremental replacements', async t => {
   const h = await memoryFixture(undefined, { compaction: policy, context: {} }); t.after(h.close);
   h.ctx.systemPrompt.context({ name: 'native-fixture', order: 1, required: true, text: 'NATIVE_UNCHANGED' });
-  const handle = h.core.registerExtension({ id: 'other-region', version: '1', apiVersion: API_VERSION, agentId: 'dafeiyu', contexts: [{
+  const handle = h.core.registerExtension({ id: 'other-region', version: '1', protocolVersion:4, agentId: 'dafeiyu', contexts: [{
     id: 'facts', kind: 'operational-fact', prepare: async () => [{ id: 'a', version: '1', text: 'OTHER_PLUGIN_UNCHANGED',
       sources: [{ ref: 'fictional:other', version: '1', hash: 'fictional' }], expiresAt: new Date(Date.now() + 600000).toISOString() }], validate: () => true,
   }] }); t.after(() => handle.dispose());
@@ -211,9 +212,7 @@ test('adding unrelated memory preserves previously valid summaries and conversat
 
 test('large tool feedback triggers a between-step check while keeping that tool pair and executing it once',async t=>{
   const h=await memoryFixture(undefined,{compaction:{...policy,inputTokens:50000}});t.after(h.close);await seed(h,4);assert.equal(compactCalls(h).length,0);
-  let effects=0,requests=0;const extension=h.core.registerExtension({id:'big-tool',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{
-    name:'large_fictional_result',description:'虚构大结果',fields:{},execute:async()=>{effects++;return {data:'虚构材料'.repeat(30000)};},
-  }]});t.after(()=>extension.dispose());
+  let effects=0,requests=0;const extension=h.core.registerExtension({id:'big-tool',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'big-tool',{id:'large_fictional_result',description:'虚构大结果',inputSchema:z.strictObject({}),work:async()=>{effects++;return {data:'虚构材料'.repeat(30000)};}})]});t.after(()=>extension.dispose());
   h.setResponse(()=>++requests===1?call('large_fictional_result',{}):textReply('工具结果已检查'));
   const receipt=h.simulator.send('a','执行虚构工具',{id:randomUUID()});await h.core.whenIdle();assert.equal(h.core.journal.get(receipt.id).state,'delivered');
   assert.ok(compactCalls(h).length>0);assert.equal(effects,1);assert.equal(requests,2);

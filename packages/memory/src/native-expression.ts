@@ -5,24 +5,15 @@ import { z } from 'zod';
 import { NativeExpressionPacketSchema,NativeExpressionCandidateSchema,TaskResultAnchorSchema,redactJson } from '@dafeiyu/contracts';
 import type { NativeExpressionAccess,NativeExpressionPacket,NativeExpressionPort } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
-import type { TaskExpression } from './expression.js';
+import type { MemoryExpressionAccess } from './expression.js';
 import { verifyPersonaDelivery } from './expression-runtime.js';
 import {packNativeEvidence} from './native-evidence.js';
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export function migrateNativeExpression(db:DatabaseSync){const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===10||version===11||version===12||version===13){db.prepare('SELECT * FROM native_expression_packets LIMIT 0').all();return;}
-  if(version!==9)throw new Error('Unsupported native expression database');
-  db.exec(`CREATE TABLE native_expression_packets(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,version INTEGER NOT NULL,withdrawn INTEGER NOT NULL,body TEXT NOT NULL,UNIQUE(agent_id,run_id));
-    CREATE TRIGGER native_expression_immutable BEFORE UPDATE OF id,agent_id,task_id,run_id,body ON native_expression_packets BEGIN SELECT RAISE(ABORT,'Immutable native expression'); END;
-    CREATE TRIGGER native_expression_retain BEFORE DELETE ON native_expression_packets BEGIN SELECT RAISE(ABORT,'Withdraw native expression'); END;
-    PRAGMA user_version=10;`);
-  db.prepare('INSERT INTO memory_schema_migrations VALUES(10,?,0,?)').run(new Date().toISOString(),'add-target-bound-native-expression-without-copying-rejected-private-bodies-v1');
-}
 export class NativeExpression implements NativeExpressionPort {
   private readonly stop=new AbortController();
   readonly signal=this.stop.signal;
   private readonly pending=new Set<Promise<void>>();
-  constructor(private readonly ctx:Context,private readonly db:DatabaseSync,private readonly store:MemoryStore,private readonly expression:TaskExpression,readonly ready:()=>boolean,private readonly flush:()=>void){}
+  constructor(private readonly ctx:Context,private readonly db:DatabaseSync,private readonly store:MemoryStore,private readonly expression:MemoryExpressionAccess,readonly ready:()=>boolean,private readonly flush:()=>void){}
   private audit(access:NativeExpressionAccess,type:string,data:unknown){const id=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(id,JSON.stringify({id,type,scope:access.execution.view.scope,runId:access.anchor.runId,origin:access.execution.view.origin,operationId:access.anchor.runId,causedBy:null,producer:'memory-native-expression',at:new Date().toISOString(),data}));}
   private build(access:NativeExpressionAccess,allowExpired=false){access.guard();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const anchor=TaskResultAnchorSchema.parse(access.anchor),scope=access.execution.view.scope;
     if(scope.kind!=='task'||scope.taskId!==anchor.taskId||access.execution.view.runId!==anchor.runId||access.execution.intentVersion!==anchor.intentVersion||!allowExpired&&Date.parse(anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');
@@ -32,7 +23,7 @@ export class NativeExpression implements NativeExpressionPort {
     const readAccess={...access.execution,guard:()=>{access.execution.view.signal.throwIfAborted();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');}};
     const candidates=z.array(NativeExpressionCandidateSchema).max(64).parse(access.candidates),proofs:unknown[]=[],targetInferences:number[]=[];let forbidden=false,evidence:NativeExpressionPacket['evidence']=[];
     const read=()=>{for(const candidate of candidates){const source=candidate.source;let material:string|null=null,fence:string|null=null,kind:'reported'|'inference'='reported',mediaStamp:string|null=null,targetStamp:string|null=null;
-      if(source.kind==='memory')material=this.expression.nativeMemoryMaterial(scope.agentId,source,anchor.target,access.expressionPolicy??null);
+      if(source.kind==='memory')material=source.collection==='autobiography'?this.store.autobiography(scope.agentId).material(source)?.text??null:this.expression.nativeMemoryMaterial(scope.agentId,source,anchor.target,access.expressionPolicy??null);
       else if(candidate.view!==null){const observed=this.store.capabilities.withAccess(readAccess,()=>{const media=this.ctx.dafeiyu.nativeMediaObservedMaterial(readAccess,source,anchor.target,candidate.view!);if(media){kind=media.kind;mediaStamp=media.stamp;}
         return this.store.capabilities.expressionView(readAccess,source,anchor.target,candidate.view!,!!media,(proof,view)=>this.ctx.dafeiyu.capabilityPublicView(proof,view),
           (proof,view)=>this.ctx.dafeiyu.capabilityTargetView(proof,view,anchor.target,scope));});material=observed?.text??null;fence=observed?.fence??null;

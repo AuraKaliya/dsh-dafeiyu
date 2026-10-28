@@ -11,7 +11,7 @@ export function backgroundContributor(ctx:Context,host:{store:QqStore;allowed(sc
   const views=new WeakMap<ContextRequest,Map<string,{hash:string;proof:QqCacheProof;time:number;generation:number|undefined}>>();
   return {id:'recent-background',kind:'evidence',prepare:async request=>{
     const scope=ctx.dafeiyu.scopeForContext(request),settings=ctx.dafeiyu.contextAssembly(),scene=request.conversation;
-    if(settings.mode!=='unified'||!settings.background.enabled||scene.channel!=='qq'||scene.kind!=='group'||!host.allowed(scene))return [];
+    if(!settings.background.enabled||scene.channel!=='qq'||scene.kind!=='group'||!host.allowed(scene))return [];
     const inbound=ctx.dafeiyu.journal.get(scope.traceId),before=Math.min(Date.parse(inbound.message.occurredAt),Date.now()),exclude=new Set(messageParts(inbound.message).map(part=>part.id));
     const rows=host.store.cache.background(qqResourceRoute(scene),before,settings.background.windowMs,settings.background.limit,exclude),items:ContextItem[]=[],map=new Map<string,{hash:string;proof:QqCacheProof;time:number;generation:number|undefined}>();
     for(const row of rows){const time=Date.parse(row.occurredAt);if(!host.accepts(scene,time,row.groupGeneration))continue;

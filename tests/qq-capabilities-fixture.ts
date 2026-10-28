@@ -58,10 +58,10 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
   const wss=new WebSocketServer({server});await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();assert.ok(address&&typeof address!=='string');
   const closeServer=async()=>{for(const ws of wss.clients)ws.terminate();await new Promise<void>(resolve=>wss.close(()=>resolve()));await new Promise<void>(resolve=>server.close(()=>resolve()));};
   let response:Response=()=>textReply('虚构完成');
-  const h=await harness(join(root,'core'),request=>response(request),undefined,turnTimeoutMs??(mediaSend?30000:10000),undefined,context,'managed',deliveryTimeoutMs).catch(async error=>{await closeServer();throw error;});
+  const h=await harness(join(root,'core'),request=>response(request),undefined,turnTimeoutMs??(mediaSend?30000:10000),undefined,context,true,deliveryTimeoutMs).catch(async error=>{await closeServer();throw error;});
   try {
   await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});
-  const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed',sourceTracking:true});
+  const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),});
   h.core.configureExecution({profileId:'qq-capability-fixture',createStore:true,policies:[...extraPolicies,
     {id:'conversation',producers:['channel-qq',...extraConversationProducers],actions:[...QQ.QQ_ACTIONS,...(stickers?QQ.QQ_STICKER_ACTIONS:[]),...(tasks?QQ.QQ_TASK_ACTIONS:[]),...(media?[...QQ.QQ_MEDIA_ACTIONS,...Media.MEDIA_ACTIONS]:[]),...extraConversationActions],allowLocalWrite:true},
     {id:'native',producers:['fixture-native'],actions:[...QQ.QQ_ACTIONS,...(media?[...QQ.QQ_MEDIA_ACTIONS,...Media.MEDIA_ACTIONS]:[])],allowLocalWrite:true,resources:[scene]},
@@ -83,7 +83,7 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
       return {stdout:Buffer.from(JSON.stringify(result)),stderr:Buffer.alloc(0),peakCommitBytes:100,memoryLimitBytes:spec.memoryBytes};}}}:{}),...(tts?{ttsWorker:{run:async spec=>{const input=z.object({text:z.string(),voice:z.literal('fixture-ordinary-voice')}).parse(JSON.parse(await readFile(spec.arguments.at(-1)!,'utf8')));platform.ttsInputs.push(input.text);if(platform.ttsFail)throw new Error('MEDIA_TTS_FIXTURE_FAILURE');return {stdout:syntheticPcm().subarray(44),stderr:Buffer.alloc(0),peakCommitBytes:100,memoryLimitBytes:spec.memoryBytes};}}}:{})});}});
     await h.ctx.dafeiyuMedia.recover();h.ctx.dafeiyuMedia.activate();}
   const config:QQ.Config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group,otherGroup],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,
-    tokenFile,dataDir:join(root,'qq'),...(batch?{messageBatch:{enabled:true,...batch}}:{}),stickers:{enabled:stickers},lifecycleMode:'managed',requestTimeoutMs:oneBotTimeoutMs??(mediaSend||stickers?5000:500),reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks,deliverResults,...(explorationResources?{explorationResources}:{})},naturalNames:['大肥鱼'],...(media?{media:{enabled:true,sendEnabled:mediaSend,cacheRoots:[join(root,'onebot-cache')],voiceDirectives}}:{})};
+    tokenFile,dataDir:join(root,'qq'),...(batch?{messageBatch:{enabled:true,...batch}}:{}),stickers:{enabled:stickers},requestTimeoutMs:oneBotTimeoutMs??(mediaSend||stickers?5000:500),reconnectMs:100,groupSync:{enabled:true,mode:'allowlist'},capabilities:{enabled:true},tasks:{enabled:tasks,deliverResults,...(explorationResources?{explorationResources}:{})},naturalNames:['大肥鱼'],...(media?{media:{enabled:true,sendEnabled:mediaSend,cacheRoots:[join(root,'onebot-cache')],voiceDirectives}}:{})};
   // Unbound v2 cache is deliberately retained, but must never appear in new account-bound pages.
   const old=new QQ.QqStore(join(root,'qq','qq.sqlite'));old.remember(JSON.stringify(['group',group]),'900',owner,'UNBOUND_CACHE_SENTINEL');old.close();
   let fiber=await h.ctx.plugin(QQ,config);

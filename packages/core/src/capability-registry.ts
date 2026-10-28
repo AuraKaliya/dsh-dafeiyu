@@ -1,25 +1,25 @@
 import { z } from 'zod';
-import { ActionOutcomeSchema, ExtensionMetadataV3Schema, dependencyOrder,redactJson,ResourceTargetViewSchema } from '@dafeiyu/contracts';
+import { ActionOutcomeSchema, ExtensionMetadataSchema, dependencyOrder,redactJson,ResourceTargetViewSchema } from '@dafeiyu/contracts';
 import type { Conversation,ExecutionScope,ResourceTargetView } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3, ExtensionV3, ExtensionHandleV3, ExecutionContextV3, ActionOutcome, Json, ContextContributorV3, ResourceProof, ResourceProofProvider, TimelineScope } from '@dafeiyu/contracts';
+import type { ActionCapability, Extension, ExtensionHandle, ExecutionContext, ActionOutcome, Json, TaskContextContributor, ResourceProof, ResourceProofProvider, TimelineScope } from '@dafeiyu/contracts';
 import { toolParameters } from './tool-schema.js';
 
 interface ReservedNames { ids: readonly string[]; actions: readonly string[]; channels: readonly string[] }
-export interface BoundActionV3 {
+export interface BoundAction {
   readonly id: string; readonly owner: string; readonly version: string;readonly pluginVersion:string; readonly description: string;
-  readonly input: Record<string, unknown>; readonly effects: ActionCapabilityV3['effects']; readonly requiresTask: boolean;
+  readonly input: Record<string, unknown>; readonly effects: ActionCapability['effects']; readonly requiresTask: boolean;
   readonly parameters:ReturnType<typeof toolParameters>;
   readonly active: () => boolean;
   readonly signal:AbortSignal;
   validateInput(raw:unknown):Json;
-  execute(raw: unknown, context: ExecutionContextV3): Promise<ActionOutcome>;
+  execute(raw: unknown, context: ExecutionContext): Promise<ActionOutcome>;
 }
 interface Entry {
-  metadata: z.infer<typeof ExtensionMetadataV3Schema>; active: boolean;controller:AbortController;
-  actions: readonly BoundActionV3[]; channels: readonly string[]; contexts: readonly ContextContributorV3[]; ready: () => boolean;
+  metadata: z.infer<typeof ExtensionMetadataSchema>; active: boolean;controller:AbortController;
+  actions: readonly BoundAction[]; channels: readonly string[]; contexts: readonly TaskContextContributor[]; ready: () => boolean;
   resourceProofs?: ResourceProofProvider;
 }
-const allowedExtensionKeys = new Set(['protocolVersion', 'id', 'version', 'agentId', 'provides', 'requires', 'actions', 'channels', 'contexts', 'lifecycleReady', 'resourceProofs']);
+const allowedExtensionKeys = new Set(['protocolVersion', 'id', 'version', 'agentId', 'provides', 'requires', 'actions', 'channels', 'contexts', 'lifecycleReady', 'resourceProofs','conversationContexts','compactionProvider','feedbackProvider','memoryObservationProvider']);
 const actionMetaSchema = z.strictObject({ id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), version: z.string().min(1).max(80),
   description: z.string().min(1).max(4000), effects: z.enum(['read', 'local-write', 'external-write']), requiresTask: z.boolean().default(false) });
 
@@ -36,7 +36,7 @@ function freezeTree(value: unknown): void {
 }
 
 /** Registration snapshots. Invocation authority is issued by the core Run coordinator. */
-export class CapabilityRegistryV3 {
+export class CapabilityRegistry {
   private resourceState(entry:Entry,scope?:TimelineScope){try{const epoch=entry.resourceProofs?.epoch(scope);return typeof epoch==='string'&&epoch.length<=8000?{ready:entry.active&&entry.ready(),epoch}:{ready:false,epoch:'INVALID_RESOURCE_EPOCH'};}catch{return {ready:false,epoch:'RESOURCE_UNAVAILABLE'};}}
   resourceCurrent(proof:ResourceProof):boolean {const entry=this.entries.get(proof.provider);try{return !!entry&&this.resourceState(entry).ready&&entry.resourceProofs?.current(proof)===true;}catch{return false;}}
   publicView(proof:ResourceProof,view:string):boolean {const entry=this.entries.get(proof.provider);try{return this.resourceCurrent(proof)&&entry?.resourceProofs?.publicView?.(proof,view)===true;}catch{return false;}}
@@ -54,15 +54,15 @@ export class CapabilityRegistryV3 {
   channelKeys(): string[] { return [...this.entries.values()].flatMap(entry => [...entry.channels]); }
   ids(): string[] { return [...this.entries.keys()]; }
   contexts(){return [...this.entries.values()].filter(entry=>entry.active).flatMap(entry=>entry.contexts.map(context=>({owner:entry.metadata.id,context,active:()=>entry.active&&entry.ready()})));}
-  actions(): BoundActionV3[] { return [...this.entries.values()].filter(entry => entry.active).flatMap(entry => [...entry.actions]); }
+  actions(): BoundAction[] { return [...this.entries.values()].filter(entry => entry.active).flatMap(entry => [...entry.actions]); }
   providedFeatures(): string[] { return [...this.entries.values()].filter(entry => entry.active && entry.ready()).flatMap(entry => entry.metadata.provides); }
   checkReady(available: readonly string[] = []): void {
     dependencyOrder([...this.entries.values()].filter(entry => entry.active).map(entry => entry.metadata), available);
     if ([...this.entries.values()].some(entry => entry.active && !entry.ready())) throw new Error('DEPENDENCY_UNAVAILABLE');
   }
-  register(agentId: string, extension: ExtensionV3, reserved: ReservedNames): ExtensionHandleV3 {
+  register(agentId: string, extension: Extension, reserved: ReservedNames): {dispose():void} {
     if (Object.keys(extension).some(key => !allowedExtensionKeys.has(key))) throw new Error('INVALID_EXTENSION_FIELD');
-    const metadata = ExtensionMetadataV3Schema.parse({ protocolVersion: extension.protocolVersion, id: extension.id, version: extension.version,
+    const metadata = ExtensionMetadataSchema.parse({ protocolVersion: extension.protocolVersion, id: extension.id, version: extension.version,
       agentId: extension.agentId, provides: extension.provides ?? [], requires: extension.requires ?? [] });
     if (metadata.agentId !== agentId) throw new Error('INCOMPATIBLE_AGENT');
     if (this.entries.has(metadata.id) || reserved.ids.includes(metadata.id)) throw new Error('DUPLICATE_EXTENSION');
@@ -73,7 +73,7 @@ export class CapabilityRegistryV3 {
       if(extension.resourceProofs.publicView!==undefined&&typeof extension.resourceProofs.publicView!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
       if(extension.resourceProofs.targetView!==undefined&&typeof extension.resourceProofs.targetView!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
       entry.resourceProofs=Object.freeze({current:extension.resourceProofs.current.bind(extension.resourceProofs),epoch:extension.resourceProofs.epoch.bind(extension.resourceProofs),...(extension.resourceProofs.publicView?{publicView:extension.resourceProofs.publicView.bind(extension.resourceProofs)}:{}),...(extension.resourceProofs.targetView?{targetView:extension.resourceProofs.targetView.bind(extension.resourceProofs)}:{})});}
-    const bound: BoundActionV3[] = [];
+    const bound: BoundAction[] = [];
     for (const action of extension.actions ?? []) {
       const meta = actionMetaSchema.parse({ id: action.id, version: action.version, description: action.description, effects: action.effects, requiresTask: action.requiresTask ?? false });
       if (names.has(meta.id)) throw new Error('DUPLICATE_ACTION'); names.add(meta.id);
@@ -86,7 +86,7 @@ export class CapabilityRegistryV3 {
       const parseInput = action.inputSchema.parse.bind(action.inputSchema), parseOutput = action.outputSchema.parse.bind(action.outputSchema), execute = action.execute.bind(action);
       const validateInput=(raw:unknown):Json=>{let parsed:Json;try{parsed=z.json().parse(parseInput(raw));}catch{throw new Error('INVALID_INPUT');}if(Buffer.byteLength(JSON.stringify(parsed),'utf8')>128000)throw new Error('ACTION_INPUT_TOO_LARGE');return parsed;};
       bound.push(Object.freeze({ ...meta, owner: metadata.id,pluginVersion:metadata.version, input: Object.freeze(input),parameters, signal:entry.controller.signal,active: () => entry.active&&entry.ready(),validateInput,
-        execute: async (raw: unknown, context: ExecutionContextV3):Promise<ActionOutcome> => {
+        execute: async (raw: unknown, context: ExecutionContext):Promise<ActionOutcome> => {
           if (!entry.active || !entry.ready()) throw new Error('CAPABILITY_UNAVAILABLE');
           context.signal.throwIfAborted();
           if (meta.requiresTask && !context.taskId) throw new Error('TASK_REQUIRED');
@@ -104,7 +104,6 @@ export class CapabilityRegistryV3 {
     const keys: string[] = [];
     for (const channel of extension.channels ?? []) {
       if(channel.processingSignal!==undefined&&typeof channel.processingSignal!=='function')throw new Error('INVALID_DELIVERY_CONTRACT');
-      if(channel.taskDelivery!==undefined&&channel.taskDelivery!=='simulated')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.deliveryValidation!==undefined&&channel.deliveryValidation!=='per-segment')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.deliverTaskResult!==undefined&&typeof channel.deliverTaskResult!=='function')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.taskTextDispatch!==undefined&&(channel.taskTextDispatch!=='write-window-v1'||channel.deliveryValidation!=='per-segment'||typeof channel.deliverTaskResult!=='function'))throw new Error('INVALID_DELIVERY_CONTRACT');

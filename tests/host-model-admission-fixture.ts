@@ -14,7 +14,7 @@ const {ScriptedModel,textReply}=await import('./harness.js');
 const {z}=await import('zod');
 const config={schemaVersion:1,profileId:'model-admission-fixture',agent:{id:'dafeiyu'},paths:{core:'./core',memory:'./memory',sessions:'./sessions',query:'./query.sqlite',channels:{}},
   persona:{fixedFile:'./persona.md',kind:'test'},modelRoutes:{chat:{provider:'local-test',model:'scripted'}},runtime:{turnTimeoutMs:3000,shutdownGraceMs:500},
-  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{sourceTracking:true}}],
+  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{}}],
   authorityPolicies:[{id:'local',producers:['host-cli'],actions:[],allowLocalWrite:false}]};
 assert.throws(()=>HostConfigSchema.parse({...config,installModelAdmission:'./arbitrary-plugin.js'}));
 await writeFile(join(root,'persona.md'),'虚构底色，仅检查模型入口与真实本机生命周期。');await writeFile(file,JSON.stringify(config));

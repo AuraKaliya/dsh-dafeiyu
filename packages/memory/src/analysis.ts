@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { ActionContext, OperationScope } from '@dafeiyu/contracts';
+import type { ConversationAccess, OperationScope } from '@dafeiyu/contracts';
 import { redactJson } from '@dafeiyu/contracts';
 import { randomUUID, createHash } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -49,7 +49,7 @@ export class MemoryAnalysis {
   private summary(job:AnalysisJob){return {status:'ok' as const,jobId:job.id,state:job.state,attempts:job.attempts,
     counts:{candidates:job.candidates.length,committed:job.candidates.filter(c=>c.status==='committed').length,
       review:job.candidates.filter(c=>c.status==='needs_review').length},error:this.faulted?'worker_unavailable':job.error??null,contextInjected:false};}
-  async submit(context:ActionContext,raw:unknown){
+  async submit(context:ConversationAccess,raw:unknown){
     const scope=this.ctx.dafeiyu.scopeFor(context),input=submitSchema.parse(raw);
     if(this.stopping||this.faulted||!this.enabled||!this.canRun())throw new AnalysisError('worker_unavailable');
     const normalized={...input,sourceRefs:[...new Set(input.sourceRefs)].sort(),targetIds:[...new Set(input.targetIds)].sort()};
@@ -88,11 +88,11 @@ export class MemoryAnalysis {
       return {...this.summary(job),duplicate:false};
     }catch(error){this.ctx.dafeiyu.revokeAnalysisGrant(grantId);throw error;}
   }
-  status(context:ActionContext,id:unknown){
+  status(context:ConversationAccess,id:unknown){
     const scope=this.ctx.dafeiyu.scopeFor(context),job=this.queue.get(scope,z.uuid().parse(id));
     return job?this.summary(job):{status:'not_found' as const};
   }
-  async inspect(context:ActionContext,id:unknown){
+  async inspect(context:ConversationAccess,id:unknown){
     const scope=this.ctx.dafeiyu.scopeFor(context),job=this.queue.get(scope,z.uuid().parse(id));
     if(!job)return {status:'not_found' as const};
     // Terminal grants are revoked. Explicit read receives its own short-lived grant.
@@ -109,7 +109,7 @@ export class MemoryAnalysis {
         candidates:job.candidates.map(({command:_command,...candidate})=>candidate)};
     }finally{this.ctx.dafeiyu.revokeAnalysisGrant(grantId);}
   }
-  cancel(context:ActionContext,id:unknown){
+  cancel(context:ConversationAccess,id:unknown){
     const scope=this.ctx.dafeiyu.scopeFor(context),job=this.queue.get(scope,z.uuid().parse(id));
     if(!job)return {status:'not_found' as const};
     if(['queued','running','committing'].includes(job.state)){

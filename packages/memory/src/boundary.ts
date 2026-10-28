@@ -17,22 +17,22 @@ function scene(scope:TimelineScope,binding:MemoryWriteBinding):MemoryBoundary['s
       if(conversationKey(scope.agentId,conversation)===scope.route)return {kind:'conversation',route:scope.route,conversation,ingressPluginId:binding.ingressPluginId??null};
     }
   }catch{/* No guesses about channel, people or task membership during migration. */}
-  return {kind:'legacy-route',route:scope.route};
+  throw new Error('INVALID_SCOPE');
 }
 export function conservativeBoundary(scope:TimelineScope,assignment:MemoryBoundary['assignment'],rawBinding:MemoryWriteBinding={}):MemoryBoundary {
   const binding=MemoryWriteBindingSchema.parse(rawBinding);
   if(binding.executionScope){const execution=binding.executionScope;if(execution.kind!=='task'||execution.agentId!==scope.agentId||execution.scopeKey!==scope.route||binding.conversation)throw new Error('SCOPE_DENIED');
-    return MemoryBoundarySchema.parse({schemaVersion:2,policyVersion:1,owner:{kind:'agent',agentId:scope.agentId},sourceScene:{kind:'execution-task',route:scope.route,taskId:execution.taskId},
+    return MemoryBoundarySchema.parse({schemaVersion:1,kind:'task',policyVersion:1,owner:{kind:'agent',agentId:scope.agentId},sourceScene:{kind:'execution-task',route:scope.route,taskId:execution.taskId},
       task:{kind:'agent-task',id:execution.taskId},internalUse:{kind:'task',route:scope.route,taskId:execution.taskId},externalExpression:{kind:'none'},assignment:'execution-create'});}
   try{const value:unknown=JSON.parse(scope.route);if(Array.isArray(value)&&value[0]==='dafeiyu-scope-v1')throw new Error('EXECUTION_BINDING_REQUIRED');}catch(error){if(error instanceof Error&&error.message==='EXECUTION_BINDING_REQUIRED')throw error;}
-  return MemoryBoundarySchema.parse({schemaVersion:1,policyVersion:1,owner:{kind:'agent',agentId:scope.agentId},sourceScene:scene(scope,binding),
+  return MemoryBoundarySchema.parse({schemaVersion:1,kind:'conversation',policyVersion:1,owner:{kind:'agent',agentId:scope.agentId},sourceScene:scene(scope,binding),
     task:binding.agentTaskId?{kind:'agent-task',id:binding.agentTaskId}:binding.taskId?{kind:'conversation-task',route:scope.route,id:binding.taskId}:{kind:'unassigned'},
     internalUse:{kind:'conversation',route:scope.route},externalExpression:{kind:'conversation',route:scope.route},assignment});
 }
 /** Sources and the previous head may narrow a new revision, never silently widen it. */
 export function restrictBoundary(boundary:MemoryBoundary,ancestors:readonly MemoryBoundary[],rawPolicy:MemoryBoundaryPolicy={}):MemoryBoundary {
   const policy=MemoryBoundaryPolicySchema.parse(rawPolicy),result=structuredClone(boundary);
-  if(boundary.schemaVersion===2&&(policy.internalUse==='conversation'||policy.externalExpression==='conversation'))throw new Error('scope_expansion_not_supported');
+  if(boundary.kind==='task'&&(policy.internalUse==='conversation'||policy.externalExpression==='conversation'))throw new Error('scope_expansion_not_supported');
   for(const field of ['internalUse','externalExpression'] as const){
     const restricted=ancestors.some(b=>b[field].kind==='none');
     if(restricted&&policy[field]==='conversation')throw new Error('scope_expansion_not_supported');

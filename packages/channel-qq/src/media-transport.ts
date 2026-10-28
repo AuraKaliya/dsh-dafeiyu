@@ -4,7 +4,7 @@ import type { QqMediaDeliveryLedger,QqMediaDeliveryPlan,QqMediaDeliveryProgress 
 import {deliveryAbortCode} from './reply-delay.js';
 type MediaReply=Reply&{media:ReplyMediaManifest};
 type Part=QqMediaDeliveryPlan['parts'][number];
-interface Host {ledger:QqMediaDeliveryLedger;legacyProgress(id:string):{confirmed:number;unknown:number;state:string}|null;
+interface Host {ledger:QqMediaDeliveryLedger;textProgress(id:string):{confirmed:number;unknown:number;state:string}|null;
   beforeSend?(reply:Reply,signal:AbortSignal):Promise<void>;
   betweenMessages?(signal:AbortSignal):Promise<void>;
   check(reply:Reply,signal:AbortSignal):Promise<void>;send(reply:MediaReply,part:Part,data:Uint8Array|null,signal:AbortSignal):Promise<string>;confirmed(reply:MediaReply,part:Part,receipt:string):void;}
@@ -16,7 +16,7 @@ export class QqMediaTransport {
   private readonly active=new Map<string,Promise<DeliveryResult>>();
   constructor(private readonly host:Host){}
   deliver(reply:MediaReply,signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>):Promise<DeliveryResult>{if(typeof authority!=='function'||typeof bytes!=='function')return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
-    let plan:QqMediaDeliveryPlan;try{plan=this.host.ledger.prepare(reply);}catch(error){const old=this.host.ledger.progress(reply.id)??this.host.legacyProgress(reply.id);return Promise.resolve(old&&(old.confirmed||old.unknown||old.state==='sending')?{status:'unknown',code:'DELIVERY_PLAN_CONFLICT'}:{status:'not-sent',code:safe(error)});}
+    let plan:QqMediaDeliveryPlan;try{plan=this.host.ledger.prepare(reply);}catch(error){const old=this.host.ledger.progress(reply.id)??this.host.textProgress(reply.id);return Promise.resolve(old&&(old.confirmed||old.unknown||old.state==='sending')?{status:'unknown',code:'DELIVERY_PLAN_CONFLICT'}:{status:'not-sent',code:safe(error)});}
     const running=this.active.get(reply.id);if(running)return running;const progress=this.host.ledger.progress(reply.id)!;if(progress.state==='sent'||progress.unknown||progress.state==='sending')return Promise.resolve(result(progress,'DELIVERY_NOT_RESUMABLE'));
     const snapshot:MediaReply={id:plan.replyId,conversation:plan.target,sourceMessageId:plan.sourceMessageId,text:plan.originalText??plan.parts.filter(p=>p.kind==='text').map(p=>p.text).join(''),media:plan.manifest,...(plan.manifest.anchor.kind==='task-result'?{taskResult:plan.manifest.anchor}:{})};
     const work=this.execute(snapshot,plan,signal,authority,bytes).finally(()=>this.active.delete(reply.id));this.active.set(reply.id,work);return work;

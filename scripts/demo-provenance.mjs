@@ -10,7 +10,7 @@ import { checkpointProof } from '../build-tests/summary-proof.js';
 const root=resolve('.runtime/demos',`provenance-${randomUUID()}`);await mkdir(root,{recursive:true});
 const h=await provenanceFixture(root,5000);
 const expiry=new Date(Date.now()+600000).toISOString();
-const plugin=h.core.registerExtension({id:'fictional-independent',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
+const plugin=h.core.registerExtension({id:'fictional-independent',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
   id:'progress',kind:'operational-fact',prepare:async()=>[{id:'progress',version:'1',text:'SECOND_PLUGIN_STAYS',expiresAt:expiry,sources:[{ref:'fictional:progress',version:'1',hash:'test'}]}],validate:()=>true,
 }]});
 const checkpoints=()=>h.session().deriveMessages().flatMap(message=>message.role==='user'&&(message.source.kind==='compact-checkpoint'||message.source.kind==='dafeiyu-summary-view')

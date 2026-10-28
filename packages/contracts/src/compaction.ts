@@ -17,7 +17,6 @@ export const SourceDependencySchema=z.discriminatedUnion('kind',[
   z.strictObject({...scopeFields,kind:z.literal('working'),id:z.string(),taskId:z.string(),revision:z.number().int().positive(),hash:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('feedback'),id:z.string(),version:z.number().int().positive(),hash:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('context'),owner:z.string(),region:z.string(),id:z.string(),version:z.string(),hash:z.string()}),
-  z.strictObject({...scopeFields,kind:z.literal('legacy'),epoch:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('ephemeral'),traceId:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('unavailable'),reason:z.string()}),
 ]);
@@ -67,8 +66,7 @@ export interface CompactionSource { readonly seq: number; readonly role: 'user' 
 export interface CompactionProvider {
   readonly policy: CompactionPolicy;
   basis(scope: CompactionScope): CompactionBasis;
-  readonly sources?:SourcePolicy;
-  summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal,checkSources?:()=>void): Promise<string>;
-  summarizeFragments?(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number,maxFragments?:number,targetChars?:number):Promise<readonly SummaryFragment[]>;
+  readonly sources:SourcePolicy;
+  summarizeFragments(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number,maxFragments?:number,targetChars?:number):Promise<readonly SummaryFragment[]>;
   rewrite?(scope:CompactionScope,request:SemanticRequest,signal:AbortSignal,checkSources:()=>void):Promise<SemanticResult>;
 }

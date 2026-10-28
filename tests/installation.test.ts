@@ -29,7 +29,7 @@ test('context settings map into the generated profile without silently enabling 
   const raw={schemaVersion:1,dataDir:'data',model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}};
   const metadata={schemaVersion:1 as const,instanceId:'11111111-1111-4111-8111-111111111111',profileId:'fixture',agentId:'fish',createdAt:'2026-10-27T00:00:00.000Z',identityHash:'0'.repeat(64),biliOwner:null};
   const legacy=installationProfile(InstallationSettingsSchema.parse(raw),metadata,'persona.md','settings.json',{scripted:true});assert.equal(legacy.context.assembly.mode,'legacy');
-  const configured=InstallationSettingsSchema.parse({...raw,context:{mode:'unified',recentState:{shared:true},background:{limit:6}},contextBudget:{maxBytes:24000},growthMaxBytes:5000});
+  const configured=InstallationSettingsSchema.parse({...raw,context:{recentState:{shared:true},background:{limit:6}},contextBudget:{maxBytes:24000},growthMaxBytes:5000});
   const profile=installationProfile(configured,metadata,'persona.md','settings.json',{scripted:true});assert.equal(profile.context.assembly.mode,'unified');assert.equal(profile.context.assembly.background.limit,6);assert.equal(profile.context.assembly.recentState.shared,true);assert.equal(profile.context.maxBytes,24000);assert.equal(profile.persona.growthRegion.maxBytes,5000);
 });
 

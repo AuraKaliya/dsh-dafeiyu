@@ -26,7 +26,7 @@ wss.on('connection',ws=>{if(!bootstrap)return;bootstrap=false;ws.send(JSON.strin
 await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();assert.ok(address&&typeof address!=='string');await writeFile(join(root,'token'),token);await writeFile(join(root,'persona.md'),'虚构底色：保持好奇、尊重证据，以自然中文交流。');
 await writeFile(file,JSON.stringify({schemaVersion:1,profileId:'qq-phase-two',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite',channels:{'channel-qq':'./data/qq'}},
   modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},runtime:{turnTimeoutMs:15000,shutdownGraceMs:1000},diagnostics:{snapshotIntervalMs:100},
-  plugins:[{id:'model-scripted',required:true},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{sourceTracking:true}},
+  plugins:[{id:'model-scripted',required:true},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{}},
     {id:'channel-qq',required:true,config:{botId:bot,ownerId:owner,groupIds:[group,peer],naturalNames:['大肥鱼'],groupSync:{enabled:true},capabilities:{enabled:true},tasks:{enabled:true,deliverResults:true},httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile:'./token'}}],
   authorityPolicies:[{id:'conversation',producers:['channel-qq'],actions:['qq_groups','qq_browse','qq_observe_select','qq_task_submit','qq_task_status','qq_task_control'],allowLocalWrite:true},
     {id:'qq-task',producers:['qq-tasks'],actions:['qq_groups','qq_browse','qq_observe_select','dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true}]}));

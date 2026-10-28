@@ -8,7 +8,7 @@ import { isAbsolute,join,relative,resolve,sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ExternalTaskAuthorizationSchema,PersonaRequestIdSchema,PersonaSourceRefSchema,ResourceProofSchema,ServiceGate } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3,ActionOutcome,Conversation,ExecutionContextV3,ExecutionScope,ExternalTaskAuthorization,Json,PersonaSourceRef,ResourceProof,ResourceTargetView } from '@dafeiyu/contracts';
+import type { ActionCapability,ActionOutcome,Conversation,ExecutionContext,ExecutionScope,ExternalTaskAuthorization,Json,PersonaSourceRef,ResourceProof,ResourceTargetView } from '@dafeiyu/contracts';
 import { StandingAuthorityFile,StandingAuthoritySchema } from '@dafeiyu/server-bootstrap';
 import type { StandingTaskPermission } from '@dafeiyu/server-bootstrap';
 import { ServerExecutorConfigSchema,serverExecutorScene } from './config.js';
@@ -72,7 +72,7 @@ export class ServerExecutorService extends Service {
   readonly store:ExecutorStore;
   private readonly root:string;
   private readonly gate=new ServiceGate();
-  private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
+  private readonly handle:ReturnType<Context['dafeiyu']['registerExtension']>;
   private readonly now:()=>number;
   private readonly run:typeof runExecutorNode;
   private readonly pending=new Set<Promise<unknown>>();
@@ -90,23 +90,23 @@ export class ServerExecutorService extends Service {
     if(this.config.createStore)mkdirSync(this.config.dataDir,{recursive:true});this.root=realpathSync(this.config.dataDir);
     check(resolve(this.config.dataDir).toLowerCase()===this.root.toLowerCase()&&statSync(this.root).isDirectory(),'EXECUTOR_STORAGE_CHANGED');
     this.store=new ExecutorStore(join(this.root,'executor.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore);
-    try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:OWNER,version:VERSION,agentId:this.config.agentId,
+    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:OWNER,version:VERSION,agentId:this.config.agentId,
       requires:['execution.task.v1','memory.capability-observation.v1'],provides:['server.execution.v1'],lifecycleReady:()=>!this.closed&&(this.gate.active||this.gate.state==='quiescing'),
       actions:this.actions(),resourceProofs:{current:proof=>this.current(proof),epoch:()=>executorHash({config:this.configHash,closed:this.closed}),publicView:()=>false,targetView:(proof,view,target,scope)=>this.targetView(proof,view,target,scope)}});}
     catch(error){this.store.close();throw error;}
     ctx.effect(()=>()=>this.close(),'server-executor.close');
   }
   private storageGuard():void{check(!this.closed&&realpathSync(this.root)===this.root&&realpathSync(this.config.dataDir)===this.root,'EXECUTOR_STORAGE_CHANGED');}
-  private access(context:ExecutionContextV3){check(this.gate.active||this.gate.state==='quiescing','HOST_NOT_READY');this.storageGuard();const access=this.ctx.dafeiyu.personaAccess(context,OWNER);check(access.view.scope.kind==='task','TASK_REQUIRED');return access;}
-  private inputMaterials(context:ExecutionContextV3,keys:readonly string[]){const access=this.access(context),persona=this.ctx.dafeiyuMemory.persona;check(persona,'DEPENDENCY_UNAVAILABLE');
+  private access(context:ExecutionContext){check(this.gate.active||this.gate.state==='quiescing','HOST_NOT_READY');this.storageGuard();const access=this.ctx.dafeiyu.personaAccess(context,OWNER);check(access.view.scope.kind==='task','TASK_REQUIRED');return access;}
+  private inputMaterials(context:ExecutionContext,keys:readonly string[]){const access=this.access(context),persona=this.ctx.dafeiyuMemory.growth;check(persona,'DEPENDENCY_UNAVAILABLE');
     const materials=keys.map(key=>{const source=access.inputs.find(input=>input.id===key)?.sourceRef??access.admittedSources.find(ref=>key===(ref.kind==='execution-source'?`execution-source:${ref.id}`:`memory:${ref.id}:${ref.revision}`));
       check(source,'SOURCE_NOT_EXPOSED');const material=persona.resolve(access,source);check(material,'SOURCE_STALE');return {source,text:material.text};});
     check(new Set(materials.map(item=>executorHash(item.source))).size===materials.length,'EXECUTOR_DUPLICATE_SOURCE');return materials;}
-  private checkMaterials(context:ExecutionContextV3,sources:readonly PersonaSourceRef[]):void{const access=this.access(context),persona=this.ctx.dafeiyuMemory.persona;check(persona,'DEPENDENCY_UNAVAILABLE');for(const source of sources)check(persona.resolve(access,source),'SOURCE_STALE');}
+  private checkMaterials(context:ExecutionContext,sources:readonly PersonaSourceRef[]):void{const access=this.access(context),persona=this.ctx.dafeiyuMemory.growth;check(persona,'DEPENDENCY_UNAVAILABLE');for(const source of sources)check(persona.resolve(access,source),'SOURCE_STALE');}
   private track<T>(promise:Promise<T>):Promise<T>{this.pending.add(promise);void promise.then(()=>this.pending.delete(promise),()=>this.pending.delete(promise));return promise;}
-  executeOwner(context:ExecutionContextV3,raw:unknown):Promise<ActionOutcome>{return this.track(this.execute(context,raw,'owner-message'));}
-  executeAutonomous(context:ExecutionContextV3,raw:unknown):Promise<ActionOutcome>{return this.track(this.execute(context,raw,'activity-wake'));}
-  private async execute(context:ExecutionContextV3,raw:unknown,kind:ExternalTaskAuthorization['source']['kind']):Promise<ActionOutcome>{
+  executeOwner(context:ExecutionContext,raw:unknown):Promise<ActionOutcome>{return this.track(this.execute(context,raw,'owner-message'));}
+  executeAutonomous(context:ExecutionContext,raw:unknown):Promise<ActionOutcome>{return this.track(this.execute(context,raw,'activity-wake'));}
+  private async execute(context:ExecutionContext,raw:unknown,kind:ExternalTaskAuthorization['source']['kind']):Promise<ActionOutcome>{
     this.gate.assertActive();const input=executeInput.parse(raw);this.access(context);const authority=this.ctx.dafeiyu.authorizeExternalTask(context,OWNER),authorization=authority.authorization;
     check(authorization.source.kind===kind,'EXECUTOR_AUTHORITY_KIND_DENIED');check(authorization.action.id===(kind==='owner-message'?SERVER_EXECUTOR_ACTIONS[0]:SERVER_EXECUTOR_ACTIONS[1]),'EXECUTOR_ACTION_DENIED');
     const settings=this.config.settings;let standing:StandingTaskPermission|undefined;
@@ -220,7 +220,7 @@ export class ServerExecutorService extends Service {
       if(detail.section==='final'&&(target.channel!=='qq'||target.kind!=='private'||target.id!==this.config.settings.resultOwner.ownerId||target.account!==this.config.settings.resultOwner.account))return null;
       return {kind:detail.section==='final'?'inference':'reported',stamp:executorHash({proof,view,target,scope,source,configHash:this.configHash})};
     }catch{return null;}}
-  private pageOutcome(context:ExecutionContextV3,job:StoredExecutorJob,input:PageRequest,external=false):ActionOutcome{const scope=ExecutorTaskScopeSchema.parse(this.access(context).view.scope);check(executorHash(scope)===executorHash(job.spec.scope)&&context.intentVersion===job.spec.intentVersion,'EXECUTOR_SCOPE_DENIED');
+  private pageOutcome(context:ExecutionContext,job:StoredExecutorJob,input:PageRequest,external=false):ActionOutcome{const scope=ExecutorTaskScopeSchema.parse(this.access(context).view.scope);check(executorHash(scope)===executorHash(job.spec.scope)&&context.intentVersion===job.spec.intentVersion,'EXECUTOR_SCOPE_DENIED');
     const envelope=this.envelope(job);this.checkMaterials(context,envelope.inputSources);check(this.sourceCurrent(envelope),'SOURCE_STALE');const proof=this.proof(job,envelope,input),page=this.page(job,envelope,input),text=JSON.stringify(page);check(text.length<=8000,'EXECUTOR_PAGE_TOO_LARGE');
     const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,OWNER,{requestId:`page:${context.operationId}:${proof.hash}`,proof,text,occurredAt:job.receipt!.createdAt,
       coverage:[input.section==='final'?'executor-self-report':'process-and-sdk-metadata','not-business-verification'],counts:{received:text.length,processed:text.length}},input.section==='final'?{inheritExecutionHistory:true}:undefined);
@@ -229,10 +229,10 @@ export class ServerExecutorService extends Service {
   private jobOutcome(job:StoredExecutorJob,external:boolean,revoked=false):ActionOutcome{return {status:job.state==='unknown'?'unknown':revoked?'cancelled':job.state==='completed'?'succeeded':job.state==='failed'?'failed':job.state==='cancelled'?'cancelled':'partial',
     effects:external?job.receipt?.effects??(job.state==='prepared'?'none':'unknown'):'none',completeness:'unknown',data:{jobId:job.id,state:job.state,version:job.version,gaps:job.receipt?.gaps??[],resultAvailable:!!job.receipt?.output,revoked},sources:[],
     receipts:job.receipt?[{id:job.receipt.id,kind:'server-executor'}]:[]};}
-  status(context:ExecutionContextV3,raw:unknown):ActionOutcome{const input=statusInput.parse(raw),access=this.access(context),scope=ExecutorTaskScopeSchema.parse(access.view.scope),job=this.store.get(input.jobId,scope);check(job.spec.intentVersion===context.intentVersion,'EXECUTOR_SCOPE_DENIED');
+  status(context:ExecutionContext,raw:unknown):ActionOutcome{const input=statusInput.parse(raw),access=this.access(context),scope=ExecutorTaskScopeSchema.parse(access.view.scope),job=this.store.get(input.jobId,scope);check(job.spec.intentVersion===context.intentVersion,'EXECUTOR_SCOPE_DENIED');
     return job.receipt?.output?this.pageOutcome(context,job,{section:'metadata',offset:0,limit:1000}):this.jobOutcome(job,false);}
-  result(context:ExecutionContextV3,raw:unknown):ActionOutcome{const input=pageInput.parse(raw),access=this.access(context),job=this.store.get(input.jobId,ExecutorTaskScopeSchema.parse(access.view.scope));return this.pageOutcome(context,job,input);}
-  private actions():ActionCapabilityV3[]{const make=(id:string,description:string,inputSchema:z.ZodType,external:boolean,execute:(context:ExecutionContextV3,input:unknown)=>ActionOutcome|Promise<ActionOutcome>):ActionCapabilityV3=>({id,description,version:'1',effects:external?'external-write':'read',requiresTask:true,inputSchema,outputSchema:z.json(),
+  result(context:ExecutionContext,raw:unknown):ActionOutcome{const input=pageInput.parse(raw),access=this.access(context),job=this.store.get(input.jobId,ExecutorTaskScopeSchema.parse(access.view.scope));return this.pageOutcome(context,job,input);}
+  private actions():ActionCapability[]{const make=(id:string,description:string,inputSchema:z.ZodType,external:boolean,execute:(context:ExecutionContext,input:unknown)=>ActionOutcome|Promise<ActionOutcome>):ActionCapability=>({id,description,version:'1',effects:external?'external-write':'read',requiresTask:true,inputSchema,outputSchema:z.json(),
       execute:async(input,context)=>{try{return await execute(context,input);}catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'EXECUTOR_ADAPTER_FAILED';
         const beforeDispatch=['INVALID_INPUT','SOURCE_NOT_EXPOSED','SOURCE_STALE','EXECUTOR_DUPLICATE_SOURCE','HOST_NOT_READY','TASK_REQUIRED','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','EXECUTOR_SCOPE_DENIED',
           'EXECUTOR_AUTHORITY_KIND_DENIED','EXECUTOR_ACTION_DENIED','EXECUTOR_OWNER_MISMATCH','EXTERNAL_TASK_SOURCE_REQUIRED','EXECUTOR_BUDGET_AUTHORITY_MISMATCH','EXECUTOR_INPUT_TOO_LARGE',

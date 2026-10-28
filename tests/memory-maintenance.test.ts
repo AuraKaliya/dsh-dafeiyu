@@ -4,7 +4,7 @@ import { mkdtemp,readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import type { ExecutionContextV3,PersonaSourceRef,MaintenanceAnalysis } from '@dafeiyu/contracts';
+import type { ExecutionContext,PersonaSourceRef,MaintenanceAnalysis } from '@dafeiyu/contracts';
 import { executionHarness } from './execution-fixture.js';
 import { testTempDir } from './test-temp.js';
 import { call,textReply } from './harness.js';
@@ -18,20 +18,20 @@ const analysis=():MaintenanceAnalysis=>({schemaVersion:1,summary:'雨天样本�
   relations:[{kind:'counters',from:{sourceId:'S1',quote:observation.text},to:{sourceId:'S2',quote:counter},reason:'条件接近但结果有差异'}],
   persona:[{kind:'interest',text:'我想继续研究灯具在雨中的表现',applicability:'暂时好奇',reason:'存在未解问题',supports:[{sourceId:'S1',quote:observation.text}],counters:[]}]});
 const dbRead=(root:string,sql:string)=>{const db=new DatabaseSync(join(root,'memory/memory.sqlite'),{readOnly:true});try{return db.prepare(sql).all();}finally{db.close();}};
-async function fixture(options:{reply?:()=>Promise<MaintenanceAnalysis>|MaintenanceAnalysis;motivation?:'self-exploration'|'explicit-task';after?:(h:H,c:ExecutionContextV3,id:string)=>unknown;timeoutMs?:number;maxInputBytes?:number;maxOutputBytes?:number;longSource?:boolean}={}){
+async function fixture(options:{reply?:()=>Promise<MaintenanceAnalysis>|MaintenanceAnalysis;motivation?:'self-exploration'|'explicit-task';after?:(h:H,c:ExecutionContext,id:string)=>unknown;timeoutMs?:number;maxInputBytes?:number;maxOutputBytes?:number;longSource?:boolean}={}){
   const root=await mkdtemp(join(testTempDir(),'maintenance-flow-'));let h:H,step=0,id='',refs:PersonaSourceRef[]=[];
-  const execute=async(c:ExecutionContextV3)=>{
-    if(step===1){refs=[h.memory.persona!.recordObservation(c,{...observation,text:observation.text+(options.longSource?'额外虚构记录。'.repeat(700):'')},'fixture'),h.memory.persona!.recordObservation(c,{...observation,requestId:'counter',text:counter,resource:'fixture:red'},'fixture')];return refs;}
+  const execute=async(c:ExecutionContext)=>{
+    if(step===1){refs=[h.memory.growth!.recordObservation(c,{...observation,text:observation.text+(options.longSource?'额外虚构记录。'.repeat(700):'')},'fixture'),h.memory.growth!.recordObservation(c,{...observation,requestId:'counter',text:counter,resource:'fixture:red'},'fixture')];return refs;}
     if(step===2){id=h.memory.maintenance!.request(c,{requestId:'maintain',sources:refs,reason:'比较本任务的虚构经历'},'fixture').id;return {id};}
     if(step===3)return h.memory.maintenance!.consolidate(c,id,'fixture');
     return options.after?.(h,c,id)??h.memory.maintenance!.inspect(c,id,'fixture');
   };
   const extension={id:'fixture',version:'1',actions:[{id:'fixture_maintain',version:'1',description:'fictional maintenance operation',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
-    execute:async(_input:unknown,c:ExecutionContextV3)=>({status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:z.json().parse(await execute(c)),sources:[],receipts:[]})}]};
+    execute:async(_input:unknown,c:ExecutionContext)=>({status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:z.json().parse(await execute(c)),sources:[],receipts:[]})}]};
   h=await executionHarness(root,async request=>{
     if(JSON.stringify(request).includes('独立经历分析器'))return textReply(JSON.stringify(await(options.reply?.()??analysis())));
     return ++step<=4?call('fixture_maintain',{}):textReply('虚构整理结束');
-  },extension,true,{sourceTracking:true,maintenance:{...(options.timeoutMs?{timeoutMs:options.timeoutMs}:{}),...(options.maxInputBytes?{maxInputBytes:options.maxInputBytes}:{}),...(options.maxOutputBytes?{maxOutputBytes:options.maxOutputBytes}:{})}});
+  },extension,true,{maintenance:{...(options.timeoutMs?{timeoutMs:options.timeoutMs}:{}),...(options.maxInputBytes?{maxInputBytes:options.maxInputBytes}:{}),...(options.maxOutputBytes?{maxOutputBytes:options.maxOutputBytes}:{})}});
   return {root,h,refs:()=>refs,id:()=>id,setStep:(value:number)=>{step=value;},run:async()=>{
     const port=h.core.executionProducer('local-test',{motivation:{kind:options.motivation??'explicit-task',basis:['fictional-only']}}),accepted=port.submitTask({requestId:'start',title:'测试',goal:'比较虚构灯具',policyId:'test-policy'});
     await h.core.whenIdle();return {port,accepted,status:port.status(accepted.run)};
@@ -95,7 +95,7 @@ test('withdrawal invalidates experience content immediately and a foreign task c
     assert.throws(()=>h.memory.maintenance!.read(c,item.id,'fixture'),/SOURCE_STALE/);
     assert.throws(()=>h.memory.maintenance!.inspect(c,id,'fixture'),/SOURCE_STALE/);return {withdrawn:true};}});
   try{await f.run();assert.ok(oldSource);assert.ok(requestId);assert.equal(dbRead(f.root,'SELECT state FROM experience_items')[0]?.state,'withdrawn');
-    f.h.extensionHandle!.dispose();let checked=false;f.h.core.registerExtensionV3({protocolVersion:3,id:'fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_maintain',version:'1',description:'foreign read',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_i,c)=>{
+    f.h.extensionHandle!.dispose();let checked=false;f.h.core.registerExtension({protocolVersion:4,id:'fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_maintain',version:'1',description:'foreign read',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_i,c)=>{
       assert.throws(()=>f.h.memory.maintenance!.inspect(c,requestId,'fixture'),/SCOPE_DENIED/);checked=true;return {status:'succeeded',effects:'none',completeness:'complete',data:null,sources:[],receipts:[]};}}]});
     // A new scoped Run is checked through a trusted fixture action, without carrying an old grant.
     f.setStep(3);const other=f.h.port.submitTask({requestId:'other',title:'另一个任务',goal:'不能读取旧任务',policyId:'test-policy'});await f.h.core.whenIdle();
@@ -107,8 +107,8 @@ test('withdrawal invalidates experience content immediately and a foreign task c
 test('new evidence revises a pinned experience version while preserving the old revision and counters',async()=>{
   const root=await mkdtemp(join(testTempDir(),'maintenance-revision-'));let h:H,step=0,round=0,id='',experienceId='',source:PersonaSourceRef;const readRounds:number[]=[];
   const extension={id:'fixture',version:'1',actions:[{id:'fixture_revise',version:'1',description:'experience comparison',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
-    execute:async(_i:unknown,c:ExecutionContextV3)=>{let data:unknown;
-      if(step===1){source=h.memory.persona!.recordObservation(c,{...observation,requestId:`observe-${round}`,text:round?'新的虚构实验显示蓝灯经过密封后成功。':observation.text},'fixture');data=source;}
+    execute:async(_i:unknown,c:ExecutionContext)=>{let data:unknown;
+      if(step===1){source=h.memory.growth!.recordObservation(c,{...observation,requestId:`observe-${round}`,text:round?'新的虚构实验显示蓝灯经过密封后成功。':observation.text},'fixture');data=source;}
       else if(step===2){id=h.memory.maintenance!.request(c,{requestId:`request-${round}`,sources:[source],reason:'按实际新证据修订',targets:round?[{id:experienceId,version:1}]:[]},'fixture').id;data={id};}
       else if(step===3)data=await h.memory.maintenance!.consolidate(c,id,'fixture');
       else{const result=z.object({experienceIds:z.array(z.uuid())}).parse(h.memory.maintenance!.inspect(c,id,'fixture'));data=h.memory.maintenance!.read(c,result.experienceIds[0]!,'fixture');readRounds.push(round);}
@@ -121,7 +121,7 @@ test('new evidence revises a pinned experience version while preserving the old 
       value.experiences[0]!.counters=round?[{sourceId:actual.sources.find(s=>s.text===observation.text)!.sourceId,quote:observation.text}]:[];value.experiences[0]!.target=round?{id:experienceId,version:1}:null;
       value.persona=[];value.relations=[];return textReply(JSON.stringify(value));}
     return ++step<=4?call('fixture_revise',{}):textReply('测试结束');
-  },extension,true,{sourceTracking:true,maintenance:{}});
+  },extension,true,{maintenance:{}});
   try{const first=h.port.submitTask({requestId:'first',title:'虚构比较',goal:'验证两次实验',policyId:'test-policy'});await h.core.whenIdle();assert.equal(h.port.status(first.run).state,'completed');
     experienceId=String(dbRead(root,'SELECT id FROM experience_items')[0]!.id);round=1;step=0;
     const second=h.port.submitTask({requestId:'second',taskId:first.task.id,expectedVersion:1,policyId:'test-policy'},first.task);await h.core.whenIdle();

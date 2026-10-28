@@ -18,22 +18,6 @@ export function verifyRecentStateSchema(db:DatabaseSync):void{
     const row=db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name!);if(!row||!String(row.sql).includes("RAISE(ABORT,'"+message+"')"))throw new Error('Unsupported recent state guard');
   }
 }
-export function migrateRecentState(db:DatabaseSync){const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===13){verifyRecentStateSchema(db);return;}
-  if(version!==12)throw new Error('Unsupported recent state database');
-  db.exec(`CREATE TABLE recent_self_states(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL);
-    CREATE INDEX recent_state_scope ON recent_self_states(agent_id,scope_key);
-    CREATE TABLE recent_state_revisions(id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(id,version));
-    CREATE TRIGGER recent_state_revision_immutable BEFORE UPDATE ON recent_state_revisions BEGIN SELECT RAISE(ABORT,'Immutable recent state revision'); END;
-    CREATE TRIGGER recent_state_revision_retain BEFORE DELETE ON recent_state_revisions BEGIN SELECT RAISE(ABORT,'Retain recent state revision'); END;
-    CREATE TABLE recent_state_requests(agent_id TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,request_id));
-    CREATE TABLE recent_state_publications(id TEXT PRIMARY KEY,state_id TEXT NOT NULL,state_version INTEGER NOT NULL,body TEXT NOT NULL,withdrawn INTEGER NOT NULL DEFAULT 0 CHECK(withdrawn IN (0,1)));
-    CREATE INDEX recent_state_publication ON recent_state_publications(state_id,state_version);
-    CREATE TRIGGER recent_publication_immutable BEFORE UPDATE OF id,state_id,state_version,body ON recent_state_publications BEGIN SELECT RAISE(ABORT,'Immutable recent publication'); END;
-    CREATE TRIGGER recent_publication_retain BEFORE DELETE ON recent_state_publications BEGIN SELECT RAISE(ABORT,'Retain recent publication'); END;
-    PRAGMA user_version=13;`);
-  db.prepare('INSERT INTO memory_schema_migrations VALUES(13,?,0,?)').run(new Date().toISOString(),'add-versioned-recent-self-state-without-changing-memory-or-persona');
-}
 
 /** Mutable attention belongs to Growth. No Task completion or personality adoption is written here. */
 export class RecentStateStore {
@@ -106,5 +90,5 @@ export class RecentStateStore {
       items.push(item);if(Buffer.byteLength(JSON.stringify(items))>limit)items.pop();
     }return items;
   }
-  private audit(access:PersonaAccess,type:string,data:unknown){const id=randomUUID();this.db.prepare('INSERT INTO persona_outbox(id,body) VALUES(?,?)').run(id,JSON.stringify({id,type,scope:access.view.scope,runId:access.view.runId,origin:access.view.origin,operationId:access.operationId,causedBy:access.startedEventId,producer:'memory-recent-state',at:new Date().toISOString(),data}));}
+  private audit(access:PersonaAccess,type:string,data:unknown){const id=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(id,JSON.stringify({id,type,scope:access.view.scope,runId:access.view.runId,origin:access.view.origin,operationId:access.operationId,causedBy:access.startedEventId,producer:'memory-recent-state',at:new Date().toISOString(),data}));}
 }

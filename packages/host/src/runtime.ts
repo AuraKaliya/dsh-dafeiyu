@@ -37,7 +37,7 @@ import { parseDocument } from 'yaml';
 import { z } from 'zod';
 import { loadHostConfig,assertPaths,pluginConfig } from './configuration.js';
 import type { PreparedHostConfig } from './configuration.js';
-import { inspectHost,bindMigratedProfile,packageVersion } from './profile.js';
+import { inspectHost,packageVersion } from './profile.js';
 import { claim } from './coordination.js';
 import type { HostLease } from './coordination.js';
 import { installInlineDeepSeek } from './inline-model.js';
@@ -71,7 +71,7 @@ export interface PluginHealth {id:string;required:boolean;state:'configured'|'st
 export interface HostSnapshot {schemaVersion:1;profileId:string;agentId:string;instanceId:string;pid:number;at:string;configHash:string;foundationHash:string;
   phase:HostPhase;mode:'daemon'|'single-run';accepting:boolean;error:string|null;plugins:PluginHealth[];features:string[];
   services:{memory:ReturnType<Memory.MemoryService['runtimeHealth']>|null;activity:Activity.ActivityService['health']|null;media:Media.MediaService['health']|null;bilibili:Bili.BiliService['health']|null;executor?:ServerExecutorService['health'];biliOwner?:ReturnType<BiliOwnerChannel['getStatus']>;taskDelivery:ReturnType<Core.DafeiyuService['getStatus']>['nativeDelivery'];qq:{state:string;groupSync:string;groupError:string|null;effectiveGroups:number;lastGroupSync:string|null;capabilities:boolean;tasks:{enabled:boolean;registered:boolean;deliverResults:boolean};delivery:{plans:number;pending:number;unknown:number}}|null};
-  counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:2;memory:typeof MEMORY_SCHEMA_VERSION;runtime:typeof RUNTIME_SCHEMA_VERSION;activity:1|null;media:typeof Media.MEDIA_SCHEMA_VERSION|null;bilibili:typeof Bili.BILI_SCHEMA_VERSION|null;executor?:typeof EXECUTOR_SCHEMA_VERSION;biliOwner?:typeof BILI_OWNER_SCHEMA_VERSION};}
+  counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:1;memory:typeof MEMORY_SCHEMA_VERSION;runtime:typeof RUNTIME_SCHEMA_VERSION;activity:1|null;media:typeof Media.MEDIA_SCHEMA_VERSION|null;bilibili:typeof Bili.BILI_SCHEMA_VERSION|null;executor?:typeof EXECUTOR_SCHEMA_VERSION;biliOwner?:typeof BILI_OWNER_SCHEMA_VERSION};}
 export interface HostRunResult {taskId:string;runId:string;state:string;error:string|null;result:string|null}
 class FixedModel extends LlmAdapter {
   constructor(private readonly response:string){super();}
@@ -114,7 +114,7 @@ export class ManagedHost {
     this.lease=claim(this.config.resources,{profileId:this.config.config.profileId,agentId:this.config.config.agent.id},this.options.coordination);
     this.instanceId=this.lease.owner.instanceId;
     const second=inspectHost(this.config,this.options.coordination,this.lease.owner.instanceId);if(!second.ready)throw new Error(second.codes[0]??'HOST_INSPECTION_FAILED');
-    if(loadHostConfig(this.config.file).hash!==this.config.hash)throw new Error('HOST_CONFIG_CHANGED');assertPaths(this.config);bindMigratedProfile(this.config);this.mark('opening');
+    if(loadHostConfig(this.config.file).hash!==this.config.hash)throw new Error('HOST_CONFIG_CHANGED');assertPaths(this.config);this.mark('opening');
     const ctx=this.ctx;await ctx.plugin(LlmRuntime);await ctx.plugin(SessionStore);await ctx.plugin(Projection);await ctx.plugin(Prompt);await ctx.plugin(Tools);await ctx.plugin(AgentRegistry);
     await ctx.plugin(Persistence,{root:this.config.paths.sessions,compression:'none'});await ctx.plugin(AgentLoop,{agents:[]});
     const deepseek=pluginConfig(this.config,'model-deepseek'),scripted=pluginConfig(this.config,'model-scripted');
@@ -134,10 +134,10 @@ export class ManagedHost {
     if(route.reasoningEffort&&!modelInfo.reasoning?.efforts.some(e=>e.id===route.reasoningEffort))throw new Error('HOST_REASONING_ROUTE_UNSUPPORTED');
     await ctx.plugin(Query,{path:this.config.paths.query,openAt:'first-search'});
     const {compactionInputTokens:inputTokens,...context}=this.config.config.context;
-    await ctx.plugin(Core,{agentId:this.config.config.agent.id,dataDir:this.config.paths.core,personaFile:this.config.paths.foundation,...route,lifecycleMode:'managed',turnTimeoutMs:this.config.config.runtime.turnTimeoutMs,phaseTimeouts:this.config.config.runtime.phaseTimeouts,
+    await ctx.plugin(Core,{agentId:this.config.config.agent.id,dataDir:this.config.paths.core,personaFile:this.config.paths.foundation,...route,turnTimeoutMs:this.config.config.runtime.turnTimeoutMs,phaseTimeouts:this.config.config.runtime.phaseTimeouts,
       context:{...context,regions:{...context.regions,'memory:growth':{...this.config.config.persona.growthRegion,required:false}}}});this.coreValue=ctx.dafeiyu;
     this.mark('binding');const timeline=pluginConfig(this.config,'timeline');if(timeline){await ctx.plugin(Timeline,{agentId:this.config.config.agent.id,...timeline});this.plugin('timeline','ready');}
-    const memory=pluginConfig(this.config,'memory');if(memory){await ctx.plugin(Memory,{agentId:this.config.config.agent.id,dataDir:this.config.paths.memory,lifecycleMode:'managed',...memory,...(inputTokens?{compaction:{inputTokens}}:{})});this.memoryValue=ctx.dafeiyuMemory;this.plugin('memory','ready');
+    const memory=pluginConfig(this.config,'memory');if(memory){await ctx.plugin(Memory,{agentId:this.config.config.agent.id,dataDir:this.config.paths.memory,...memory,...(inputTokens?{compaction:{inputTokens}}:{})});this.memoryValue=ctx.dafeiyuMemory;this.plugin('memory','ready');
       this.core.configureExecution({profileId:this.config.config.profileId,policies:this.config.config.authorityPolicies,createStore:false,maxPendingRuns:this.config.config.runtime.maxPendingRuns,maxConcurrentRuns:this.config.config.runtime.maxConcurrentRuns});}
     if(this.options.dshTools){await this.options.dshTools.catalog(this.options.signal??new AbortController().signal);const handle=bindDshTools(ctx,this.config.config.agent.id,this.options.dshTools,join(this.config.paths.core,'dsh-tool-receipts'));ctx.effect(()=>()=>handle.dispose());}
     const executor=pluginConfig(this.config,'server-executor');if(executor){const dependencies=this.options.serverExecutorDependencies;if(!dependencies)throw new Error('HOST_EXECUTOR_RUNTIME_PORT_REQUIRED');
@@ -150,7 +150,7 @@ export class ManagedHost {
     const simulator=pluginConfig(this.config,'channel-simulator');if(simulator){await ctx.plugin(Simulator,{agentId:this.config.config.agent.id,...simulator});this.plugin('channel-simulator',this.mode==='single-run'?'disabled':'ready');}
     const qq=pluginConfig(this.config,'channel-qq');if(qq&&this.mode==='daemon'){
       if(!existsSync(qq.tokenFile)){if(this.health.find(p=>p.id==='channel-qq')?.required)throw new Error('HOST_QQ_CREDENTIAL_FILE_MISSING');this.plugin('channel-qq','degraded','HOST_QQ_CREDENTIAL_FILE_MISSING');}
-      else{await ctx.plugin(QQ,{agentId:this.config.config.agent.id,dataDir:this.config.paths.channels['channel-qq']!,lifecycleMode:'managed',...qq});this.qqValue=ctx.dafeiyuQQ;this.qqValue.holdIngress();this.plugin('channel-qq','starting');}
+      else{await ctx.plugin(QQ,{agentId:this.config.config.agent.id,dataDir:this.config.paths.channels['channel-qq']!,...qq});this.qqValue=ctx.dafeiyuQQ;this.qqValue.holdIngress();this.plugin('channel-qq','starting');}
     }else if(qq)this.plugin('channel-qq','disabled','HOST_SINGLE_RUN');
     const biliOwner=pluginConfig(this.config,'channel-bili-owner');if(biliOwner&&this.mode==='daemon'){
       if(!this.options.createBiliOwnerPorts){if(this.health.find(plugin=>plugin.id==='channel-bili-owner')?.required)throw new Error('HOST_BILI_OWNER_RUNTIME_PORT_REQUIRED');this.plugin('channel-bili-owner','degraded','HOST_BILI_OWNER_RUNTIME_PORT_REQUIRED');}
@@ -198,8 +198,8 @@ export class ManagedHost {
   private executorHealth(){if(this.executorValue){const unknown=(this.executorValue.health.counts.unknown??0)>0;this.plugin('server-executor',unknown?'degraded':'ready',unknown?'HOST_EXECUTOR_UNCERTAIN':null);}}
   private qqHealth(){const status=this.qqValue?.getStatus().groupSync;if(!status)return;
     if(status.enabled&&(status.state!=='current'||status.error))this.plugin('channel-qq','degraded',status.error??'GROUP_SYNC_UNAVAILABLE');else this.plugin('channel-qq','ready');}
-  private outbox(){let count=0;for(const [file,tables] of [[join(this.config.paths.core,'runtime.sqlite'),['runtime_outbox']],[join(this.config.paths.core,'delivery.sqlite'),['events']],
-    [join(this.config.paths.memory,'memory.sqlite'),['outbox','persona_outbox','execution_memory_outbox']],[join(this.config.paths.memory,'analysis.sqlite'),['audit_outbox']],
+  private outbox(){let count=0;for(const [file,tables] of [[join(this.config.paths.core,'runtime.sqlite'),['runtime_outbox']],
+    [join(this.config.paths.memory,'memory.sqlite'),['outbox','execution_memory_outbox']],[join(this.config.paths.memory,'analysis.sqlite'),['audit_outbox']],
     [join(this.config.paths.memory,'working.sqlite'),['outbox']],[join(this.config.paths.memory,'feedback.sqlite'),['outbox']]] as const){
     if(!existsSync(file))continue;const db=new DatabaseSync(file,{readOnly:true});try{for(const table of tables)if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))count+=Number(db.prepare(`SELECT count(*) AS n FROM ${table} WHERE delivered=0`).get()?.n);}finally{db.close();}}
     const activityFile=join(this.config.paths.core,'activity.sqlite');if(existsSync(activityFile)){const db=new DatabaseSync(activityFile,{readOnly:true});try{count+=Number(db.prepare('SELECT count(*) AS n FROM activity_outbox WHERE acknowledged=0').get()?.n);}finally{db.close();}}
@@ -208,7 +208,7 @@ export class ManagedHost {
   snapshot():HostSnapshot{const core=this.coreValue?.getStatus(),qq=this.qqValue?.getStatus();return {schemaVersion:1,profileId:this.config.config.profileId,agentId:this.config.config.agent.id,instanceId:this.instanceId,pid:process.pid,at:new Date().toISOString(),configHash:this.config.hash,foundationHash:this.config.foundation.hash,
       phase:this.phase,mode:this.mode,accepting:['ready','degraded'].includes(this.phase)&&!!this.coreValue?.accepting,error:this.error,plugins:this.health.map(p=>({...p})),features:this.coreValue?.capabilityManifest().features??[],
       services:{memory:this.memoryValue?.runtimeHealth()??null,activity:this.activityValue?.health??null,media:this.mediaValue?.health??null,bilibili:this.biliValue?.health??null,...(this.executorValue?{executor:this.executorValue.health}:{}),...(this.biliOwnerValue?{biliOwner:this.biliOwnerValue.getStatus()}:{}),taskDelivery:core?.nativeDelivery??null,qq:qq?{state:qq.state,groupSync:qq.groupSync.state,groupError:qq.groupSync.error,effectiveGroups:qq.groupSync.effectiveIds.length,lastGroupSync:qq.groupSync.lastSuccessAt,capabilities:qq.capabilities.registered,tasks:{enabled:qq.tasks.enabled,registered:qq.tasks.registered,deliverResults:qq.tasks.deliverResults},delivery:qq.delivery}:null},
-      counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:2,memory:MEMORY_SCHEMA_VERSION,runtime:RUNTIME_SCHEMA_VERSION,activity:existsSync(join(this.config.paths.core,'activity.sqlite'))?1:null,media:existsSync(join(this.config.paths.core,'media.sqlite'))?Media.MEDIA_SCHEMA_VERSION:null,bilibili:existsSync(join(this.config.paths.core,'bilibili.sqlite'))?Bili.BILI_SCHEMA_VERSION:null,...(this.executorValue?{executor:EXECUTOR_SCHEMA_VERSION}:{}),...(this.biliOwnerValue?{biliOwner:BILI_OWNER_SCHEMA_VERSION}:{})}};}
+      counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:1,memory:MEMORY_SCHEMA_VERSION,runtime:RUNTIME_SCHEMA_VERSION,activity:existsSync(join(this.config.paths.core,'activity.sqlite'))?1:null,media:existsSync(join(this.config.paths.core,'media.sqlite'))?Media.MEDIA_SCHEMA_VERSION:null,bilibili:existsSync(join(this.config.paths.core,'bilibili.sqlite'))?Bili.BILI_SCHEMA_VERSION:null,...(this.executorValue?{executor:EXECUTOR_SCHEMA_VERSION}:{}),...(this.biliOwnerValue?{biliOwner:BILI_OWNER_SCHEMA_VERSION}:{})}};}
   publish(){if(!this.lease)return;const file=join(this.config.paths.core,'host-status.json'),temp=file+'.'+randomUUID()+'.tmp';writeFileSync(temp,JSON.stringify(this.snapshot(),null,2)+'\n',{flag:'wx'});renameSync(temp,file);}
   run(raw:unknown):Promise<HostRunResult>{if(!['ready','degraded'].includes(this.phase))throw new Error('HOST_NOT_READY');if(!this.memoryValue)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     const work=this.performRun(raw).finally(()=>this.jobs.delete(work));this.jobs.add(work);return work;}

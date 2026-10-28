@@ -84,14 +84,7 @@ function inputsVerified(session:Session,manifestSeq:number,m:FragmentManifest):b
       if(record){
         if(record.data.agentId!==m.agentId||record.data.route!==m.route||record.data.owner!==m.owner||record.data.hash!==input.hash)return false;
         expected.push(record.data.dependencies);
-      }else{
-        const legacy=events.flatMap(e=>{const p=pluginRecordOf(e);if(p?.type!=='plugin:dafeiyu/turn-seal')return [];
-          const value=z.object({route:z.string(),owner:z.string(),epoch:z.string(),seqs:z.array(z.number()),precision:z.string().optional()}).parse(p.data);
-          return !value.precision&&value.route===m.route&&value.owner===m.owner&&value.seqs.includes(input.seq)?[value]:[];
-        })[0];
-        if(!legacy)return false;
-        expected.push([{kind:'legacy',agentId:m.agentId,route:m.route,epoch:legacy.epoch}]);
-      }
+      }else{return false;}
     }
     if(JSON.stringify(unionDependencies(...expected))!==JSON.stringify(unionDependencies(group.dependencies)))return false;
   }

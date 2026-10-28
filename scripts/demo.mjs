@@ -1,3 +1,5 @@
+import {z} from 'zod';
+import {fixtureAction} from '../tests/fixture-action.js';
 // Local acceptance harness: real DSH plugins, scripted model, no remote transport.
 import { harness, textReply, call } from '../build-tests/harness.js';
 import { resolve } from 'node:path';
@@ -11,10 +13,7 @@ const h = await harness(root, () => {
   return textReply(turn === 2 ? '测试能力已经返回，我在本地模拟会话里回复你。' : '这是另一个独立会话。');
 });
 try {
-  h.core.registerExtension({ id: 'demo-echo', version: '0.1.0', apiVersion: 2, agentId: 'dafeiyu', actions: [{
-    name: 'demo_echo', description: '本地演示用回显能力', fields: { text: { description: '回显内容', required: true } },
-    execute: async args => ({ echo: args.text ?? '' }),
-  }] });
+  h.core.registerExtension({ id: 'demo-echo', version: '0.1.0', protocolVersion:4, agentId: 'dafeiyu', actions: [fixtureAction(h.core,'demo-echo',{id:'demo_echo',description:'本地演示用回显能力',inputSchema:z.strictObject({text:z.string().describe('回显内容')}),work:async args => ({ echo: args.text ?? '' })})] });
   const first = h.simulator.send('主人测试窗口', '请使用回显能力。', { id: 'demo-1' });
   await h.core.whenIdle();
   h.simulator.send('群聊测试窗口', '你好', { id: 'demo-2' });

@@ -4,7 +4,7 @@ import { PersonaRequestIdSchema } from './persona.js';
 import type { InboundMessage } from './index.js';
 import { MediaVoiceEvidenceSchema } from './media.js';
 import type { MediaVoiceEvidence } from './media.js';
-import type { ExecutionContextV3 } from './execution.js';
+import type { ExecutionContext } from './execution.js';
 import type { Conversation } from './conversation.js';
 
 export const MessageTaskSubmitSchema=z.strictObject({requestId:PersonaRequestIdSchema,title:z.string().trim().min(1).max(200).optional(),kind:z.enum(['explicit-task','self-exploration']).default('explicit-task'),goal:z.string().trim().min(1).max(2000).optional(),voiceExposureId:z.uuid().optional()})
@@ -23,5 +23,5 @@ export interface MessageTaskBinding {id:string;pluginId:string;channelExtensionI
   explorationResources?:readonly Conversation[];
   expressionPolicy?:{id:string;version:number};
   autoDeliver?:boolean;
-  voice?:{version:string;resolve(context:ExecutionContextV3,message:InboundMessage,exposureId:string):{text:string;evidence:MediaVoiceEvidence};current(message:InboundMessage,evidence:MediaVoiceEvidence):boolean};
+  voice?:{version:string;resolve(context:ExecutionContext,message:InboundMessage,exposureId:string):{text:string;evidence:MediaVoiceEvidence};current(message:InboundMessage,evidence:MediaVoiceEvidence):boolean};
   classify(message:InboundMessage):{kind:'submit'|'cancel'|'revise'|'resolve'|'none';text:string};active():boolean;}

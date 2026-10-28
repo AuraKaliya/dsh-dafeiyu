@@ -4,15 +4,13 @@ import { z } from 'zod';
 import { ExecutionScopeSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,redactJson,SourceDependencySchema,ExecutionObservationSchema,PersonaSourceNatureSchema,PersonaSourceEvidenceSchema } from '@dafeiyu/contracts';
 import type { PersonaSourceNature } from '@dafeiyu/contracts';
 import type { PersonaAccess,PersonaSourceRef } from '@dafeiyu/contracts';
-import type { PersonaMaterial,PersonaResolver } from './persona-store.js';
+import type { PersonaMaterial,PersonaResolver } from './material.js';
 import { personaDigest,personaScope,uniqueSources } from './persona-digest.js';
 
-const bodySchema=z.strictObject({schemaVersion:z.literal(1),kind:z.literal('self-report'),text:z.string().min(1).max(8000),scope:ExecutionScopeSchema,
-  runId:z.uuid(),producer:z.string(),operationId:z.string(),dependencies:z.array(PersonaSourceRefSchema).max(64),rootSources:z.array(z.string().max(2200)).max(64)});
 const observedSchema=z.strictObject({schemaVersion:z.literal(2),kind:z.enum(['primary','digest','self-report']),text:z.string().min(1).max(32000),scope:ExecutionScopeSchema,
   runId:z.uuid(),producer:z.string(),operationId:z.string(),dependencies:z.array(PersonaSourceRefSchema).max(64),rootSources:z.array(z.string().max(2200)).max(64),
   history:z.array(SourceDependencySchema).max(4096),occurredAt:z.iso.datetime({offset:true}),resource:z.string(),coverage:z.array(z.string()),completeness:z.enum(['complete','partial','unknown']),nature:PersonaSourceNatureSchema.optional()});
-const storedSchema=z.union([bodySchema,observedSchema]);
+const storedSchema=observedSchema;
 export class ExecutionSources {
   private readonly sourceReadStatements=new Map<string,import('node:sqlite').StatementSync>();
   private sourceRead(sql:string){let statement=this.sourceReadStatements.get(sql);if(!statement){statement=this.db.prepare(sql);this.sourceReadStatements.set(sql,statement);}return statement;}

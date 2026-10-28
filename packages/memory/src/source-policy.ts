@@ -59,25 +59,25 @@ export class MemorySourcePolicy implements SourcePolicy {
   }
   tool(scope:CompactionScope,name:string,text:string,meta:unknown):SourceDependency[]{
     try{
-      const data:unknown=JSON.parse(text);
+      const returned=ActionOutcomeSchema.parse(JSON.parse(text)),data:unknown=returned.data;
       // These are current-inbound acceptance receipts, not remembered content. A child
       // task writing unrelated memory must not invalidate its parent's acknowledgement.
-      if(['qq_task_submit','qq_explore','local_owner_task_submit'].includes(name)){ActionOutcomeSchema.parse(data);return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];}
+      if(['qq_task_submit','qq_explore','local_owner_task_submit'].includes(name)){returned;return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];}
       if(name==='qq_browse'){
-        const outcome=ActionOutcomeSchema.parse(data);if(outcome.data===null)return [];
+        const outcome=returned;if(outcome.data===null)return [];
         const view=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema})}).parse(outcome.data),ref=view.observation.source;
         if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,ref,digest(JSON.stringify(view.page))))return this.missing(scope);
         return [{...scoped(scope),kind:'capability',ref}];
       }
       if(name==='dafeiyu_media_read'||name==='qq_media_list'||name==='qq_sticker_list'){
-        const outcome=ActionOutcomeSchema.parse(data);if(outcome.status!=='succeeded'||outcome.data===null)return [];
+        const outcome=returned;if(outcome.status!=='succeeded'||outcome.data===null)return [];
         const value=z.record(z.string(),z.json()).parse(outcome.data);if(value.observation===undefined)return [];
         const observation=z.object({source:PersonaSourceRefSchema}).parse(value.observation),{observation:_observation,...view}=value;
         const actual=name==='dafeiyu_media_read'?z.string().parse(view.text):JSON.stringify(view);
         if(!this.ctx.dafeiyu.capabilityObservationCurrent(scope,observation.source,digest(actual)))return this.missing(scope);
         return [{...scoped(scope),kind:'capability',ref:observation.source}];
       }
-      if(['qq_groups','qq_observe_select','dafeiyu_media_select','dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_reply','dafeiyu_media_reply_status','qq_sticker_collect','qq_sticker_use','qq_sticker_manage'].includes(name))return [];
+      if(['dafeiyu_memory_reflect','dafeiyu_memory_self_update','dafeiyu_memory_self_withdraw','qq_groups','qq_observe_select','dafeiyu_media_select','dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_reply','dafeiyu_media_reply_status','qq_sticker_collect','qq_sticker_use','qq_sticker_manage'].includes(name))return [];
       if(name==='dafeiyu_source_open'||name.includes('_deleted_')||name==='dafeiyu_memory_analysis_open'
         ||name==='dafeiyu_tool_feedback_open'||/deleted_lookup_only|historical_evidence_only/.test(text))return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];
       const feedback=z.object({dafeiyuFeedback:FeedbackMetaSchema}).safeParse(meta);
@@ -97,7 +97,7 @@ export class MemorySourcePolicy implements SourcePolicy {
           if(!root||root.version!==ref.version||root.contentHash!==ref.contentHash)return this.missing(scope);
           return ref.sourceVersions&&ref.sourceFences?[...ref.sourceVersions.map(s=>({...scoped(scope),kind:'memory' as const,id:s.id,revision:s.revision,version:s.version,hash:s.contentHash})),
             ...ref.sourceFences.map(s=>({...scoped(scope),kind:'timeline' as const,ref:s.ref,hash:s.contentHash,fence:s.fence}))]
-            :[{...scoped(scope),kind:'legacy' as const,epoch:this.epoch(scope)}];
+            :[{...scoped(scope),kind:'unavailable' as const,reason:'untracked-tool-source'}];
         });
       }
       // Commands with receipt-only return values expose no remembered body.
@@ -105,7 +105,7 @@ export class MemorySourcePolicy implements SourcePolicy {
         'dafeiyu_memory_working_set','dafeiyu_memory_context_select','dafeiyu_memory_context_retrieve','dafeiyu_memory_context_clear',
         'dafeiyu_memory_context_status','dafeiyu_memory_analyze','dafeiyu_memory_analysis_status','dafeiyu_memory_analysis_cancel',
         'dafeiyu_tool_feedback_delete','dafeiyu_tool_feedback_restore'].includes(name))return [];
-      return [{...scoped(scope),kind:'legacy',epoch:this.epoch(scope)}];
+      return [{...scoped(scope),kind:'unavailable' as const,reason:'untracked-tool-source'}];
     }catch{return this.missing(scope);}
   }
   validate(scope:CompactionScope,dep:SourceDependency):boolean {
@@ -118,7 +118,6 @@ export class MemorySourcePolicy implements SourcePolicy {
       case 'working':{const item=this.working?.sourceItem(scope,dep.id);return !!item&&item.taskId===dep.taskId&&item.revision===dep.revision&&item.hash===dep.hash;}
       case 'feedback':{const item=this.feedback?.sourceRecord(scope,dep.id);return !!item&&item.version===dep.version&&item.archive.hash===dep.hash;}
       case 'ephemeral':return dep.traceId===scope.traceId;
-      case 'legacy':return dep.epoch===this.epoch(scope);
       default:return false;
     }}catch{return false;}
   }

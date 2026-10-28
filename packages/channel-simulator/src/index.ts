@@ -16,8 +16,8 @@ export class Simulator extends Service {
   readonly handle: ExtensionHandle;
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'dafeiyuSimulator');
-    this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-simulator', version: '0.4.0', apiVersion: 2, agentId: config.agentId,
-      channels: [{ channel: 'simulator', account: config.account, taskDelivery:'simulated',deliver: async (reply, signal) => {
+    this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-simulator', version: '0.4.0', protocolVersion:4, agentId: config.agentId,
+      channels: [{ channel: 'simulator', account: config.account, deliver: async (reply, signal) => {
         signal.throwIfAborted();
         const existing = this.receipts.get(reply.id);
         if (existing) return existing;

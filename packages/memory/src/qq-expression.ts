@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { Conversation,ContextItem,ExecutionContextV3,PersonaAccess,TimelineScope } from '@dafeiyu/contracts';
+import type { Conversation,ContextItem,ExecutionContext,PersonaAccess,TimelineScope } from '@dafeiyu/contracts';
 import { conversationKey,ContextItemSchema,redactContent,redactJson } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
@@ -21,7 +21,7 @@ export class QqExpressionPreferences {
   private currentSources(scope:TimelineScope,item:MemoryView){return item.sources.every(source=>source.kind==='timeline'&&this.ctx.dafeiyuTimeline.checkArchivedSource(scope,source.ref,source.contentHash));}
   prepare(scene:Conversation):ContextItem[]{return this.entries(scene).map(({item,value})=>ContextItemSchema.parse({id:'qq-expression:'+item.id,version:String(item.version),text:JSON.stringify({...value,evidenceStatus:value.basis==='self-preference'?'self-report':'reported-user-preference',instructionAuthority:false}),expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:memoryRef(item.id,item.revision),version:String(item.version),hash:item.contentHash}]}));}
   status(scene:Conversation){return this.entries(scene).map(({item,value})=>({id:item.id,version:item.version,...value}));}
-  save(context:ExecutionContextV3,access:PersonaAccess,raw:unknown){
+  save(context:ExecutionContext,access:PersonaAccess,raw:unknown){
     const input=QqExpressionSaveSchema.parse(raw),source=this.ctx.dafeiyu.quoteReplySource(context,'memory-persona'),inbound=this.ctx.dafeiyu.journal.get(source.inboundId),scene=source.target;
     if(scene.channel!=='qq'||conversationKey(this.agentId,scene)!==inbound.route)throw new Error('SCOPE_DENIED');access.guard();
     const existing=this.entries(scene).filter(entry=>entry.value.slot===input.slot);if(existing.length>1)throw new Error('VERSION_CONFLICT');const previous=existing[0]?.item;

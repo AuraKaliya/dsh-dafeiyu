@@ -5,7 +5,7 @@ import { MediaReplyAuthoritySchema,MediaAssetRefSchema,MediaSourceDescriptionSch
 import type { PersonaAccess,ReplyMediaManifest } from '@dafeiyu/contracts';
 
 export const MEDIA_REPLY_TABLES=['media_reply_drafts','media_reply_heads','media_reply_exports'] as const;
-export function migrateMediaReplies(db:DatabaseSync){const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);if(version===2){for(const name of MEDIA_REPLY_TABLES)db.prepare(`SELECT * FROM ${name} LIMIT 0`).all();return;}if(version!==1)throw new Error('MEDIA_SCHEMA_UNSUPPORTED');
+export function createMediaReplySchema(db:DatabaseSync){
   db.exec(`CREATE TABLE media_reply_drafts(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,UNIQUE(run_id,version));
     CREATE TABLE media_reply_heads(run_id TEXT PRIMARY KEY,draft_id TEXT NOT NULL REFERENCES media_reply_drafts(id),version INTEGER NOT NULL,frozen INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE media_reply_exports(id TEXT PRIMARY KEY,reply_id TEXT NOT NULL UNIQUE,draft_id TEXT NOT NULL REFERENCES media_reply_drafts(id),body TEXT NOT NULL,body_hash TEXT NOT NULL,state TEXT NOT NULL);

@@ -6,7 +6,7 @@ import * as Timeline from '@dafeiyu/timeline';
 import * as Memory from '@dafeiyu/memory';
 import Query from '@deepseek-ai/dsh-session-query-sqlite';
 import { CapabilitySelectionSchema,ConversationSchema } from '@dafeiyu/contracts';
-import type { Conversation,ExecutionContextV3,PersonaSourceRef } from '@dafeiyu/contracts';
+import type { Conversation,ExecutionContext,PersonaSourceRef } from '@dafeiyu/contracts';
 import { harness, textReply } from './harness.js';
 import type { Response } from './harness.js';
 import { testTempDir as tmpdir } from './test-temp.js';
@@ -15,15 +15,15 @@ export const capabilityScene:Conversation={channel:'simulator',account:'local',k
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export async function capabilityFixture(sourceTracking=true){
   const root=await mkdtemp(join(tmpdir(),'dafeiyu-capability-')),state={version:1,valid:true,throwSelect:false,reads:0};
-  let response:Response=()=>textReply('完成'),source:PersonaSourceRef|undefined,captured:ExecutionContextV3|undefined;
-  let readHook:(context:ExecutionContextV3)=>void=()=>{};
-  const h=await harness(root,request=>response(request),undefined,10000,undefined,undefined,'managed');
+  let response:Response=()=>textReply('完成'),source:PersonaSourceRef|undefined,captured:ExecutionContext|undefined;
+  let readHook:(context:ExecutionContext)=>void=()=>{};
+  const h=await harness(root,request=>response(request),undefined,10000,undefined,undefined,true);
   await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});
-  await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed',sourceTracking});
+  await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),sourceTracking});
   const page={messages:[{id:'M1',text:'QQ_RAW_VIEW_SENTINEL：这是一份尚未核实的虚构观察。'}],limitations:['文字样本，不代表媒体理解']};
   const view=JSON.stringify(page),receipts:Record<string,unknown>[]=[];
   const fail=(error:unknown)=>{const code=error instanceof Error?error.message:'FAILED';if(code==='SIMULATED_STORAGE_UNKNOWN')throw error;return {status:'failed' as const,effects:'none' as const,completeness:'unknown' as const,data:null,sources:[],receipts:[],errorCode:/^[A-Z_]+$/.test(code)?code:'OBSERVATION_FAILED'};};
-  const handle=h.core.registerExtensionV3({protocolVersion:3,id:'fixture-observer',version:'1',agentId:'dafeiyu',resourceProofs:{current:proof=>state.valid&&proof.version===state.version,epoch:()=>JSON.stringify(state)},actions:[
+  const handle=h.core.registerExtension({protocolVersion:4,id:'fixture-observer',version:'1',agentId:'dafeiyu',resourceProofs:{current:proof=>state.valid&&proof.version===state.version,epoch:()=>JSON.stringify(state)},actions:[
     {id:'qq_browse',version:'1',description:'读取虚构能力资料',inputSchema:z.strictObject({requestId:z.string(),scene:ConversationSchema.optional()}),outputSchema:z.json(),effects:'read',
       execute:async(raw,context)=>{try{captured=context;const input=z.object({requestId:z.string(),scene:ConversationSchema.optional()}).parse(raw),scene=input.scene??h.core.capabilityResources(context,'fixture-observer')[0]!;
         h.core.authorizeCapabilityResource(context,'fixture-observer',scene);readHook(context);state.reads++;

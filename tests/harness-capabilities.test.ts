@@ -32,7 +32,7 @@ test('configured capabilities are visible and queryable in ordinary conversation
 test('the built-in catalog describes task-only plugin capabilities without granting them to a chat',async t=>{
   let calls=0,steps=0;
   const h=await qqCapabilityFixture({beforeActivate:async ctx=>{
-    const handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'fixture-capabilities',version:'1',agentId:'dafeiyu',actions:[{
+    const handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'fixture-capabilities',version:'1',agentId:'dafeiyu',actions:[{
       id:'fixture_task_only',version:'1',description:'A configured task-only fixture.',requiresTask:true,effects:'read',inputSchema:z.strictObject({query:z.string()}),outputSchema:z.json(),
       execute:async()=>{calls++;return {status:'succeeded',effects:'none',completeness:'complete',data:null,sources:[],receipts:[]};}
     }]});ctx.effect(()=>()=>handle.dispose());

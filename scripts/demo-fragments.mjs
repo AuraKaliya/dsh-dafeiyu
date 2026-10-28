@@ -9,7 +9,7 @@ import { fragmentFixture } from '../build-tests/fragment-fixture.js';
 
 const root=resolve('.runtime/demos',`fragments-${randomUUID()}`);await mkdir(root,{recursive:true});
 const h=await fragmentFixture(root),expiry=new Date(Date.now()+600000).toISOString();
-const extension=h.core.registerExtension({id:'fictional-secondary',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
+const extension=h.core.registerExtension({id:'fictional-secondary',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
   id:'status',kind:'operational-fact',prepare:async()=>[{id:'status',version:'1',text:'SECOND_PLUGIN_STAYS',expiresAt:expiry,sources:[{ref:'fictional:secondary',version:'1',hash:'test'}]}],validate:()=>true,
 }]});
 try{

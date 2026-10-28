@@ -4,7 +4,7 @@ import {SessionId} from '@deepseek-ai/dsh-session';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {RecentStatePublishSchema,conversationKey,messageMainText} from '@dafeiyu/contracts';
-import type {PersonaAccess,ExecutionContextV3,ExecutionScope,Conversation,ContextRequest,ContextItem,ExecutionView} from '@dafeiyu/contracts';
+import type {PersonaAccess,ExecutionContext,ExecutionScope,Conversation,ContextRequest,ContextItem,ExecutionView} from '@dafeiyu/contracts';
 import type {MemoryStore} from './store.js';
 import type {TaskWorkspace} from './task-workspace.js';
 import type {RecentStateStore} from './recent-state-store.js';
@@ -15,8 +15,8 @@ export class RecentStateService {
   constructor(private readonly ctx:Context,memory:MemoryStore,private readonly tasks:TaskWorkspace,private readonly agentId:string,private readonly ready:()=>boolean){
     this.store=memory.recentStateStore((runId,sources)=>this.ready()&&ctx.dafeiyu.recentStateSourcesCurrent(runId,sources));
   }
-  private enabled(){const c=this.ctx.dafeiyu.contextAssembly();return c.mode==='unified'&&c.recentState.enabled;}
-  save(context:ExecutionContextV3,access:PersonaAccess,input:unknown){if(!this.enabled())throw new Error('DEPENDENCY_UNAVAILABLE');return this.store.save(access,input,this.ctx.dafeiyu.captureRecentStateSources(context,'memory-persona'));}
+  private enabled(){const c=this.ctx.dafeiyu.contextAssembly();return c.recentState.enabled;}
+  save(context:ExecutionContext,access:PersonaAccess,input:unknown){if(!this.enabled())throw new Error('DEPENDENCY_UNAVAILABLE');return this.store.save(access,input,this.ctx.dafeiyu.captureRecentStateSources(context,'memory-persona'));}
   status(access:PersonaAccess){access.guard();return {enabled:this.enabled(),states:this.store.list(access.view.scope),sharedViews:this.ctx.dafeiyu.contextAssembly().recentState.shared?this.store.published(access.view.scope):[],sharedPolicy:this.ctx.dafeiyu.contextAssembly().recentState.shared?'self-summary-v1':null};}
   unpublish(access:PersonaAccess,input:unknown){return this.store.unpublish(access,input,this.enabled()&&this.ctx.dafeiyu.contextAssembly().recentState.shared);}
   prepareScope(scope:ExecutionScope,query=''):ContextItem[]{if(!this.ready()||!this.enabled())return [];const c=this.ctx.dafeiyu.contextAssembly().recentState;return this.store.prepare(scope,query,c.shared,c.maxBytes);}

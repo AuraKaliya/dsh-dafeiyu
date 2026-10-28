@@ -69,7 +69,7 @@ test('voice goal revision and cancellation use current evidence and preserve the
 test('runtime v3 requires an explicit protocol upgrade and preserves existing request bytes',async()=>{
   const root=await mkdtemp(join(testTempDir(),'runtime-voice-migration-')),file=join(root,'runtime.sqlite'),identity={agentId:'fixture',profileId:'fixture'};const store=new RuntimeStore(file,identity,{create:true});store.prepareRequest('fixture','old',{goal:'旧文字目标'});store.close();
   const db=new DatabaseSync(file);const beforeRows=db.prepare('SELECT * FROM execution_requests').all();db.exec('PRAGMA user_version=3');db.close();const before=await readFile(file);assert.equal(inspectStorage(file,'runtime',identity).version,3);assert.throws(()=>new RuntimeStore(file,identity),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(file),before);
-  new RuntimeStore(file,identity,{migrate:true}).close();const after=new DatabaseSync(file);try{assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,RUNTIME_SCHEMA_VERSION);assert.deepEqual(after.prepare('SELECT * FROM execution_requests').all(),beforeRows);}finally{after.close();}
+  new RuntimeStore(file,identity,{}).close();const after=new DatabaseSync(file);try{assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,RUNTIME_SCHEMA_VERSION);assert.deepEqual(after.prepare('SELECT * FROM execution_requests').all(),beforeRows);}finally{after.close();}
 });
 
 test('voice objection resolution preserves the parent source and binds the new control recording',async()=>{

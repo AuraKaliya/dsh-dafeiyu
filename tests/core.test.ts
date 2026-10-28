@@ -8,7 +8,7 @@ import { conversationKey } from '@dafeiyu/contracts';
 import type { Extension } from '@dafeiyu/contracts';
 
 const directory = () => mkdtemp(join(tmpdir(), 'dafeiyu-test-'));
-const echo: Extension = { id: 'test-actions', version: '0.1.0', apiVersion: 2, agentId: 'dafeiyu', actions: [{
+const echo: Extension = { id: 'test-actions', version: '0.1.0', protocolVersion:4, agentId: 'dafeiyu', actions: [{
   name: 'test_echo', description: '回显测试文本', fields: { text: { description: '文本', required: true } },
   execute: async (args) => ({ text: args.text ?? '' }),
 }] };
@@ -204,7 +204,7 @@ test('class-backed channel methods retain their receiver during registration', a
     async deliver() { this.count++; return { status: 'sent' as const, receiptId: 'class-receipt' }; }
   }
   const channel = new Channel();
-  const handle = h.core.registerExtension({ id: 'class-extension', version: '0.1.0', apiVersion: 2, agentId: 'dafeiyu', channels: [channel] });
+  const handle = h.core.registerExtension({ id: 'class-extension', version: '0.1.0', protocolVersion:4, agentId: 'dafeiyu', channels: [channel] });
   const receipt = handle.ingest({ id: '1', occurredAt: new Date().toISOString(), conversation: { channel: channel.channel, account: channel.account, kind: 'local', id: 'test' }, sender: { id: 'user', displayName: 'test' }, text: 'hello' });
   await h.core.whenIdle();
   assert.equal(channel.count, 1); assert.equal(h.core.journal.get(receipt.id).state, 'delivered');
@@ -219,7 +219,7 @@ for(const protocol of [2,3] as const)test(`channel v${protocol} processing lease
     async deliver(){this.sends++;return {status:'sent' as const,receiptId:'fixture-receipt'};}
   }
   const channel=new Channel(),base={id:'lease-extension',version:'1',agentId:'dafeiyu',channels:[channel]};
-  const handle=protocol===2?h.core.registerExtension({...base,apiVersion:2}):h.core.registerExtensionV3({...base,protocolVersion:3});
+  const handle=protocol===2?h.core.registerExtension({...base,protocolVersion:4}):h.core.registerExtension({...base,protocolVersion:4});
   assert.ok(handle.ingest);const receipt=handle.ingest({id:'lease',occurredAt:new Date().toISOString(),conversation:{channel:channel.channel,account:channel.account,kind:'local',id:'test'},sender:{id:'user',displayName:'fixture'},text:'开始'});
   await started;channel.controller.abort();release();await h.core.whenIdle();assert.equal(h.core.journal.get(receipt.id).state,'failed');assert.ok(channel.checks>0);assert.equal(channel.sends,0);
 });

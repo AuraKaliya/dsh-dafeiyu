@@ -44,22 +44,22 @@ export async function biliOwnerChannelFixture(options:{root?:string;create?:bool
   const adapter=new ScriptedModel(request=>response(request)),host=await probeHost(root,adapter),ctx=host.ctx,ports=backend.createPorts();
   const identity:BiliOwnerIdentity={agentId:'dafeiyu',profileId:'bili-owner-test',accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID},directory=join(root,'bili');
   let publicReads=0;const proofs=new Map<string,ResourceProof>(),publicPage={kind:'public-bili-fixture',text:'PUBLIC_BILI_EVIDENCE：虚构视频文字，未取得画面或音频。'};
-  let publicHandle:ReturnType<typeof ctx.dafeiyu.registerExtensionV3>|undefined,qqHandle:ReturnType<typeof ctx.dafeiyu.registerExtension>|undefined,qqTasks:QqTaskCapabilities|undefined;
+  let publicHandle:ReturnType<typeof ctx.dafeiyu.registerExtension>|undefined,qqHandle:ReturnType<typeof ctx.dafeiyu.registerExtension>|undefined,qqTasks:QqTaskCapabilities|undefined;
   try{
-    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(root,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:10000});
-    await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed',sourceTracking:true});
+    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(root,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',turnTimeoutMs:10000});
+    await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),});
     ctx.dafeiyu.configureExecution({profileId:identity.profileId,createStore:create,...(options.maxConcurrentRuns?{maxConcurrentRuns:options.maxConcurrentRuns}:{}),policies:[
       {id:'conversation',producers:['channel-bili-owner',...(options.otherChannel?['channel-qq']:[])],actions:options.tasks?[...BILI_OWNER_TASK_ACTIONS,...(options.otherChannel?QQ_TASK_ACTIONS:[])]:[],allowLocalWrite:true},
       ...(!options.omitTaskPolicy?[{id:'bili-owner-task',producers:['bili-owner-tasks'],actions:['bili_fixture_read','dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true,resources:[BILI_PUBLIC_SCENE]}]:[]),
       ...(options.otherChannel?[{id:'qq-task',producers:['qq-tasks'],actions:[],allowLocalWrite:true,resources:[]}]:[]),
     ]});
-    publicHandle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'bili-public-fixture',version:'1',agentId:'dafeiyu',resourceProofs:{current:proof=>biliOwnerHash(proofs.get(proof.key)??null)===biliOwnerHash(proof),epoch:()=>fixtureHash,publicView:(proof,view)=>proofs.has(proof.key)&&view===JSON.stringify(publicPage)},actions:[
+    publicHandle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'bili-public-fixture',version:'1',agentId:'dafeiyu',resourceProofs:{current:proof=>biliOwnerHash(proofs.get(proof.key)??null)===biliOwnerHash(proof),epoch:()=>fixtureHash,publicView:(proof,view)=>proofs.has(proof.key)&&view===JSON.stringify(publicPage)},actions:[
       {id:'bili_fixture_read',version:'1',description:'仅本机虚构的公共视频文字来源',effects:'read',requiresTask:true,inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_raw,context)=>{
         publicReads++;ctx.dafeiyu.authorizeCapabilityResource(context,'bili-public-fixture',BILI_PUBLIC_SCENE);const proof:ResourceProof={provider:'bili-public-fixture',scene:BILI_PUBLIC_SCENE,key:context.operationId,version:1,hash:biliOwnerHash(publicPage),roots:['fixture-public-video'],detail:{scope:context.scope}};proofs.set(proof.key,proof);
         const observation=ctx.dafeiyu.recordCapabilityObservation(context,'bili-public-fixture',{requestId:context.operationId,proof,text:JSON.stringify(publicPage),occurredAt:new Date().toISOString(),coverage:['only-fictional-text'],counts:{received:1,processed:1}});
         const {id,scopeKey,version,contentHash}=observation.source;return {status:'succeeded',effects:'none',completeness:'partial',data:z.json().parse({page:publicPage,observation}),sources:[{id,scopeKey,version,contentHash}],receipts:[]};}},
     ]});
-    if(options.otherChannel){qqHandle=ctx.dafeiyu.registerExtension({id:'channel-qq',version:'fixture',apiVersion:API_VERSION,agentId:'dafeiyu',channels:[{channel:'qq',account:'12345678',deliver:async()=>({status:'sent',receiptId:'fictional-qq'})}]});
+    if(options.otherChannel){qqHandle=ctx.dafeiyu.registerExtension({id:'channel-qq',version:'fixture',protocolVersion:4,agentId:'dafeiyu',channels:[{channel:'qq',account:'12345678',deliver:async()=>({status:'sent',receiptId:'fictional-qq'})}]});
       qqTasks=new QqTaskCapabilities(ctx,{agentId:'dafeiyu',botId:'12345678',ownerId:'87654321',policyId:'qq-task',naturalNames:[],deliverResults:false});}
     if(create){const store=new BiliOwnerStore(join(directory,'bili-owner.sqlite'),identity,true);try{store.initializeFresh({requestId:'fresh',since:backend.state.now-60000,cutoverHash:fixtureHash},backend.state.now);}finally{store.close();}}
     channel=await openBiliOwnerChannel(ctx,{agentId:identity.agentId,profileId:identity.profileId,dataDir:directory,settings:{accountUid:'10000001',ownerUid:'10000002',tasks:{enabled:options.tasks??false,deliverResults:options.deliverResults??true},...(options.maxPending?{maxPending:options.maxPending}:{})}},ports);

@@ -11,7 +11,7 @@ async function fixture(){const root=await mkdtemp(join(testTempDir(),'host-bili-
   await writeFile(join(root,'persona.md'),'虚构配置夹具，不连接平台。');
   const config={schemaVersion:1,profileId:'bili-owner-config',agent:{id:'dafeiyu'},paths:{core:'data/core',memory:'data/memory',sessions:'data/sessions',query:'data/query.sqlite'},
     modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'persona.md',kind:'test'},
-    plugins:[{id:'model-scripted',config:{}},{id:'timeline',config:{execution:true}},{id:'memory',config:{sourceTracking:true}},
+    plugins:[{id:'model-scripted',config:{}},{id:'timeline',config:{execution:true}},{id:'memory',config:{}},
       {id:'media',config:{ffmpeg:process.execPath,ffprobe:process.execPath}},{id:'bilibili',config:{}},{id:'channel-bili-owner',config:{accountUid:'10000001',ownerUid:'10000002',}}] as {id:string;config:Record<string,unknown>}[],
     authorityPolicies:[{id:'conversation',producers:['channel-bili-owner'],actions:[...BILI_OWNER_TASK_ACTIONS],allowLocalWrite:true},
       {id:'bili-owner-task',producers:['bili-owner-tasks'],actions:[...BILI_OWNER_NATIVE_ACTIONS],allowLocalWrite:true,resources:[BILI_PUBLIC_SCENE,BILI_OWNER_SCENE]}] as {id:string;producers:string[];actions:string[];allowLocalWrite:boolean;resources?:unknown[];externalActions?:unknown[]}[]};

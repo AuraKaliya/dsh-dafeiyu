@@ -37,7 +37,7 @@ export class ActivityStore {
   private closed=false;
   constructor(file:string,identity:z.infer<typeof identitySchema>,config:z.input<typeof ActivityConfigSchema>={},create=false){
     this.identity=identitySchema.parse(identity);this.config=ActivityConfigSchema.parse(config);validateQuiet(this.config.quiet);
-    if(!existsSync(file)&&!create)throw new Error('ACTIVITY_MIGRATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});
+    if(!existsSync(file)&&!create)throw new Error('ACTIVITY_INITIALIZATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});
     this.db=new DatabaseSync(file);try{
       this.db.exec('PRAGMA busy_timeout=5000;');const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),app=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
       const empty=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n)===0;

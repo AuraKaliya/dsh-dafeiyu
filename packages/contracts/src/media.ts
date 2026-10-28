@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { ExecutionScopeSchema,ExtensionIdSchema } from './execution.js';
 import { ResourceProofSchema } from './resource-observation.js';
 import { PersonaRequestIdSchema,PersonaSourceRefSchema } from './persona.js';
-import type { ExecutionContextV3 } from './execution.js';
+import type { ExecutionContext } from './execution.js';
 import type { PersonaAccess } from './persona.js';
 import type { ResourceProof } from './resource-observation.js';
 import type { MediaReplyAccess,MediaReplyAuthority,ReplyMediaManifest } from './media-delivery.js';
@@ -57,12 +57,12 @@ export interface MediaSourceProvider {
 export interface MediaPort {
   ready():boolean;
   registerProvider(provider:MediaSourceProvider):()=>void;
-  acquire(context:ExecutionContextV3,owner:string,input:z.infer<typeof MediaAcquireSchema>):Promise<MediaAssetRef>;
-  inspect(context:ExecutionContextV3,owner:string,ref:MediaAssetRef):unknown;
-  read(context:ExecutionContextV3,owner:string,input:z.infer<typeof MediaReadSchema>):Promise<unknown>;
-  imageOriginal?(context:ExecutionContextV3,owner:string,exposureId:string):Promise<{data:Uint8Array;mime:string;source:MediaSourceDescription}>;
-  prepareReply?(context:ExecutionContextV3,input:unknown,owner?:string):Promise<unknown>;
-  voice?(context:ExecutionContextV3,owner:string,exposureId:string):{text:string;evidence:MediaVoiceEvidence};
+  acquire(context:ExecutionContext,owner:string,input:z.infer<typeof MediaAcquireSchema>):Promise<MediaAssetRef>;
+  inspect(context:ExecutionContext,owner:string,ref:MediaAssetRef):unknown;
+  read(context:ExecutionContext,owner:string,input:z.infer<typeof MediaReadSchema>):Promise<unknown>;
+  imageOriginal?(context:ExecutionContext,owner:string,exposureId:string):Promise<{data:Uint8Array;mime:string;source:MediaSourceDescription}>;
+  prepareReply?(context:ExecutionContext,input:unknown,owner?:string):Promise<unknown>;
+  voice?(context:ExecutionContext,owner:string,exposureId:string):{text:string;evidence:MediaVoiceEvidence};
   voiceCurrent?(evidence:MediaVoiceEvidence):boolean;
   replyDraft?(runId:string):{id:string;version:number;selected:number;authority:MediaReplyAuthority}|null;
   finalizeReply?(access:MediaReplyAccess):Promise<ReplyMediaManifest|null>;

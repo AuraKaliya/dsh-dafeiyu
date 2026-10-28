@@ -10,10 +10,9 @@ const range=z.discriminatedUnion('kind',[
 /** Stage A deliberately provides no agent-wide/public grant constructor. Ownership is
  * independent of permission, and matching a task name never grants access. */
 const conversationBoundary=z.strictObject({
-  schemaVersion:z.literal(1),policyVersion:z.literal(1),owner:z.strictObject({kind:z.literal('agent'),agentId:id}),
+  schemaVersion:z.literal(1),kind:z.literal('conversation'),policyVersion:z.literal(1),owner:z.strictObject({kind:z.literal('agent'),agentId:id}),
   sourceScene:z.discriminatedUnion('kind',[
     z.strictObject({kind:z.literal('conversation'),route,conversation,ingressPluginId:id.nullable()}),
-    z.strictObject({kind:z.literal('legacy-route'),route}),
   ]),
   task:z.discriminatedUnion('kind',[
     z.strictObject({kind:z.literal('unassigned')}),
@@ -21,13 +20,13 @@ const conversationBoundary=z.strictObject({
     z.strictObject({kind:z.literal('agent-task'),id:z.uuid()}),
   ]),
   internalUse:range,externalExpression:range,
-  assignment:z.enum(['legacy-migration','conservative-create']),
+  assignment:z.literal('conservative-create'),
 });
 const taskRange=z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('task'),route,taskId:z.uuid()}),z.strictObject({kind:z.literal('none')})]);
-const executionBoundary=z.strictObject({schemaVersion:z.literal(2),policyVersion:z.literal(1),owner:z.strictObject({kind:z.literal('agent'),agentId:id}),
+const executionBoundary=z.strictObject({schemaVersion:z.literal(1),kind:z.literal('task'),policyVersion:z.literal(1),owner:z.strictObject({kind:z.literal('agent'),agentId:id}),
   sourceScene:z.strictObject({kind:z.literal('execution-task'),route,taskId:z.uuid()}),task:z.strictObject({kind:z.literal('agent-task'),id:z.uuid()}),
   internalUse:taskRange,externalExpression:z.strictObject({kind:z.literal('none')}),assignment:z.literal('execution-create')});
-export const MemoryBoundarySchema=z.discriminatedUnion('schemaVersion',[conversationBoundary,executionBoundary]).refine(value=>value.schemaVersion!==2||
+export const MemoryBoundarySchema=z.discriminatedUnion('kind',[conversationBoundary,executionBoundary]).refine(value=>value.kind!=='task'||
   value.sourceScene.route===taskScopeKey(value.owner.agentId,value.task.id)&&value.sourceScene.taskId===value.task.id&&
   (value.internalUse.kind==='none'||value.internalUse.route===value.sourceScene.route&&value.internalUse.taskId===value.task.id),'Execution memory boundary mismatch');
 export type MemoryBoundary=z.infer<typeof MemoryBoundarySchema>;

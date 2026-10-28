@@ -22,7 +22,7 @@ async function fixture(enabled=false){
     route:{provider:'local-test',model:'scripted',reasoningEffort:null,contextWindow:32768,maxOutputTokens:2048,maxRequestBytes:100000},budgetAuthorizationId:'fictional-budget',resultOwner:{account:'12345678',ownerId:'87654321'}}};
   const config={schemaVersion:1,profileId:identity.profileId,agent:{id:identity.agentId},paths:{core:'data/core',memory:'data/memory',sessions:'data/sessions',query:'data/query.sqlite'},
     modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'persona.md',kind:'test'},plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},
-      {id:'memory',required:true,config:{sourceTracking:true}}] as {id:string;required:boolean;config:Record<string,unknown>}[]};
+      {id:'memory',required:true,config:{}}] as {id:string;required:boolean;config:Record<string,unknown>}[]};
   if(enabled)config.plugins.push(executor);
   await writeFile(join(root,'persona.md'),'受管离线夹具人格，不调用模型。');await writeFile(file,JSON.stringify(config));
   const old=loadHostConfig(file);initializeProfile(old,coordination);

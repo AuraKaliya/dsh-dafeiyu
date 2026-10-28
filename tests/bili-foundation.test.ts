@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createServer,request } from 'node:http';
 import type { Server } from 'node:http';
-import type { ExecutionContextV3,ExecutionGrant } from '@dafeiyu/contracts';
+import type { ExecutionContext,ExecutionGrant } from '@dafeiyu/contracts';
 import { taskScopeKey } from '@dafeiyu/contracts';
 import { BiliStore } from '@dafeiyu/bilibili';
 import { BiliConfigSchema } from '../packages/bilibili/lib/config.js';
@@ -14,7 +14,7 @@ import { biliUrl,publicAddress,boundedJson } from '../packages/bilibili/lib/http
 import type { HttpTransport,HttpResponse } from '../packages/bilibili/lib/http.js';
 import { testTempDir } from './test-temp.js';
 
-async function fixture(){const root=await mkdtemp(join(testTempDir(),'bili-')),file=join(root,'bilibili.sqlite'),identity={agentId:'fish',profileId:'test'},taskId=randomUUID(),context:ExecutionContextV3={agentId:'fish',taskId,scope:{kind:'task',agentId:'fish',taskId,scopeKey:taskScopeKey('fish',taskId)},runId:randomUUID(),operationId:randomUUID(),origin:{kind:'native',producerId:'fixture',requestId:'start'},intentVersion:1,grant:{} as ExecutionGrant,signal:new AbortController().signal};
+async function fixture(){const root=await mkdtemp(join(testTempDir(),'bili-')),file=join(root,'bilibili.sqlite'),identity={agentId:'fish',profileId:'test'},taskId=randomUUID(),context:ExecutionContext={agentId:'fish',taskId,scope:{kind:'task',agentId:'fish',taskId,scopeKey:taskScopeKey('fish',taskId)},runId:randomUUID(),operationId:randomUUID(),origin:{kind:'native',producerId:'fixture',requestId:'start'},intentVersion:1,grant:{} as ExecutionGrant,signal:new AbortController().signal};
   return {root,file,identity,context,store:new BiliStore(file,identity,true)};}
 const response=(data:unknown,status=200):HttpResponse=>{const bytes=Buffer.from(JSON.stringify(data));return {status,headers:{'content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};};
 const page={kind:'discover' as const,sourceKey:'popular:1',data:{titles:['虚构天文']},coverage:['本页'],fields:[{id:'title:0',text:'虚构天文'}]};

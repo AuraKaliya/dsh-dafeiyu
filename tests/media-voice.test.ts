@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { MediaVoiceEvidence,ExecutionContextV3 } from '@dafeiyu/contracts';
+import type { MediaVoiceEvidence,ExecutionContext } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,bot,owner,privateScene,until,outcomes } from './qq-capabilities-fixture.js';
 import { syntheticPcm } from './media-pcm-fixture.js';
 import { call,textReply } from './harness.js';
@@ -12,7 +12,7 @@ for(const variant of ['complete','partial','silence','file','not-exposed','cropp
   const h=await qqCapabilityFixture({media:true,audio:true,extraConversationActions:['fixture_voice_evidence']});let captured:MediaVoiceEvidence|undefined,error:string|undefined,step=0,exposureId:string|undefined,earlyRejected=false;
   if(variant==='not-exposed'){const read=h.ctx.dafeiyuMedia.read.bind(h.ctx.dafeiyuMedia);h.ctx.dafeiyuMedia.read=async(context,owner,input)=>{const result=await read(context,owner,input),view=z.object({exposureId:z.string()}).parse(result);
     assert.throws(()=>h.core.mediaVoiceEvidence(context,owner,view.exposureId),/OBSERVATION_NOT_EXPOSED/);earlyRejected=true;return result;};}
-  const handle=h.core.registerExtensionV3({protocolVersion:3,id:'voice-fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_voice_evidence',version:'1',description:'program-only voice proof fixture',inputSchema:z.strictObject({exposureId:z.string()}),outputSchema:z.json(),effects:'read',execute:async(input,c:ExecutionContextV3)=>{
+  const handle=h.core.registerExtension({protocolVersion:4,id:'voice-fixture',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_voice_evidence',version:'1',description:'program-only voice proof fixture',inputSchema:z.strictObject({exposureId:z.string()}),outputSchema:z.json(),effects:'read',execute:async(input,c:ExecutionContext)=>{
     try{const id=z.object({exposureId:z.string()}).parse(input).exposureId;assert.throws(()=>h.core.mediaVoiceEvidence({...c},'voice-fixture',id),/SCOPE_DENIED/);const actual=h.core.mediaVoiceEvidence(c,'voice-fixture',id);captured=actual.evidence;assert.equal(actual.text,h.platform.transcript);return {status:'succeeded',effects:'none',completeness:'complete',data:{valid:true},sources:[],receipts:[]};}
     catch(e){error=e instanceof Error?e.message:'unknown';return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:/^[A-Z_]+$/.test(error)?error:'VOICE_TEST_FAILED'};}}}]});
   try{const file=join(h.root,'onebot-cache/voice.wav');await writeFile(file,syntheticPcm(32000));h.platform.mediaFiles.set('voice-handle',file);h.platform.speechDetected=variant!=='silence';

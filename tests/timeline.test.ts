@@ -1,10 +1,12 @@
+import {z} from 'zod';
+import {fixtureAction} from './fixture-action.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { API_VERSION } from '@dafeiyu/contracts';
-import type { ActionContext, EventRecord } from '@dafeiyu/contracts';
+import type { ConversationAccess, EventRecord } from '@dafeiyu/contracts';
 import { eventFor } from '@dafeiyu/journal';
 import { textReply, call } from './harness.js';
 import { timelineFixture } from './timeline-fixture.js';
@@ -76,9 +78,7 @@ test('source results omit model reasoning, tool-private data and system prompts'
 
 test('opening tool evidence never reruns the tool and masks credential-shaped output',async t=>{
   const h=await timelineFixture();t.after(h.close);let executions=0,requests=0;
-  h.core.registerExtension({id:'fixture-action',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{
-    name:'fixture_action',description:'一次测试操作',fields:{},execute:async()=>{executions++;return {value:'测试结果',api_key:'MOCK_SECRET_SENTINEL'};},
-  }]});
+  h.core.registerExtension({id:'fixture-action',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'fixture-action',{id:'fixture_action',description:'一次测试操作',inputSchema:z.strictObject({}),work:async()=>{executions++;return {value:'测试结果',api_key:'MOCK_SECRET_SENTINEL'};}})]});
   h.setResponse(()=>++requests===1?call('fixture_action',{}):textReply('操作完成'));
   const receipt=h.simulator.send('a','执行测试操作',{id:'operation'});await h.core.whenIdle();const item=h.core.journal.get(receipt.id);
   const completed=h.core.journal.events(item.route).find(e=>e.traceId===item.id&&e.type==='turn.completed')!;
@@ -116,10 +116,10 @@ test('original DSH source remains readable after surface replacement without rep
 });
 
 test('forged and expired action contexts cannot obtain a history scope',async t=>{
-  const h=await timelineFixture();t.after(h.close);let captured:ActionContext|undefined;
+  const h=await timelineFixture();t.after(h.close);let captured:ConversationAccess|undefined;
   await h.probe('a',context=>{captured=context;return h.timeline.search(context,{limit:1});});
   assert.ok(captured);assert.throws(()=>h.timeline.search(captured!,{}),/No active/);
-  const fake:ActionContext={operationId:'fake',conversation:{channel:'simulator',account:'local',kind:'local',id:'a'},sourceMessageId:'x',signal:new AbortController().signal};
+  const fake:ConversationAccess={operationId:'fake',conversation:{channel:'simulator',account:'local',kind:'local',id:'a'},sourceMessageId:'x',signal:new AbortController().signal};
   assert.throws(()=>h.timeline.search(fake,{}),/No active/);
 });
 

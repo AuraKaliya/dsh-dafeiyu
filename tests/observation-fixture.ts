@@ -14,7 +14,7 @@ export function observationReport(overrides:Partial<MemoryObservation>={}):Memor
 }
 export async function observationFixture(root?:string,pluginVersion='fixture-v1'){
   const h=await memoryFixture(root,{compaction:{inputTokens:1000000},context:{}}),store=new MemoryStore(join(h.root,'memory.sqlite'));
-  const handle=h.core.registerExtension({id:'fictional-observer',version:pluginVersion,apiVersion:API_VERSION,agentId:'dafeiyu',channels:[{
+  const handle=h.core.registerExtension({id:'fictional-observer',version:pluginVersion,protocolVersion:4,agentId:'dafeiyu',channels:[{
     channel:observationConversation.channel,account:observationConversation.account,deliver:async()=>({status:'sent',receiptId:'fictional-only'}),
   }]});
   const scope={agentId:'dafeiyu',route:conversationKey('dafeiyu',observationConversation),traceId:randomUUID(),operationId:randomUUID(),startedEventId:randomUUID()};

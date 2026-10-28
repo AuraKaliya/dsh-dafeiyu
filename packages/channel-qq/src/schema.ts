@@ -47,35 +47,21 @@ export function inspectQqSchema(db: DatabaseSync): QqSchemaInspection {
   const applicationId = Number(db.prepare('PRAGMA application_id').get()?.application_id);
   const objects = db.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all();
   const fresh = version === 0 && applicationId === 0 && objects.length === 0;
-  const expected = [...Object.entries(tables), ...(version >= 2 ? [['qq_group_snapshots', groupTable]] as const : []), ...(version >= 3 ? Object.entries(cacheTables) : []), ...(version >= 4 ? Object.entries(deliveryTables) : []),...(version>=5?Object.entries(mediaTables):[]),...(version>=7?[['qq_reply_quotes',quoteTable]]:[]),...(version>=8?Object.entries(interactionTables):[])];
+  const expected: readonly (readonly [string,string])[] = [...Object.entries(tables), ['qq_group_snapshots',groupTable], ...Object.entries(cacheTables), ...Object.entries(deliveryTables), ...Object.entries(mediaTables), ['qq_reply_quotes',quoteTable], ...Object.entries(interactionTables)];
   const structure = objects.length === expected.length && expected.every(([name, sql]) => {
     const found = objects.find(item => item.name === name);
     return found?.type === 'table' && typeof found.sql === 'string' && normalize(found.sql) === normalize(sql);
   });
-  const supported = structure && (version === 0 && applicationId === 0 || [1, 2, 3, 4, 5, 6, 7, 8].includes(version) && applicationId === QQ_APPLICATION_ID);
+  const supported = structure && version === QQ_SCHEMA_VERSION && applicationId === QQ_APPLICATION_ID;
   return { version, applicationId, fresh, supported };
 }
 
-/** Caller must have admitted a fresh database or an explicitly authorized migration. */
-export function initializeQqSchema(db: DatabaseSync, migrate: boolean): void {
+/** Create the complete current schema only in an empty database. */
+export function initializeQqSchema(db:DatabaseSync):void {
   db.exec('BEGIN IMMEDIATE');
-  try {
-    const current = inspectQqSchema(db);
-    if (!current.fresh && !current.supported) throw new Error('QQ_STORAGE_UNSUPPORTED');
-    if (!current.fresh && current.version < QQ_SCHEMA_VERSION && !migrate) throw new Error('QQ_MIGRATION_REQUIRED');
-    if (current.fresh) for (const sql of Object.values(tables)) db.exec(sql);
-    if (current.fresh || current.version < 2) db.exec(groupTable);
-    if (current.fresh || current.version < 3) for (const sql of Object.values(cacheTables)) db.exec(sql);
-    if (current.fresh || current.version < 4) for (const sql of Object.values(deliveryTables)) db.exec(sql);
-    if (current.fresh || current.version < 5) for (const sql of Object.values(mediaTables)) db.exec(sql);
-    if (current.fresh || current.version < 7) db.exec(quoteTable);
-    if (current.fresh || current.version < 8) for(const sql of Object.values(interactionTables))db.exec(sql);
-    if (current.fresh || current.version < QQ_SCHEMA_VERSION) {
-      db.exec(`PRAGMA application_id=${QQ_APPLICATION_ID}; PRAGMA user_version=${QQ_SCHEMA_VERSION};`);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
+  try{const current=inspectQqSchema(db);
+    if(!current.fresh){if(!current.supported)throw new Error('INVALID_STORAGE');db.exec('COMMIT');return;}
+    for(const sql of [...Object.values(tables),groupTable,...Object.values(cacheTables),...Object.values(deliveryTables),...Object.values(mediaTables),quoteTable,...Object.values(interactionTables)])db.exec(sql);
+    db.exec(`PRAGMA application_id=${QQ_APPLICATION_ID};PRAGMA user_version=${QQ_SCHEMA_VERSION};`);db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
 }

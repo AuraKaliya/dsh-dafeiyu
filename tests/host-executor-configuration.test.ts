@@ -28,7 +28,7 @@ async function fixture(){
   // Deliberately declare executor before its providers: actual feature dependencies must determine the order.
   const config=HostConfigSchema.parse({schemaVersion:1,profileId:'executor-config',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},
     modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},
-    plugins:[{id:'server-executor',required:true,config:settings},{id:'memory',required:true,config:{sourceTracking:true}},{id:'timeline',required:true,config:{execution:true}},{id:'model-scripted',required:true,config:{}}],
+    plugins:[{id:'server-executor',required:true,config:settings},{id:'memory',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'model-scripted',required:true,config:{}}],
     authorityPolicies:[{id:'owner-work',producers:['host-cli'],actions:[execute,status],allowLocalWrite:true,externalActions:[exact],resources:[serverExecutorScene('executor-config')]}]});
   await writeFile(join(root,'persona.md'),'虚构配置测试底色，不包含真实经历。\n');await writeFile(file,JSON.stringify(config));
   return {root,file,coordination,config,prepared:loadHostConfig(file)};

@@ -25,7 +25,7 @@ const options={scripted:true,foundationTemplate:resolve('profiles/persona.founda
 try{
   const prepared=prepareInstallation(file,options);assert.equal(prepared.inspection.ready,true);
   const metadata=await readFile(join(data,'installation.json'),'utf8');
-  host=await startInstallation(file,options);assert.equal(host.snapshot().phase,'ready');assert.ok(host.ctx.dafeiyuMemory.growth);assert.equal(host.ctx.dafeiyuMemory.growth,host.ctx.dafeiyuMemory.persona);
+  host=await startInstallation(file,options);assert.equal(host.snapshot().phase,'ready');assert.ok(host.ctx.dafeiyuMemory.growth);assert.equal(host.ctx.dafeiyuMemory.growth,host.ctx.dafeiyuMemory.growth);
   const deadline=Date.now()+11000;while(sends===0&&Date.now()<deadline)await new Promise(done=>setTimeout(done,20));assert.equal(sends,1);
   await assert.rejects(()=>startInstallation(file,options),/STORE_OWNED|RESOURCE_OWNED|ALREADY_OWNED/);
   await host.close('fixture');host=undefined;

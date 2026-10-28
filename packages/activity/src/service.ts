@@ -4,7 +4,7 @@ import type {} from '@dafeiyu/core';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { ActivityConfigSchema,ActivityTriggerSchema,QuietWindowSchema,ActivityTimeZoneSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,ServiceGate } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3,ExecutionContextV3,PersonaSourceRef,ActivityScheduleBody,MemoryMaintenanceSchedulingPort,ActivityDomainEvent } from '@dafeiyu/contracts';
+import type { ActionCapability,ExecutionContext,PersonaSourceRef,ActivityScheduleBody,MemoryMaintenanceSchedulingPort,ActivityDomainEvent } from '@dafeiyu/contracts';
 import { ActivityStore,activityHash } from './store.js';
 import { ActivityScheduler } from './scheduler.js';
 
@@ -32,43 +32,43 @@ export class ActivityService extends Service {
   private closing:Promise<void>|undefined;
   private finalCounts:ReturnType<ActivityStore['counts']>|undefined;
   private readonly scheduler:ActivityScheduler;
-  private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
+  private readonly handle:ReturnType<Context['dafeiyu']['registerExtension']>;
   constructor(ctx:Context,raw:Config,private readonly now:()=>number=Date.now,monotonic:()=>number=()=>performance.now()){
     super(ctx,'dafeiyuActivity');this.config=configSchema.parse(raw);this.configHash=activityHash(this.config.settings);
     this.store=new ActivityStore(join(this.config.dataDir,'activity.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.settings);
-    try{this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'activity',version:'0.1.0',agentId:this.config.agentId,
+    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'activity',version:'0.1.0',agentId:this.config.agentId,
       requires:['execution.task.v1','execution.source-anchor.v1','memory.execution.v1',...(this.config.settings.maintenance?['memory.maintenance.v1']:[])],provides:['activity.plan.v1','activity.wakeup.v1'],lifecycleReady:()=>this.gate.active&&!this.closed&&this.scheduler.dependenciesReady(),actions:this.actions(),
       contexts:[{id:'wake',prepare:async view=>this.scheduler.context(view),validate:(view,item)=>this.scheduler.contextCurrent(view,item)}]});}
     catch(error){this.store.close();throw error;}
     try{this.scheduler=new ActivityScheduler(ctx,this.store,this.configHash,()=>this.gate.active&&!this.closed,this.now,monotonic);}catch(error){this.handle.dispose();this.store.close();throw error;}
     ctx.effect(()=>()=>this.close(),'activity.close');
   }
-  private access(context:ExecutionContextV3,write:boolean){if(this.closed)throw new Error('DEPENDENCY_UNAVAILABLE');this.gate.assertActive();
+  private access(context:ExecutionContext,write:boolean){if(this.closed)throw new Error('DEPENDENCY_UNAVAILABLE');this.gate.assertActive();
     const access=this.ctx.dafeiyu.personaAccess(context,'activity',write?'local-write':'read');if(access.view.scope.kind!=='task')throw new Error('TASK_REQUIRED');return access;}
-  private basis(context:ExecutionContextV3,refs:readonly PersonaSourceRef[]){const access=this.access(context,true),exposed=[...access.admittedSources,...access.inputs.flatMap(i=>i.sourceRef?[i.sourceRef]:[])];
+  private basis(context:ExecutionContext,refs:readonly PersonaSourceRef[]){const access=this.access(context,true),exposed=[...access.admittedSources,...access.inputs.flatMap(i=>i.sourceRef?[i.sourceRef]:[])];
     if(refs.some(ref=>!exposed.some(item=>activityHash(item)===activityHash(ref))))throw new Error('SOURCE_NOT_EXPOSED');return access;}
-  private trigger(context:ExecutionContextV3,value:z.infer<typeof trigger>):ActivityScheduleBody['trigger']{
+  private trigger(context:ExecutionContext,value:z.infer<typeof trigger>):ActivityScheduleBody['trigger']{
     return value.kind==='condition'?{...value,key:`task:${context.taskId}`}:value;
   }
-  plan(context:ExecutionContextV3,raw:unknown){const input=planSchema.parse(raw),access=this.basis(context,input.basis),anchor=this.ctx.dafeiyu.captureActivityAnchor(context,'activity');
+  plan(context:ExecutionContext,raw:unknown){const input=planSchema.parse(raw),access=this.basis(context,input.basis),anchor=this.ctx.dafeiyu.captureActivityAnchor(context,'activity');
     return this.store.create({schemaVersion:1,requestId:input.requestId,agentId:this.config.agentId,owner:access.view.scope,purpose:'exploration',goal:input.goal,basis:input.basis,anchor,maintenanceId:null,
       policyId:this.config.settings.explorationPolicy,configHash:this.configHash,trigger:this.trigger(context,input.trigger),missed:input.missed,
       timeZone:input.timeZone??this.config.settings.timeZone,quiet:input.quiet??this.config.settings.quiet,state:'active'},this.now());
   }
-  update(context:ExecutionContextV3,raw:unknown){const input=updateSchema.parse(raw),access=this.basis(context,input.basis??[]),plan=this.store.get(input.id,access.view.scope);
+  update(context:ExecutionContext,raw:unknown){const input=updateSchema.parse(raw),access=this.basis(context,input.basis??[]),plan=this.store.get(input.id,access.view.scope);
     if(plan.body.purpose==='maintenance'&&(input.goal!==undefined||input.basis!==undefined))throw new Error('SCOPE_DENIED');
     const pauseOnly=(input.state==='paused'||input.state==='cancelled')&&input.goal===undefined&&input.basis===undefined&&input.trigger===undefined&&input.missed===undefined&&input.quiet===undefined&&input.timeZone===undefined;
     if(!pauseOnly&&plan.body.anchor&&this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor).state==='stale'&&input.goal===undefined)throw new Error('ACTIVITY_REPLAN_REQUIRED');
     const anchor=pauseOnly?undefined:this.ctx.dafeiyu.captureActivityAnchor(context,'activity');const {id,...patch}=input;
     return this.store.update(id,access.view.scope,{...patch,...(input.goal!==undefined?{basis:input.basis??[]}:{}),...(input.trigger?{trigger:this.trigger(context,input.trigger)}:{}),...(anchor?{anchor}:{}),configHash:this.configHash},this.now());
   }
-  status(context:ExecutionContextV3,id?:string){const access=this.access(context,false),plans=id?[this.store.get(id,access.view.scope)]:this.store.list(access.view.scope);
+  status(context:ExecutionContext,id?:string){const access=this.access(context,false),plans=id?[this.store.get(id,access.view.scope)]:this.store.list(access.view.scope);
     return plans.map(plan=>{const source=plan.body.anchor?this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor):{state:'stale',code:'ACTIVITY_SOURCE_REQUIRED'};return {id:plan.body.id,version:plan.body.version,status:plan.status,purpose:plan.body.purpose,goal:source.state==='stale'?null:plan.body.goal,trigger:plan.body.trigger,
       quiet:plan.body.quiet,timeZone:plan.body.timeZone,nextDueAt:plan.nextDue===null?null:new Date(plan.nextDue).toISOString(),notBefore:new Date(plan.notBefore).toISOString(),error:plan.error,
       source};});
   }
-  private actions():ActionCapabilityV3[]{
-    const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,fn:(input:unknown,c:ExecutionContextV3)=>unknown):ActionCapabilityV3=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',requiresTask:true,
+  private actions():ActionCapability[]{
+    const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,fn:(input:unknown,c:ExecutionContext)=>unknown):ActionCapability=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',requiresTask:true,
       execute:async(input,c)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(fn(input,c)),sources:[],receipts:[]};}
         catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'ACTIVITY_FAILED';
           return {status:'failed',effects:write&&!['INVALID_INPUT','SOURCE_NOT_EXPOSED','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','SCOPE_DENIED','ACTIVITY_CANCELLED','ACTIVITY_INTERVAL_TOO_SHORT','ACTIVITY_SOURCE_REQUIRED','ACTIVITY_REPLAN_REQUIRED','ACTIVITY_QUIET_ALL_DAY','PRIVATE_INPUT_REJECTED'].includes(code)?'unknown':'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});

@@ -17,23 +17,6 @@ const grantBodySchema=z.strictObject({input:TaskMemoryGrantSchema,authorization:
 const hitSchema=z.strictObject({proof:witnessSchema,start:z.number().int(),end:z.number().int(),profile:z.string()});
 type Grant=ReturnType<TaskMemory['active']>;
 
-export function migrateTaskMemory(db:DatabaseSync){
-  const version=db.prepare('PRAGMA user_version').get()?.user_version;
-if(version===5||version===6||version===7||version===8||version===9||version===10||version===11||version===12||version===13){for(const table of ['task_memory_policies','task_memory_policy_revisions','task_memory_grants','task_memory_requests','task_memory_hits'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
-  if(version!==4)throw new Error('Unsupported task memory schema');
-  db.exec(`CREATE TABLE task_memory_policies(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id));
-    CREATE TABLE task_memory_policy_revisions(agent_id TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,id,version));
-    CREATE TABLE task_memory_grants(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,task_id TEXT NOT NULL REFERENCES task_workspaces(id),version INTEGER NOT NULL,revoked INTEGER NOT NULL,body TEXT NOT NULL);
-    CREATE TABLE task_memory_requests(agent_id TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,request_id));
-    CREATE TABLE task_memory_hits(id TEXT PRIMARY KEY,grant_id TEXT NOT NULL REFERENCES task_memory_grants(id),expires_at TEXT NOT NULL,body TEXT NOT NULL);
-    CREATE TRIGGER task_memory_policy_revision_immutable BEFORE UPDATE ON task_memory_policy_revisions BEGIN SELECT RAISE(ABORT,'Immutable policy revision'); END;
-    CREATE TRIGGER task_memory_policy_revision_retain BEFORE DELETE ON task_memory_policy_revisions BEGIN SELECT RAISE(ABORT,'Retain policy revision'); END;
-    CREATE TRIGGER task_memory_grant_immutable BEFORE UPDATE OF id,agent_id,task_id,body ON task_memory_grants BEGIN SELECT RAISE(ABORT,'Immutable grant binding'); END;
-    CREATE TRIGGER task_memory_grant_retain BEFORE DELETE ON task_memory_grants BEGIN SELECT RAISE(ABORT,'Revoke authorization'); END;
-    CREATE TRIGGER task_memory_hit_immutable BEFORE UPDATE ON task_memory_hits BEGIN SELECT RAISE(ABORT,'Immutable hit proof'); END;
-    PRAGMA user_version=5;`);
-}
-
 /** Durable task-internal authority. The original memory boundaries are never rewritten. */
 export class TaskMemory {
   constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly memory:MemoryStore,

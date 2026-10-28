@@ -39,6 +39,6 @@ test('pre-dispatch rejection retains the approved text without inventing a send 
 
 test('runtime v2 migration is explicit and preserves every old Run before adding an empty native delivery table',async()=>{
   const path=await file(),store=new RuntimeStore(path,identity,{create:true}),{run}=setup(store);store.close();const old=new DatabaseSync(path);old.exec('DROP TABLE native_deliveries;PRAGMA user_version=2;');const before=old.prepare('SELECT * FROM runs').all();old.close();const bytes=await readFile(path);
-  assert.throws(()=>new RuntimeStore(path,identity),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),bytes);const upgraded=new RuntimeStore(path,identity,{migrate:true});try{assert.equal(upgraded.get(run.id).state,'completed');assert.deepEqual(upgraded.nativeDeliveries.list(),[]);}finally{upgraded.close();}
+  assert.throws(()=>new RuntimeStore(path,identity),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),bytes);const upgraded=new RuntimeStore(path,identity,{});try{assert.equal(upgraded.get(run.id).state,'completed');assert.deepEqual(upgraded.nativeDeliveries.list(),[]);}finally{upgraded.close();}
   const db=new DatabaseSync(path,{readOnly:true});try{assert.deepEqual(db.prepare('SELECT * FROM runs').all(),before);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,RUNTIME_SCHEMA_VERSION);}finally{db.close();}
 });

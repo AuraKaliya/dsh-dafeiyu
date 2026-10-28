@@ -1,14 +1,13 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ExecutionInput,ExecutionView,PersonaSnapshot,PendingMessage,ContextItem } from '@dafeiyu/contracts';
-import type { BoundAction,RuntimeDelivery } from './runtime.js';
-import type { BoundActionV3 } from './registry-v3.js';
+import type { BoundAction } from './capability-registry.js';
 import type { Json } from '@dafeiyu/contracts';
 import type { ExecutionToolReceipt,SourceDependency } from '@dafeiyu/contracts';
 import type { ExecutionEvidence,NativeContext } from './execution-evidence.js';
 
 export interface NativeAction {
-  definition:BoundActionV3;
+  definition:BoundAction;
   execute(input:unknown,callId:string,signal:AbortSignal):Promise<Json>;
   metadata?(value:Json):ExecutionToolReceipt|undefined;
 }
@@ -28,9 +27,7 @@ export interface TaskExecutionFrame {
   prepare?:(scope:Context,agent:Agent)=>Promise<()=>void>;
 }
 export interface ConversationExecutionFrame {
-  mode:'conversation'|'delivery-v2';item:PendingMessage;persona:PersonaSnapshot;actions:readonly BoundAction[];
-  signal:AbortSignal;channelDescription:string;delivery?:RuntimeDelivery;
-  nativeActions?:readonly NativeAction[];
-  allowEmpty?:()=>boolean;
+  mode:'conversation';item:PendingMessage;persona:PersonaSnapshot;actions:readonly NativeAction[];
+  signal:AbortSignal;channelDescription:string;allowEmpty?:()=>boolean;
 }
 export type ExecutionFrame=TaskExecutionFrame|ConversationExecutionFrame;

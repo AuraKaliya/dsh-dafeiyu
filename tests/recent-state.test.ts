@@ -39,7 +39,7 @@ test('only the exact independently reviewed publication can cross scopes; edits 
   state.save(owner,{...input(),id:saved.id,expectedVersion:1,status:'dormant'},sources);assert.equal(state.prepare(scope('b'),'海洋',true,3000).length,0);
 });
 test('runtime tool retains recent self report without adopting it and rejects an unfaithful sharing review',async t=>{
-  const h=await qqCapabilityFixture({context:{assembly:{mode:'unified',recentState:{shared:true}}},extraConversationActions:['dafeiyu_recent_state_save','dafeiyu_recent_state_status','dafeiyu_recent_state_publish']});t.after(h.close);
+  const h=await qqCapabilityFixture({context:{assembly:{recentState:{shared:true}}},extraConversationActions:['dafeiyu_recent_state_save','dafeiyu_recent_state_status','dafeiyu_recent_state_publish']});t.after(h.close);
   let step=0,savedId='';h.setResponse(request=>{if(String(request.sessionId).startsWith('recent-state-review-'))return textReply(JSON.stringify({selfOnly:false,privateDetails:true,thirdPartyClaims:true}));
     if(++step===1)return call('dafeiyu_recent_state_save',input());
     if(step===2){const result=outcomes(request).find(outcome=>outcome.status==='succeeded');assert.ok(result);savedId=z.object({id:z.string()}).parse(result.data).id;assert.match(JSON.stringify(request.messages),/recent-self-state/);return call('dafeiyu_recent_state_publish',{requestId:'publish',id:savedId,expectedVersion:1,view:'他人的私人事实不应跨会话。'});}

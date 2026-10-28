@@ -7,17 +7,17 @@ import { z } from 'zod';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { executionHarness } from './execution-fixture.js';
 import { call,textReply } from './harness.js';
-import type { ExecutionContextV3 } from '@dafeiyu/contracts';
+import type { ExecutionContext } from '@dafeiyu/contracts';
 
 const request={requestId:'first',title:'虚构内部任务',goal:'读取测试数字并给出内部结果',policyId:'test-policy'};
-const fixture=(execute:(context:ExecutionContextV3)=>void)=>({id:'fixture',version:'1',actions:[{id:'fixture_read',version:'1',description:'读虚构的测试数字',effects:'read' as const,
+const fixture=(execute:(context:ExecutionContext)=>void)=>({id:'fixture',version:'1',actions:[{id:'fixture_read',version:'1',description:'读虚构的测试数字',effects:'read' as const,
   inputSchema:z.strictObject({amount:z.number().int().min(1).max(5)}),outputSchema:z.strictObject({value:z.number()}),
-  execute:async(_raw:unknown,context:ExecutionContextV3)=>{execute(context);return {status:'succeeded' as const,effects:'none' as const,completeness:'complete' as const,data:{value:7},sources:[],receipts:[]};}}]});
+  execute:async(_raw:unknown,context:ExecutionContext)=>{execute(context);return {status:'succeeded' as const,effects:'none' as const,completeness:'complete' as const,data:{value:7},sources:[],receipts:[]};}}]});
 function deferred(){let resolve=()=>{};const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};}
 const tick=()=>new Promise<void>(resolve=>setImmediate(resolve));
 
 test('native Task runs through real DSH without a channel, inbox, fake user source or delivery',async()=>{
-  const root=await mkdtemp(join(tmpdir(),'dafeiyu-execution-'));let count=0,step=0,captured:ExecutionContextV3|undefined;
+  const root=await mkdtemp(join(tmpdir(),'dafeiyu-execution-'));let count=0,step=0,captured:ExecutionContext|undefined;
   const h=await executionHarness(root,()=>++step===1?call('fixture_read',{amount:2}):textReply('数字是7'),fixture(context=>{count++;captured=context;assert.equal(context.scope.kind,'task');h.core.executionAuthority(context,'fixture');assert.throws(()=>h.core.executionAuthority({...context},'fixture'),/SCOPE_DENIED/);assert.throws(()=>h.core.executionAuthority(context,'another'),/SCOPE_DENIED/);}));
   try{
     const accepted=h.port.submitTask(request);await h.core.whenIdle();const status=h.port.status(accepted.run);

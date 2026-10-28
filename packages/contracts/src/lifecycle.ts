@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-export const LifecycleModeSchema = z.enum(['legacy', 'managed']);
-export type LifecycleMode = z.infer<typeof LifecycleModeSchema>;
 export type ServicePhase = 'registered' | 'recovered' | 'active' | 'quiescing' | 'closed';
 
 /** Runtime readiness is independent of constructing a service or opening its storage. */

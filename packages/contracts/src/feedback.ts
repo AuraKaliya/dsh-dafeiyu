@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ActionContext,Json } from './index.js';
+import type { ConversationAccess,Json } from './index.js';
 import type { OperationScope } from './history.js';
 
 /** Explicit tool-owned facts, not a heuristic interpretation of arbitrary output text. */
@@ -18,7 +18,7 @@ export const FeedbackWitnessSchema=z.strictObject({id:z.uuid(),version:z.number(
   mode:z.enum(['normal','history','deleted']),view:z.enum(['brief','page']),traceId:z.string()});
 export type FeedbackWitness=z.infer<typeof FeedbackWitnessSchema>;
 export interface FeedbackRequest {
-  readonly context:ActionContext;
+  readonly context:ConversationAccess;
   readonly pluginId:string;
   readonly pluginVersion:string;
   readonly action:string;
@@ -28,7 +28,7 @@ export interface FeedbackDelivery {readonly value:Json;readonly witness:Feedback
 export interface FeedbackProvider {
   capture(request:FeedbackRequest,raw:Json):Promise<FeedbackDelivery>;
   /** Only this provider's own read actions may issue historical/deleted view witnesses. */
-  present(context:ActionContext,raw:Json):FeedbackDelivery;
+  present(context:ConversationAccess,raw:Json):FeedbackDelivery;
   validate(scope:Pick<OperationScope,'agentId'|'route'|'traceId'>,witness:FeedbackWitness):boolean;
 }
 export const FEEDBACK_RETIRED_TEXT=JSON.stringify({kind:'dafeiyu-feedback-retired',status:'unavailable',untrustedEvidence:true,

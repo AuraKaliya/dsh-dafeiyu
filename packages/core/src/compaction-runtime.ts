@@ -44,42 +44,9 @@ export function readCompactionEvents(session:Session):(SessionEvent|z.infer<type
       'plugin:dafeiyu/source-record','plugin:dafeiyu/request-sources','plugin:dafeiyu/summary-manifest','plugin:dafeiyu/summary-view'].includes(record.type)
       ?recordSchema.parse(record):event;});
 }
-export function committedSummary(session:Session,id:string,text:string):boolean {
-  const events=session.snapshotEvents();
-  const capsule=capsuleSchema.safeParse((()=>{try{return JSON.parse(text);}catch{return null;}})());
-  if(!capsule.success||!capsule.data.sources.every(source=>{
-    const event=events[source.seq];
-    const message=event?.type==='user/message'?event.data:event?.type==='assistant/message'?event.data.message:undefined;
-    return !!message&&hash(message.content.filter(b=>b.type==='text').map(b=>b.text).join('\n'))===source.hash;
-  }))return false;
-  if(capsule.data.schemaVersion===2){
-    const records=readProvenance(session).filter(e=>e.type==='plugin:dafeiyu/source-record');
-    const expected:SourceDependency[][]=[];
-    for(const source of capsule.data.sources){
-      const record=records.find(r=>r.data.targetSeq===source.seq);
-      if(record){
-        if(record.data.agentId!==capsule.data.agentId||record.data.route!==capsule.data.route||record.data.owner!==capsule.data.owner||record.data.hash!==source.hash)return false;
-        expected.push(record.data.dependencies);
-      }else{
-        const turn=readCompactionEvents(session).find(e=>e.type==='plugin:dafeiyu/turn-seal'&&!e.data.precision&&e.data.seqs.includes(source.seq));
-        if(turn?.type!=='plugin:dafeiyu/turn-seal')return false;
-        expected.push([{kind:'legacy',agentId:capsule.data.agentId,route:capsule.data.route,epoch:turn.data.epoch}]);
-      }
-    }
-    if(JSON.stringify(unionDependencies(...expected))!==JSON.stringify(unionDependencies(capsule.data.dependencies!)))return false;
-  }
-  const checkpoint=events.find(e=>e.type==='user/message'&&e.data.source.kind==='compact-checkpoint'&&e.data.source.compactionId===id
-    &&e.data.content.filter(b=>b.type==='text').map(b=>b.text).join('\n')===text);
-  return !!checkpoint&&events.some(e=>e.seq>checkpoint.seq&&e.type==='compaction/end'&&e.data.compactionId===id&&e.data.error===undefined);
-}
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
   'dafeiyu-compaction-retired': { kind: 'dafeiyu-compaction-retired' };
 } }
-const sourceSchema = z.strictObject({ seq: z.number().int().nonnegative(), hash: z.string().length(64) });
-export const capsuleSchema = z.strictObject({ kind: z.literal('dafeiyu-incremental-summary'), schemaVersion: z.union([z.literal(1),z.literal(2)]),
-  agentId: z.string(), route: z.string(), owner: z.string(), version: z.string(), epoch: z.string(), taskId: z.string().nullable(),
-  versions:z.record(z.string(),z.number().int().nonnegative()),policy: z.string(), policyHash:z.string().length(64), model: z.strictObject({provider:z.string(),model:z.string()}), sources: z.array(sourceSchema).min(1), summary: z.string().min(1), createdAt: z.number(),dependencies:dependenciesSchema.optional() })
-  .refine(value=>value.schemaVersion!==2||value.dependencies!==undefined,'Fine-grained summaries require dependencies');
 const hash = (text: string): string => createHash('sha256').update(text).digest('hex');
 const RETIRED = '此处大肥鱼历史工作视图因来源、版本或使用范围失效而退出。原始归档保留，不得据此恢复旧事实。历史操作不会因此撤销，切勿仅因正文退出就重新执行；需要细节时按权限回查档案。';
 
@@ -151,16 +118,14 @@ export class CompactionRuntime {
   private valid(turn: Turn): boolean {
     const binding = this.binding();
     return !!binding && turn.complete && !turn.ephemeral && turn.route === this.item?.route && turn.owner === binding.owner
-      && (turn.precision==='sources-v1'?turn.seqs.every(seq=>{const record=this.provenance.get(seq);return !!record&&this.provenance.valid(record);}):turn.epoch === binding.provider.basis(this.scope()).epoch);
+      && turn.seqs.every(seq=>{const record=this.provenance.get(seq);return !!record&&this.provenance.valid(record);});
   }
   private capsuleValid(text: string): boolean {
     try {
       const parsed=JSON.parse(text),binding=this.binding(),compact=fragmentCapsuleSchema.safeParse(parsed);
       if(compact.success){const view=this.agent&&resolveFragmentView(this.agent.session,compact.data.ref,this.scope());
         return !!view&&view.text===text&&(view.view.active.length===0||!!binding&&view.manifest.owner===binding.owner&&this.provenance.validate(fragmentDependencies(view)));}
-      const capsule = capsuleSchema.parse(parsed);
-      return !!binding && capsule.agentId === this.agentId && capsule.route === this.item?.route && capsule.owner === binding.owner
-        && (capsule.schemaVersion===2?this.provenance.validate(capsule.dependencies!):capsule.epoch === binding.provider.basis(this.scope()).epoch);
+      return false;
     } catch { return false; }
   }
   private clean(): void {
@@ -200,7 +165,7 @@ export class CompactionRuntime {
           }
           continue;
         }
-        if (text.includes('"kind":"dafeiyu-incremental-summary"') && (!this.capsuleValid(text)||!committedSummary(session,event.data.source.compactionId,text))) invalid.add(seq);
+        if (text.includes('"kind":"dafeiyu-incremental-summary"') && !this.capsuleValid(text)) invalid.add(seq);
       }
     }
     // M4/M5A may have already rewritten a tagged node. Follow replacement ancestry so
@@ -373,12 +338,12 @@ export class CompactionRuntime {
       if(e.type==='assistant/message'&&selectedCost>=pressure-target+p.maxSummaryChars+512)break;
     }
     const grouped:{sources:CompactionSource[];dependencies:SourceDependency[];taskId:string|null}[]=[];
-    const fragmented=!!binding.provider.sources&&!!binding.provider.summarizeFragments;
-    if(fragmented){
+
+    {
       const limit=Math.min(p.initialMaxGroups??p.maxFragmentGroups??8,p.maxFragmentGroups??8,p.initialMaxFragments??p.maxFragments??16,p.maxFragments??16,Math.max(1,Math.floor(p.maxSummaryChars/64)));
       let count=0;
       for(const source of sources){
-        const dependencies=unionDependencies(this.provenance.dependenciesFor(source.seq,this.legacyEpoch(source.seq))),last=grouped.at(-1);
+        const dependencies=unionDependencies(this.provenance.dependenciesFor(source.seq)),last=grouped.at(-1);
         const taskId=tasks.get(source.seq)??null;
         if(last&&last.taskId===taskId&&JSON.stringify(last.dependencies)===JSON.stringify(dependencies))last.sources.push(source);
         else{if(grouped.length===limit)break;grouped.push({sources:[source],dependencies,taskId});}
@@ -395,7 +360,7 @@ export class CompactionRuntime {
         recovery:'Keep current constraints and unknown effects; reopen older verified results by source reference. If required material still cannot fit, report capacity instead of replaying actions.'},[]);return;
     }
     const generation = session.surface.replaceGeneration, basis = binding.provider.basis(this.scope()), id = CompactionId(randomUUID());
-    const dependencies=binding.provider.sources?unionDependencies(...seqs.map(seq=>this.provenance.dependenciesFor(seq,this.legacyEpoch(seq)))):undefined;
+    const dependencies=unionDependencies(...seqs.map(seq=>this.provenance.dependenciesFor(seq)));
     const checkSources=()=>{if(dependencies&&!this.provenance.validate(dependencies))throw new Error('Selected sources changed');};
     const opened = events.findLast(e => e.type === 'turn/start');
     const turn = opened?.type === 'turn/start' ? opened.data.turn : null;
@@ -404,7 +369,7 @@ export class CompactionRuntime {
     try {
       checkSources();
       let manifest:FragmentManifest|undefined,text:string;
-      if(fragmented){
+      {
         const groups:FragmentManifest['groups']=[],fragments:FragmentManifest['fragments']=[];
         for(const [index,group] of grouped.entries()){
           checkSources();
@@ -425,13 +390,6 @@ export class CompactionRuntime {
           producerVersion:binding.version,epoch:basis.epoch,taskId:basis.taskId,versions:basis.versions,policy:'dafeiyu-fragments-v1',policyHash:hash(JSON.stringify(p)),
           model:{provider:agent.options.provider??'',model:agent.options.model??''},createdAt:Date.now(),groups,fragments});
         text=renderFragmentView(session.seq,manifest,manifest.fragments.map(f=>f.id));
-      }else{
-        const summary = await binding.provider.summarize(this.scope(), sources, signal,dependencies?checkSources:undefined);
-        if (!summary.trim() || Array.from(summary).length > p.maxSummaryChars) throw new Error('Invalid summary');
-        text=JSON.stringify(capsuleSchema.parse({kind:'dafeiyu-incremental-summary',schemaVersion:dependencies?2:1,...(dependencies?{dependencies}:{}),
-          agentId:this.agentId,route:this.item!.route,owner:binding.owner,version:binding.version,epoch:basis.epoch,taskId:basis.taskId,versions:basis.versions,
-          policy:'dafeiyu-incremental-v1',policyHash:hash(JSON.stringify(p)),model:{provider:agent.options.provider??'',model:agent.options.model??''},
-          sources:sources.map(({seq,hash})=>({seq,hash})),summary,createdAt:Date.now()}));
       }
       signal.throwIfAborted();
       checkSources();
@@ -472,7 +430,7 @@ export class CompactionRuntime {
     if (!this.item || !this.agent) return;
     const binding = this.binding();
     if(binding?.provider.sources){
-      if(admit)this.provenance.admit(options,seq=>this.legacyEpoch(seq));
+      if(admit)this.provenance.admit(options);
       this.provenance.guard();
     }
     const epoch = binding ? this.epoch(binding) : 'unregistered';
@@ -491,12 +449,8 @@ export class CompactionRuntime {
     }
     for (const message of options.messages) if (message.role === 'user' && (message.source?.kind === 'compact-checkpoint'||message.source?.kind==='dafeiyu-summary-view')) {
       const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
-      if (text.includes('"kind":"dafeiyu-incremental-summary"') && (!this.capsuleValid(text)||(!fragmentCapsuleSchema.safeParse(JSON.parse(text)).success&&!committedSummary(this.agent.session,message.source.compactionId,text)))) throw new Error('Invalid summary checkpoint');
+      if (text.includes('"kind":"dafeiyu-incremental-summary"') && !this.capsuleValid(text)) throw new Error('Invalid summary checkpoint');
     }
-  }
-  private legacyEpoch(seq:number):string|undefined {
-    const turn=this.agent&&readCompactionEvents(this.agent.session).find(e=>e.type==='plugin:dafeiyu/turn-seal'&&e.data.precision!=='sources-v1'&&e.data.seqs.includes(seq));
-    return turn?.type==='plugin:dafeiyu/turn-seal'?turn.data.epoch:undefined;
   }
   validateDependencies(dependencies:readonly SourceDependency[]):boolean{return this.provenance.validate(dependencies);}
   exposedDependencies():readonly SourceDependency[]{return this.provenance.exposed();}

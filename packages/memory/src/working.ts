@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { redactContent,ContextItemSchema } from '@dafeiyu/contracts';
-import type { ActionContext,ContextContributor,ContextItem,ContextRequest,OperationScope } from '@dafeiyu/contracts';
+import type { ConversationAccess,ContextContributor,ContextItem,ContextRequest,OperationScope } from '@dafeiyu/contracts';
 import { MemoryStore } from './store.js';
 import { MemoryRetrieval } from './retrieval.js';
 import { MemoryError,keySchema,memoryRef } from './types.js';
@@ -25,10 +25,10 @@ export class WorkingMemory {
   private readonly state:WorkingStore;
   private readonly cache=new WeakMap<ContextRequest,Map<string,{epoch:string;items:ContextItem[]}>>();
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly retrieval:MemoryRetrieval|null,directory:string,
-    private readonly evidence:(context:ActionContext,refs:readonly string[])=>Promise<Evidence[]>,private readonly strictSources=false){
+    private readonly evidence:(context:ConversationAccess,refs:readonly string[])=>Promise<Evidence[]>,private readonly strictSources=false){
     this.state=new WorkingStore(resolve(directory,'working.sqlite'));this.flush();
   }
-  private scope(context:ActionContext){return this.ctx.dafeiyu.scopeFor(context);}
+  private scope(context:ConversationAccess){return this.ctx.dafeiyu.scopeFor(context);}
   compactionBasis(scope:Pick<OperationScope,'agentId'|'route'>){
     const state=this.state.read(scope,'working');
     return {working:this.state.version(scope,'working'),evidence:this.state.version(scope,'evidence'),
@@ -50,7 +50,7 @@ export class WorkingMemory {
     const points=Array.from(memory.content);
     return item.start<item.end&&item.end<=points.length?{memory,text:points.slice(item.start,item.end).join('')}:null;
   }
-  async update(context:ActionContext,raw:unknown){
+  async update(context:ConversationAccess,raw:unknown){
     this.scope(context);const input=workSchema.parse(raw);this.expiry(input.expiresAt);
     if(new Set(input.items.map(i=>i.id)).size!==input.items.length)throw new MemoryError('idempotency_conflict');
     const items:WorkEntry[]=[];
@@ -81,14 +81,14 @@ export class WorkingMemory {
     const receipt=this.state.write(scope,input.requestId,input.expectedVersion,{kind:'working',version:input.expectedVersion,taskId:input.taskId,expiresAt:input.expiresAt,items});
     this.flush();return {status:'ok' as const,...receipt,admission:'pending-next-request'};
   }
-  select(context:ActionContext,raw:unknown){
+  select(context:ConversationAccess,raw:unknown){
     const scope=this.scope(context),input=selectSchema.parse(raw);this.expiry(input.expiresAt);
     for(const item of input.items)if(!this.selected(scope,item))throw new MemoryError('source_unavailable');
     const receipt=this.state.write(scope,input.requestId,input.expectedVersion,{kind:'evidence',version:input.expectedVersion,workingVersion:this.state.version(scope,'working'),taskId:input.taskId,expiresAt:input.expiresAt,
       items:input.items.map(item=>({...item,ancestors:[...this.selected(scope,item)!.memory.sourceVersions],sourceFences:this.memory.evidenceFences(scope,item.id,item.revision,(left,right)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,left,right))}))});
     this.flush();return {status:'ok' as const,...receipt,selected:input.items.length,admission:'pending-next-request'};
   }
-  async retrieve(context:ActionContext,raw:unknown){
+  async retrieve(context:ConversationAccess,raw:unknown){
     const scope=this.scope(context),input=retrieveSchema.parse(raw);this.expiry(input.expiresAt);
     if(!this.retrieval)return {status:'not_configured' as const};
     const result=await this.retrieval.recall(scope,{query:input.query,strategy:input.strategy,limit:input.limit},context.signal,()=>{this.scope(context);});
@@ -96,12 +96,12 @@ export class WorkingMemory {
       items:result.items.map(item=>({id:item.id,revision:item.revision,version:item.version,contentHash:item.contentHash,start:item.chunk.start,end:item.chunk.end}))}),
       strategy:result.strategyUsed,degraded:result.degraded};
   }
-  clear(context:ActionContext,raw:unknown){
+  clear(context:ConversationAccess,raw:unknown){
     const scope=this.scope(context),input=clearSchema.parse(raw);
     const receipt=this.state.write(scope,input.requestId,input.expectedVersion,{kind:input.kind,version:input.expectedVersion,taskId:'cleared',expiresAt:'1970-01-01T00:00:00.000Z',items:[]});
     this.flush();return {status:'ok' as const,...receipt};
   }
-  status(context:ActionContext){
+  status(context:ConversationAccess){
     const scope=this.scope(context);this.flush();
     return {status:'ok' as const,areas:(['working','evidence'] as const).map(kind=>{
       const state=this.state.read(scope,kind);return {kind,version:state?.version??0,taskId:state?.taskId??null,

@@ -1,3 +1,5 @@
+import {z} from 'zod';
+import {fixtureAction} from './fixture-action.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -5,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { API_VERSION } from '@dafeiyu/contracts';
-import type { ActionContext, PendingMessage } from '@dafeiyu/contracts';
+import type { ConversationAccess, PendingMessage } from '@dafeiyu/contracts';
 import { MemoryStore } from '@dafeiyu/memory/store';
 import { memoryFixture } from './memory-fixture.js';
 import { call, textReply } from './harness.js';
@@ -78,7 +80,7 @@ test('all model-facing read and mutation paths reject foreign conversation ident
 });
 
 test('forged, cloned and expired contexts never authorize memory access',async t=>{
-  const h=await memoryFixture();t.after(h.close);let saved:ActionContext|undefined;
+  const h=await memoryFixture();t.after(h.close);let saved:ConversationAccess|undefined;
   await h.probe('a',c=>{saved=c;assert.throws(()=>h.memory.search({...c},{}),/core-issued/);return null;});
   assert.ok(saved);assert.throws(()=>h.memory.search(saved!,{}),/core-issued/);
 });
@@ -116,9 +118,7 @@ test('deleted tool result and assistant restatement cannot masquerade as new pri
 
 test('independent actual tool evidence remains usable without re-executing the tool',async t=>{
   const h=await memoryFixture();t.after(h.close);let count=0,step=0;
-  const extension=h.core.registerExtension({id:'proof-tool',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{
-    name:'proof_tool',description:'虚构工具验证',fields:{},execute:async()=>{count++;return {receipt:'FAKE-RECEIPT-731',success:true};},
-  }]});t.after(()=>extension.dispose());
+  const extension=h.core.registerExtension({id:'proof-tool',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'proof-tool',{id:'proof_tool',description:'虚构工具验证',inputSchema:z.strictObject({}),work:async()=>{count++;return {receipt:'FAKE-RECEIPT-731',success:true};}})]});t.after(()=>extension.dispose());
   h.setResponse(()=>++step===1?call('proof_tool',{}):textReply('操作已结束'));
   const receipt=h.simulator.send('a','运行虚构操作',{id:randomUUID()});await h.core.whenIdle();
   const item=h.core.journal.get(receipt.id),ref=sessionSource(h,item,'tool/result');

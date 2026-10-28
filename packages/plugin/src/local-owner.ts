@@ -12,7 +12,7 @@ export const LocalOwnerRequestSchema=z.strictObject({schemaVersion:z.literal(1),
 export function attachLocalOwnerControl(ctx:Context,settings:InstallationSettings,agentId:string){
   if(!settings.localOwnerControl)return ()=>{};
   const directory=join(settings.dataDir,'local-owner-control');mkdirSync(directory,{recursive:true});let closed=false;
-  const handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'local-owner-tasks',version:'1',agentId,requires:['execution.message-task.v1'],provides:['channel.local-owner.v1'],lifecycleReady:()=>!closed,
+  const handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'local-owner-tasks',version:'1',agentId,requires:['execution.message-task.v1'],provides:['channel.local-owner.v1'],lifecycleReady:()=>!closed,
     actions:[{id:'local_owner_task_submit',version:'1',description:'受理本地主人明确下达的当前任务。每条指示只需受理一次；重复调用返回同一个任务，不查询进度。受理后结束本轮确认回复，实际工作及核验后的QQ结果由独立任务自动交付。来源是本机委托，不是QQ来信。',inputSchema:MessageInstructionSubmitSchema,outputSchema:z.json(),effects:'local-write',
       execute:async(input,context)=>({status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse({...ctx.dafeiyu.submitMessageTask(context,'local-owner-tasks',{...MessageInstructionSubmitSchema.parse(input),kind:'explicit-task'}),taskAccepted:true,note:'当前指示已受理，工作在独立任务中进行。此工具不是进度查询；重复提交不会推进任务。本轮只需简短确认，最终结果会自动经人格整理和核验后送往主人QQ。'}),sources:[],receipts:[]})}],
     channels:[{channel:'local-owner',account:settings.qq.botId,deliveryValidation:'per-segment',taskTextDispatch:'write-window-v1',description:'本机管理员代表主人提交的新指示；并非收到一条QQ消息。用local_owner_task_submit受理。回复与结果将实际发送到配置中的主人QQ，任务执行与结果核验沿用正常流程。',

@@ -15,7 +15,7 @@ import * as Timeline from '@dafeiyu/timeline';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { ExtensionV3,HostConfig } from '@dafeiyu/contracts';
+import type { Extension,HostConfig } from '@dafeiyu/contracts';
 import type { EvaluationLedger } from './ledger.ts';
 import { installEvaluationBilling } from './billing.ts';
 export const evaluationText=(text:string):StreamChunk[]=>[{type:'block-start',index:0,blockType:'text'},{type:'text-delta',index:0,text},{type:'block-end',index:0,block:{type:'text',text}},{type:'finish',reason:{kind:'stop'}}];
@@ -36,13 +36,13 @@ export class EvaluationScriptedAdapter extends LlmAdapter {
     for(const chunk of chunks){options.signal?.throwIfAborted();if(chunk.type==='finish'){yield {type:'usage',usage:{inputTokens:Math.ceil(Buffer.byteLength(JSON.stringify(options.messages))/4),outputTokens:Math.ceil(Buffer.byteLength(JSON.stringify(chunks))/4)}};yield {...chunk,replayState:{response:PRIVATE_STREAM_SENTINEL}};}else yield chunk;}}
 }
 export async function openEvaluationRuntime(options:{root:string;foundationFile:string;ledger:EvaluationLedger;attemptId:string;response:EvaluationResponse;create?:boolean;compaction?:Memory.Config['compaction'];modelContextWindow?:number;
-  extension?:(ctx:Context)=>Omit<ExtensionV3,'protocolVersion'|'agentId'>;policies?:HostConfig['authorityPolicies'];beforeActivate?:(ctx:Context)=>Promise<void>}){
+  extension?:(ctx:Context)=>Omit<Extension,'protocolVersion'|'agentId'>;policies?:HostConfig['authorityPolicies'];beforeActivate?:(ctx:Context)=>Promise<void>}){
   if(options.ledger.config.mode!=='offline')throw new Error('EVALUATION_OFFLINE_RUNTIME_ONLY');if(options.create===false&&['core/runtime.sqlite','memory/memory.sqlite'].some(file=>!existsSync(join(options.root,file))))throw new Error('EVALUATION_BASELINE_INCOMPLETE');
-  const contextWindow=options.modelContextWindow??65536,ctx=new Context(),adapter=new EvaluationScriptedAdapter(options.response,contextWindow);let handle:ReturnType<Core.DafeiyuService['registerExtensionV3']>|undefined;
+  const contextWindow=options.modelContextWindow??65536,ctx=new Context(),adapter=new EvaluationScriptedAdapter(options.response,contextWindow);let handle:ReturnType<Core.DafeiyuService['registerExtension']>|undefined;
   try{await ctx.plugin(LlmRuntime);await ctx.plugin(SessionStore);await ctx.plugin(Projection);await ctx.plugin(Prompt);await ctx.plugin(Tools);await ctx.plugin(AgentRegistry);await ctx.plugin(Persistence,{root:join(options.root,'sessions'),compression:'none'});await ctx.plugin(AgentLoop,{agents:[]});await ctx.plugin(Query,{path:join(options.root,'query.sqlite'),openAt:'never'});ctx.llm.registerAdapter(['local-test'],adapter);
     installEvaluationBilling(ctx,options.ledger,{provider:'local-test',model:'scripted',contextWindow,maxRequestBytes:1000000},()=>options.attemptId);
-    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(options.root,'core'),personaFile:options.foundationFile,provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:30000});await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(options.root,'memory'),lifecycleMode:'managed',sourceTracking:true,...(options.compaction?{compaction:options.compaction}:{})});
-    const extension=options.extension?.(ctx);ctx.dafeiyu.configureExecution({profileId:'evaluation',createStore:options.create!==false,policies:options.policies??[{id:'case',producers:['evaluation'],actions:[...(extension?.actions?.map(a=>a.id)??[]),...PERSONA_ACTIONS,...EXECUTION_ACTIONS],allowLocalWrite:true}]});if(extension)handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,agentId:'dafeiyu',...extension});await options.beforeActivate?.(ctx);
+    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(options.root,'core'),personaFile:options.foundationFile,provider:'local-test',model:'scripted',turnTimeoutMs:30000});await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(options.root,'memory'),...(options.compaction?{compaction:options.compaction}:{})});
+    const extension=options.extension?.(ctx);ctx.dafeiyu.configureExecution({profileId:'evaluation',createStore:options.create!==false,policies:options.policies??[{id:'case',producers:['evaluation'],actions:[...(extension?.actions?.map(a=>a.id)??[]),...PERSONA_ACTIONS,...EXECUTION_ACTIONS],allowLocalWrite:true}]});if(extension)handle=ctx.dafeiyu.registerExtension({protocolVersion:4,agentId:'dafeiyu',...extension});await options.beforeActivate?.(ctx);
     ctx.dafeiyuMemory.recover();ctx.dafeiyuMemory.activate();await ctx.dafeiyu.recoverExecutions();ctx.dafeiyu.recover();ctx.dafeiyu.activate();let closed=false;
     return {ctx,adapter,core:ctx.dafeiyu,memory:ctx.dafeiyuMemory,port:ctx.dafeiyu.executionProducer('evaluation'),close:async()=>{if(closed)return;closed=true;ctx.dafeiyu.quiesce();await ctx.dafeiyu.whenIdle();try{await ctx.dafeiyuMemory.close();await ctx.dafeiyu.close();}finally{handle?.dispose();await ctx.fiber.dispose();}}};
   }catch(e){handle?.dispose();await ctx.fiber.dispose();throw e;}

@@ -8,8 +8,8 @@ const {localHost,model}=await import('./local-host.mjs'),Memory=await import('@d
 const {containsPrivateModelState}=await import('../build-tests/phase1-probe-fixture.js');
 const marker=randomUUID(),report={stage:'1E-2',kind:'real-model-real-dsh-fictional-persona-data',model,at:new Date().toISOString(),serverAccess:false,realPlatformAccess:false,
   newFoundationUsed:true,fullPersonaEvaluation:false,checks:[],calls:[],passed:false};let host,memory,port;
-const setup=async create=>{host=await localHost(root,{simulator:false,realModel:true,timeline:true,lifecycleMode:'managed',personaFile:resolve('profiles/persona.foundation.md'),timeout:240000});
-  memory=await host.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),lifecycleMode:'managed'});
+const setup=async create=>{host=await localHost(root,{simulator:false,realModel:true,timeline:true,personaFile:resolve('profiles/persona.foundation.md'),timeout:240000});
+  memory=await host.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),});
   host.core.configureExecution({profileId:'persona-fixture',createStore:create,policies:[{id:'probe',producers:['probe-driver'],actions:['dafeiyu_persona_status','dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_publish'],allowLocalWrite:true,sourceRules:[]}]});
   host.ctx.dafeiyuMemory.recover();host.ctx.dafeiyuMemory.activate();await host.core.recoverExecutions();host.core.recover();host.core.activate();port=host.core.executionProducer('probe-driver');};
 const close=async()=>{if(!host)return;const current=host;host=undefined;report.calls.push(...current.calls.map(({sessionId:_id,at:_at,...call})=>call));

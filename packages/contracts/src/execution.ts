@@ -27,7 +27,7 @@ export const ExecutionScopeSchema = z.discriminatedUnion('kind', [
 export type ExecutionScope = z.infer<typeof ExecutionScopeSchema>;
 declare const executionGrantBrand: unique symbol;
 export interface ExecutionGrant { readonly id: string; readonly [executionGrantBrand]: true }
-export interface ExecutionContextV3 {
+export interface ExecutionContext {
   readonly agentId: string; readonly taskId: string | null; readonly runId: string; readonly operationId: string;
   readonly origin: RunOrigin; readonly scope: ExecutionScope; readonly intentVersion: number;
   readonly grant: ExecutionGrant; readonly signal: AbortSignal;
@@ -45,28 +45,39 @@ export const ActionOutcomeSchema = z.strictObject({
   errorCode: z.string().regex(/^[A-Z0-9_]{1,100}$/).optional(),
 });
 export type ActionOutcome = z.infer<typeof ActionOutcomeSchema>;
-export interface ActionCapabilityV3 {
+export interface ActionCapability {
   readonly id: string; readonly version: string; readonly description: string;
   readonly inputSchema: z.ZodType; readonly outputSchema: z.ZodType;
   readonly effects: 'read' | 'local-write' | 'external-write'; readonly requiresTask?: boolean;
-  execute(input: Json, context: ExecutionContextV3): Promise<ActionOutcome>;
+  execute(input: Json, context: ExecutionContext): Promise<ActionOutcome>;
 }
-export interface ContextContributorV3 {
+export interface TaskContextContributor {
   readonly id: string;
   prepare(view: ExecutionView): Promise<readonly ContextItem[]>;
   validate(view: ExecutionView, item: ContextItem): boolean;
 }
-export interface ExtensionV3 {
-  readonly protocolVersion: 3; readonly id: string; readonly version: string; readonly agentId: string;
+export interface Extension {
+  readonly protocolVersion:4; readonly id: string; readonly version: string; readonly agentId: string;
   readonly provides?: readonly string[]; readonly requires?: readonly string[];
-  readonly actions?: readonly ActionCapabilityV3[]; readonly channels?: readonly ChannelCapability[];
-  readonly contexts?: readonly ContextContributorV3[];
+  readonly actions?: readonly ActionCapability[]; readonly channels?: readonly ChannelCapability[];
+  readonly contexts?: readonly TaskContextContributor[];
   readonly lifecycleReady?: () => boolean;
   readonly resourceProofs?: ResourceProofProvider;
+  readonly conversationContexts?: readonly import('./context.js').ContextContributor[];
+  readonly compactionProvider?: import('./compaction.js').CompactionProvider;
+  readonly feedbackProvider?: import('./feedback.js').FeedbackProvider;
+  readonly memoryObservationProvider?: import('./observation.js').MemoryObservationProvider;
 }
-export interface ExtensionHandleV3 { readonly ingest?: (message:unknown)=>Receipt; dispose(): void }
+export interface ExtensionHandle {
+  ingest(message:unknown):Receipt;
+  observe(event:import('./index.js').Observation):string;
+  observeMemory(input:unknown,context?:import('./index.js').ConversationAccess):import('./observation.js').ObservationReceipt;
+  openObservationSource(input:unknown,context?:import('./index.js').ConversationAccess):Record<string,unknown>;
+  changeObservationSource(input:unknown,context?:import('./index.js').ConversationAccess):Record<string,unknown>;
+  dispose():void;
+}
 
-export const ExtensionMetadataV3Schema = z.strictObject({ protocolVersion: z.literal(3), id: ExtensionIdSchema,
+export const ExtensionMetadataSchema = z.strictObject({ protocolVersion: z.literal(4), id: ExtensionIdSchema,
   version: z.string().min(1).max(80), agentId: actor, provides: z.array(FeatureSchema).max(64).default([]), requires: z.array(FeatureSchema).max(64).default([]) });
 
 export const TaskSubmitSchema = z.strictObject({ requestId, title: z.string().trim().min(1).max(200), goal: z.string().trim().min(1).max(2000),

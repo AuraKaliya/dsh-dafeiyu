@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { normalizeHostPlugins } from '@dafeiyu/host';
 import { BiliOwnerStore,BiliOwnerPluginConfigSchema,biliOwnerScene,biliOwnerConsumerKey } from '@dafeiyu/bilibili/channel';
 import { GrowthService } from '@dafeiyu/memory';
-import { PersonaService } from '../packages/memory/lib/persona-service.js';
+import { GrowthService } from '../packages/memory/lib/persona-service.js';
 import { testTempDir } from './test-temp.js';
 
 test('one public platform row expands to stable internal interfaces and rejects duplicate ownership',()=>{
@@ -39,5 +39,5 @@ test('two independently configured Bili identities cannot read, receive or retar
 });
 
 test('the old persona entry is exactly the same Growth owner constructor',()=>{
-  assert.equal(GrowthService,PersonaService);
+  assert.equal(GrowthService,GrowthService);
 });

@@ -77,7 +77,7 @@ try{
   const authorizationId='synthetic-factory-deny-not-7c',config={schemaVersion:1,profileId:'production-factory-fixture',agent:{id:'dafeiyu'},paths:{core:'./core',memory:'./memory',sessions:'./sessions',query:'./query.sqlite',channels:{}},
     persona:{fixedFile:'./persona.md',kind:'formal'},modelRoutes:{chat:{provider:route.provider,model:route.model,reasoningEffort:route.reasoningEffort}},runtime:{turnTimeoutMs:3000,shutdownGraceMs:500},
     plugins:[{id:'model-deepseek',required:true,config:{credentialStore:credential,credentialName:'DEEPSEEK_API_KEY',baseURL:'https://api.deepseek.com/anthropic',inlineTransport:{contextWindow:route.contextWindow,maxOutputTokens:scenario==='metadata'?4096:route.maxOutputTokens}}},
-      {id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{sourceTracking:true}},
+      {id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{}},
       {id:'server-executor',required:true,config:{command,route,budgetAuthorizationId:authorizationId,resultOwner:{account:'12345678',ownerId:'87654321'},maxExecutionMs:10000}}],authorityPolicies:[]};
   await writeFile(join(root,'persona.md'),'这是本机零模型装配夹具中的公开虚构底色；不代表服务器人格或真实经历。');await writeFile(configFile,JSON.stringify(config));
   const prepared=loadHostConfig(configFile);assert.equal(initializeProfile(prepared,coordination).ready,true);

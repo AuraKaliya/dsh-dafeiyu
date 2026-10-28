@@ -12,7 +12,7 @@ const expiresAt=new Date(Date.now()+600000).toISOString();
 const runtimeText=()=>JSON.stringify(h.adapter.requests.at(-1)?.messages.filter(m=>m.role==='user'&&m.source?.kind==='runtime-context'));
 let native='原生测试区域：桌面材料就绪';
 h.ctx.systemPrompt.context({name:'native-fixture',order:1,required:true,text:()=>native});
-const second=h.core.registerExtension({id:'fictional-tasks',version:'1',apiVersion:2,agentId:'dafeiyu',contexts:[{
+const second=h.core.registerExtension({id:'fictional-tasks',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
   id:'progress',kind:'operational-fact',prepare:async request=>request.conversation.id==='test'?[{id:'task',version:'1',text:'虚构任务插件：等待材料确认',expiresAt,
     sources:[{ref:'fictional:task:731',version:'1',hash:'fixture'}]}]:[],validate:()=>true,
 }]});

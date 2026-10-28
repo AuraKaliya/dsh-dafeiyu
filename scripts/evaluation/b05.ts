@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { API_VERSION,MessageTaskSubmitSchema,MessageTaskStatusSchema,MessageTaskControlSchema,MessageTaskSourceSchema } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3,ExecutionContextV3,ExtensionHandle,HostConfig } from '@dafeiyu/contracts';
+import type { ActionCapability,ExecutionContext,ExtensionHandle,HostConfig } from '@dafeiyu/contracts';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
 import { qqTaskDirective } from '@dafeiyu/qq';
 import type { BoundarySample,EvaluationCase } from './catalog.ts';
@@ -35,9 +35,9 @@ export function b05Messages(sample:BoundarySample,condition:Extract<EvaluationCa
   ];
 }
 
-function actions(ctx:Context):ActionCapabilityV3[]{
+function actions(ctx:Context):ActionCapability[]{
   const knownErrors=new Set(['INVALID_INPUT','SCOPE_DENIED','MESSAGE_REQUIRED','TASK_DIRECTIVE_REQUIRED','IDEMPOTENCY_CONFLICT','SOURCE_STALE','CAPACITY_EXCEEDED','DEPENDENCY_UNAVAILABLE','PRIVATE_INPUT_REJECTED','VERSION_CONFLICT','TASK_VERSION_CONFLICT','RUN_NOT_QUIESCENT','OPERATION_UNCERTAIN','CONTROL_SUPERSEDED','TASK_NOT_ACTIVE']);
-  const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,work:(context:ExecutionContextV3,input:unknown)=>unknown):ActionCapabilityV3=>({
+  const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,work:(context:ExecutionContext,input:unknown)=>unknown):ActionCapability=>({
     id,description,version:'2',inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',requiresTask:false,
     execute:async(input,context)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(work(context,input)),sources:[],receipts:[]};}
       catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':stableEvaluationError(error);if(!knownErrors.has(code))throw error;
@@ -73,7 +73,7 @@ export async function runB05Real(record:RealCaseRecord,sample:BoundarySample,ite
   try{
     h=await openRealEvaluationRuntime({repository:options.repository,campaignRoot:record.workspace.root,root:record.profile,foundationFile:join(record.workspace.root,'sources/persona.foundation.md'),ledger:record.workspace.ledger,attemptId:record.attemptId,caseDeadline:record.startedAt+300000,policies,...(options.testBackend?{testBackend:options.testBackend}:{}),
       extension:ctx=>({id:'evaluation-fixture',version:'2',actions:actions(ctx)}),beforeActivate:async ctx=>{
-        channel=ctx.dafeiyu.registerExtension({id:'evaluation-channel',version:'2',apiVersion:API_VERSION,agentId:'dafeiyu',channels:[{channel:conversation.channel,account:conversation.account,deliver:async reply=>{delivered.push(reply.text);return {status:'sent',receiptId:'fixture:'+reply.id};}}]});
+        channel=ctx.dafeiyu.registerExtension({id:'evaluation-channel',version:'2',protocolVersion:4,agentId:'dafeiyu',channels:[{channel:conversation.channel,account:conversation.account,deliver:async reply=>{delivered.push(reply.text);return {status:'sent',receiptId:'fixture:'+reply.id};}}]});
         unbind=ctx.dafeiyu.bindMessageTasks({id:'evaluation-message-tasks',pluginId:'evaluation-fixture',channelExtensionId:'evaluation-channel',channel:conversation.channel,account:conversation.account,ownerId:'owner',policyId:'message-task',version:'2',classify:message=>qqTaskDirective(message),active:()=>true});
       }});
     for(const step of plan){

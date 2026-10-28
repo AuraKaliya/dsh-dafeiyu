@@ -24,7 +24,7 @@ export class AutomaticRecall {
     return this.memory.provenance(scope,item.id,item.revision).every(parent=>parent.sources.every(source=>source.kind!=='timeline'||this.ctx.dafeiyuTimeline.checkArchivedSource(scope,source.ref,source.contentHash)));
   }
   async prepare(request:ContextRequest):Promise<ContextItem[]>{
-    const scope=this.ctx.dafeiyu.scopeForContext(request),config=this.ctx.dafeiyu.contextAssembly();if(config.mode!=='unified'||!config.recall.enabled)return [];
+    const scope=this.ctx.dafeiyu.scopeForContext(request),config=this.ctx.dafeiyu.contextAssembly();if(!config.recall.enabled)return [];
     const input=this.ctx.dafeiyu.journal.get(scope.traceId),query=messageMainText(input.message).slice(0,2000);
     const result=await this.build(scope,query,input.message.id,scope.route,request.signal,()=>{this.ctx.dafeiyu.scopeForContext(request);});this.prepared.set(request,result);return result.items;
   }
@@ -67,7 +67,7 @@ export class AutomaticRecall {
     const current=this.memory.read(scope,match[1]!,'normal',Number(match[2])),valid=!!current&&String(current.version)===source.version&&current.contentHash===source.hash&&this.current(scope,current);memo.items.set(key,valid);return valid;
   }
   async prepareNative(view:ExecutionView):Promise<ContextItem[]>{
-    const config=this.ctx.dafeiyu.contextAssembly();if(config.mode!=='unified'||!config.recall.enabled)return [];
+    const config=this.ctx.dafeiyu.contextAssembly();if(!config.recall.enabled)return [];
     const origin=this.ctx.dafeiyu.originRecallScope(view,'memory-origin-recall');if(!origin)return [];
     const scope={agentId:view.scope.agentId,route:conversationKey(view.scope.agentId,origin.conversation)},guard=()=>{view.signal.throwIfAborted();if(!this.ctx.dafeiyu.originRecallCurrent(view.runId,origin.conversation,origin.stamp))throw new Error('SOURCE_STALE');};
     const result=await this.build(scope,origin.query.slice(0,2000),origin.stamp+view.runId,'task:'+view.runId,view.signal,guard),items:ContextItem[]=[];

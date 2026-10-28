@@ -1,3 +1,5 @@
+import {z} from 'zod';
+import {fixtureAction} from '../tests/fixture-action.js';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
@@ -34,9 +36,7 @@ h.ctx.on('llm/stream',async function*(options,next){
 const okay=value=>{assert.equal(value.status,'ok');return value;};
 async function probe(work,room='test'){
   let value,step=0;
-  const handle=h.core.registerExtension({id:'analysis-acceptance',version:'test',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{
-    name:'acceptance_probe',description:'虚构样本验收操作',fields:{},execute:async(_args,context)=>{value=await work(context);return value;},
-  }]});
+  const handle=h.core.registerExtension({id:'analysis-acceptance',version:'test',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'analysis-acceptance',{id:'acceptance_probe',description:'虚构样本验收操作',inputSchema:z.strictObject({}),work:async(_args,context)=>{value=await work(context);return value;}})]});
   mainResponse=()=>++step===1?call('acceptance_probe',{}):textReply('验收步骤完成');
   try{h.simulator.send(room,'执行本机虚构样本验收',{id:randomUUID()});await h.core.whenIdle();assert.ok(value);return value;}
   finally{handle.dispose();}

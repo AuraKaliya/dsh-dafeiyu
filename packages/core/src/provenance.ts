@@ -66,7 +66,7 @@ export class SourceTracker {
     return dependencies.every(dep=>dep.agentId===scope.agentId&&dep.route===scope.route&&(dep.kind==='context'
       ?this.context.validateHistorical(dep):(()=>{
         const key=JSON.stringify(dep),cached=this.validationCache.get(key);if(cached!==undefined)return cached;
-        const valid=b.provider.sources?.validate(scope,dep)??(dep.kind==='legacy'&&dep.epoch===b.provider.basis(scope).epoch);
+        const valid=b.provider.sources.validate(scope,dep);
         if(this.validationCache.size>=8192)this.validationCache.clear();this.validationCache.set(key,valid);return valid;
       })()));
   }
@@ -117,21 +117,18 @@ export class SourceTracker {
       }
     }
   }
-  dependenciesFor(seq:number,legacyEpoch?:string):SourceDependency[]{
+  dependenciesFor(seq:number):SourceDependency[]{
     const record=this.get(seq);if(record)return record.dependencies;
     const event=this.session?.snapshotEvents()[seq],text=eventText(event);
     if(event?.type==='user/message'&&(event.data.source.kind==='compact-checkpoint'||event.data.source.kind==='dafeiyu-summary-view')&&text){
       const compact=fragmentCapsuleSchema.safeParse((()=>{try{return JSON.parse(text);}catch{return null;}})());
       if(compact.success){const view=resolveFragmentView(this.session!,compact.data.ref,this.scope());return view&&view.text===text
         ?fragmentDependencies(view):[{agentId:this.agentId,route:this.item!.route,kind:'unavailable',reason:'invalid-fragment-view'}];}
-      try {const value=z.object({schemaVersion:z.number(),dependencies:dependenciesSchema.optional(),epoch:z.string()}).parse(JSON.parse(text));
-        if(value.schemaVersion===2&&value.dependencies)return value.dependencies;
-        return [{agentId:this.agentId,route:this.item!.route,kind:'legacy',epoch:value.epoch}];
-      }catch{return [{agentId:this.agentId,route:this.item!.route,kind:'unavailable',reason:'unknown-checkpoint'}];}
+      return [{agentId:this.agentId,route:this.item!.route,kind:'unavailable',reason:'invalid-checkpoint'}];
     }
-    return [{agentId:this.agentId,route:this.item!.route,kind:'legacy',epoch:legacyEpoch??'untracked'}];
+    return [{agentId:this.agentId,route:this.item!.route,kind:'unavailable',reason:'untracked-source'}];
   }
-  admit(options:GenerateOptions,legacy:(seq:number)=>string|undefined):void {
+  admit(options:GenerateOptions):void {
     if(!this.session||!this.item||!this.binding()?.provider.sources)return;
     this.sync();const b=this.binding()!,events=this.session.snapshotEvents(),visible=new Set(options.messages.map(m=>m.id));
     const deps:(readonly SourceDependency[])[]=[],parents:number[]=[];
@@ -139,7 +136,7 @@ export class SourceTracker {
       const e=events[seq];const message=e?.type==='user/message'?e.data:e?.type==='assistant/message'||e?.type==='tool/result'?e.data.message:undefined;
       if(!message||!visible.has(message.id))continue;
       if(e?.type==='user/message'&&e.data.source.kind!==this.item.inputKind&&e.data.source.kind!=='compact-checkpoint'&&e.data.source.kind!=='dafeiyu-summary-view')continue;
-      deps.push(this.dependenciesFor(seq,legacy(seq)));parents.push(seq);
+      deps.push(this.dependenciesFor(seq));parents.push(seq);
     }
     for(const region of this.context.sourceItems()){
       deps.push(region.owner===b.owner?b.provider.sources!.context(this.scope(),region.region,region.item):[{

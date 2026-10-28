@@ -10,7 +10,7 @@ import * as Core from '@dafeiyu/core';
 import * as Timeline from '@dafeiyu/timeline';
 import * as Memory from '@dafeiyu/memory';
 import { API_VERSION,ActionOutcomeSchema,MessageTaskSubmitSchema,ResourceProofSchema } from '@dafeiyu/contracts';
-import type { ActivityAnchor,Conversation,ExecutionContextV3,ExternalActionPolicy,HostConfig,Json } from '@dafeiyu/contracts';
+import type { ActivityAnchor,Conversation,ExecutionContext,ExternalActionPolicy,HostConfig,Json } from '@dafeiyu/contracts';
 import { ServerExecutorService,SERVER_EXECUTOR_ACTIONS } from '../packages/server-executor/lib/service.js';
 import type { ServerExecutorDependencies } from '../packages/server-executor/lib/service.js';
 import { ServerExecutorConfigSchema,ServerExecutorPluginConfigSchema,serverExecutorScene } from '../packages/server-executor/lib/config.js';
@@ -52,15 +52,15 @@ async function fixture(options:{directory?:string;create?:boolean;scene?:Convers
   const adapter=new ScriptedModel(request=>response(request)),host=await probeHost(directory,adapter),ctx=host.ctx;let calls=0,lastJob='',messageId=0,submission:{taskId:string;runId:string}|undefined,anchor:ActivityAnchor|undefined;
   let executor:ServerExecutorService|undefined;
   try{
-    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(directory,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:10000});
-    await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(directory,'memory'),lifecycleMode:'managed',sourceTracking:true});
+    await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(directory,'core'),personaFile:resolve('profiles/persona.test.md'),provider:'local-test',model:'scripted',turnTimeoutMs:10000});
+    await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(directory,'memory'),});
     const core=ctx.dafeiyu,scene=options.scene??privateScene;
     const serviceConfig=config(directory,{createStore:options.create??true});if(options.standing)serviceConfig.settings={...serviceConfig.settings,standingAuthority:options.standing};
     executor=new ServerExecutorService(ctx,serviceConfig,{budget:options.budget??emptyBudget,processControl,run:async input=>{calls++;lastJob=input.jobId;return options.run?options.run(input):closedRun(input);},loadProfile:options.loadProfile??(async()=>({allowedTools:[],guard:()=>{}}))});
     const policy:HostConfig['authorityPolicies'][number]={id:'test-policy',producers:['fixture-tasks','local-test','wake-test'],actions:[...SERVER_EXECUTOR_ACTIONS,'fixture_anchor'],allowLocalWrite:true,externalActions:grants,sourceRules:[],resources:[serverExecutorScene('test')]};
     core.configureExecution({profileId:'test',createStore:options.create??true,policies:[policy,{id:'conversation',producers:['fixture-qq'],actions:['fixture_submit'],allowLocalWrite:true}]});
-    const channel=core.registerExtension({id:'fixture-qq',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',channels:[{channel:'qq',account,deliver:async()=>({status:'sent',receiptId:'never-direct-executor-send'})}]});
-    const taskTools=core.registerExtensionV3({protocolVersion:3,id:'fixture-tasks',version:'1',agentId:'dafeiyu',actions:[
+    const channel=core.registerExtension({id:'fixture-qq',version:'1',protocolVersion:4,agentId:'dafeiyu',channels:[{channel:'qq',account,deliver:async()=>({status:'sent',receiptId:'never-direct-executor-send'})}]});
+    const taskTools=core.registerExtension({protocolVersion:4,id:'fixture-tasks',version:'1',agentId:'dafeiyu',actions:[
       {id:'fixture_submit',version:'1',description:'提交真实虚构主人消息的任务',effects:'local-write',inputSchema:MessageTaskSubmitSchema,outputSchema:z.json(),execute:async(raw,c)=>{submission=core.submitMessageTask(c,'fixture-tasks',raw);return success(z.json().parse(submission));}},
       {id:'fixture_anchor',version:'1',description:'虚构来源形成真实程序锚点',effects:'local-write',requiresTask:true,inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_raw,c)=>{anchor=core.captureActivityAnchor(c,'fixture-tasks');options.onAnchor?.(anchor);return success(z.json().parse({anchor}));}},
     ]});
@@ -138,7 +138,7 @@ test('another real task cannot read the first task job by identifier',async()=>{
 
 test('copied execution contexts and model source identifiers never acquire owner authority or unexposed material',async()=>{
   const h=await fixture();try{const taskId=randomUUID(),fake={agentId:'dafeiyu',taskId,runId:randomUUID(),operationId:randomUUID(),origin:{kind:'native',producerId:'fixture-tasks',requestId:'forged'},
-      scope:{kind:'task',agentId:'dafeiyu',taskId,scopeKey:JSON.stringify(['dafeiyu-scope-v1','task','dafeiyu',taskId])},intentVersion:1,grant:{id:randomUUID()},signal:new AbortController().signal} as ExecutionContextV3;
+      scope:{kind:'task',agentId:'dafeiyu',taskId,scopeKey:JSON.stringify(['dafeiyu-scope-v1','task','dafeiyu',taskId])},intentVersion:1,grant:{id:randomUUID()},signal:new AbortController().signal} as ExecutionContext;
     await assert.rejects(h.service.executeOwner(fake,input),/SCOPE_DENIED/);let step=0;
     h.owner(()=>++step===1?call(SERVER_EXECUTOR_ACTIONS[0],{...input,sources:[`execution-source:${randomUUID()}`]}):textReply('未知引用没有授权'));await h.core.whenIdle();
     assert.equal(h.calls,0);assert.equal(outcomes(h)[0]?.errorCode,'SOURCE_NOT_EXPOSED');assert.deepEqual(h.service.store.counts(),{});

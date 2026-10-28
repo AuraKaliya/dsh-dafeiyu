@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { Context } from '@deepseek-ai/cordis';
-import type { ExecutionContextV3,ActivityConfigSchema,ExtensionV3,PersonaSourceRef } from '@dafeiyu/contracts';
+import type { ExecutionContext,ActivityConfigSchema,Extension,PersonaSourceRef } from '@dafeiyu/contracts';
 import { ActivityService,ACTIVITY_ACTIONS } from '@dafeiyu/activity';
 import { ActivityStore } from '../packages/activity/lib/store.js';
 import { executionHarness } from './execution-fixture.js';
@@ -16,12 +16,12 @@ import { testTempDir } from './test-temp.js';
 type H=Awaited<ReturnType<typeof executionHarness>>;
 const memoryActions=['dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_execution_select'];
 const request={requestId:'plan',title:'虚构探索安排',goal:'决定一次自主探索',policyId:'test-policy'};
-async function fixture(response:Response,options:{settings?:z.input<typeof ActivityConfigSchema>;extension?:Omit<ExtensionV3,'protocolVersion'|'agentId'>;directory?:string;now?:number;maxConcurrentRuns?:number;turnTimeoutMs?:number;context?:NonNullable<Parameters<typeof executionHarness>[4]>['context']}={}){
+async function fixture(response:Response,options:{settings?:z.input<typeof ActivityConfigSchema>;extension?:Omit<Extension,'protocolVersion'|'agentId'>;directory?:string;now?:number;maxConcurrentRuns?:number;turnTimeoutMs?:number;context?:NonNullable<Parameters<typeof executionHarness>[4]>['context']}={}){
   const directory=options.directory??await mkdtemp(join(testTempDir(),'activity-scheduler-')),dataDir=join(directory,'activity'),settings={explorationPolicy:'test-policy',maintenancePolicy:'test-policy',...options.settings};
   if(!options.directory)new ActivityStore(join(dataDir,'activity.sqlite'),{agentId:'dafeiyu',profileId:'test'},settings,true).close();let now=options.now??Date.now(),monotonic=0,activity!:ActivityService;
   const configure=async(ctx:Context)=>{activity=new ActivityService(ctx,{agentId:'dafeiyu',profileId:'test',dataDir,settings},()=>now,()=>monotonic);
     if(settings.maintenance)activity.bindMaintenance(ctx.dafeiyuMemory.maintenance!.schedulingPort());activity.recover();activity.activate();};
-  const h=await executionHarness(directory,response,options.extension,!options.directory,{sourceTracking:true,...(settings.maintenance?{maintenance:{}}:{}),...(options.turnTimeoutMs?{turnTimeoutMs:options.turnTimeoutMs}:{}),...(options.context?{context:options.context}:{}),...(options.maxConcurrentRuns?{maxConcurrentRuns:options.maxConcurrentRuns}:{}),extraActions:[...ACTIVITY_ACTIONS,...memoryActions],extraProducers:['activity'],beforeActivate:configure});
+  const h=await executionHarness(directory,response,options.extension,!options.directory,{...(settings.maintenance?{maintenance:{}}:{}),...(options.turnTimeoutMs?{turnTimeoutMs:options.turnTimeoutMs}:{}),...(options.context?{context:options.context}:{}),...(options.maxConcurrentRuns?{maxConcurrentRuns:options.maxConcurrentRuns}:{}),extraActions:[...ACTIVITY_ACTIONS,...memoryActions],extraProducers:['activity'],beforeActivate:configure});
   return {h,activity,directory,now:()=>now,advance:(ms:number)=>{now+=ms;monotonic+=Math.max(0,ms);},start:()=>activity.start(false),tick:()=>activity.tick(),close:h.close};
 }
 function read(directory:string,sql:string,which='activity'){const file=which==='activity'?'activity/activity.sqlite':which==='memory'?'memory/memory.sqlite':'core/runtime.sqlite';const db=new DatabaseSync(join(directory,file),{readOnly:true});try{return db.prepare(sql).all();}finally{db.close();}}
@@ -52,7 +52,7 @@ test('a lost acknowledgement cannot reject an accepted Run and restart never rep
 test('task completion with selected evidence is scheduled for maintenance while redundant selection requests coalesce',async()=>{
   let f:Awaited<ReturnType<typeof fixture>>,step=0,maintenance=false,maintenanceId='',source:PersonaSourceRef|undefined;const text='虚构气球在观察窗口内向东移动';
   const extension={id:'fixture',version:'1',actions:[{id:'fixture_observe',version:'1',description:'fictional observation',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
-    execute:async(_i:unknown,c:ExecutionContextV3)=>{source=f.h.memory.persona!.recordObservation(c,{requestId:'source',text,kind:'primary',resource:'fixture:balloon',occurredAt:new Date().toISOString(),coverage:['fictional-window'],completeness:'partial'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'partial' as const,data:z.json().parse(source),sources:[],receipts:[]};}}]};
+    execute:async(_i:unknown,c:ExecutionContext)=>{source=f.h.memory.growth!.recordObservation(c,{requestId:'source',text,kind:'primary',resource:'fixture:balloon',occurredAt:new Date().toISOString(),coverage:['fictional-window'],completeness:'partial'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'partial' as const,data:z.json().parse(source),sources:[],receipts:[]};}}]};
   f=await fixture(options=>{
     if(JSON.stringify(options).includes('独立经历分析器'))return textReply(JSON.stringify({schemaVersion:1,summary:'一次有界观察',gaps:['未知未来'],experiences:[{content:{observation:'气球向东',action:'虚构观察',outcome:'窗口内向东',interpretation:'不能推断永久方向',conditions:['本次窗口'],unknowns:['未来方向']},supports:[{sourceId:'S1',quote:text}],counters:[],target:null}],relations:[],persona:[]}));
     step++;if(!maintenance)return step===1?call('fixture_observe',{}):step===2?call('dafeiyu_execution_select',{requestId:'select',expectedVersion:0,entries:[source],reason:'选择观察'}):textReply('观察结束');
@@ -156,8 +156,8 @@ test('a missed lifecycle consumer is repaired from bounded authoritative Run rec
 test('maintenance cannot reintroduce a revoked planning source through its derived Task goal, even when activity context was omitted',async()=>{
   let f:Awaited<ReturnType<typeof fixture>>,mode='plan',step=0;
   const extension={id:'fixture',version:'1',actions:[{id:'fixture_save',version:'1',description:'selected fictional content',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
-    execute:async(_i:unknown,c:ExecutionContextV3)=>{const source=f.h.memory.persona!.recordObservation(c,{requestId:'source',text:'虚构观察，保留来源',kind:'primary',resource:'fixture:scope',occurredAt:new Date().toISOString(),coverage:['test'],completeness:'partial'},'fixture');
-      const saved=f.h.memory.persona!.contribute(c,{requestId:'save',source:source.id,version:source.version,mode:'original',reason:'选择保存'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:z.json().parse(saved),sources:[],receipts:[]};}}]};
+    execute:async(_i:unknown,c:ExecutionContext)=>{const source=f.h.memory.growth!.recordObservation(c,{requestId:'source',text:'虚构观察，保留来源',kind:'primary',resource:'fixture:scope',occurredAt:new Date().toISOString(),coverage:['test'],completeness:'partial'},'fixture');
+      const saved=f.h.memory.growth!.contribute(c,{requestId:'save',source:source.id,version:source.version,mode:'original',reason:'选择保存'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:z.json().parse(saved),sources:[],receipts:[]};}}]};
   f=await fixture(()=>++step===1?mode==='plan'?call('dafeiyu_activity_plan',planInput(f.now()+60000)):call('fixture_save',{}):textReply('测试步骤结束'),{extension,settings:{maintenance:true},context:{maxBytes:0}});
   try{const parent=f.h.port.submitTask(request);await f.h.core.whenIdle();mode='explore';step=0;f.start();f.advance(60000);await f.tick();await f.h.core.whenIdle();
     assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'completed');

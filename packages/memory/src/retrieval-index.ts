@@ -36,7 +36,7 @@ export class RetrievalIndex {
       const app = this.db.prepare('PRAGMA application_id').get()?.application_id;
       const version = this.db.prepare('PRAGMA user_version').get()?.user_version;
       const fresh = app === 0 && version === 0 && this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n === 0;
-      if (!fresh && (app !== APP || (version !== 1 && version !== 2))) throw new Error('Unsupported retrieval database');
+      if (!fresh && (app !== APP || version !== 2)) throw new Error('Unsupported retrieval database');
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
       if (fresh) this.db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE profiles(hash TEXT PRIMARY KEY,body TEXT NOT NULL);
@@ -53,7 +53,6 @@ export class RetrievalIndex {
           role TEXT NOT NULL CHECK(role IN ('query','document')),text_hash TEXT NOT NULL,vector BLOB NOT NULL,accessed INTEGER NOT NULL,
           UNIQUE(agent_id,route,profile,role,text_hash));
         PRAGMA application_id=${APP}; PRAGMA user_version=2; COMMIT;`);
-      else if (version === 1) this.db.exec('BEGIN IMMEDIATE; ALTER TABLE chunks ADD COLUMN order_no INTEGER NOT NULL DEFAULT 0; DELETE FROM snapshots; PRAGMA user_version=2; COMMIT;');
     } catch (error) { this.db.close(); throw error; }
   }
   snapshot(scope: TimelineScope, profile: string): number | null {

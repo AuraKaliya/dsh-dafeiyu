@@ -1,3 +1,5 @@
+import {z} from 'zod';
+import {fixtureAction} from '../tests/fixture-action.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -20,11 +22,7 @@ async function send(room, text, name, verify) {
 }
 try {
   host = await localHost(root);
-  host.core.registerExtension({ id: 'acceptance-echo', version: '0.1.0', apiVersion: 2, agentId: 'dafeiyu', actions: [{
-    name: 'acceptance_echo', description: '原样返回text并附一个固定的验收回执，请以实际工具返回为准。',
-    fields: { text: { description: '要回显的文字', required: true } },
-    execute: async args => ({ text: args.text ?? '', receipt: 'echo-accepted-42' }),
-  }] });
+  host.core.registerExtension({ id: 'acceptance-echo', version: '0.1.0', protocolVersion:4, agentId: 'dafeiyu', actions: [fixtureAction(host.core,'acceptance-echo',{id:'acceptance_echo',description:'原样返回text并附一个固定的验收回执，请以实际工具返回为准。',inputSchema:z.strictObject({text:z.string().describe('要回显的文字')}),work:async args => ({ text: args.text ?? '', receipt: 'echo-accepted-42' })})] });
   await send('private-test', '请用一句中文介绍你是谁。', 'persona', reply => reply.includes('大肥鱼'));
   await send('private-test', '本轮测试约定：项目代号是“蓝帆731”。请记在当前会话中，并仅回复这个代号。', 'context-first', reply => reply.includes('蓝帆731'));
   await send('private-test', '更正刚才的约定：项目代号改为“青羽842”。仅回复新的代号。', 'context-correction', reply => reply.includes('青羽842') && !reply.includes('蓝帆731'));

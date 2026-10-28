@@ -25,15 +25,14 @@ export class QqStore {
   readonly mediaDelivery:QqMediaDeliveryLedger;
   readonly stickers:QqStickerStore;
   batches(config:z.output<typeof QqBatchConfigSchema>,host:QqBatchHost,clock?:()=>number){return new QqMessageBatches(this.db,config,host,clock);}
-  constructor(file: string, options: { migrate?: boolean; cache?: QqCacheOptions;stickers?:z.input<typeof QqStickersConfigSchema> } = {}) {
+  constructor(file: string, options: { cache?: QqCacheOptions;stickers?:z.input<typeof QqStickersConfigSchema> } = {}) {
     mkdirSync(dirname(file), { recursive: true }); this.db = new DatabaseSync(file);
     try {
       // Refuse unknown/legacy stores before changing their persistent journal mode.
       const current = inspectQqSchema(this.db);
       if (!current.fresh && !current.supported) throw new Error('QQ_STORAGE_UNSUPPORTED');
-      if (!current.fresh && current.version < QQ_SCHEMA_VERSION && !options.migrate) throw new Error('QQ_MIGRATION_REQUIRED');
       this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
-      initializeQqSchema(this.db, options.migrate ?? false);
+      initializeQqSchema(this.db);
       this.cache = new QqCache(this.db, options.cache);
       this.delivery = new QqDeliveryLedger(this.db);
       this.media=new QqMediaStore(this.db,this.cache);

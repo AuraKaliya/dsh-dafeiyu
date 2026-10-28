@@ -81,7 +81,7 @@ test('removed fragment refs and old full checkpoint exports cannot disclose dele
 test('other plugin regions and native sections survive fragment retirement unchanged',async t=>{
   const h=await fragmentFixture();t.after(h.close);
   h.ctx.systemPrompt.context({name:'native-c2',order:1,required:true,text:'NATIVE_C2_KEEP'});
-  const expires=new Date(Date.now()+600000).toISOString();const extension=h.core.registerExtension({id:'second-c2',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{
+  const expires=new Date(Date.now()+600000).toISOString();const extension=h.core.registerExtension({id:'second-c2',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
     id:'status',kind:'operational-fact',prepare:async()=>[{id:'status',version:'1',text:'SECOND_C2_KEEP',expiresAt:expires,sources:[{ref:'fictional:status',version:'1',hash:'test'}]}],validate:()=>true,
   }]});t.after(()=>extension.dispose());await h.run('加入其他区域');
   h.mutate(h.a,'delete',1);await h.run('继续');assert.match(h.visible(),/NATIVE_C2_KEEP/);assert.match(h.visible(),/SECOND_C2_KEEP/);assert.match(h.view().text,/B_FACT_KEEP/);

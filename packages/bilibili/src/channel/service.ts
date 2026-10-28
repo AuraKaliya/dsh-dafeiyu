@@ -38,7 +38,7 @@ export class BiliOwnerChannel extends Service {
     this.identityHash=BiliOwnerHashSchema.parse(ports.transport.identityHash);this.epoch=z.number().int().positive().parse(ports.lease.epoch);this.now=ports.now??Date.now;ports.lease.guard();ports.transport.guard();
     this.store=new BiliOwnerStore(join(this.config.dataDir,'bili-owner.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId,accountUid:this.config.settings.accountUid,ownerUid:this.config.settings.ownerUid},this.config.createStore);
     try{this.root=realpathSync(this.config.dataDir);}catch(error){this.store.close();throw error;}
-    try{this.handle=ctx.dafeiyu.registerExtension({id:BILI_OWNER_EXTENSION,version:BILI_OWNER_VERSION,apiVersion:API_VERSION,agentId:this.config.agentId,lifecycleReady:()=>!this.closed&&(this.gate.active||this.gate.state==='quiescing'),
+    try{this.handle=ctx.dafeiyu.registerExtension({id:BILI_OWNER_EXTENSION,version:BILI_OWNER_VERSION,protocolVersion:4,agentId:this.config.agentId,lifecycleReady:()=>!this.closed&&(this.gate.active||this.gate.state==='quiescing'),
       channels:[{channel:'bilibili',account:this.config.settings.accountUid,deliveryValidation:'per-segment',description:'当前为B站独立账号与配置的唯一主人的私聊；仅文字，每条最多1000个Unicode字符。不提供平台发布、QQ主人或服务器执行权限。视频探索使用本渠道只读Task，结果由原人格会话整理。',
         deliver:(reply,signal,authority)=>this.deliver(reply,signal,authority),deliverTaskResult:(reply,anchor,signal,authority)=>this.deliverTaskResult(reply,anchor,signal,authority)}]});}
     catch(error){this.store.close();throw error;}

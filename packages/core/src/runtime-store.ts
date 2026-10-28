@@ -1,3 +1,4 @@
+import {createStorageSchema} from './storage-schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -6,12 +7,10 @@ import { z } from 'zod';
 import { ActionOutcomeSchema, ExecutionScopeSchema, RunOriginSchema, conversationKey,PersonaManifestSchema } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
 import { configureSqlite } from '@dafeiyu/journal';
-import { migratePersonaRuntime } from './migrate-persona-runtime.js';
-import { NativeDeliveryStore,migrateNativeDeliveries } from './native-delivery-store.js';
-import { migrateMediaRuntime } from './migrate-media-runtime.js';
+import { NativeDeliveryStore } from './native-delivery-store.js';
 
-export const RUNTIME_APPLICATION_ID = 0x44465231;
-export const RUNTIME_SCHEMA_VERSION = 4;
+export const RUNTIME_APPLICATION_ID = 0x44465232;
+export const RUNTIME_SCHEMA_VERSION = 1;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
@@ -52,7 +51,7 @@ export class RuntimeStore {
   private readonly nonce=randomUUID();
   private closed=false;
   readonly identity:Readonly<RuntimeIdentity>;
-  constructor(readonly file:string,identity:RuntimeIdentity,private readonly options:{create?:boolean;migrate?:boolean;requirePersonaManifest?:boolean}={}){
+  constructor(readonly file:string,identity:RuntimeIdentity,private readonly options:{create?:boolean;requirePersonaManifest?:boolean}={}){
     this.identity=Object.freeze(RuntimeIdentitySchema.parse(identity));
     if(!existsSync(file)&&!options.create)throw new Error('RUNTIME_INITIALIZATION_REQUIRED');
     if(options.create)mkdirSync(dirname(file),{recursive:true});
@@ -62,8 +61,7 @@ export class RuntimeStore {
       const count=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n);
       const fresh=version===0&&app===0&&count===0;
       if(fresh&&!options.create)throw new Error('RUNTIME_INITIALIZATION_REQUIRED');
-      if(!fresh&&(![1,2,3,4].includes(version)||app!==RUNTIME_APPLICATION_ID))throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
-      if(!fresh&&version<RUNTIME_SCHEMA_VERSION&&!options.migrate)throw new Error('MIGRATION_REQUIRED');
+      if(!fresh&&(version!==RUNTIME_SCHEMA_VERSION||app!==RUNTIME_APPLICATION_ID))throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
       this.db.exec('PRAGMA busy_timeout=5000;PRAGMA foreign_keys=ON;');
       if(fresh)this.initialize();
       const saved=this.db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();
@@ -73,40 +71,13 @@ export class RuntimeStore {
       configureSqlite(this.db);
       this.transaction(()=>{const owner=this.db.prepare('SELECT pid FROM runtime_ownership WHERE singleton=1').get();
         if(owner){let alive=true;try{process.kill(Number(owner.pid),0);}catch(error){if(error instanceof Error&&'code'in error&&error.code==='ESRCH')alive=false;}if(alive)throw new Error('RUNTIME_ALREADY_OWNED');}
-        migratePersonaRuntime(this.db);
-        migrateNativeDeliveries(this.db);
-        migrateMediaRuntime(this.db);
         this.db.prepare('INSERT OR REPLACE INTO runtime_ownership VALUES(1,?,?)').run(process.pid,this.nonce);});
       this.nativeDeliveries=new NativeDeliveryStore(this.db,work=>this.transaction(work),(runId,type,data)=>this.event(runId,type,data));
     }catch(error){this.db.close();throw error;}
   }
   private initialize():void {
     this.db.exec('BEGIN IMMEDIATE');
-    try{
-      const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
-      if(version===1||version===2||version===3||version===4){this.db.exec('COMMIT');return;}
-      this.db.exec(`
-        CREATE TABLE runtime_metadata(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL);
-        CREATE TABLE runtime_ownership(singleton INTEGER PRIMARY KEY CHECK(singleton=1),pid INTEGER NOT NULL,nonce TEXT NOT NULL);
-        CREATE TABLE execution_requests(id TEXT PRIMARY KEY,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,task_id TEXT,run_id TEXT,UNIQUE(producer,request_id));
-        CREATE TABLE runs(id TEXT PRIMARY KEY,request_key TEXT NOT NULL UNIQUE REFERENCES execution_requests(id),definition TEXT NOT NULL,state TEXT NOT NULL,version INTEGER NOT NULL,snapshot TEXT,result TEXT,error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
-        CREATE TABLE run_inputs(run_id TEXT NOT NULL REFERENCES runs(id),input_id TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(run_id,input_id));
-        CREATE TABLE execution_sessions(session_key TEXT PRIMARY KEY,session_id TEXT NOT NULL UNIQUE);
-        CREATE TABLE run_operations(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,run_id TEXT NOT NULL REFERENCES runs(id),call_id TEXT NOT NULL,fingerprint TEXT NOT NULL,action TEXT NOT NULL,plugin TEXT NOT NULL,plugin_version TEXT NOT NULL,state TEXT NOT NULL,outcome TEXT,started_event TEXT NOT NULL,UNIQUE(run_id,call_id));
-        CREATE TABLE run_checkpoints(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
-        CREATE TABLE wake_receipts(producer TEXT NOT NULL,occurrence_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,run_id TEXT REFERENCES runs(id),PRIMARY KEY(producer,occurrence_id));
-        CREATE TABLE runtime_outbox(ordinal INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,body TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0);
-        CREATE TRIGGER runtime_request_immutable BEFORE UPDATE OF id,producer,request_id,fingerprint,body ON execution_requests BEGIN SELECT RAISE(ABORT,'Immutable runtime request');END;
-        CREATE TRIGGER runtime_run_binding_immutable BEFORE UPDATE OF id,request_key,definition,created_at ON runs BEGIN SELECT RAISE(ABORT,'Immutable run binding');END;
-        CREATE TRIGGER runtime_snapshot_immutable BEFORE UPDATE OF snapshot ON runs WHEN OLD.snapshot IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable run snapshot');END;
-        CREATE TRIGGER runtime_result_immutable BEFORE UPDATE OF result ON runs WHEN OLD.result IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable run result');END;
-        CREATE TRIGGER runtime_operation_binding_immutable BEFORE UPDATE OF id,run_id,call_id,fingerprint,action,plugin,plugin_version,started_event ON run_operations BEGIN SELECT RAISE(ABORT,'Immutable operation binding');END;
-        CREATE TRIGGER runtime_operation_result_immutable BEFORE UPDATE OF outcome ON run_operations WHEN OLD.outcome IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable operation outcome');END;
-        CREATE TRIGGER runtime_checkpoint_immutable BEFORE UPDATE ON run_checkpoints BEGIN SELECT RAISE(ABORT,'Immutable checkpoint');END;
-        CREATE TRIGGER runtime_event_immutable BEFORE UPDATE OF id,body ON runtime_outbox BEGIN SELECT RAISE(ABORT,'Immutable execution event');END;
-        CREATE TRIGGER runtime_runs_retain BEFORE DELETE ON runs BEGIN SELECT RAISE(ABORT,'Retain execution history');END;
-        PRAGMA application_id=${RUNTIME_APPLICATION_ID};PRAGMA user_version=1;
-      `);
+    try{createStorageSchema(this.db);this.db.exec(`PRAGMA application_id=${RUNTIME_APPLICATION_ID};PRAGMA user_version=${RUNTIME_SCHEMA_VERSION};`);
       this.db.prepare('INSERT INTO runtime_metadata VALUES(1,?)').run(JSON.stringify(this.identity));this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -183,7 +154,7 @@ export class RuntimeStore {
       return this.transitionInside(id,version,'running');});
   }
   personaBinding(id:string){this.get(id);const row=this.db.prepare('SELECT body,body_hash FROM run_persona_manifests WHERE run_id=?').get(id);
-    if(!row)return {kind:'legacy-unbound' as const};const manifest=PersonaManifestSchema.parse(JSON.parse(string(row.body)));if(runtimeHash(manifest)!==row.body_hash)throw new Error('PERSONA_MANIFEST_CORRUPT');return {kind:'bound' as const,manifest};}
+    if(!row)throw new Error('PERSONA_MANIFEST_REQUIRED');const manifest=PersonaManifestSchema.parse(JSON.parse(string(row.body)));if(runtimeHash(manifest)!==row.body_hash)throw new Error('PERSONA_MANIFEST_CORRUPT');return {kind:'bound' as const,manifest};}
   complete(id:string,version:number,raw:unknown):StoredRun {
     const result=RunResultRefSchema.parse(raw);return this.transaction(()=>{const run=this.get(id);if(run.state!=='running'||run.version!==version||run.snapshot?.sessionId!==result.sessionId)throw new Error('RESULT_BINDING_CONFLICT');
       if(this.operations(id).some(operation=>operation.state==='started'))throw new Error('OPERATION_PENDING');
@@ -225,11 +196,6 @@ export class RuntimeStore {
   latestRunEvent(runId:string,state:RunState){this.get(runId);RunStateSchema.parse(state);const row=this.db.prepare("SELECT id,body FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')=? ORDER BY ordinal DESC LIMIT 1").get(runId,`run.${state}`);
     if(!row)return null;const event=eventSchema.parse(JSON.parse(string(row.body)));if(event.id!==row.id||event.runId!==runId||event.type!==`run.${state}`)throw new Error('RUN_EVENT_BINDING_CONFLICT');return event;
   }
-  /** Core-only receipts do not manufacture a model result or an admission in an already closed Run. */
-  bindPersonaTrialRecord(runId:string,kind:'admission-input'|'admission-receipt'|'completion-receipt',raw:unknown):void{z.enum(['admission-input','admission-receipt','completion-receipt']).parse(kind);const value=z.json().parse(raw),id=`persona-trial:${kind}`;this.transaction(()=>{
-    const run=this.get(runId);if(kind==='completion-receipt'?!['completed','failed','cancelled','interrupted'].includes(run.state):run.state!=='running')throw new Error('PERSONA_TRIAL_RUN_STATE_INVALID');
-    const old=this.readInput(runId,id);if(old!==null){if(runtimeHash(old)!==runtimeHash(value))throw new Error('INPUT_BINDING_CONFLICT');return;}this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId,id,JSON.stringify(value));
-  });}
   operations(runId:string){this.open();return this.db.prepare('SELECT id FROM run_operations WHERE run_id=? ORDER BY ordinal').all(runId).map(row=>this.operation(string(row.id)));}
   finishOperation(id:string,raw:unknown){const outcome=ActionOutcomeSchema.parse(raw);return this.transaction(()=>{const operation=this.operation(id);if(operation.outcome){if(runtimeHash(operation.outcome)!==runtimeHash(outcome))throw new Error('OPERATION_OUTCOME_CONFLICT');return operation;}
     if(operation.state!=='started')throw new Error('OPERATION_UNCERTAIN');this.db.prepare("UPDATE run_operations SET state='finished',outcome=? WHERE id=?").run(JSON.stringify(outcome),id);this.event(operation.runId,`operation.${outcome.status}`,{operationId:id,effects:outcome.effects});return this.operation(id);});}

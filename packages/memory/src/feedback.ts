@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { resolve } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import { ToolFeedbackSchema,redactJson,redactContent,FeedbackWitnessSchema,FeedbackCaptureError } from '@dafeiyu/contracts';
-import type { ActionContext,FeedbackDelivery,FeedbackRequest,FeedbackWitness,FeedbackProvider,ToolFeedback,Json,OperationScope } from '@dafeiyu/contracts';
+import type { ConversationAccess,FeedbackDelivery,FeedbackRequest,FeedbackWitness,FeedbackProvider,ToolFeedback,Json,OperationScope } from '@dafeiyu/contracts';
 import { FeedbackStore,digestText } from './feedback-store.js';
 import type { FeedbackRecord,FeedbackHeaderRecord,FeedbackDependency } from './feedback-store.js';
 import type { Evidence } from './types.js';
@@ -29,10 +29,10 @@ export class ToolFeedbackArchive implements FeedbackProvider {
   private readonly store:FeedbackStore;
   private readonly config:z.output<typeof feedbackConfigSchema>;
   constructor(private readonly ctx:Context,private readonly memories:MemoryStore,directory:string,config:z.input<typeof feedbackConfigSchema>,
-    private readonly evidence:(context:ActionContext,refs:readonly string[])=>Promise<Evidence[]>,private readonly strictSources=false){
+    private readonly evidence:(context:ConversationAccess,refs:readonly string[])=>Promise<Evidence[]>,private readonly strictSources=false){
     this.config=feedbackConfigSchema.parse(config);this.store=new FeedbackStore(resolve(directory,'feedback.sqlite'));this.flush();
   }
-  private scope(context:ActionContext){return this.ctx.dafeiyu.scopeFor(context);}
+  private scope(context:ConversationAccess){return this.ctx.dafeiyu.scopeFor(context);}
   mutationEpoch(scope:Scope):number{return this.store.mutationEpoch(scope);}
   sourceRecord(scope:Scope,id:string){const record=this.store.header(scope,id);return record&&this.state(scope,record)==='valid'?record:null;}
   private match(scope:Scope,ref:string){return (other:string)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,ref,other);}
@@ -116,7 +116,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
       archiveStatus:'source_unavailable',ref:ref(record.archive.id),untrustedEvidence:true},witness:null};
     return {value:this.brief(record),witness:this.witness(scope,record,'normal')};
   }
-  open(context:ActionContext,raw:unknown,deleted=false):Json{
+  open(context:ConversationAccess,raw:unknown,deleted=false):Json{
     const scope=this.scope(context),input=pageSchema.parse(raw),mode=deleted?'deleted':input.mode;
     this.flush();
     if(deleted&&input.mode!=='normal')throw new MemoryError('not_found');
@@ -148,7 +148,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
       offsetUnit:'unicode-codepoint',hasMore:nextCursor!==null,nextCursor,untrustedEvidence:true,
       useRestriction:mode==='deleted'?'deleted_lookup_only':mode==='history'?'historical_evidence_only':'archive_read_only'});
   }
-  present(context:ActionContext,raw:Json):FeedbackDelivery{
+  present(context:ConversationAccess,raw:Json):FeedbackDelivery{
     const scope=this.scope(context);
     const parsed=z.object({status:z.literal('ok'),kind:z.literal('dafeiyu-feedback-page'),ref:z.string(),version:z.number(),hash:z.string(),mode:z.enum(['normal','history','deleted'])}).safeParse(raw);
     if(!parsed.success)return {value:raw,witness:null};
@@ -156,7 +156,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
     if(!this.validate(scope,witness))return {value:{status:'source_unavailable'},witness:null};
     return {value:raw,witness};
   }
-  list(context:ActionContext,raw:unknown):Json{
+  list(context:ConversationAccess,raw:unknown):Json{
     const scope=this.scope(context),input=listSchema.parse(raw),items=[];
     this.flush();
     for(const record of this.store.list(scope)){
@@ -166,7 +166,7 @@ export class ToolFeedbackArchive implements FeedbackProvider {
     }
     return {status:'ok',mode:input.mode,items,untrustedEvidence:true};
   }
-  change(context:ActionContext,raw:unknown,deleted:boolean):Json{
+  change(context:ConversationAccess,raw:unknown,deleted:boolean):Json{
     const scope=this.scope(context),input=changeSchema.parse(raw);
     const receipt=this.store.change(scope,{id:this.id(input.ref),expectedVersion:input.expectedVersion,requestId:input.requestId,reason:redactContent(input.reason).value},deleted);
     const current=this.store.get(scope,receipt.id)!;

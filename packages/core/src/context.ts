@@ -50,7 +50,7 @@ export class ContextCoordinator {
   }
   release(regions:readonly PreparedRegion[]):void{for(const region of regions)this.scopes.delete(region.request);}
   async prepare(item:PendingMessage,signal:AbortSignal):Promise<PreparedRegion[]>{
-    const prepared:PreparedRegion[]=[];const deadline=this.config.assembly.mode==='unified'?Date.now()+this.config.assembly.deadlineMs:Infinity;
+    const prepared:PreparedRegion[]=[];const deadline=Date.now()+this.config.assembly.deadlineMs;
     try{
       for(const entry of [...this.entries.values()]){
         if(!entry.active)continue;

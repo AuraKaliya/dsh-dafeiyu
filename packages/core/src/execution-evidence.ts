@@ -6,7 +6,7 @@ import type { RuntimeStore,StoredRun } from './runtime-store.js';
 import { runtimeHash } from './runtime-store.js';
 import { digestSource,unionDependencies } from './source-records.js';
 import type { PersonaRuntime } from './persona-runtime.js';
-import type { CapabilityRegistryV3 } from './registry-v3.js';
+import type { CapabilityRegistry } from './capability-registry.js';
 import type { ContextEvidenceView } from './context-runtime.js';
 
 const dependencies=z.array(SourceDependencySchema).max(4096);
@@ -27,7 +27,7 @@ export class ExecutionEvidence {
   private invalidated=false;
   private bound:ReturnType<ExecutionEvidence['binding']>|undefined;
   constructor(readonly run:StoredRun,private readonly store:RuntimeStore,private readonly memory:()=>ExecutionMemoryPort|undefined,
-    private readonly personas:PersonaRuntime,private readonly registry:CapabilityRegistryV3,private readonly repository:TaskRepositoryPort,
+    private readonly personas:PersonaRuntime,private readonly registry:CapabilityRegistry,private readonly repository:TaskRepositoryPort,
     private readonly rules:readonly string[],private readonly base:PersonaAccess,private readonly authorityValid:(anchor:ActivityAnchor)=>boolean=()=>false,private readonly authorityRequired:(run:StoredRun)=>boolean=()=>false){}
   access(base=this.base):PersonaAccess{const cached=this.validationDepth>0?this.accessMemo.get(base):undefined;if(cached)return cached;
     const access:PersonaAccess={...base,sourceRules:this.rules,historyDependencies:this.admitted,historyTracked:true,
@@ -82,8 +82,7 @@ export class ExecutionEvidence {
           return [{...scopeFields,kind:'execution-input',runId:id,hash:runtimeHash(proof)},...proof.sources.map(ref=>({...scopeFields,kind:'execution-source' as const,ref}))];},
         context:(_scope,region,item)=>{const own=this.contexts.find(context=>context.owner==='memory'&&context.region===region&&context.item.id===item.id);if(!own)return this.unavailable('missing-context');
           const refs:PersonaSourceRef[]=region==='growth'?(()=>{const manifest=this.personas.current(this.run.id)?.manifest;if(!manifest)return [];
-            return [...manifest.entries.filter(entry=>`persona:${entry.candidate.id}`===item.id).flatMap(entry=>[entry.contentRef,...entry.dependencies]),
-              ...(manifest.schemaVersion===2?manifest.trialEntries.filter(entry=>`persona-trial:${entry.candidate.id}`===item.id).flatMap(entry=>[entry.contentRef,...entry.dependencies]):[])];})()
+            return manifest.entries.filter(entry=>`self-memory:${entry.memory.id}`===item.id).flatMap(entry=>[entry.contentRef,...entry.dependencies]);})()
             :(()=>{try{const value=z.object({source:PersonaSourceRefSchema}).safeParse(JSON.parse(item.text));return value.success?[value.data.source]:[];}catch{return [];}})();
           return [this.dependency(own),...refs.map(ref=>({...scopeFields,kind:'execution-source' as const,ref}))];},
         tool:(_scope,_name,_text,meta)=>{const parsed=z.object({dafeiyuExecution:ExecutionToolReceiptSchema}).safeParse(meta);if(!parsed.success)return this.unavailable('unbound-tool-result');const receipt=parsed.data.dafeiyuExecution;
@@ -92,8 +91,7 @@ export class ExecutionEvidence {
         validate:(_scope,dep)=>this.validate([dep]),
         validateMany:(_scope,deps)=>{let result:boolean[]=[];this.readSources(()=>{result=deps.map(dep=>this.validate([dep]));});return result;},
       },
-      summarize:(scope,sources,signal,check)=>{if(!port)throw new Error('DEPENDENCY_UNAVAILABLE');return port.summarize(scope,sources,signal,check);},
-      ...(port?.summarizeFragments?{summarizeFragments:port.summarizeFragments.bind(port)}:{}),
+      summarizeFragments:(...args)=>{if(!port)throw new Error('DEPENDENCY_UNAVAILABLE');return port.summarizeFragments(...args);},
       ...(port?.rewrite?{rewrite:port.rewrite.bind(port)}:{}),
     };return this.bound={owner:'memory',version:'execution-sources-v1',provider};
   }

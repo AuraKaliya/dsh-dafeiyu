@@ -21,7 +21,7 @@ async function fixture(enabled=false){
   const root=await mkdtemp(join(testTempDir(),'host-bili-owner-storage-')),file=join(root,'host.json'),coordination=join(root,'coordination.sqlite');
   const config={schemaVersion:1,profileId:identity.profileId,agent:{id:identity.agentId},paths:{core:'data/core',memory:'data/memory',sessions:'data/sessions',query:'data/query.sqlite'},
     modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'persona.md',kind:'test'},plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},
-      {id:'memory',required:true,config:{sourceTracking:true}}] as {id:string;required:boolean;config:Record<string,unknown>}[]};
+      {id:'memory',required:true,config:{}}] as {id:string;required:boolean;config:Record<string,unknown>}[]};
   if(enabled)config.plugins.push(plugin);await writeFile(join(root,'persona.md'),'虚构存储测试；不调用模型或私信平台。');await writeFile(file,JSON.stringify(config));
   const old=loadHostConfig(file),initial=initializeProfile(old,coordination),database=join(old.paths.core,'bili-owner.sqlite');
   return {root,file,coordination,config,old,initial,database,enable:async()=>{config.plugins.push(plugin);await writeFile(file,JSON.stringify(config));return loadHostConfig(file);}};

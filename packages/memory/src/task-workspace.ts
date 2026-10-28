@@ -1,9 +1,10 @@
+import {TaskCreateSchema,TaskUpdateSchema,TaskSceneSchema,TaskActivateSchema,TaskLinkSchema,TaskBeginSchema,TaskCompleteSchema} from '@dafeiyu/contracts';
 import { randomUUID,createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { conversationKey,redactContent,TaskMemoryAuthorizationSchema } from '@dafeiyu/contracts';
 import type { TaskMemoryAuthorization } from '@dafeiyu/contracts';
-import type { ObservationAuthority,MemoryObservation,TimelineScope,MemoryAccessPurpose,ContextItem,TaskWorkspaceProvider } from '@dafeiyu/contracts';
+import type { ObservationAuthority,MemoryObservation,TimelineScope,MemoryAccessPurpose,ContextItem } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import type { NewEvent } from '@dafeiyu/journal';
 import { MEMORY_VERSION,sourceVersionSchema,sourceFenceSchema } from './types.js';
@@ -25,28 +26,6 @@ const authoritySchema=z.object({agentId:z.string(),route:z.string(),pluginId:z.s
 const jobSchema=z.strictObject({authority:authoritySchema,taskEpoch:z.number().int(),selectionVersion:z.number().int(),slot:z.string(),slotVersion:z.number().int(),
   inputs:z.array(z.strictObject({linkId:z.uuid(),proof:witnessSchema})).max(16)});
 const privateRoute=(agentId:string,taskId:string)=>conversationKey(agentId,{channel:'agent-task',account:agentId,kind:'local',id:taskId});
-
-export function migrateTaskWorkspaces(db:DatabaseSync):void {
-  const version=db.prepare('PRAGMA user_version').get()?.user_version;
-  const tables=['task_workspaces','task_revisions','task_members','task_selections','task_links','task_jobs','task_slots','task_requests','task_observations'];
-if(version===4||version===5||version===6||version===7||version===8||version===9||version===10||version===11||version===12||version===13){for(const table of tables)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
-  if(version!==3)throw new Error('Unsupported task workspace schema');
-  db.exec(`CREATE TABLE task_workspaces(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,version INTEGER NOT NULL,epoch INTEGER NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL);
-    CREATE TABLE task_revisions(task_id TEXT NOT NULL REFERENCES task_workspaces(id),version INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(task_id,version));
-    CREATE TABLE task_members(task_id TEXT NOT NULL REFERENCES task_workspaces(id),route TEXT NOT NULL,plugin TEXT NOT NULL,PRIMARY KEY(task_id,route,plugin));
-    CREATE TABLE task_selections(agent_id TEXT NOT NULL,route TEXT NOT NULL,version INTEGER NOT NULL,task_id TEXT REFERENCES task_workspaces(id),PRIMARY KEY(agent_id,route));
-    CREATE TABLE task_links(id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task_workspaces(id),fingerprint TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(task_id,fingerprint));
-    CREATE TABLE task_jobs(id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task_workspaces(id),status TEXT NOT NULL,body TEXT NOT NULL,result TEXT);
-    CREATE TABLE task_slots(task_id TEXT NOT NULL REFERENCES task_workspaces(id),slot TEXT NOT NULL,version INTEGER NOT NULL,job_id TEXT NOT NULL REFERENCES task_jobs(id),PRIMARY KEY(task_id,slot));
-    CREATE TABLE task_requests(agent_id TEXT NOT NULL,route TEXT NOT NULL,plugin TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,route,plugin,request_id));
-    CREATE TABLE task_observations(task_id TEXT NOT NULL REFERENCES task_workspaces(id),job_id TEXT NOT NULL REFERENCES task_jobs(id),activity_id TEXT NOT NULL REFERENCES observation_activities(id),late INTEGER NOT NULL,PRIMARY KEY(job_id,activity_id));
-    CREATE TRIGGER task_revision_immutable BEFORE UPDATE ON task_revisions BEGIN SELECT RAISE(ABORT,'Immutable task revision'); END;
-    CREATE TRIGGER task_revision_no_delete BEFORE DELETE ON task_revisions BEGIN SELECT RAISE(ABORT,'Retain task revision'); END;
-    CREATE TRIGGER task_link_immutable BEFORE UPDATE ON task_links BEGIN SELECT RAISE(ABORT,'Immutable task source'); END;
-    CREATE TRIGGER task_link_no_delete BEFORE DELETE ON task_links BEGIN SELECT RAISE(ABORT,'Retain task source'); END;
-    CREATE TRIGGER task_job_input_immutable BEFORE UPDATE OF id,task_id,body ON task_jobs BEGIN SELECT RAISE(ABORT,'Immutable work inputs'); END;
-    PRAGMA user_version=4;`);
-}
 
 /** One SQLite transaction for task state, source adoption, observations and outbox. Task
  * control epoch, scene activation and per-slot version are independent concurrency fences. */
@@ -88,7 +67,7 @@ export class TaskWorkspace {
       if(old){if(old.fingerprint!==fingerprint)throw new Error('task_idempotency_conflict');return z.record(z.string(),z.unknown()).parse(JSON.parse(string(old.receipt))) as T;}
       const receipt=work();this.db.prepare('INSERT INTO task_requests VALUES(?,?,?,?,?,?)').run(scope.agentId,scope.route,scope.pluginId,requestId,fingerprint,JSON.stringify(receipt));return receipt;});
   }
-  create(agentId:string,input:Parameters<TaskWorkspaceProvider['create']>[1]):string {
+  create(agentId:string,input:z.output<typeof TaskCreateSchema>):string {
     return this.request({agentId,route:'$task-coordinator',pluginId:'$core'},input.requestId,{kind:'create',input},()=>{
       const id=randomUUID(),task={id,agentId,version:1,epoch:1,status:'active' as const,title:redactContent(input.title).value,goal:redactContent(input.goal).value};
       this.db.prepare('INSERT INTO task_workspaces VALUES(?,?,?,?,?,?)').run(id,agentId,1,1,'active',JSON.stringify({title:task.title,goal:task.goal}));
@@ -99,7 +78,7 @@ export class TaskWorkspace {
     const row=this.db.prepare("SELECT receipt FROM task_requests WHERE agent_id=? AND route='$task-coordinator' AND plugin='$core' AND request_id=?").get(agentId,requestId);
     return row?z.object({id:z.uuid()}).parse(JSON.parse(string(row.receipt))).id:null;
   }
-  update(agentId:string,id:string,input:Parameters<TaskWorkspaceProvider['update']>[2]):Record<string,unknown>{
+  update(agentId:string,id:string,input:z.output<typeof TaskUpdateSchema>):Record<string,unknown>{
     return this.request({agentId,route:'$task-coordinator',pluginId:'$core'},input.requestId,{kind:'update',id,input},()=>{
       const task=this.task(agentId,id);if(task.version!==input.expectedVersion)throw new Error('task_version_conflict');
       task.version++;task.epoch++;if(input.title!==undefined)task.title=redactContent(input.title).value;if(input.goal!==undefined)task.goal=redactContent(input.goal).value;if(input.status)task.status=input.status;
@@ -108,20 +87,20 @@ export class TaskWorkspace {
   }
   private member(authority:ObservationAuthority,id:string){const task=this.task(authority.agentId,id);
     if(!this.db.prepare('SELECT 1 FROM task_members WHERE task_id=? AND route=? AND plugin=?').get(id,authority.route,authority.pluginId))throw new Error('task_scene_not_joined');return task;}
-  join(authority:ObservationAuthority,id:string,input:Parameters<TaskWorkspaceProvider['join']>[2]):Record<string,unknown>{
+  join(authority:ObservationAuthority,id:string,input:z.output<typeof TaskSceneSchema>):Record<string,unknown>{
     return this.request(authority,input.requestId,{kind:'join',id,input},()=>{const task=this.task(authority.agentId,id);if(task.status!=='active')throw new Error('task_not_active');
       this.db.prepare('INSERT OR IGNORE INTO task_members VALUES(?,?,?)').run(id,authority.route,authority.pluginId);this.record(task,'task.scene.joined',{plugin:authority.pluginId},authority);return {taskId:id,joined:true};});
   }
   selection(scope:TimelineScope){const row=this.db.prepare('SELECT version,task_id FROM task_selections WHERE agent_id=? AND route=?').get(scope.agentId,scope.route);return {version:row?integer(row.version):0,taskId:row?.task_id?string(row.task_id):null};}
   activeTask(scope:TimelineScope):string|null {const selection=this.selection(scope);return selection.taskId&&this.task(scope.agentId,selection.taskId).status==='active'?selection.taskId:null;}
-  activate(authority:ObservationAuthority,id:string|null,input:Parameters<TaskWorkspaceProvider['activate']>[2]):Record<string,unknown>{
+  activate(authority:ObservationAuthority,id:string|null,input:z.output<typeof TaskActivateSchema>):Record<string,unknown>{
     return this.request(authority,input.requestId,{kind:'activate',id,input},()=>{const old=this.selection(authority);if(old.version!==input.expectedVersion)throw new Error('task_selection_conflict');
       if(id&&this.member(authority,id).status!=='active')throw new Error('task_not_active');
       this.db.prepare('INSERT INTO task_selections VALUES(?,?,?,?) ON CONFLICT(agent_id,route) DO UPDATE SET version=excluded.version,task_id=excluded.task_id').run(authority.agentId,authority.route,old.version+1,id);
       if(id||old.taskId)this.record(this.task(authority.agentId,id??old.taskId!),'task.scene.selected',{selectionVersion:old.version+1,selected:id},authority);
       return {taskId:id,version:old.version+1};});
   }
-  private capture(scope:TimelineScope,ref:Parameters<TaskWorkspaceProvider['link']>[2]['items'][number]):Witness|null {
+  private capture(scope:TimelineScope,ref:z.output<typeof TaskLinkSchema>['items'][number]):Witness|null {
     if(ref.kind==='observation'){const activity=this.memory.observations.activity(scope,ref.id,'internal');return activity?{kind:'observation',route:scope.route,id:ref.id,contentHash:activity.hash}:null;}
     const item=this.memory.read(scope,ref.id,'normal',ref.revision,'internal');if(!item||item.version!==ref.version||item.contentHash!==ref.contentHash)return null;
     const fences=this.memory.evidenceFences(scope,item.id,item.revision,(a,b)=>this.sameSource(scope,a,b),'internal');
@@ -138,7 +117,7 @@ export class TaskWorkspace {
     const points=Array.from(item.content);if(range&&(range.start>=range.end||range.end>points.length))return null;
     return {text:range?points.slice(range.start,range.end).join(''):item.content,proof};
   }
-  link(authority:ObservationAuthority,id:string,input:Parameters<TaskWorkspaceProvider['link']>[2]):Record<string,unknown>{
+  link(authority:ObservationAuthority,id:string,input:z.output<typeof TaskLinkSchema>):Record<string,unknown>{
     return this.request(authority,input.requestId,{kind:'link',id,input},()=>{const task=this.member(authority,id);if(task.status!=='active')throw new Error('task_not_active');if(task.version!==input.expectedVersion)throw new Error('task_version_conflict');
       const links:string[]=[];for(const item of input.items){const proof=this.capture(authority,item);if(!proof)throw new Error('task_source_unavailable');
         const fingerprint=hash(proof),old=this.db.prepare('SELECT id FROM task_links WHERE task_id=? AND fingerprint=?').get(id,fingerprint);
@@ -154,7 +133,7 @@ export class TaskWorkspace {
     if(integer(this.db.prepare('SELECT count(*) AS n FROM task_links WHERE task_id=?').get(id)?.n)>=64)throw new Error('task_capacity');
     const linkId=randomUUID();this.db.prepare('INSERT INTO task_links VALUES(?,?,?,?)').run(linkId,id,fingerprint,JSON.stringify(proof));return linkId;
   }
-  begin(authority:ObservationAuthority,id:string,input:Parameters<TaskWorkspaceProvider['begin']>[2]):string {
+  begin(authority:ObservationAuthority,id:string,input:z.output<typeof TaskBeginSchema>):string {
     return this.request(authority,input.requestId,{kind:'begin',id,input},()=>{const task=this.member(authority,id),selection=this.selection(authority);if(task.status!=='active'||selection.taskId!==id)throw new Error('task_not_selected');
       const slot=this.db.prepare('SELECT version FROM task_slots WHERE task_id=? AND slot=?').get(id,input.slot),slotVersion=slot?integer(slot.version):0;
       if(slotVersion!==input.expectedSlotVersion)throw new Error('task_slot_conflict');
@@ -224,7 +203,7 @@ export class TaskWorkspace {
     }
     return receipt;
   });}
-  complete(authority:ObservationAuthority,id:string,input:Parameters<TaskWorkspaceProvider['complete']>[2]):Record<string,unknown>{
+  complete(authority:ObservationAuthority,id:string,input:z.output<typeof TaskCompleteSchema>):Record<string,unknown>{
     return this.request(authority,input.requestId,{kind:'complete',id,input},()=>{const job=this.job(authority,id);if(job.status!=='running')throw new Error('task_work_closed');
       const observations=this.db.prepare('SELECT activity_id,late FROM task_observations WHERE job_id=? ORDER BY rowid').all(id);
       const outputs=observations.map(row=>this.capture(job.body.authority,{kind:'observation',id:string(row.activity_id)}));

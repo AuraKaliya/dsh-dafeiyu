@@ -1,3 +1,4 @@
+import {createStorageSchema} from './storage-schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -5,7 +6,7 @@ import { dirname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { MessageSchema, conversationKey, TimelineQuerySchema, redactJson, ExecutionEventInputSchema, ExecutionEventSchema, taskScopeKey } from '@dafeiyu/contracts';
 import type { NewExecutionEvent, ExecutionEvent } from '@dafeiyu/contracts';
-import { JOURNAL_APPLICATION_ID, checkJournalShape, migrateJournalSchema, journalHasLiveOwner } from './schema.js';
+import { JOURNAL_APPLICATION_ID, checkJournalShape, journalHasLiveOwner } from './schema.js';
 import { configureSqlite } from './sqlite.js';
 export { inspectJournal, JOURNAL_APPLICATION_ID } from './schema.js';
 export { configureSqlite } from './sqlite.js';
@@ -34,45 +35,14 @@ export class Journal {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     try {
-    this.db.exec('PRAGMA busy_timeout=5000;');
-    const schema = this.db.prepare('PRAGMA user_version').get();
-    const app=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
-    const tableCount=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n);
-    const fresh=schema?.user_version===0&&app===0&&tableCount===0;
-    if (!fresh&&!(schema?.user_version===1&&app===0)&&!(schema?.user_version===2&&app===JOURNAL_APPLICATION_ID)) {
-      this.db.close(); throw new Error('Unsupported journal schema');
-    }
-    try{if(!fresh){checkJournalShape(this.db,schema?.user_version===1);if(journalHasLiveOwner(this.db))throw new Error('Journal is already owned by a live process');}}catch(error){this.db.close();throw error;}
+    const version=this.db.prepare('PRAGMA user_version').get()?.user_version;
+    const app=this.db.prepare('PRAGMA application_id').get()?.application_id;
+    const count=this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
+    const fresh=version===0&&app===0&&count===0;
+    if(!fresh&&(version!==1||app!==JOURNAL_APPLICATION_ID))throw new Error('INVALID_STORAGE');
+    if(!fresh){checkJournalShape(this.db);if(journalHasLiveOwner(this.db))throw new Error('Journal is already owned by a live process');}
     configureSqlite(this.db);
-    if(fresh){
-      this.transaction(()=>{
-      const currentVersion=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),currentApp=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
-      const currentTables=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n);
-      if(currentVersion===0&&currentApp===0&&currentTables===0){
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS conversations(route TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE);
-      CREATE TABLE IF NOT EXISTS inbox(
-        ordinal INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-        route TEXT NOT NULL REFERENCES conversations(route), message_id TEXT NOT NULL,
-        extension_id TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL, reply TEXT,
-        UNIQUE(route,message_id));
-      CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-        route TEXT NOT NULL, trace_id TEXT NOT NULL, operation_id TEXT NOT NULL, body TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS events_route ON events(route,seq);
-      CREATE INDEX IF NOT EXISTS events_trace ON events(trace_id,seq);
-      CREATE TABLE IF NOT EXISTS ownership(singleton INTEGER PRIMARY KEY CHECK(singleton=1),pid INTEGER NOT NULL,nonce TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS analysis_grants(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,route TEXT NOT NULL,body TEXT NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
-      CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'Events are append-only'); END;
-      CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'Events are append-only'); END;
-      PRAGMA user_version=1;
-    `);
-      }else{
-        if(!(currentVersion===1&&currentApp===0)&&!(currentVersion===2&&currentApp===JOURNAL_APPLICATION_ID))throw new Error('Unsupported journal schema');
-        checkJournalShape(this.db,currentVersion===1);if(journalHasLiveOwner(this.db))throw new Error('Journal is already owned by a live process');
-      }
-      });
-    }
-    try{migrateJournalSchema(this.db);}catch(error){this.db.close();throw error;}
+    if(fresh)this.transaction(()=>{createStorageSchema(this.db);this.db.exec(`PRAGMA application_id=${JOURNAL_APPLICATION_ID};PRAGMA user_version=1;`);});
     try {
       this.transaction(() => {
         const owner = this.db.prepare('SELECT pid FROM ownership WHERE singleton=1').get();

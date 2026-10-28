@@ -11,16 +11,6 @@ const materialSchema=z.strictObject({packetId:z.uuid(),sourceStamp:z.string().le
 export type NativeDeliveryMaterial=z.infer<typeof materialSchema>;
 const renderRef=z.strictObject({sessionId:z.string(),messageSeq:z.number().int().positive(),turnEndSeq:z.number().int().positive(),textHash:z.string().length(64)});
 const rowSchema=z.object({id:z.uuid(),run_id:z.uuid(),state:stateSchema,version:z.number().int().positive(),anchor:z.string(),material:z.string().nullable(),render_ref:z.string().nullable(),body:z.string().nullable(),credential:z.string().nullable(),receipt:z.string().nullable(),error:z.string().nullable()});
-export function migrateNativeDeliveries(db:DatabaseSync){const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===3||version===4){db.prepare('SELECT * FROM native_deliveries LIMIT 0').all();return;}if(version!==2)throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
-  db.exec(`CREATE TABLE native_deliveries(id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),state TEXT NOT NULL,version INTEGER NOT NULL,anchor TEXT NOT NULL,material TEXT,render_ref TEXT,body TEXT,credential TEXT,receipt TEXT,error TEXT);
-    CREATE TRIGGER native_delivery_anchor_immutable BEFORE UPDATE OF id,run_id,anchor ON native_deliveries BEGIN SELECT RAISE(ABORT,'Immutable delivery anchor'); END;
-    CREATE TRIGGER native_delivery_material_immutable BEFORE UPDATE OF material ON native_deliveries WHEN OLD.material IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable delivery material'); END;
-    CREATE TRIGGER native_delivery_render_immutable BEFORE UPDATE OF render_ref ON native_deliveries WHEN OLD.render_ref IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable rendering result'); END;
-    CREATE TRIGGER native_delivery_body_immutable BEFORE UPDATE OF body,credential ON native_deliveries WHEN OLD.credential IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable delivery credential'); END;
-    CREATE TRIGGER native_delivery_retain BEFORE DELETE ON native_deliveries BEGIN SELECT RAISE(ABORT,'Retain native delivery'); END;
-    PRAGMA user_version=3;`);
-}
 export class NativeDeliveryStore {
   constructor(private readonly db:DatabaseSync,private readonly atomic:<T>(work:()=>T)=>T,private readonly event:(runId:string,type:string,data:Record<string,Json>)=>unknown){}
   get(runId:string){const raw=this.db.prepare('SELECT * FROM native_deliveries WHERE run_id=?').get(z.uuid().parse(runId));if(!raw)return null;const row=rowSchema.parse(raw);

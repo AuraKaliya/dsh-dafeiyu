@@ -3,7 +3,7 @@ import type {} from '@dafeiyu/core';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { messageMainText,ResourceProofSchema } from '@dafeiyu/contracts';
-import type { ActionCapabilityV3,Conversation,ExecutionContextV3,ResourceProof } from '@dafeiyu/contracts';
+import type { ActionCapability,Conversation,ExecutionContext,ResourceProof } from '@dafeiyu/contracts';
 import { QQ_STICKER_PROVIDER,StickerMetadataSchema } from './sticker-store.js';
 import type { QqStickerStore } from './sticker-store.js';
 
@@ -16,11 +16,11 @@ const catalogProof=z.strictObject({kind:z.literal('catalog'),entries:z.array(z.s
 interface Host {agentId:string;botId:string;ownerId:string;store:QqStickerStore;allowed(scene:Conversation):boolean}
 /** Local selection/collection only. Core binds the target, final reply and delivery authority. */
 export class QqStickers {
-  private readonly handle:ReturnType<Context['dafeiyu']['registerExtensionV3']>;
+  private readonly handle:ReturnType<Context['dafeiyu']['registerExtension']>;
   private readonly unregister:()=>void;
   private closed=false;
   constructor(private readonly ctx:Context,private readonly host:Host){
-    this.handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:QQ_STICKER_PROVIDER,version:'1',agentId:host.agentId,requires:['media.assets.v1','memory.capability-observation.v1','execution.resource-scope.v1'],provides:['qq.stickers.v1'],lifecycleReady:()=>!this.closed,
+    this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:QQ_STICKER_PROVIDER,version:'1',agentId:host.agentId,requires:['media.assets.v1','memory.capability-observation.v1','execution.resource-scope.v1'],provides:['qq.stickers.v1'],lifecycleReady:()=>!this.closed,
       resourceProofs:{current:proof=>this.current(proof),epoch:()=>this.closed?'closed':host.store.epoch()},actions:this.actions()});
     try{this.unregister=ctx.dafeiyu.registerMediaProvider({id:QQ_STICKER_PROVIDER,describe:key=>{const description=host.store.describe(key);return description&&this.current(description.origin)?description:null;},open:async(key,range,signal)=>{
       signal.throwIfAborted();if(range)throw new Error('STICKER_RANGE_UNSUPPORTED');const {data,description}=host.store.open(key);if(!this.current(description.origin))throw new Error('STICKER_SOURCE_STALE');
@@ -31,24 +31,24 @@ export class QqStickers {
     if(!proof.key.startsWith('catalog:'))return this.host.store.current(proof);
     const detail=catalogProof.parse(proof.detail);return proof.version===1&&proof.hash===digest(detail)&&proof.key==='catalog:'+proof.hash&&JSON.stringify(proof.roots)===JSON.stringify(detail.entries.map(row=>'qq-sticker:'+row.id))&&detail.entries.every(entry=>{const row=this.host.store.get(entry.id);return row.version===entry.version&&!row.body.deleted&&(row.body.scope==='global'||digest(row.body.scene)===digest(proof.scene));});
   }catch{return false;}}
-  private target(context:ExecutionContextV3){this.ctx.dafeiyu.executionAuthority(context,QQ_STICKER_PROVIDER);const {target}=this.ctx.dafeiyu.quoteReplySource(context,QQ_STICKER_PROVIDER);
+  private target(context:ExecutionContext){this.ctx.dafeiyu.executionAuthority(context,QQ_STICKER_PROVIDER);const {target}=this.ctx.dafeiyu.quoteReplySource(context,QQ_STICKER_PROVIDER);
     if(target.channel!=='qq'||target.account!==this.host.botId||!this.host.allowed(target))throw new Error('STICKER_TARGET_DENIED');return target;}
-  private list(context:ExecutionContextV3,raw:unknown){const target=this.target(context),input=listSchema.parse(raw),stickers=this.host.store.list(target,input.query).map(row=>({...row,...(row.enabled?{source:this.host.store.lease(row.id,target,'preview:'+digest([row.id,row.version,target])).ref}:{})}));while(stickers.length&&JSON.stringify({stickers}).length>7800)stickers.pop();if(!stickers.length)return {stickers,coverage:'本地库未找到可用候选；可自主挑选当前会话中已看过、适合作为表情的图片收录。'};
+  private list(context:ExecutionContext,raw:unknown){const target=this.target(context),input=listSchema.parse(raw),stickers=this.host.store.list(target,input.query).map(row=>({...row,...(row.enabled?{source:this.host.store.lease(row.id,target,'preview:'+digest([row.id,row.version,target])).ref}:{})}));while(stickers.length&&JSON.stringify({stickers}).length>7800)stickers.pop();if(!stickers.length)return {stickers,coverage:'本地库未找到可用候选；可自主挑选当前会话中已看过、适合作为表情的图片收录。'};
     const detail=catalogProof.parse({kind:'catalog',entries:stickers.map(row=>({id:row.id,version:row.version}))}),hash=digest(detail),text=JSON.stringify({stickers}),observation=this.ctx.dafeiyu.recordCapabilityObservation(context,QQ_STICKER_PROVIDER,{
       requestId:'catalog:'+digest([context.runId,context.operationId,hash]),proof:{provider:QQ_STICKER_PROVIDER,scene:target,key:'catalog:'+hash,hash,version:1,roots:detail.entries.map(row=>'qq-sticker:'+row.id),detail},text,occurredAt:new Date().toISOString(),coverage:['名称、标签和描述来自收录记录；发送前仍核对原字节与库版本。'],counts:{received:stickers.length,processed:stickers.length}});
     return {stickers,observation};
   }
-  private async collect(context:ExecutionContextV3,raw:unknown){const input=collectSchema.parse(raw),access=this.ctx.dafeiyu.personaAccess(context,QQ_STICKER_PROVIDER,'local-write'),original=await this.ctx.dafeiyu.originalImage(context,QQ_STICKER_PROVIDER,input.exposureId);
+  private async collect(context:ExecutionContext,raw:unknown){const input=collectSchema.parse(raw),access=this.ctx.dafeiyu.personaAccess(context,QQ_STICKER_PROVIDER,'local-write'),original=await this.ctx.dafeiyu.originalImage(context,QQ_STICKER_PROVIDER,input.exposureId);
     if(original.source.ref.provider!=='qq-media'||!this.host.allowed(original.source.origin.scene))throw new Error('QQ_IMAGE_SOURCE_REQUIRED');
     const detail=z.object({messageId:z.string().min(1).max(80),sender:z.string().min(1).max(80)}).parse(original.source.origin.detail);access.guard();
     return this.host.store.collect(original.source.origin.scene,detail,StickerMetadataSchema.parse({name:input.name,description:input.description,tags:input.tags}),original.data,original.mime);
   }
-  private async use(context:ExecutionContextV3,raw:unknown){const input=useSchema.parse(raw),target=this.target(context);let parts:unknown[]=[];
+  private async use(context:ExecutionContext,raw:unknown){const input=useSchema.parse(raw),target=this.target(context);let parts:unknown[]=[];
     if(input.id){const source=this.host.store.lease(input.id,target,digest([context.runId,input.requestId])),asset=await this.ctx.dafeiyu.acquireMedia(context,QQ_STICKER_PROVIDER,{requestId:'sticker:'+digest([context.runId,input.requestId]),source:source.ref});
       this.host.store.bind(source.ref.key,asset);parts=[{kind:'asset',asset,as:'image'}];}
     return this.ctx.dafeiyu.prepareReplyMedia(context,QQ_STICKER_PROVIDER,{requestId:input.requestId,expectedVersion:input.expectedVersion,parts});
   }
-  private manage(context:ExecutionContextV3){this.ctx.dafeiyu.executionAuthority(context,QQ_STICKER_PROVIDER);if(context.origin.kind!=='message')throw new Error('OWNER_COMMAND_REQUIRED');
+  private manage(context:ExecutionContext){this.ctx.dafeiyu.executionAuthority(context,QQ_STICKER_PROVIDER);if(context.origin.kind!=='message')throw new Error('OWNER_COMMAND_REQUIRED');
     const item=this.ctx.dafeiyu.journal.get(context.origin.inboundId),scene=item.message.conversation;
     if(scene.channel!=='qq'||scene.account!==this.host.botId||item.message.sender.id!==this.host.ownerId||!this.host.allowed(scene)||this.ctx.dafeiyu.journal.messageRecalled({agentId:this.host.agentId,route:item.route},item.message.id))throw new Error('OWNER_COMMAND_REQUIRED');
     const text=messageMainText(item.message).trim(),listing=/^表情管理[：:]\s*列表(?:\s+([^\r\n]+))?$/u.exec(text);
@@ -58,7 +58,7 @@ export class QqStickers {
     const commands={通用:'global',停用:'disable',启用:'enable',删除:'delete',改名:'rename',标签:'tags'} as const;
     const access=this.ctx.dafeiyu.personaAccess(context,QQ_STICKER_PROVIDER,'local-write');access.guard();const row=this.host.store.manage(split[0]!.trim(),commands[action as keyof typeof commands],split[1]?.trim());return {id:row.id,version:row.version,name:row.name,scope:row.scope,enabled:row.enabled,deleted:row.deleted};
   }
-  private actions():ActionCapabilityV3[]{const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,work:(context:ExecutionContextV3,input:unknown)=>unknown|Promise<unknown>):ActionCapabilityV3=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(input,context)=>{
+  private actions():ActionCapability[]{const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,work:(context:ExecutionContext,input:unknown)=>unknown|Promise<unknown>):ActionCapability=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(input,context)=>{
     try{const data=z.json().parse(await work(context,input)),observed=z.object({observation:z.object({source:z.object({id:z.string(),scopeKey:z.string(),version:z.number(),contentHash:z.string()})})}).safeParse(data);
       return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data,sources:observed.success?[observed.data.observation.source]:[],receipts:[]};
     }catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'STICKER_OPERATION_FAILED';

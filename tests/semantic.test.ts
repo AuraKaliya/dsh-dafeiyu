@@ -94,7 +94,7 @@ test('rewriting one source group preserves unrelated history and other plugin ar
   const combined=compose(h,[h.a.view,b.view]),plan=h.plan(combined);assert.ok(plan);
   const view=commitSummaryRewrite(h.ctx,h.session(),plan,acceptedResult(plan.request),h.validate),ref=summaryReference(view.manifestSeq,view.manifest);
   h.ctx.systemPrompt.context({name:'semantic-native',order:1,required:true,text:'NATIVE_KEEP'});
-  const ext=h.core.registerExtension({id:'semantic-other',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',contexts:[{id:'status',kind:'operational-fact',
+  const ext=h.core.registerExtension({id:'semantic-other',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{id:'status',kind:'operational-fact',
     prepare:async()=>[{id:'status',version:'1',text:'OTHER_PLUGIN_KEEP',expiresAt:new Date(Date.now()+600000).toISOString(),sources:[{ref:'fictional:other',version:'1',hash:'test'}]}],validate:()=>true}]});t.after(()=>ext.dispose());
   h.mutate(h.a.memory,'delete',1);await h.run('继续');const after=resolveFragmentView(h.session(),ref,h.scope);assert.ok(after);assert.match(after.text,/B_ONLY/);assert.ok(!after.text.includes('青羽842'));
   assert.match(h.visible(),/NATIVE_KEEP/);assert.match(h.visible(),/OTHER_PLUGIN_KEEP/);

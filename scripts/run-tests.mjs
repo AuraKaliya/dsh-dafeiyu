@@ -37,13 +37,23 @@ try {
     try { const reason = await budgetCheck(run); if (reason) stop(reason); } catch { stop('TEST_STORAGE_MONITOR_FAILED'); }
     finally { monitoring = false; }
   }, 2000);
-  await execute('build', ['node_modules/typescript/bin/tsc', '-b']);
-  await execute('test-types', ['node_modules/typescript/bin/tsc', '-p', 'tests/tsconfig.json']);
-  await execute('tooling-types', ['node_modules/typescript/bin/tsc', '-p', 'scripts/testing/tsconfig.json']);
-  const available = [...(await readdir(join(repository, 'build-tests'))).filter(name => name.endsWith('.test.js')).map(name => 'build-tests/' + name),
+  const available = [...(await readdir(join(repository, 'tests'))).filter(name => name.endsWith('.test.ts')).map(name => 'build-tests/' + name.replace(/\.ts$/,'.js')),
     ...(await readdir(join(repository, 'tests', 'tooling'))).filter(name => name.endsWith('.test.ts')).map(name => 'tests/tooling/' + name)].sort();
   const requested = process.argv.slice(2), files = requested.length ? requested : available;
   if (!files.length || files.some(file => !available.includes(file))) throw new Error('TEST_FILE_NOT_ALLOWED');
+  await execute('build', ['node_modules/typescript/bin/tsc', '-b']);
+  if(requested.length){
+    const sources=files.filter(file=>file.startsWith('build-tests/')).map(file=>resolve(repository,'tests',basename(file).replace(/\.js$/,'.ts')));
+    if(sources.length){const config=join(run.root,'test-types.json');
+      await writeFile(config,JSON.stringify({extends:resolve(repository,'tests/tsconfig.json'),compilerOptions:{rootDir:resolve(repository,'tests'),outDir:resolve(repository,'build-tests')},include:[],files:sources}));
+      await execute('test-types',['node_modules/typescript/bin/tsc','-p',config]);}
+  }else await execute('test-types', ['node_modules/typescript/bin/tsc', '-p', 'tests/tsconfig.json']);
+  if(requested.length){
+    const config=join(run.root,'tooling-types.json');
+    const tooling=(await readdir(join(repository,'scripts/testing'))).filter(name=>name.endsWith('.ts')).map(name=>resolve(repository,'scripts/testing',name));
+    await writeFile(config,JSON.stringify({extends:resolve(repository,'scripts/testing/tsconfig.json'),include:[],files:[...tooling,...files.filter(file=>file.startsWith('tests/tooling/')).map(file=>resolve(repository,file))]}));
+    await execute('tooling-types',['node_modules/typescript/bin/tsc','-p',config]);
+  }else await execute('tooling-types', ['node_modules/typescript/bin/tsc', '-p', 'scripts/testing/tsconfig.json']);
   await execute('tests', ['scripts/testing/driver.ts', ...files]);
   const summary = JSON.parse(await readFile(join(run.root, 'summary.json'), 'utf8'));
   if (!summary.success || summary.counts.tests < 1) throw new Error('TEST_SUMMARY_FAILED');
