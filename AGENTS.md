@@ -1,5 +1,7 @@
 # 大肥鱼项目当前约定
 
+- 2026-10-28上下文完整开发已获用户授权，按 `docs/context-assembly-development-plan-20261028.md` 实施。用户明确调整P6：本地程序/组件测试通过后冻结公开发布并部署服务器，实际交互验收由用户完成；旧162项真实模型/真实平台验收不作为本轮部署前置条件，不自行新增付费或真实外发测试。服务器仍只核对部署、启动、账号、路径、权限和连接；保护真实身份、记忆及并行修改。
+
 - 仅执行用户指定的本项目工作，不领取父目录无关任务。
 - 2026-10-27最新范围见 `docs/current-scope-and-cleanup.md`、`docs/architecture.md`、`docs/integrated-acceptance-plan.md`、`docs/runtime-deployment-plan.md`。历史文档不覆盖这些当前约定。
 - 不使用子代理。所有分析、开发、检查由当前代理执行；不启动或恢复此前子代理。
