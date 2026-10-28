@@ -49,7 +49,7 @@ export class NativeRuntime {
           '回答既有状态时，保留与当前判断直接相关的来源资格、纠正关系、反证、未完成事项和未知效果。自述、摘要和推断不能代替实际回执；记录缺失只表示当前不能核实，不表示过去一定没有发生。假设、修辞及写作示例应明确标识，不能当作自己的真实经历。',
         ].join('\n')});
         // Keep standard DSH instruction sections. Unrelated runtime data is not a task handoff.
-        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const assembled=await next();return {...assembled,contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
+        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>this.harness.acceptsSection(section.name)),contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
       });
       if(!scope||!compaction){await handle.dispose();throw new Error('DSH_SCOPE_MISSING');}
       owned={handle,scope,compaction,lastRequest:undefined,get frame(){return slot.frame;},set frame(value){slot.frame=value;}};this.sessions.set(frame.sessionId,owned);

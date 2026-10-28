@@ -57,10 +57,11 @@ export class NativeExpression implements NativeExpressionPort {
     if(resultIncluded&&access.assessment)evidence.push({id:'A',kind:'inference',text:JSON.stringify({kind:'model-result-assessment',...access.assessment,note:'模型对目标满足程度和价值的判断，不是程序事实或发送回执。'})});
     if(access.media)evidence.push({id:'M',kind:'reported',text:JSON.stringify({note:'程序已核验可用于此目标的媒体部件。以下仅为字节／类型元信息，不表示读懂其内容；正文只据其他获准证据描述内容。',parts:access.media.parts})});
     if(!evidence.length)throw new Error('NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL');
+    if(access.handoff)evidence.push({id:'CONTEXT',kind:'reported',text:JSON.stringify({kind:'stage-handoff',...access.handoff})});
     evidence=packNativeEvidence(evidence);
     const question=z.string().min(1).max(2000).parse(access.question);if(Buffer.byteLength(JSON.stringify({question,evidence}))>128000)throw new Error('NATIVE_EXPRESSION_CAPACITY');
     if(redactJson(z.json().parse({question,evidence})).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
-    access.guard();return {anchor,question,evidence,resultIncluded,...(access.media?{media:access.media}:{}),sourceStamp:hash({anchor,proofs,outputHash:resultIncluded?hash(access.output):null,opaque:access.opaqueInfluence,policy:access.expressionPolicy??null,...(access.media?{media:access.media}:{})})};
+    access.guard();return {anchor,question,evidence,resultIncluded,...(access.media?{media:access.media}:{}),sourceStamp:hash({anchor,proofs,...(access.handoff?{handoff:access.handoff}:{}),outputHash:resultIncluded?hash(access.output):null,opaque:access.opaqueInfluence,policy:access.expressionPolicy??null,...(access.media?{media:access.media}:{})})};
   }
   prepare(access:NativeExpressionAccess){try{return this.store.atomic(()=>{const built=this.build(access),old=this.db.prepare('SELECT id FROM native_expression_packets WHERE agent_id=? AND run_id=?').get(access.execution.view.scope.agentId,built.anchor.runId);
     if(old)return this.open(access,String(old.id));const packet=NativeExpressionPacketSchema.parse({id:randomUUID(),version:1,...built});

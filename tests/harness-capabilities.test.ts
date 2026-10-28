@@ -47,6 +47,7 @@ test('the built-in catalog describes task-only plugin capabilities without grant
 test('DSH native tool parameters, recoverable errors and results stay in the same loop with stable prefixes',async t=>{
   let calls=0,step=0,chat=0;const schemas:string[]=[],prompts:string[]=[];
   const h=await qqCapabilityFixture({...taskOptions,context:{maxBytes:0},beforeActivate:async(ctx,root)=>{
+    ctx.effect(()=>ctx.dafeiyu.registerHarnessSection('standard-harness-instructions'));
     ctx.systemPrompt.section({name:'standard-harness-instructions',order:5,text:'STANDARD_DSH_HARNESS_INSTRUCTIONS'});
     ctx.systemPrompt.context({name:'unrelated-room',order:1,text:'UNRELATED_RUNTIME_DATA'});
     const handle=bindDshTools(ctx,'dafeiyu',{catalog:async()=>catalog(),execute:async(input,authority)=>{authority.guard();calls++;assert.equal(input.name,'fixture_lookup');assert.deepEqual(JSON.parse(input.argumentsJson),{number:calls});

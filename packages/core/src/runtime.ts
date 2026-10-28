@@ -79,6 +79,7 @@ export class DshRuntime {
     });
   }
 
+  registerHarnessSection(name:string){return this.harness.allowSection(name);}
   async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。',delivery?:RuntimeDelivery,nativeActions:readonly NativeAction[]=[],allowEmpty:()=>boolean=()=>false): Promise<RunResult> {
     return this.runFrame({mode:delivery?'delivery-v2':'conversation',item,persona,actions,signal,channelDescription,...(delivery?{delivery}:{}),nativeActions,allowEmpty});
   }

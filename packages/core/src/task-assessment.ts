@@ -26,7 +26,7 @@ export async function assessTask(ctx:Context,model:AgentOptions,cwd:string,frame
   const timer=AbortSignal.timeout(frame.assessmentTimeoutMs??60000),signal=AbortSignal.any([frame.view.signal,timer]),id=SessionId('dafeiyu-assessment-'+randomUUID());frame.guard();
   const info=await ctx.llm.resolveModelInfo(model.provider!,model.model!,signal),phaseModel:AgentOptions={...model,maxTokens:8192,...(info.reasoning?.efforts.some(value=>value.id==='low')?{reasoningEffort:ReasoningEffortId('low')}:{})};
   const workflow=z.object({workflow:z.json()}).safeParse(frame.program);
-  const input={stage:'result-assessment',goal:frame.goal,workflow:workflow.success?workflow.data.workflow:null,programFacts:facts,draft:{text:draft.text,kind:'model-inference',visibility:'internal-not-sent',ref:draft.resultRef},outputContract:outputContract(TaskAssessmentSchema)};
+  const input={stage:'result-assessment',goal:frame.goal,...(frame.handoff?{handoff:{...frame.handoff,stage:'assessment'},inputs:frame.inputs}:{}),workflow:workflow.success?workflow.data.workflow:null,programFacts:facts,draft:{text:draft.text,kind:'model-inference',visibility:'internal-not-sent',ref:draft.resultRef},outputContract:outputContract(TaskAssessmentSchema)};
   if(Buffer.byteLength(JSON.stringify(input))>frame.requestMaxBytes-frame.outputReserveBytes)throw new Error('TASK_ASSESSMENT_CAPACITY');
   const handle=await ctx.agents.create({sessionId:id,meta:{cwd},agentOptions:phaseModel,setup:scope=>{
     scope.tools.presentAs('native');scope.tools.restrict({allow:[]});

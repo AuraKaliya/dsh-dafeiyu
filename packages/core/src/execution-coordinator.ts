@@ -1,3 +1,4 @@
+import {stageHandoff} from './context-handoff.js';
 import {admitNativeContexts,contextManifest} from './context-plan.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -41,7 +42,7 @@ interface Dependencies {
   personas:PersonaRuntime;
   memory:()=>ExecutionMemoryPort|undefined;
   accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
-  turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number;maxBytes:number;prepareTimeoutMs:number};signal:AbortSignal;
+  turnTimeoutMs:number;context:{requestMaxBytes:number;outputReserveBytes:number;maxBytes:number;prepareTimeoutMs:number;assembly?:import('@dafeiyu/contracts').ContextAssembly};signal:AbortSignal;
   assessmentTimeoutMs?:number;
   projectConversation?:()=>Promise<void>;
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
@@ -183,7 +184,8 @@ export class ExecutionCoordinator {
     if(run.state==='waiting')operationalEvidence.push({id:'STATE',kind:'reported',text:JSON.stringify({state:run.state,error:run.error,note:'程序等待状态，不表示目标已经满足。'})});
     const reviewed=z.object({assessment:TaskAssessmentSchema}).safeParse(this.d.store.readInput(run.id,'task-assessment'));
     const selectedSourceIds=reviewed.success?reviewed.data.assessment.evidenceIds.flatMap(id=>this.d.store.operation(id).outcome?.sources.map(ref=>ref.id)??[]):[];
-    const expression:NativeExpressionAccess={execution:access,readSources:read=>evidence.readSources(read),anchor,question:source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),...(reviewed.success?{assessment:reviewed.data.assessment}:{}),...(selectedSourceIds.length?{selectedSourceIds}:{}),guard};
+    const handoff=this.d.store.readInput(run.id,'stage-handoff')?stageHandoff('delivery',source.kind==='self-exploration'&&!wake?'向当前会话分享获准的探索结果':task.goal,{taskId:task.id,runId:run.id,intentVersion:run.definition.intentVersion},this.validateMessageSource(source).item.message,{state:run.state,answerVisibilityAtPreparation:'candidate-not-yet-sent'},source.control?this.d.journal.get(source.control.inboundId).message:null):undefined;
+    const expression:NativeExpressionAccess={execution:access,...(handoff?{handoff}:{}),readSources:read=>evidence.readSources(read),anchor,question:source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,...(expressionPolicy?{expressionPolicy}:{}),...(reviewed.success?{assessment:reviewed.data.assessment}:{}),...(selectedSourceIds.length?{selectedSourceIds}:{}),guard};
     const media=this.d.media?.()?.nativeMaterial?.(expression);return media?{...expression,media}:expression;
   }
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
@@ -575,6 +577,8 @@ export class ExecutionCoordinator {
           continuation:saved.parentRunId?{parentRunId:saved.parentRunId,checkpoint:this.d.store.readCheckpoint(saved.parentRunId,saved.checkpointId!),operations:this.d.store.operations(saved.parentRunId).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))}:null,
           continuity:prior?{checkpointId:prior.id,previousRunId:prior.runId,sessionChanged:prior.sessionId!==sessionId,completedOperations:prior.completedOperations,unknownOperations:prior.unknownOperations,summary:prior.summary,gaps:prior.gaps}:null,
           gaps:[...(omitted?[`${omitted}项上下文未进入本轮，不能猜测其内容`]:[]),...(!prior?['未取得可核验接续检查点；不据此虚构过去']:[])]});
+        const handoff=this.d.context.assembly?.mode==='unified'?stageHandoff('exploration',runGoal,{taskId:task.id,runId:id,intentVersion:task.epoch},trigger?.message??null,{state:'running',continuation:prior?.id??null}):undefined;
+        if(handoff)this.d.store.bindInput(id,'stage-handoff',handoff);
         evidence.recordInput(program,inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),prior?{id:prior.id,hash:runtimeHash(prior)}:null,this.wakeSources(run,task));
         const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validate(evidence.exposed()))throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
         let stage=0,previousAssessment:import('@dafeiyu/contracts').TaskAssessment|undefined;
@@ -582,7 +586,7 @@ export class ExecutionCoordinator {
           this.d.store.appendExecutionEvent(id,'task.stage',{phase:'exploration',stage,deadlineAt:new Date(Date.parse(run.updatedAt)+this.d.turnTimeoutMs).toISOString()});this.flushEvents();
           let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
           const frame:TaskExecutionFrame={mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,...(this.d.assessmentTimeoutMs?{assessmentTimeoutMs:this.d.assessmentTimeoutMs}:{}),
-            program:z.json().parse({...z.record(z.string(),z.json()).parse(program),stage:{kind:'exploration',index:stage,previousAssessment:previousAssessment??null}}),contexts,evidence,
+            ...(handoff?{handoff}:{}),program:z.json().parse({...z.record(z.string(),z.json()).parse(program),...(handoff?{handoff}:{}),stage:{kind:'exploration',index:stage,previousAssessment:previousAssessment??null}}),contexts,evidence,
             audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
             checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
           const result=await this.d.runtime.runExecution(frame);admittedGuard();this.d.store.bindInput(id,`draft-result:${stage}`,result.resultRef);

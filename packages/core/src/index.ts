@@ -75,6 +75,8 @@ export class DafeiyuService extends Service {
   private expressionPreferences:{read:NonNullable<MemoryGrowthProvider['expressionPreferences']>}|undefined;
   private nativeTaskDelivery:NativeTaskDelivery|undefined;
   phaseTimeouts(){return this.config.phaseTimeouts;}
+  registerHarnessSection(name:string){return this.runtime.registerHarnessSection(name);}
+  contextAssembly(){return this.config.context.assembly;}
   private closedNativeDelivery:ReturnType<RuntimeStore['nativeDeliveries']['counts']>|null=null;
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}

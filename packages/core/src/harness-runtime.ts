@@ -13,7 +13,14 @@ const rules='依据程序提供的当前能力与实际结果选择方法。工�
 
 /** Reuses DSH assembly, native schemas and its tool loop. No model or second planner here. */
 export class HarnessRuntime {
+  private readonly sections=new Map<string,number>();
+  private readonly standardSections=new Set(['harness:identity','deployment:persona-prefix','deployment:persona-suffix','tools:ptc-only','tools:sdk',
+    'dafeiyu-persona','dafeiyu-execution-rules','dafeiyu-compaction-rules','dafeiyu-harness-principles']);
   constructor(private readonly configured:()=>Json=()=>null){}
+  /** Program-only registration for trusted deployment guidance; never accepted through a tool. */
+  allowSection(name:string):()=>void {if(!/^[a-z][a-z0-9:._-]{0,159}$/.test(name))throw new Error('INVALID_HARNESS_SECTION');
+    this.sections.set(name,(this.sections.get(name)??0)+1);let active=true;return ()=>{if(!active)return;active=false;const count=(this.sections.get(name)??1)-1;if(count)this.sections.set(name,count);else this.sections.delete(name);};}
+  acceptsSection(name:string):boolean{return this.standardSections.has(name)||this.sections.has(name);}
   private provider:Pick<DshToolsPort,'catalog'>|undefined;
   bind(provider:Pick<DshToolsPort,'catalog'>):()=>void {
     if(this.provider)throw new Error('DSH_HARNESS_ALREADY_BOUND');

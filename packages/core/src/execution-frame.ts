@@ -13,6 +13,7 @@ export interface NativeAction {
   metadata?(value:Json):ExecutionToolReceipt|undefined;
 }
 export interface TaskExecutionFrame {
+  readonly handoff?:import('@dafeiyu/contracts').ContextHandoff;
   assessmentTimeoutMs?:number;
   mode:'task';sessionId:string;view:ExecutionView;persona:PersonaSnapshot;goal:string;inputs:readonly ExecutionInput[];
   actions:readonly NativeAction[];guard:()=>void;requestMaxBytes:number;outputReserveBytes:number;
