@@ -21,6 +21,8 @@ export class ExecutionEvidence {
   private readonly checking=new Set<string>();
   private readonly validationMemo=new Map<string,boolean>();
   private accessMemo=new WeakMap<PersonaAccess,PersonaAccess>();
+  private readonly operationMemo=new Map<string,ReturnType<RuntimeStore['operation']>>();
+  private readonly runMemo=new Map<string,StoredRun>();
   private validationDepth=0;
   private invalidated=false;
   private bound:ReturnType<ExecutionEvidence['binding']>|undefined;
@@ -29,7 +31,7 @@ export class ExecutionEvidence {
     private readonly rules:readonly string[],private readonly base:PersonaAccess,private readonly authorityValid:(anchor:ActivityAnchor)=>boolean=()=>false,private readonly authorityRequired:(run:StoredRun)=>boolean=()=>false){}
   access(base=this.base):PersonaAccess{const cached=this.validationDepth>0?this.accessMemo.get(base):undefined;if(cached)return cached;
     const access:PersonaAccess={...base,sourceRules:this.rules,historyDependencies:this.admitted,historyTracked:true,
-    validateHistory:deps=>this.validate(deps),operationFinished:id=>{try{const op=this.store.operation(id),run=this.store.get(op.runId);return run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&['succeeded','partial'].includes(op.outcome?.status??'');}catch{return false;}},
+    validateHistory:deps=>this.validate(deps),operationFinished:id=>{try{const op=this.readOperation(id),run=this.readRun(op.runId);return run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&['succeeded','partial'].includes(op.outcome?.status??'');}catch{return false;}},
     verifyMemorySource:ref=>{try{if(ref.kind!=='memory'||!ref.selectionId||!ref.authorization||!this.rules.includes(ref.authorization.policyId))return null;
       const input=this.repository.readSelectedInputs(ref.agentId,this.run.definition.taskId!,[`task-link:${ref.selectionId}`],this.rules)[0];
       return input?.sourceRef&&runtimeHash(input.sourceRef)===runtimeHash(ref)?{text:input.text,rootSources:input.rootSources??[]}:null;}catch{return null;}}};
@@ -45,17 +47,20 @@ export class ExecutionEvidence {
   exposed(){return structuredClone(this.admitted);}
   contextView():ContextEvidenceView{return {sourceItems:()=>this.contexts,nativeDependencies:()=>[],validateHistorical:dep=>this.validate([dep])};}
   sourceRefs(deps=this.admitted):PersonaSourceRef[]{return [...new Map(deps.filter((dep):dep is Extract<SourceDependency,{kind:'execution-source'}>=>dep.kind==='execution-source').map(dep=>[runtimeHash(dep.ref),dep.ref])).values()];}
-  readSources(read:()=>void):void{const outer=this.validationDepth++===0;try{read();}finally{this.validationDepth--;if(outer){this.validationMemo.clear();this.accessMemo=new WeakMap();}}}
+  private clearValidation(){this.validationMemo.clear();this.accessMemo=new WeakMap();this.operationMemo.clear();this.runMemo.clear();}
+  private readOperation(id:string){const cached=this.validationDepth?this.operationMemo.get(id):undefined;if(cached)return cached;const value=this.store.operation(id);if(this.validationDepth)this.operationMemo.set(id,value);return value;}
+  private readRun(id:string){const cached=this.validationDepth?this.runMemo.get(id):undefined;if(cached)return cached;const value=this.store.get(id);if(this.validationDepth)this.runMemo.set(id,value);return value;}
+  readSources(read:()=>void):void{const outer=this.validationDepth++===0;try{read();}finally{this.validationDepth--;if(outer)this.clearValidation();}}
   validate(deps:readonly SourceDependency[]):boolean{if(this.invalidated)return false;const outer=this.validationDepth++===0;try{return deps.every(dep=>{const key=runtimeHash(dep),cached=this.validationMemo.get(key);if(cached!==undefined)return cached;if(this.checking.has(key)||this.checking.size>=128)return false;this.checking.add(key);
-    try{const valid=this.valid(dep);this.validationMemo.set(key,valid);return valid;}catch{return false;}finally{this.checking.delete(key);}});}finally{this.validationDepth--;if(outer){this.validationMemo.clear();this.accessMemo=new WeakMap();}}}
+    try{const valid=this.valid(dep);this.validationMemo.set(key,valid);return valid;}catch{return false;}finally{this.checking.delete(key);}});}finally{this.validationDepth--;if(outer)this.clearValidation();}}
   private valid(dep:SourceDependency):boolean{
     if(dep.agentId!==this.base.view.scope.agentId||dep.route!==this.route())return false;this.base.guard();
     if(dep.kind==='execution-source')return this.memory()?.validate(this.access(),dep.ref)??false;
-    if(dep.kind==='execution-input'){const run=this.store.get(dep.runId),body=inputProof.safeParse(this.store.readInput(dep.runId,'native-program'));
+    if(dep.kind==='execution-input'){const run=this.readRun(dep.runId),body=inputProof.safeParse(this.store.readInput(dep.runId,'native-program'));
       return run.definition.taskId===this.run.definition.taskId&&body.success&&body.data.epoch===run.definition.intentVersion&&runtimeHash(body.data)===dep.hash
         &&(!this.authorityRequired(run)||!!body.data.authorities?.length)&&(body.data.authorities??[]).every(anchor=>this.authorityValid(anchor))
         &&body.data.sources.every(ref=>this.memory()?.validate(this.access(),ref))&&(!body.data.continuity||(()=>{const checkpoint=this.memory()?.checkpoint(this.access(),body.data.continuity.id,true);return !!checkpoint&&runtimeHash(checkpoint)===body.data.continuity.hash;})());}
-    if(dep.kind==='execution-operation'){const op=this.store.operation(dep.operationId),run=this.store.get(op.runId),body=this.store.readInput(op.runId,`operation-inputs:${op.id}`);
+    if(dep.kind==='execution-operation'){const op=this.readOperation(dep.operationId),run=this.readRun(op.runId),body=this.store.readInput(op.runId,`operation-inputs:${op.id}`);
       return op.runId===dep.runId&&run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&!!op.outcome&&runtimeHash(op.outcome)===dep.hash
         &&body!==null&&runtimeHash(body)===dep.inputHash&&this.validate(dependencies.parse(body));}
     if(dep.kind==='context'){

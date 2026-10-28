@@ -214,10 +214,10 @@ export class DafeiyuService extends Service {
     this.persona();
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
-    this.contexts.register('core-situation','1',[situationContributor(()=>this.config.context.assembly.mode==='unified',scene=>this.executions?.responsibilityFacts(scene)??[],
+    if(this.config.context.assembly.mode==='unified'){this.contexts.register('core-situation','1',[situationContributor(()=>true,scene=>this.executions?.responsibilityFacts(scene)??[],
       (request,item,proof)=>{const scope=this.contexts.scopeFor(request),runId=this.runStore?.findRequest('conversation',scope.traceId)?.runId;if(!runId||!this.runStore)throw new Error('RUN_NOT_RUNNING');this.runStore.bindInput(runId,'operational-context:'+runtimeHash([item.text,item.sources]),{route:scope.route,item,proof});},
       (request,dependency)=>{try{const scope=this.contexts.scopeFor(request),record=z.object({route:z.string(),item:ContextItemSchema,proof:z.json()}).parse(this.runStore?.findContext('operational-context:'+dependency.hash));return record.route===scope.route&&record.item.id===dependency.id&&record.item.version===dependency.version&&runtimeHash([record.item.text,record.item.sources])===dependency.hash&&(this.executions?.responsibilitySnapshotCurrent(record.proof,request.conversation)??false);}catch{return false;}})]);
-    if(this.config.context.assembly.mode==='unified')this.contexts.pinRegion('core-situation:responsibilities');
+    this.contexts.pinRegion('core-situation:responsibilities');}
     this.personas=new PersonaRuntime(this.config.context);
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
