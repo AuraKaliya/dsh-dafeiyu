@@ -19,6 +19,12 @@ test('owner and bot must be supplied separately; no provider credentials or priv
   assert.equal(InstallationSettingsSchema.safeParse({schemaVersion:1,dataDir:'data',model:{model:'fixture',credentialStore:'file'},qq:{botId:'12345678',ownerId:'12345678',tokenFile:'file',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'}}).success,false);
 });
 
+test('configured DSH catalog is a conversation capability without granting host execution',()=>{
+  const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'data',dshTools:true,model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}});
+  const profile=installationProfile(settings,{schemaVersion:1,instanceId:'11111111-1111-4111-8111-111111111111',profileId:'fixture',agentId:'fish',createdAt:'2026-10-27T00:00:00.000Z',identityHash:'0'.repeat(64),biliOwner:null},'persona.md','settings.json',{scripted:true});
+  const conversation=profile.authorityPolicies.find(p=>p.id==='conversation')!;assert.ok(conversation.actions.includes('dsh_tool_list'));assert.ok(!conversation.actions.includes('dsh_tool_call'));
+});
+
 test('a local installation may explicitly extend task duration without adding a tool-call limit',()=>{
   const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'data',taskTimeoutMs:1800000,phaseTimeouts:{verification:60000},model:{model:'fixture',credentialStore:'unused'},qq:{botId:'12345678',ownerId:'87654321',tokenFile:'token',httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}});
   const profile=installationProfile(settings,{schemaVersion:1,instanceId:'11111111-1111-4111-8111-111111111111',profileId:'fixture',agentId:'fish',createdAt:'2026-10-27T00:00:00.000Z',identityHash:'0'.repeat(64),biliOwner:null},'persona.md','settings.json',{scripted:true});

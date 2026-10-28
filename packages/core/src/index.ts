@@ -37,6 +37,7 @@ import { RunScheduler } from './run-scheduler.js';
 import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
+import { HarnessRuntime,CAPABILITY_OWNER,CAPABILITY_QUERY } from './harness-runtime.js';
 import { renderPublicProgress } from './target-renderer.js';
 import type { PersonaTrialCompletionStatus } from './persona-runtime.js';
 export type { PersonaTrialCompletionStatus } from './persona-runtime.js';
@@ -153,6 +154,8 @@ export class DafeiyuService extends Service {
   readonly journal: Journal;
   private readonly config: z.output<typeof ConfigSchema>;
   private readonly runtime: DshRuntime;
+  private readonly harness=new HarnessRuntime(()=>z.json().parse(this.configuredCapabilities()));
+  bindHarnessCatalog(provider:Pick<import('@dafeiyu/contracts').DshToolsPort,'catalog'>):()=>void{return this.harness.bind(provider);}
   private readonly contexts:ContextCoordinator;
   private readonly personas:PersonaRuntime;
   private readonly taskCoordinator:TaskCoordinator;
@@ -190,7 +193,7 @@ export class DafeiyuService extends Service {
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
       (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text),this.config.agentId,()=>this.compactionBinding(),
-      (frame,data,seqs)=>{const item=this.journal.get(frame.id);this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.config.lifecycleMode==='managed');
+      (frame,data,seqs)=>{const item=this.journal.get(frame.id);this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.config.lifecycleMode==='managed',this.harness);
     try{this.taskDelivery=new TaskDelivery(resolve(this.config.dataDir,'delivery.sqlite'),{agentId:this.config.agentId,journal:this.journal,contexts:this.contexts,runtime:this.runtime,signal:this.controller.signal,
       turnTimeoutMs:this.config.turnTimeoutMs,deliveryTimeoutMs:this.config.deliveryTimeoutMs,assertOpen:()=>this.assertOpen(),persona:()=>this.persona(),model:()=>this.analysisModelRoute(),
       sourceTracking:()=>!!this.compactionBinding()?.provider.sources,
@@ -201,6 +204,15 @@ export class DafeiyuService extends Service {
       const scope=this.contexts.scopeFor(request),current=this.journal.get(scope.traceId),facts=this.replyStateFacts(current);
       return facts.map(f=>({id:f.inboundId,version:runtimeHash(f),text:JSON.stringify(f),expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:pending-reply:'+f.inboundId,version:'1',hash:runtimeHash(f)}]}));
     },validate:(request,item)=>{try{const current=this.journal.get(this.contexts.scopeFor(request).traceId);return this.replyStateFacts(current).some(f=>f.inboundId===item.id&&runtimeHash(f)===item.version);}catch{return false;}}}]);
+    this.registryV3.register(this.config.agentId,{protocolVersion:3,id:CAPABILITY_OWNER,version:'1',agentId:this.config.agentId,actions:[{
+      id:CAPABILITY_QUERY,version:'1',description:'查询当前已注册的大肥鱼能力、提供方状态和任务要求。可选tool读取精确参数；注册不等于当前会话获准执行，也不证明外部依赖可用。',effects:'read',requiresTask:false,
+      inputSchema:z.strictObject({tool:z.string().min(1).max(160).optional()}),outputSchema:z.json(),execute:async(raw,context)=>{
+        this.executionAuthority(context,CAPABILITY_OWNER);const {tool}=z.object({tool:z.string().optional()}).parse(raw),catalog=this.configuredCapabilities();
+        const native=tool?this.registryV3.actions().find(action=>action.id===tool):undefined;
+        const legacy=tool?[...this.extensions.values()].flatMap(entry=>entry.extension.actions??[]).find(action=>action.name===tool):undefined;
+        const details=native?{id:native.id,description:native.description,parameters:native.input}:legacy?{id:legacy.name,description:legacy.description,fields:legacy.fields}:null;
+        return {status:'succeeded',effects:'none',completeness:'complete',data:z.json().parse({...catalog,details}),sources:[],receipts:[]};
+      }}]},{ids:[],actions:[],channels:[]});
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
   recover():void {
@@ -251,6 +263,10 @@ export class DafeiyuService extends Service {
   messageTaskStatus(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const status=this.executions.messageTaskStatus(context,pluginId,input);return {...status,delivery:this.messageTaskDeliveryStatus(status.runId)};}
   controlMessageTask(context:ExecutionContextV3,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.controlMessageTask(context,pluginId,input);}
   capabilityManifest(){return {features:[...new Set([...this.features(),...this.registryV3.providedFeatures()])],actions:this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
+  private configuredCapabilities(){return {features:this.capabilityManifest().features.sort(),actions:[
+    ...this.registryV3.actions().map(action=>({id:action.id,owner:action.owner,version:action.version,purpose:Array.from(action.description).slice(0,120).join(''),effects:action.effects,requiresTask:action.requiresTask,providerReady:action.active()})),
+    ...[...this.extensions.values()].flatMap(entry=>(entry.extension.actions??[]).map(action=>({id:action.name,owner:entry.extension.id,version:entry.extension.version,purpose:Array.from(action.description).slice(0,120).join(''),effects:'legacy-action',requiresTask:false,providerReady:entry.active})))
+  ].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0)};}
   get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {
     try {

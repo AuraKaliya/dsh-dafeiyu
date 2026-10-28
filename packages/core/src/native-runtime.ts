@@ -10,6 +10,7 @@ import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { CompactionRuntime } from './compaction-runtime.js';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { z } from 'zod';
+import {HarnessRuntime,CAPABILITY_CONTEXT} from './harness-runtime.js';
 export const EXECUTION_MESSAGE_SOURCE='dafeiyu-execution' as const;
 
 declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {
@@ -19,7 +20,7 @@ interface Owned {handle:AgentHandle;scope:Context;frame:TaskExecutionFrame|undef
 export class NativeRuntime {
   private readonly sessions=new Map<string,Owned>();
   private meterLoading:Promise<unknown>|undefined;
-  constructor(private readonly ctx:Context,private readonly model:AgentOptions,private readonly cwd:string){
+  constructor(private readonly ctx:Context,private readonly model:AgentOptions,private readonly cwd:string,private readonly harness=new HarnessRuntime()){
     const sessions=this.sessions;
     ctx.on('llm/stream',async function*(options,next){const owned=options.sessionId?sessions.get(options.sessionId):undefined;
       if(!owned){yield* next();return;}await yieldEventLoop();const frame=owned.frame;if(!frame)throw new Error('RUN_NOT_RUNNING');
@@ -46,7 +47,8 @@ export class NativeRuntime {
           '当前任务已受理。workflow记录本轮阶段与结果交付方式；完成必要工作后直接给出结果草稿，由程序接续人格整理、核验及交付。未提供接收或发送工具不代表任务未受理或不能交付，不为寻找这些工具反复检查无关状态。',
           '回答既有状态时，保留与当前判断直接相关的来源资格、纠正关系、反证、未完成事项和未知效果。自述、摘要和推断不能代替实际回执；记录缺失只表示当前不能核实，不表示过去一定没有发生。假设、修辞及写作示例应明确标识，不能当作自己的真实经历。',
         ].join('\n')});
-        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>['dafeiyu-persona','dafeiyu-execution-rules','dafeiyu-compaction-rules'].includes(section.name)),contexts:assembled.contexts.filter(context=>context.name==='dafeiyu:persona-context:v1')};});
+        // Keep standard DSH instruction sections. Unrelated runtime data is not a task handoff.
+        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const assembled=await next();return {...assembled,contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
       });
       if(!scope||!compaction){await handle.dispose();throw new Error('DSH_SCOPE_MISSING');}
       owned={handle,scope,compaction,lastRequest:undefined,get frame(){return slot.frame;},set frame(value){slot.frame=value;}};this.sessions.set(frame.sessionId,owned);
@@ -61,6 +63,7 @@ export class NativeRuntime {
         parameters:action.definition.parameters,output:{schema:{},render:(_args,value)=>[{type:'text',text:JSON.stringify(z.object({value:z.json()}).parse(value).value)}],presentationMeta:(_args,value)=>z.json().parse({dafeiyuExecution:z.object({receipt:z.json()}).parse(value).receipt})},
         execute:async(raw,exec)=>{if(exec.agent!==owned!.handle.agent)throw new Error('SCOPE_DENIED');frame.guard();
           const value=await action.execute(raw,String(exec.callId),AbortSignal.any([frame.view.signal,exec.signal]));return z.json().parse({value,receipt:action.metadata?.(value)??null});}}));}
+      disposers.push(this.harness.install(owned.scope,owned.handle.agent,frame.actions,frame.view.signal,frame.view.taskId));
       const input=createUserMessage({source:{kind:'dafeiyu-execution',form:'notice',summary:'大肥鱼内部任务输入',taskId:frame.view.taskId,runId:frame.view.runId,inputId:randomUUID(),originKind:frame.view.origin.kind},
         content:[{type:'text',text:JSON.stringify(frame.program??{goal:frame.goal,inputs:frame.inputs})}]});
       owned.compaction.expectInput(input);

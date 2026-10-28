@@ -237,6 +237,8 @@ test('unchanged controlled context does not append a fresh snapshot on each turn
   const h=await memoryFixture(undefined,{context:{}});t.after(h.close);const a=await remembered(h);await select(h,[a.selected]);
   const agent=h.ctx.agents.get(SessionId(a.evidence.message.sessionId))!;
   const count=()=>agent.session.snapshotEvents().filter(e=>e.type==='user/message'&&String(e.data.source.kind)==='runtime-context').length;
+  // Leaving the fixture probe removes its temporary tool; settle the real capability inventory first.
+  await turn(h);
   const before=count();await turn(h);await turn(h);assert.equal(count(),before);assert.match(content(h),/MEMORY_ALPHA/);
 });
 

@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { ContextCoordinator,CONTEXT_CARRIER,bytes } from './context.js';
 import type { PreparedRegion,ContextPacket } from './context.js';
 import { priceRetirement } from './compaction-runtime.js';
+import {CAPABILITY_CONTEXT} from './harness-runtime.js';
 
 // DSH 0.2.1-rc.2 implements this public event shape but its package root omits the augmentation.
 export interface ContextEvidenceView {
@@ -63,7 +64,9 @@ export class ContextRuntime {
   begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;this.preparing=true;this.retired=0;}
   end():void{this.coordinator.release(this.prepared);this.prepared=[];this.item=undefined;this.preparing=true;}
   sourceItems(){return this.packet.regions.flatMap(region=>region.items.map(item=>({owner:region.owner,region:region.region,item})));}
-  nativeDependencies(scope:CompactionScope):SourceDependency[]{return this.nativeSections.filter(s=>s.text).map(s=>({
+  // Capability declarations have the same authority as tool schemas, not evidence about the world.
+  // Their availability is rechecked at dispatch; a catalog refresh does not revoke old factual replies.
+  nativeDependencies(scope:CompactionScope):SourceDependency[]{return this.nativeSections.filter(s=>s.text&&s.name!==CAPABILITY_CONTEXT).map(s=>({
     agentId:scope.agentId,route:scope.route,kind:'context',owner:'$native',region:s.name,id:s.name,version:'1',hash:createHash('sha256').update(s.text).digest('hex')}));}
   validateHistorical(dep:Extract<SourceDependency,{kind:'context'}>):boolean {
     if(this.preparing)return false;

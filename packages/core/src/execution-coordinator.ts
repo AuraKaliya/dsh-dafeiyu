@@ -27,6 +27,8 @@ import { MediaReplyAuthoritySchema } from '@dafeiyu/contracts';
 import { mediaAuthorityBodySchema } from './media-authority.js';
 import { ExternalTaskAuthorizationSchema } from '@dafeiyu/contracts';
 import type { ExternalTaskAuthority,ExternalTaskAuthorization,ExternalTaskSource } from '@dafeiyu/contracts';
+import {CAPABILITY_OWNER,CAPABILITY_QUERY} from './harness-runtime.js';
+const basicCapability=(action:BoundActionV3)=>action.owner===CAPABILITY_OWNER&&action.id===CAPABILITY_QUERY&&action.effects==='read'&&!action.requiresTask;
 
 export const ExecutionOptionsSchema=z.strictObject({profileId:ProducerSchema,createStore:z.boolean().default(false),
   policies:HostConfigSchema.shape.authorityPolicies,maxPendingRuns:z.number().int().min(1).max(1000).default(100),
@@ -528,8 +530,8 @@ export class ExecutionCoordinator {
         if(run.definition.origin.kind==='wake'&&!this.wakes.get(request.producer)?.validate(run.definition.origin,task))throw new Error('WAKE_NOT_AUTHORIZED');
         const inputs=repository.readSelectedInputs(this.d.agentId,task.id,saved.input.inputRefs,policy.sourceRules),inputHash=runtimeHash(inputs),authorityVersion=runtimeHash(policy);
         trialInputs=inputs;
-        const actions=this.d.registry.actions().filter(action=>policy.actions.includes(action.id)&&(action.effects==='external-write'?this.externalActionAllowed(run,policy,action):action.effects!=='local-write'||policy.allowLocalWrite));
-        const contributors=this.d.registry.contributors().filter(entry=>entry.owner!=='dsh-tools'||actions.some(action=>action.owner==='dsh-tools'&&action.id==='dsh_tool_call')),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
+        const actions=this.d.registry.actions().filter(action=>basicCapability(action)||policy.actions.includes(action.id)&&(action.effects==='external-write'?this.externalActionAllowed(run,policy,action):action.effects!=='local-write'||policy.allowLocalWrite));
+        const contributors=this.d.registry.contributors(),memory=this.d.memory();if(memory&&!memory.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
         const messageSignal=saved.messageSource?this.d.messageSignal?.(saved.messageSource.inboundId):run.definition.origin.kind==='message'?this.d.messageSignal?.(run.definition.origin.inboundId):undefined;
@@ -551,14 +553,12 @@ export class ExecutionCoordinator {
         this.d.personas.admitTrial(this.d.store,id,inputs,signal,guard);
         this.d.store.checkpoint(id,{kind:'run-start',intentVersion:task.epoch});this.flushEvents();
         const view=Object.freeze({runId:id,taskId:task.id,scope:Object.freeze({...run.definition.scope}),origin:Object.freeze({...run.definition.origin}),signal});
-        const contexts:NativeContext[]=runPersona.items.map(item=>({owner:'memory',region:'growth',item})),operationalCapabilities:Json[]=[];let contextBytes=Buffer.byteLength(JSON.stringify(contexts),'utf8'),omitted=0;
+        const operationalCapabilities={source:'current-native-tool-schemas',refreshed:'each-model-step',hostCatalogConfigured:actions.some(action=>action.owner==='dsh-tools')};
+        const contexts:NativeContext[]=runPersona.items.map(item=>({owner:'memory',region:'growth',item}));let contextBytes=Buffer.byteLength(JSON.stringify(contexts),'utf8'),omitted=0;
         const add=(owner:string,region:string,item:unknown)=>{const parsed=ContextItemSchema.parse(item),bytes=Buffer.byteLength(JSON.stringify(parsed),'utf8');if(Date.parse(parsed.expiresAt)<=Date.now()||contextBytes+bytes>this.d.context.maxBytes){omitted++;return;}contextBytes+=bytes;contexts.push({owner,region,item:parsed});};
         for(const item of memory?.prepareContext(access)??[])add('memory','execution',item);
         for(const contributor of contributors){const prepared=await Promise.race([contributor.context.prepare(view),new Promise<never>((_resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('CONTEXT_PREPARE_TIMEOUT')),this.d.context.prepareTimeoutMs);timer.unref();})]);guard();
-          for(const item of prepared)if(contributor.context.validate(view,item)){
-            if(contributor.owner==='dsh-tools'&&contributor.context.id==='capabilities')operationalCapabilities.push(z.json().parse(JSON.parse(item.text)));
-            else add(contributor.owner,contributor.context.id,item);
-          }else omitted++;}
+          for(const item of prepared)if(contributor.context.validate(view,item))add(contributor.owner,contributor.context.id,item);else omitted++;}
         evidence.setContexts(contexts);
         const trigger=saved.messageSource?this.validateMessageSource(saved.messageSource).item:null;
         const wake=this.wakeOrigins(run)[0],wakeProvider=wake?this.wakes.get(wake.producerId):undefined;
@@ -672,14 +672,14 @@ export class ExecutionCoordinator {
     }};
   }
   conversationActions(run:StoredRun,producer:string,signal:AbortSignal,guard:()=>void):NativeAction[]{
-    const policy=this.conversationPolicy(producer);if(!policy)return [];
-    return this.d.registry.actions().filter(action=>!action.requiresTask&&policy.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
+    const policy=this.conversationPolicy(producer);
+    return this.d.registry.actions().filter(action=>basicCapability(action)||!action.requiresTask&&policy?.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .map(action=>{const base=()=>{signal.throwIfAborted();guard();if(!action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');};return this.bindAction(run,action,signal,()=>{base();this.d.personas.current(run.id)?.guard();},base);});
   }
   private conversationPolicy(producer:string){return this.d.options.policies.find(policy=>policy.id===`conversation-${producer}`&&policy.producers.includes(producer))??this.d.options.policies.find(policy=>policy.id==='conversation'&&policy.producers.includes(producer));}
   conversationSnapshot(producer:string){const policy=this.conversationPolicy(producer);
     return {policyId:policy?.id??'conversation-v2',authority:policy??null,actions:this.d.registry.actions()
-      .filter(action=>policy?.actions.includes(action.id)&&!action.requiresTask&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
+      .filter(action=>basicCapability(action)||policy?.actions.includes(action.id)&&!action.requiresTask&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .map(action=>({id:action.id,owner:action.owner,version:action.version,input:action.input,effects:action.effects}))};}
   authority(context:ExecutionContextV3,pluginId:string,effect:'read'|'local-write'='read'){const grant=this.grants.get(context);
     if(!grant||grant.action.owner!==pluginId||!grant.action.active()||this.d.store.get(grant.runId).state!=='running')throw new Error('SCOPE_DENIED');

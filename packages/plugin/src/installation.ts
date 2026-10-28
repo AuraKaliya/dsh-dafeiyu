@@ -34,7 +34,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   const enabledMediaActions=settings.qq.media?.sendEnabled?MEDIA_ACTIONS:mediaActions;
   const stickerActions=settings.qq.stickers.enabled?[...QQ_STICKER_ACTIONS]:[];
   const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...QQ_PROGRESS_ACTIONS,...stickerActions,...(settings.dshTools?DSH_TOOL_ACTIONS:[]),...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?[...BILI_ACTIONS,...(bili.browser?['bili_browser_read']:[])]:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
-  const conversation=[...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
+  const conversation=[...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...(settings.dshTools?['dsh_tool_list']:[]),...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
   const plugins:unknown[]=[{id:options.scripted?'model-scripted':'model-deepseek',required:true,config:options.scripted?{}:{credentialStore:settings.model.credentialStore,...(settings.model.auth?{auth:settings.model.auth}:{}),...(settings.model.baseURL?{baseURL:settings.model.baseURL}:{}),...(settings.model.inlineTransport?{inlineTransport:settings.model.inlineTransport}:{})}},
     {id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true,config:{sourceTracking:true,context:{},maintenance:{}}},
     {id:'qq',required:true,config:{...settings.qq,joinedGroups:undefined,capabilities:{enabled:true},tasks:{enabled:true,policyId:'qq-task',deliverResults:true,explorationResources:resources},...(settings.media?{media:{enabled:true,...settings.qq.media}}:{}),groupSync:{enabled:true,mode:settings.qq.joinedGroups?'joined':'allowlist'}}}];
@@ -51,7 +51,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
     {id:'qq-task',producers:['qq-tasks'],actions,allowLocalWrite:true,resources},
     {id:'local-task',producers:['host-cli'],actions,allowLocalWrite:true,resources:[...resources,{channel:'qq',account:settings.qq.botId,kind:'private',id:settings.qq.ownerId}]}];
   if(activity)policies.push({id:'activity-explore',producers:['activity'],actions,allowLocalWrite:true,resources},{id:'activity-maintenance',producers:['activity'],actions:[...maintenanceActions,...growthActions],allowLocalWrite:true,resources});
-  if(settings.localOwnerControl)policies.push({id:'conversation-local-owner-tasks',producers:['local-owner-tasks'],actions:['local_owner_task_submit'],allowLocalWrite:true},
+  if(settings.localOwnerControl)policies.push({id:'conversation-local-owner-tasks',producers:['local-owner-tasks'],actions:['local_owner_task_submit',...(settings.dshTools?['dsh_tool_list']:[])],allowLocalWrite:true},
     {id:'local-owner-task',producers:['local-owner-tasks'],actions,allowLocalWrite:true,resources,
     externalActions:settings.dshTools?[{extensionId:'dsh-tools',actionId:'dsh_tool_call',actionVersion:'1'}]:[]});
   for(const policy of policies){const entry=z.object({id:z.string()}).parse(policy);if(['qq-task','activity-explore'].includes(entry.id))Object.assign(policy!,{externalActions:[...(settings.dshTools?[{extensionId:'dsh-tools',actionId:'dsh_tool_call',actionVersion:'1'}]:[]),{extensionId:'qq-progress',actionId:'qq_progress',actionVersion:'1'}]});}

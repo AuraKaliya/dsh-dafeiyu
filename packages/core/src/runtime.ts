@@ -25,6 +25,7 @@ import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecuti
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { conversationHistory } from './history-frame.js';
 import { assessTask } from './task-assessment.js';
+import {HarnessRuntime} from './harness-runtime.js';
 
 interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime;delivery?:RuntimeDelivery;lastRequest?:GenerateOptions }
 export interface RuntimeDelivery {id:string;guard:()=>void;finalize:(result:RunResult,guard:()=>void)=>Promise<void>}
@@ -44,8 +45,8 @@ export class DshRuntime {
   private readonly handles = new Map<string, OwnedSession>();
   private readonly native:NativeRuntime;
   private meterLoading: Promise<unknown> | undefined;
-  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator,private readonly agentId:string,private readonly compactionBinding:()=>CompactionBinding|undefined,private readonly compactionAudit:CompactionAudit,managedProjection=false) {
-    this.native=new NativeRuntime(ctx,model,cwd);
+  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator,private readonly agentId:string,private readonly compactionBinding:()=>CompactionBinding|undefined,private readonly compactionAudit:CompactionAudit,managedProjection=false,private readonly harness=new HarnessRuntime()) {
+    this.native=new NativeRuntime(ctx,model,cwd,harness);
     const sessions=this.handles;
     ctx.on('llm/stream',async function*(options,next){
       const owned=options.sessionId?sessions.get(options.sessionId):undefined;
@@ -146,6 +147,7 @@ export class DshRuntime {
       for(const action of nativeActions)disposers.push(owned.scope.tools.register({name:action.definition.id,description:action.definition.description,parameters:action.definition.parameters,
         output:{schema:{},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(raw,exec)=>{
           if(exec.agent!==agent)throw new Error('SCOPE_DENIED');return action.execute(raw,String(exec.callId),AbortSignal.any([signal,exec.signal]));}}));
+      disposers.push(this.harness.install(owned.scope,agent,nativeActions,signal));
       signal.throwIfAborted();
       const input=createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
         `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch?'：同一发送者的连续原消息，依序一起理解，引用保留各自身份':''}]\n${messageDisplayText(item.message)}` }] });

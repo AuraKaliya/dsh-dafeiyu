@@ -9,10 +9,17 @@ export function createDshBridgeClient():DshToolsPort&{biliBrowser:BiliBrowserPor
   process.once('disconnect',()=>{for(const item of pending.values())item.reject(new Error('DSH_BRIDGE_DISCONNECTED'));pending.clear();});
   const request=async(type:'dsh.catalog'|'dsh.call'|'dsh.bili-read',data:Record<string,unknown>,signal:AbortSignal):Promise<Json>=>{
     signal.throwIfAborted();if(!process.connected||!process.send)throw new Error('DSH_BRIDGE_UNAVAILABLE');const id=randomUUID();
-    let invoked=false;const abort=()=>{if(invoked&&process.connected)process.send?.({type:'dsh.cancel',id});if(type==='dsh.catalog'){pending.get(id)?.reject(new Error('DSH_BRIDGE_UNAVAILABLE'));pending.delete(id);}};
+    let invoked=false,grace:ReturnType<typeof setTimeout>|undefined;
+    const abandon=()=>{pending.get(id)?.reject(new Error(type==='dsh.call'&&invoked?'DSH_TOOL_OUTCOME_UNKNOWN':'DSH_BRIDGE_UNAVAILABLE'));pending.delete(id);};
+    const abort=()=>{if(invoked&&process.connected)process.send?.({type:'dsh.cancel',id},undefined,{},()=>{});
+      if(type!=='dsh.call'){abandon();return;}
+      // Give an already dispatched operation a brief chance to return its receipt. Never await an
+      // uncooperative tool forever after caller cancellation, and never claim it was not executed.
+      grace??=setTimeout(abandon,1000);
+    };
     signal.addEventListener('abort',abort,{once:true});
-    try{const result=await new Promise<Json>((resolve,reject)=>{pending.set(id,{resolve,reject});invoked=true;process.send!({type,id,...data},undefined,{},(error:Error|null)=>{if(error){pending.delete(id);reject(new Error('DSH_BRIDGE_DISCONNECTED'));}});if(signal.aborted)abort();});signal.throwIfAborted();return result;}
-    finally{signal.removeEventListener('abort',abort);pending.delete(id);}
+    try{const result=await new Promise<Json>((resolve,reject)=>{pending.set(id,{resolve,reject});invoked=true;process.send!({type,id,...data},undefined,{},(error:Error|null)=>{if(error){pending.delete(id);reject(new Error('DSH_BRIDGE_DISCONNECTED'));}});if(signal.aborted)abort();});if(type!=='dsh.call')signal.throwIfAborted();return result;}
+    finally{if(grace)clearTimeout(grace);signal.removeEventListener('abort',abort);pending.delete(id);}
   };
-  return {biliBrowser:{read:async(input,signal)=>BiliBrowserResultSchema.parse(await request('dsh.bili-read',{request:input},signal))},catalog:async(signal,taskId)=>DshToolCatalogSchema.parse(await request('dsh.catalog',taskId?{taskId}:{},AbortSignal.any([signal,AbortSignal.timeout(10000)]))),execute:async(call,authority,signal)=>{authority.guard();const value=await request('dsh.call',{call,authorization:authority.authorization},signal);authority.guard();return value;}};
+  return {biliBrowser:{read:async(input,signal)=>BiliBrowserResultSchema.parse(await request('dsh.bili-read',{request:input},signal))},catalog:async(signal,taskId)=>DshToolCatalogSchema.parse(await request('dsh.catalog',taskId?{taskId}:{},AbortSignal.any([signal,AbortSignal.timeout(10000)]))),execute:async(call,authority,signal)=>{authority.guard();return request('dsh.call',{call,authorization:authority.authorization},signal);}};
 }

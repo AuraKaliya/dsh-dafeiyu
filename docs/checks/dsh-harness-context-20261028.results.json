@@ -1,0 +1,133 @@
+{
+  "at": "2026-10-28T09:07:29.853Z",
+  "base": "d3ff1f7284d27b4fbb059d869543adebd10f0bbb",
+  "scope": "current integrated working tree; local scripted model and platform, real DSH/IPC/SQLite",
+  "tests": {
+    "runId": "87c5bdb8-11aa-4647-89c2-ae76f769a668",
+    "counts": {
+      "tests": 100,
+      "failed": 0,
+      "passed": 100,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "topLevel": 100,
+      "suites": 0
+    },
+    "stages": [
+      {
+        "name": "build",
+        "code": 0,
+        "signal": null,
+        "durationMs": 162
+      },
+      {
+        "name": "test-types",
+        "code": 0,
+        "signal": null,
+        "durationMs": 3770
+      },
+      {
+        "name": "tooling-types",
+        "code": 0,
+        "signal": null,
+        "durationMs": 1892
+      },
+      {
+        "name": "tests",
+        "code": 0,
+        "signal": null,
+        "durationMs": 14232
+      }
+    ],
+    "cleanup": {
+      "removed": [
+        "87c5bdb8-11aa-4647-89c2-ae76f769a668"
+      ],
+      "retained": [
+        {
+          "id": "4f777daf-4b8d-4ef5-b7ed-88a0bce76daf",
+          "bytes": 39510769
+        },
+        {
+          "id": "5d838e12-66b7-426c-afba-8703357a44e9",
+          "bytes": 1358236
+        },
+        {
+          "id": "79a37d2a-a855-4074-ab4d-2471ea6fccff",
+          "bytes": 2716137
+        }
+      ],
+      "blocked": []
+    }
+  },
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "sourceHashes": [
+    {
+      "path": "packages/contracts/src/dsh-tools.ts",
+      "sha256": "996ec4971009d75c1b47bbf3b1f4e45997ed12eb0de900a2846517bd6adb610d"
+    },
+    {
+      "path": "packages/core/src/harness-runtime.ts",
+      "sha256": "dd8e00713c4cbc6dde7eda174ec4e12d4b5bbfa638247dabd0dce9171eceb8a9"
+    },
+    {
+      "path": "packages/core/src/context-runtime.ts",
+      "sha256": "561926cde03c4ac3e9a7982af8ad9aaef9fbecdc04ad5379e24a810d371ab3c0"
+    },
+    {
+      "path": "packages/core/src/context.ts",
+      "sha256": "24ee82d467b38504c1aeabb57280157855e60b0ac74c2b5fa11c3c550f95c3cd"
+    },
+    {
+      "path": "packages/core/src/execution-coordinator.ts",
+      "sha256": "045980c89be6afda3213dde73cb8e19b291dd7a5c7e934e44f7e577228439976"
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "sha256": "d0538053e26545c6c0d97eb81996f760e7b75ad3c46a8f7d6b49f743f5e9d4ff"
+    },
+    {
+      "path": "packages/core/src/native-runtime.ts",
+      "sha256": "74f22f51605c62b887b2a43af287abc313072d2a400f7a71bd88741bdedf9bc0"
+    },
+    {
+      "path": "packages/core/src/runtime.ts",
+      "sha256": "f29e8651a382621a7258a6873ad763ddea2cffb486e6fec5db573609c5b0bc16"
+    },
+    {
+      "path": "packages/host/src/dsh-tools.ts",
+      "sha256": "47abcee645aceac1ab92929b01422c8ecc836eb8d343975d88b19cd7f49bfcbe"
+    },
+    {
+      "path": "packages/plugin/src/bridge-client.ts",
+      "sha256": "daa7a213d5a951ec092bff44b0265e695f8c0cd872f44990b71f9ca643c669d8"
+    },
+    {
+      "path": "packages/plugin/src/bridge-parent.ts",
+      "sha256": "d6ea35d984fc7b5dc4ca968c01c6b6ad2b1274e34d79e6d76e5ae499b3f98730"
+    },
+    {
+      "path": "packages/plugin/src/installation.ts",
+      "sha256": "ac0ec1d997a5cbf6110808a793acd621089f15421bb322f870b05083c729e557"
+    },
+    {
+      "path": "tests/context.test.ts",
+      "sha256": "f30a3bfa64b2c8415afbdd2bf18b6b8ceb2a53c371020b3ec044831a69e86745"
+    },
+    {
+      "path": "tests/harness-capabilities.test.ts",
+      "sha256": "75da35ba33b1cf7c0e0016854c7737060d26224da61f57d947828104f54a8d59"
+    },
+    {
+      "path": "tests/dsh-bridge-cancellation.test.ts",
+      "sha256": "a20129b3cc77a9313e036c7507571e87b9a06d7cd3bcdd744971e9442f2dbb3d"
+    },
+    {
+      "path": "tests/installation.test.ts",
+      "sha256": "43e5e1b4453242ae97552dbb55a06f8b78477cf6939f6e70edf1564453db9622"
+    }
+  ]
+}

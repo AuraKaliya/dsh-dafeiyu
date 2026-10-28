@@ -12,7 +12,7 @@ import { DeferredPluginChanges } from './deferred-plugins.js';
 import { readInstallationSettings } from './settings.js';
 import {readBiliBrowser} from './bili-browser.js';
 import { z } from 'zod';
-import { DshBridgeRequestSchema,DshToolCatalogSchema,ExternalTaskAuthorizationSchema,DshCapabilityChangeSchema,redactJson } from '@dafeiyu/contracts';
+import { DshBridgeRequestSchema,DshToolCatalogSchema,ExternalTaskAuthorizationSchema,DshCapabilityChangeSchema,redactJson,orderedDshCatalog,stableJson } from '@dafeiyu/contracts';
 import type { DshToolCatalog,Json } from '@dafeiyu/contracts';
 
 interface Presets {mount(scope:Context,id:string):Promise<{id:string}>}
@@ -58,7 +58,8 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
     const skills=snapshot?.skills.filter(item=>item.invocation.modelInvocable&&!excludedSkill(item.name)).map(item=>({name:item.name,description:item.description,load:{name:'skill',arguments:{name:item.name}}}));
     const directories=ctx.get('workingDirectory') as {ensure(agent:AgentHandle['agent'],signal:AbortSignal):Promise<string>}|undefined;
     const workingDirectory=directories?await directories.ensure(h.agent,signal):dirname(settings.dataDir),environment={workingDirectory,developmentDirectory:join(dirname(settings.dataDir),'development',taskId??'shared'),platform:process.platform};
-    return DshToolCatalogSchema.parse({version:hash({tools,skills:skills??null,workingDirectory}),tools,environment,...(skills?{skills,skillsComplete:snapshot?.complete}:{}),pluginChanges:changes.status()});
+    const catalog=orderedDshCatalog(DshToolCatalogSchema.parse({version:'0'.repeat(64),tools,environment,...(skills?{skills,skillsComplete:snapshot?.complete}:{}),pluginChanges:changes.status()}));
+    return {...catalog,version:createHash('sha256').update(stableJson(z.json().parse({tools:catalog.tools,skills:catalog.skills??null,workingDirectory}))).digest('hex')};
   };
   const announced=new Set<string>(),lastAttempt=new Map<string,number>();
   const notifyChanges=async()=>{for(const row of changes.notifications()){
