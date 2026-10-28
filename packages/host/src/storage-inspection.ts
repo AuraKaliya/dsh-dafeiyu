@@ -1,3 +1,4 @@
+import {verifyRecentStateSchema} from '@dafeiyu/memory/store';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { inspectJournal } from '@dafeiyu/journal';
@@ -80,7 +81,7 @@ export function inspectStorage(file:string,kind:StorageKind,identity?:RuntimeIde
         11:['experience_items','experience_revisions','experience_relations','maintenance_events','maintenance_requests','maintenance_receipts','maintenance_watermarks'],
         12:PERSONA_ADOPTION_TABLES};
       supported=Object.entries(stages).every(([stage,names])=>version<Number(stage)||names.every(name=>tables.has(name)));
-      if(supported&&version>=13){try{for(const table of ['recent_self_states','recent_state_revisions','recent_state_requests','recent_state_publications'])db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();}catch{supported=false;}}
+      if(supported&&version>=13){try{verifyRecentStateSchema(db);}catch{supported=false;}}
       if(supported&&version>=12){try{verifyPersonaAdoptionSchema(db);}catch{supported=false;}}
     }
     const integrity=Object.values(db.prepare('PRAGMA quick_check').get()??{})[0]==='ok'&&db.prepare('PRAGMA foreign_key_check').get()===undefined;

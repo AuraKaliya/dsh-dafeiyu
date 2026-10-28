@@ -26,6 +26,7 @@ export const HostConfigSchema = z.strictObject({
     sourceRules: z.array(ExtensionIdSchema).max(64).default([]), resources: z.array(ConversationSchema).max(64).default([]) })).max(64).default([]),
   diagnostics: z.strictObject({ snapshotIntervalMs: z.number().int().min(100).max(60000).default(2000) }).prefault({}),
 }).superRefine((value, ctx) => {
+  if(value.context.outputReserveBytes>=value.context.requestMaxBytes)ctx.addIssue({code:'custom',path:['context','outputReserveBytes'],message:'Output reserve must fit within the request capacity'});
   for (const [name, ids] of [['plugins', value.plugins.map(p => p.id)], ['authorityPolicies', value.authorityPolicies.map(p => p.id)]] as const)
     if (new Set(ids).size !== ids.length) ctx.addIssue({ code: 'custom', message: `Duplicate ${name}` });
 });

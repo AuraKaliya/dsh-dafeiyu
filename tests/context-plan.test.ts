@@ -29,6 +29,9 @@ test('optional invalid and duplicate items are omitted without slicing evidence'
 test('native task context shares required admission and counts the serialized envelope',()=>{
   const result=admitNativeContexts([{owner:'fixture',region:'large',item:item('large',1000)},{owner:'memory',region:'growth',item:item('self',300)}],1000);
   assert.equal(result.contexts.length,1);assert.equal(result.contexts[0]?.region,'growth');assert.ok(Buffer.byteLength(result.packet.text)<=1000);
+  const material=[{owner:'fixture',region:'facts',item:item('facts',600)}];
+  assert.equal(admitNativeContexts(material,2000,{'fixture:facts':{maxBytes:200,required:false,priority:100}}).contexts.length,0);
+  assert.throws(()=>admitNativeContexts(material,2000,{'fixture:facts':{maxBytes:200,required:true,priority:100}}),/Required context exceeds budget/);
 });
 test('full capacity includes schemas, tool history and output reserve, measured in bytes',()=>{
   const result=requestCapacity({messages:[{text:'中文'}],tools:[{schema:'x'.repeat(800)}],toolHistory:'x'.repeat(200)},1100,100);

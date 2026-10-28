@@ -1,16 +1,25 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {randomUUID,createHash} from 'node:crypto';
 import {z} from 'zod';
-import {RecentStateRecordSchema,RecentStateSaveSchema,RecentStatePublishSchema,ContextItemSchema,redactJson} from '@dafeiyu/contracts';
+import {RecentStateRecordSchema,RecentStateSaveSchema,RecentStatePublishSchema,RecentStateUnpublishSchema,ContextItemSchema,redactJson} from '@dafeiyu/contracts';
 import type {RecentStateRecord,PersonaAccess,ExecutionScope,ContextItem,SourceDependency} from '@dafeiyu/contracts';
 import {personaScope} from './persona-digest.js';
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const publicationSchema=z.strictObject({id:z.uuid(),stateId:z.uuid(),stateVersion:z.number().int().positive(),view:z.string().max(800),viewHash:z.string(),
-  policy:z.literal('self-summary-v1'),reviewHash:z.string(),createdAt:z.iso.datetime()});
+  topics:z.array(z.string().max(80)).max(16),policy:z.literal('self-summary-v1'),reviewHash:z.string(),createdAt:z.iso.datetime()});
 export const RECENT_STATE_TABLES=['recent_self_states','recent_state_revisions','recent_state_requests','recent_state_publications'] as const;
+export function verifyRecentStateSchema(db:DatabaseSync):void{
+  db.prepare('SELECT id,agent_id,scope_key,version,body FROM recent_self_states LIMIT 0').all();
+  db.prepare('SELECT id,version,body FROM recent_state_revisions LIMIT 0').all();
+  db.prepare('SELECT agent_id,request_id,fingerprint,receipt FROM recent_state_requests LIMIT 0').all();
+  db.prepare('SELECT id,state_id,state_version,body,withdrawn FROM recent_state_publications LIMIT 0').all();
+  for(const [name,message] of [['recent_state_revision_immutable','Immutable recent state revision'],['recent_state_revision_retain','Retain recent state revision'],['recent_publication_immutable','Immutable recent publication'],['recent_publication_retain','Retain recent publication']]){
+    const row=db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name!);if(!row||!String(row.sql).includes("RAISE(ABORT,'"+message+"')"))throw new Error('Unsupported recent state guard');
+  }
+}
 export function migrateRecentState(db:DatabaseSync){const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===13){for(const table of RECENT_STATE_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===13){verifyRecentStateSchema(db);return;}
   if(version!==12)throw new Error('Unsupported recent state database');
   db.exec(`CREATE TABLE recent_self_states(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL);
     CREATE INDEX recent_state_scope ON recent_self_states(agent_id,scope_key);
@@ -18,8 +27,10 @@ export function migrateRecentState(db:DatabaseSync){const version=Number(db.prep
     CREATE TRIGGER recent_state_revision_immutable BEFORE UPDATE ON recent_state_revisions BEGIN SELECT RAISE(ABORT,'Immutable recent state revision'); END;
     CREATE TRIGGER recent_state_revision_retain BEFORE DELETE ON recent_state_revisions BEGIN SELECT RAISE(ABORT,'Retain recent state revision'); END;
     CREATE TABLE recent_state_requests(agent_id TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(agent_id,request_id));
-    CREATE TABLE recent_state_publications(id TEXT PRIMARY KEY,state_id TEXT NOT NULL,state_version INTEGER NOT NULL,body TEXT NOT NULL);
+    CREATE TABLE recent_state_publications(id TEXT PRIMARY KEY,state_id TEXT NOT NULL,state_version INTEGER NOT NULL,body TEXT NOT NULL,withdrawn INTEGER NOT NULL DEFAULT 0 CHECK(withdrawn IN (0,1)));
     CREATE INDEX recent_state_publication ON recent_state_publications(state_id,state_version);
+    CREATE TRIGGER recent_publication_immutable BEFORE UPDATE OF id,state_id,state_version,body ON recent_state_publications BEGIN SELECT RAISE(ABORT,'Immutable recent publication'); END;
+    CREATE TRIGGER recent_publication_retain BEFORE DELETE ON recent_state_publications BEGIN SELECT RAISE(ABORT,'Retain recent publication'); END;
     PRAGMA user_version=13;`);
   db.prepare('INSERT INTO memory_schema_migrations VALUES(13,?,0,?)').run(new Date().toISOString(),'add-versioned-recent-self-state-without-changing-memory-or-persona');
 }
@@ -59,16 +70,32 @@ export class RecentStateStore {
       const row=this.read(access,input.id);if(row.version!==input.expectedVersion)throw new Error('VERSION_CONFLICT');
       if(row.status!=='active'||Date.parse(row.expiresAt)<=Date.now()||!this.current(row.runId,row.sources))throw new Error('SOURCE_STALE');
       if(redactJson(input.view).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
-      const publication=publicationSchema.parse({id:randomUUID(),stateId:row.id,stateVersion:row.version,view:input.view,viewHash:hash(input.view),policy:'self-summary-v1',reviewHash:hash(review),createdAt:new Date().toISOString()});
-      this.db.prepare('INSERT INTO recent_state_publications VALUES(?,?,?,?)').run(publication.id,row.id,row.version,JSON.stringify(publication));
+      const topics=[...new Set([...new Intl.Segmenter('zh',{granularity:'word'}).segment(input.view)].filter(part=>part.isWordLike&&part.segment.length>1&&!['最近','自己','一些','现在'].includes(part.segment)).map(part=>part.segment.slice(0,80)))].slice(0,16);
+      const publication=publicationSchema.parse({id:randomUUID(),stateId:row.id,stateVersion:row.version,view:input.view,viewHash:hash(input.view),topics,policy:'self-summary-v1',reviewHash:hash(review),createdAt:new Date().toISOString()});
+      this.db.prepare('UPDATE recent_state_publications SET withdrawn=1 WHERE state_id=? AND withdrawn=0').run(row.id);
+      this.db.prepare('INSERT INTO recent_state_publications(id,state_id,state_version,body) VALUES(?,?,?,?)').run(publication.id,row.id,row.version,JSON.stringify(publication));
       this.audit(access,'recent-state.published',{id:row.id,version:row.version,publication:publication.id});return {id:row.id,version:row.version,publication:publication.id,scope:'qualified-self-summary',rawSourcesShared:false};
+    });
+  }
+  published(scope:ExecutionScope){return this.db.prepare('SELECT p.body,s.body AS state FROM recent_state_publications p JOIN recent_self_states s ON s.id=p.state_id AND s.version=p.state_version WHERE s.agent_id=? AND p.withdrawn=0 ORDER BY p.rowid DESC LIMIT 32').all(scope.agentId).flatMap(row=>{
+    const state=RecentStateRecordSchema.parse(JSON.parse(String(row.state))),publication=publicationSchema.parse(JSON.parse(String(row.body)));
+    return state.status==='active'&&Date.parse(state.expiresAt)>Date.now()&&this.current(state.runId,state.sources)?[{publication:publication.id,id:state.id,version:state.version,view:publication.view,expiresAt:state.expiresAt,claimType:'self_report' as const}]:[];
+  });}
+  unpublish(access:PersonaAccess,raw:unknown,shared:boolean){access.guard();const input=RecentStateUnpublishSchema.parse(raw);
+    return this.request(access.view.scope.agentId,`${access.view.runId}:unpublish:${input.requestId}`,input,()=>{
+      const row=this.db.prepare('SELECT p.state_id,p.state_version,s.scope_key FROM recent_state_publications p JOIN recent_self_states s ON s.id=p.state_id WHERE p.id=? AND s.agent_id=?').get(input.publication,access.view.scope.agentId);
+      if(!row||!shared&&row.scope_key!==personaScope(access.view.scope))throw new Error('SCOPE_DENIED');
+      if(Number(row.state_version)!==input.expectedVersion)throw new Error('VERSION_CONFLICT');
+      this.db.prepare('UPDATE recent_state_publications SET withdrawn=1 WHERE id=?').run(input.publication);
+      this.audit(access,'recent-state.unpublished',{publication:input.publication});return {publication:input.publication,withdrawn:true,originRecordChanged:false};
     });
   }
   prepare(scope:ExecutionScope,query:string,shared:boolean,limit:number):ContextItem[]{
     const own=this.list(scope),candidates:{state:RecentStateRecord;view:string;publication:string|null}[]=own.map(state=>({state,view:state.text,publication:null}));
-    if(shared)for(const row of this.db.prepare('SELECT p.body,s.body AS state FROM recent_state_publications p JOIN recent_self_states s ON s.id=p.state_id AND s.version=p.state_version WHERE s.agent_id=? AND s.scope_key<>? ORDER BY p.rowid DESC LIMIT 32').all(scope.agentId,personaScope(scope))){
+    if(shared)for(const row of this.db.prepare('SELECT p.body,s.body AS state FROM recent_state_publications p JOIN recent_self_states s ON s.id=p.state_id AND s.version=p.state_version WHERE s.agent_id=? AND s.scope_key<>? AND p.withdrawn=0 ORDER BY p.rowid DESC LIMIT 32').all(scope.agentId,personaScope(scope))){
       const state=RecentStateRecordSchema.parse(JSON.parse(String(row.state))),publication=publicationSchema.parse(JSON.parse(String(row.body)));
-      if(state.topics.length&&!state.topics.some(topic=>query.toLowerCase().includes(topic.toLowerCase())))continue;
+      // Cross-scene selection may only use the approved public view, not private topic labels.
+      if(!publication.topics.length||!publication.topics.some(topic=>query.toLowerCase().includes(topic.toLowerCase())))continue;
       if(publication.viewHash!==hash(publication.view))continue;candidates.push({state,view:publication.view,publication:publication.id});
     }
     const items:ContextItem[]=[],seen=new Set<string>();

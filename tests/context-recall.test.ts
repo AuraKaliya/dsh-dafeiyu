@@ -5,6 +5,8 @@ import {z} from 'zod';
 import {memoryFixture} from './memory-fixture.js';
 import {textReply} from './harness.js';
 import {qqCapabilityFixture,scene,otherGroup} from './qq-capabilities-fixture.js';
+import {API_VERSION,conversationKey} from '@dafeiyu/contracts';
+import {call} from './harness.js';
 
 test('first-request lexical recall is scoped, source checked and does not write selected state',async t=>{
   const h=await memoryFixture(undefined,{context:{}},undefined,{assembly:{mode:'unified'}});t.after(h.close);
@@ -26,4 +28,22 @@ test('cached non-trigger group background is supplied only in its current group 
   await h.message('你怎么看',{target:scene,trigger:true});
   const request=JSON.stringify(h.adapter.requests.at(-1)?.messages);assert.ok(request.includes('BACKGROUND_SCOPE_A'),'current group cached background should be admitted');assert.ok(!request.includes('PRIVATE_BACKGROUND'));assert.match(request,/recent-group-background/);
   assert.equal(h.platform.historyCalls.length,0);
+});
+
+test('a task recalls expression-eligible memory only from its verified origin conversation',async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true,context:{assembly:{mode:'unified'}}});t.after(h.close);
+  const seed=h.core.registerExtension({id:'fixture-recall-seed',version:'1',apiVersion:API_VERSION,agentId:'dafeiyu',actions:[{name:'fixture_recall_seed',description:'fixture scoped memory',fields:{},execute:async(_raw,context)=>{
+    const scope=h.core.scopeFor(context),event=h.core.journal.events(scope.route).findLast(event=>event.type==='message.accepted');assert.ok(event);
+    return z.json().parse(await h.ctx.dafeiyuMemory.create(context,{requestId:randomUUID(),kind:'knowledge',claimType:'reported_claim',content:context.conversation.id===scene.id?'海洋计划 ORIGIN_RECALL：只读分析。':'海洋计划 FOREIGN_PRIVATE_RECALL',sourceRefs:[`dafeiyu:source:${event.id}:0`]}));
+  }}]});t.after(()=>seed.dispose());let step=0;
+  h.setResponse(()=>++step===1?call('fixture_recall_seed',{}):textReply('fixture saved'));await h.message('海洋记录',{target:scene,trigger:true});step=0;await h.message('海洋记录',{target:{...scene,id:otherGroup},trigger:true});
+  let chat=0,read=false,rendered=false;
+  h.setResponse(request=>{const id=String(request.sessionId),text=JSON.stringify(request.messages);
+    if(id.startsWith('dafeiyu-task-')){assert.ok(text.includes('ORIGIN_RECALL'));assert.ok(!text.includes('FOREIGN_PRIVATE_RECALL'));read=true;return textReply('遵循原来的只读限制。');}
+    if(id.startsWith('dafeiyu-delivery-v3-')){assert.ok(text.includes('ORIGIN_RECALL'));assert.ok(!text.includes('FOREIGN_PRIVATE_RECALL'));rendered=true;return textReply('我会遵循只读分析。');}
+    if(id.startsWith('memory-expression-verify-delivery-'))return textReply(JSON.stringify({faithful:true,issues:[]}));
+    return ++chat===1?call('qq_task_submit',{requestId:'origin-recall'}):textReply('');
+  });await h.message('任务：回忆海洋计划',{target:scene,trigger:true});assert.equal(read,true);assert.equal(rendered,true);
+  const fake={runId:randomUUID(),taskId:randomUUID(),scope:{kind:'conversation' as const,agentId:'dafeiyu',route:conversationKey('dafeiyu',scene)},origin:{kind:'message' as const,inboundId:randomUUID(),conversation:scene},signal:new AbortController().signal};
+  assert.equal(h.core.originRecallScope(fake,'memory-origin-recall'),null);
 });

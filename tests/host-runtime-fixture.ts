@@ -73,8 +73,8 @@ try{
       const db=new DatabaseSync(join(prepared.paths.core,'runtime.sqlite'),{readOnly:true});try{assert.equal(db.prepare("SELECT r.state FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE q.producer='qq-tasks'").get()?.state,scenario==='qq-tasks-wait'?'waiting':'completed');}finally{db.close();}
       await host.close();assert.deepEqual(readHostStatus(prepared,coordination).snapshot?.services.taskDelivery,snapshot?.services.taskDelivery);
     }
-    else if(segmented){await entered;await host.core.whenIdle();assert.equal(modelCalls,1);assert.equal(sent,scenario==='qq-partial'?2:3);host.publish();
-      const snapshot=readHostStatus(prepared,coordination).snapshot;assert.deepEqual(snapshot?.services.qq?.delivery,{plans:1,pending:scenario==='qq-partial'?1:0,unknown:scenario==='qq-partial'?1:0});assert.ok(!JSON.stringify(snapshot).includes('LONG_HOST_REPLY_SENTINEL'));
+    else if(segmented){await entered;await host.core.whenIdle();assert.equal(modelCalls,1);assert.equal(sent,scenario==='qq-partial'?2:11);host.publish();
+      const snapshot=readHostStatus(prepared,coordination).snapshot;assert.deepEqual(snapshot?.services.qq?.delivery,{plans:1,pending:scenario==='qq-partial'?9:0,unknown:scenario==='qq-partial'?1:0});assert.ok(!JSON.stringify(snapshot).includes('LONG_HOST_REPLY_SENTINEL'));
       assert.equal(host.core.journal.list()[0]?.state,scenario==='qq-partial'?'uncertain':'delivered');await host.close();assert.deepEqual(readHostStatus(prepared,coordination).snapshot?.services.qq?.delivery,snapshot?.services.qq?.delivery);}
     else if(scenario==='qq-capabilities'){await entered;await host.core.whenIdle();assert.equal(sent,1);assert.equal(modelCalls,3);host.publish();
       const saved=readHostStatus(prepared,coordination);assert.equal(saved.online,true);assert.equal(saved.snapshot?.services.memory?.sourceTracking,'configured');assert.equal(saved.snapshot?.services.qq?.capabilities,true);assert.ok(saved.snapshot?.features.includes('qq.browse.v1'));}

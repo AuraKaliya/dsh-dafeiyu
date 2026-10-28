@@ -1,4 +1,5 @@
 import {RecentStateStore,migrateRecentState} from './recent-state-store.js';
+export {verifyRecentStateSchema} from './recent-state-store.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';

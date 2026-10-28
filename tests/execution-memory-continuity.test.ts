@@ -130,6 +130,34 @@ test('native compression uses DSH provenance and preserves constraints through r
   }finally{await h.close();}
 });
 
+test('a tool-heavy native run keeps recent pairs and reopen references for old receipts without replay',async()=>{
+  const directory=await root();let h:H,calls=0,step=0;
+  const spec:Omit<ExtensionV3,'agentId'|'protocolVersion'>={id:'fixture',version:'1',actions:[{
+    id:'fixture_read',version:'1',description:'读取虚构大结果',inputSchema:z.strictObject({index:z.number().int()}),outputSchema:z.json(),effects:'read',
+    execute:async(input,c)=>{
+      const {index}=z.object({index:z.number().int()}).parse(input);calls++;const text=`RECEIPT_BODY_${index}_`+'虚构完整结果。'.repeat(800);
+      const source=h.memory.persona!.recordObservation(c,{...observation,requestId:`read-${index}`,text},'fixture');
+      return {status:'succeeded',effects:'none',completeness:'complete',data:{text},
+        sources:[{id:source.id,scopeKey:source.scopeKey,version:source.version,contentHash:source.contentHash}],receipts:[]};
+    },
+  }]};
+  h=await executionHarness(directory,opts=>opts.purpose==='compaction'?textReply(JSON.stringify({summary:'虚构旧记录'})):
+    ++step<=12?call('fixture_read',{index:step}):textReply('已检查所有虚构材料，历史回执可按引用回查。'),spec,true,
+    {executionActions:true,compaction:{inputTokens:2048,minGrowthTokens:0,minSavingsTokens:64,cooldownMs:0}});
+  try{
+    const accepted=h.port.submitTask(request);await h.core.whenIdle();const status=h.port.status(accepted.run);
+    assert.equal(status.state,'completed');assert.equal(calls,12);assert.equal(status.operations.length,12);
+    const last=h.adapter.requests.filter(r=>r.tools?.some(tool=>tool.name==='fixture_read')).at(-1)!;
+    const results=last.messages.filter(m=>m.role==='tool');assert.equal(results.length,12);
+    const reduced=results.filter(m=>JSON.stringify(m.content).includes('archived-tool-result'));assert.ok(reduced.length>0);
+    assert.ok(results.slice(-8).every(m=>!JSON.stringify(m.content).includes('archived-tool-result')));
+    for(const message of results){assert.equal(message.role,'tool');if(message.role!=='tool')continue;
+      assert.ok(last.messages.some(m=>m.role==='assistant'&&m.content.some(b=>b.type==='tool-call'&&b.id===message.toolCallId)));
+    }
+    assert.ok((await archive(join(directory,'sessions'))).includes('tool-receipts-compacted'));
+  }finally{await h.close();}
+});
+
 test('nonempty action source references are verified after persisting the actual effect receipt',async()=>{
   const directory=await root();let h:H,step=0,invalid=false;
   const spec:Omit<ExtensionV3,'agentId'|'protocolVersion'>={id:'fixture',version:'plugin-7',actions:[{id:'fixture_observe',version:'action-3',description:'虚构带来源回执',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_input,c)=>{

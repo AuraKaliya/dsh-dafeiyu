@@ -58,6 +58,11 @@ export class SourceTracker {
     const scope=this.scope();
     const basis=b.provider.basis(scope),stamp=JSON.stringify([scope,basis.epoch,basis.versions]);
     if(stamp!==this.validationStamp||this.validationProvider!==b.provider){this.validationCache.clear();this.validationStamp=stamp;this.validationProvider=b.provider;}
+    if(b.provider.sources?.validateMany){
+      const pending=dependencies.filter(dep=>dep.agentId===scope.agentId&&dep.route===scope.route&&dep.kind!=='context'&&!this.validationCache.has(JSON.stringify(dep)));
+      if(pending.length){const values=b.provider.sources.validateMany(scope,pending);if(values.length!==pending.length)throw new Error('SOURCE_VALIDATION_FAILED');
+        if(this.validationCache.size+pending.length>8192)this.validationCache.clear();pending.forEach((dep,index)=>this.validationCache.set(JSON.stringify(dep),values[index]===true));}
+    }
     return dependencies.every(dep=>dep.agentId===scope.agentId&&dep.route===scope.route&&(dep.kind==='context'
       ?this.context.validateHistorical(dep):(()=>{
         const key=JSON.stringify(dep),cached=this.validationCache.get(key);if(cached!==undefined)return cached;
@@ -71,6 +76,7 @@ export class SourceTracker {
   }
   invalid():Set<number>{
     this.index();const invalid=new Set<number>();
+    if(this.binding()?.provider.sources?.validateMany)this.validate([...this.reverse.keys()].map(key=>SourceDependencySchema.parse(JSON.parse(key))));
     for(const [key,seqs] of this.reverse)if(!this.validate([SourceDependencySchema.parse(JSON.parse(key))]))for(const seq of seqs)invalid.add(seq);
     const events=this.session?.snapshotEvents();
     for(const [seq,record] of this.records)if(record.agentId!==this.agentId||record.route!==this.item?.route||record.owner!==this.binding()?.owner
@@ -81,6 +87,11 @@ export class SourceTracker {
     if(this.get(event.seq))return;const text=eventText(event);if(text===null)return;
     appendPluginRecord(this.session!,'plugin:dafeiyu/source-record',{...this.common(),schemaVersion:1,targetSeq:event.seq,hash:digestSource(text),
       parents:[...new Set(parents)].sort((a,b)=>a-b),dependencies:unionDependencies(dependencies),...(requestSeq===undefined?{}:{requestSeq})});
+  }
+  recordReplacement(seq:number,parentSeq:number):void{
+    const parent=this.get(parentSeq),event=this.session?.snapshotEvents()[seq];
+    if(!parent||!event||!this.valid(parent))throw new Error('SOURCE_VALIDATION_FAILED');
+    this.write(event,parent.dependencies,[parentSeq]);
   }
   /** Capture completed outputs before any pruning; record input hashes at first dispatch. */
   sync():void{

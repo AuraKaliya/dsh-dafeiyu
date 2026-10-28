@@ -194,10 +194,19 @@ test('insufficient reduction does not replace sources or repeatedly retry in the
 });
 
 test('adding unrelated memory preserves previously valid summaries and conversation history',async t=>{
-  const h=await memoryFixture(undefined,{compaction:policy});t.after(h.close);const e=await h.evidence('a');await seed(h);
-  const summaries=lastChat(h).messages.filter(m=>m.role==='user'&&m.source?.kind==='compact-checkpoint').map(m=>m.id);assert.ok(summaries.length);
+  const h=await memoryFixture(undefined,{compaction:policy});t.after(h.close);const e=await h.evidence('a');const agent=await seed(h);
+  const proofs=()=>agent.session.deriveMessages().filter(m=>m.role==='user'&&(m.source.kind==='compact-checkpoint'||m.source.kind==='dafeiyu-summary-view')
+    &&lastChat(h).messages.some(visible=>visible.id===m.id)).map(m=>checkpointProof(agent.session,m));
+  const summaries=proofs();assert.ok(summaries.length);
   await h.probe('a',c=>h.memory.create(c,{requestId:randomUUID(),kind:'knowledge',claimType:'self_report',content:'另一条虚构资料',sourceRefs:[e.ref]}));
-  await next(h);assert.ok(summaries.every(id=>lastChat(h).messages.some(m=>m.id===id)));
+  await next(h);
+  // Lossless composition may replace checkpoint IDs; retained facts and their exact sources must survive.
+  const current=proofs();
+  for(const before of summaries){
+    assert.ok(current.some(after=>after.summary.includes(before.summary)));
+    for(const source of before.sources)assert.ok(current.some(after=>after.sources.some(next=>next.seq===source.seq&&next.hash===source.hash)));
+    for(const dependency of before.dependencies)assert.ok(current.some(after=>after.dependencies.some(next=>JSON.stringify(next)===JSON.stringify(dependency))));
+  }
 });
 
 test('large tool feedback triggers a between-step check while keeping that tool pair and executing it once',async t=>{

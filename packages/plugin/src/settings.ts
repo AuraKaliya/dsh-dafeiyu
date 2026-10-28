@@ -1,3 +1,4 @@
+import {ContextAssemblySchema,ContextBudgetSchema} from '@dafeiyu/contracts';
 import { readFileSync,statSync } from 'node:fs';
 import { dirname,resolve } from 'node:path';
 import { z } from 'zod';
@@ -10,6 +11,9 @@ export const InstallationSettingsSchema=z.strictObject({
   schemaVersion:z.literal(1),dataDir:path,instanceName:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('dafeiyu'),
   foundationFile:path.optional(),
   dshTools:z.boolean().default(false),
+  context:ContextAssemblySchema.optional(),
+  contextBudget:ContextBudgetSchema.omit({assembly:true}).optional(),
+  growthMaxBytes:z.number().int().min(0).max(32000).optional(),
   localOwnerControl:z.boolean().default(false),
   taskTimeoutMs:z.number().int().min(1000).max(3600000).optional(),
   phaseTimeouts:PhaseTimeoutsSchema.optional(),
@@ -28,6 +32,8 @@ export const InstallationSettingsSchema=z.strictObject({
   activity:z.strictObject({enabled:z.boolean().default(true),timeZone:z.string().default('Asia/Shanghai'),
     dailyActiveMs:z.number().int().min(100).max(86400000).default(3600000)}).prefault({}),
 }).superRefine((value,ctx)=>{
+  if(value.contextBudget&&value.contextBudget.outputReserveBytes>=value.contextBudget.requestMaxBytes)ctx.addIssue({code:'custom',path:['contextBudget','outputReserveBytes'],message:'Output reserve must fit within the request capacity'});
+  if(value.contextBudget?.regions['memory:growth'])ctx.addIssue({code:'custom',path:['contextBudget','regions'],message:'Use growthMaxBytes for personality capacity'});
   if(value.bilibili?.browser&&!value.dshTools)ctx.addIssue({code:'custom',path:['dshTools'],message:'Bilibili browser reads require the desktop bridge'});
   if(value.bilibili&&!value.bilibili.capabilities&&!value.bilibili.channel)ctx.addIssue({code:'custom',path:['bilibili'],message:'Enable a platform interface or omit the plugin'});
   if(value.qq.media&&!value.media)ctx.addIssue({code:'custom',path:['media'],message:'QQ media interfaces require media configuration'});

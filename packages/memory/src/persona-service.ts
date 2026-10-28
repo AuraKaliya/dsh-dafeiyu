@@ -1,5 +1,5 @@
 import {RecentStateService} from './recent-state.js';
-import {RecentStateSaveSchema,RecentStatePublishSchema} from '@dafeiyu/contracts';
+import {RecentStateSaveSchema,RecentStatePublishSchema,RecentStateUnpublishSchema} from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import type { PersonaAccess,PersonaSourceRef,PersonaCounterCheck,ActionCapabilityV3,ExecutionContextV3 } from '@dafeiyu/contracts';
 import { PersonaSourceRefSchema,PersonaKindSchema,PersonaRequestIdSchema,ExecutionScopeSchema,RunOriginSchema,ExecutionContributionSchema,TaskObjectionSchema,PersonaTrialSelectInputSchema,PersonaAdoptionReviewInputSchema,PersonaPublishInputSchema } from '@dafeiyu/contracts';
@@ -68,6 +68,9 @@ export class GrowthService {
     access.guard();if(!this.ready()||ref.agentId!==this.agentId||access.view.scope.agentId!==this.agentId)return null;
     const key=`${access.view.runId}:${sourceKey(ref)}`;if(this.resolving.has(key)||this.resolving.size>=64)return null;this.resolving.add(key);
     try{
+      const memo=this.resolutionMemo.get(access)??new Map<string,PersonaMaterial|null>();this.resolutionMemo.set(access,memo);
+      const cached=memo.get(key);if(cached!==undefined)return cached;
+      const material=(()=>{
       if(ref.kind==='execution-source')return this.experiences.sourceCurrent(access,ref)?this.memory.capabilities.material(access,ref)??this.sources.open(access,ref):null;
       if(access.view.scope.kind==='task'){
         if(ref.scopeKey===access.view.scope.scopeKey)return this.memory.capabilities.memoryMaterial(access,ref)??this.executionState.memoryMaterial(access,ref);
@@ -80,8 +83,12 @@ export class GrowthService {
       const proof=this.tasks.memoryProof(scope,ref.id,ref.revision,ref.version,ref.contentHash);if(!proof||proof.kind!=='memory')return null;
       const dependencies=proof.ancestors.map(parent=>PersonaSourceRefSchema.parse({kind:'memory',agentId:this.agentId,scopeKey:ref.scopeKey,...parent}));
       return {text:memory.content,dependencies,rootSources:[...new Set(proof.fences.map(fence=>JSON.stringify(['timeline',this.agentId,ref.scopeKey,this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope,fence.ref)??fence.ref])))]};
-    }catch{return null;}finally{this.resolving.delete(key);}
+      })();memo.set(key,material);return material;
+    }catch{return null;}finally{this.resolving.delete(key);if(!this.resolving.size)this.resolutionMemo=new WeakMap();}
   }
+  // Shared ancestors are checked once per synchronous traversal and exact authority object.
+  // Never reuse this cache after a traversal, a write, or an asynchronous boundary.
+  private resolutionMemo=new WeakMap<PersonaAccess,Map<string,PersonaMaterial|null>>();
   private access(context:ExecutionContextV3,pluginId:string,write:boolean){if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.ctx.dafeiyu.personaAccess(context,pluginId,write?'local-write':'read');}
   /** A source key selects only a reference already exposed in this live execution access. */
   private resolveExposedSource(access:PersonaAccess,key:string):PersonaSourceRef {
@@ -151,6 +158,7 @@ export class GrowthService {
     return [
       make('dafeiyu_recent_state_save','保存、修订、休眠或撤下当前范围的近期自我关注。保留受托/自主/混合/未知动机；不是稳定人格，也不创建或完成任务。首次expectedVersion=0，expiresAt在未来30天内。',RecentStateSaveSchema,true,(c,i)=>{const result=this.recent.save(c,this.access(c,'memory-persona',true),i);this.flush();return result;}),
       make('dafeiyu_recent_state_status','读取本范围近期关注及共享策略状态；不读取其它会话原文。',z.strictObject({}),false,c=>this.recent.status(this.access(c,'memory-persona',false))),
+      make('dafeiyu_recent_state_unpublish','撤下指定版本的共享自我表达。可在已授权共享范围内撤下公开视图，不读取或改写其原会话记录。先status取得publication及version。',RecentStateUnpublishSchema,true,(c,i)=>{const result=this.recent.unpublish(this.access(c,'memory-persona',true),i);this.flush();return result;}),
       make('dafeiyu_recent_state_publish','提交指定近期关注版本的简短跨会话自我表达。须通过独立检查；不分享原始来源，不包含他人/私聊/任务细节，不改为稳定人格。',RecentStatePublishSchema,true,async(c,i)=>{const result=await this.recent.publish(this.access(c,'memory-persona',true),i);this.flush();return result;}),
       make('dafeiyu_qq_expression_status','读取当前QQ场景已长期保存的表达规则和版本；这是表达偏好，不是身份或事实权限。',z.strictObject({}),false,c=>this.qqExpression.status(this.ctx.dafeiyu.quoteReplySource(c,'memory-persona').target)),
       make('dafeiyu_qq_expression_save','保存或调整当前QQ场景的长期表达偏好／可调整表达规则。自主选择tone/length/structure/pacing/address/other；首次expectedVersion=0，修改先status。自选用self-preference，真实用户要求用user-request；空text撤下。保存到既有Memory，由Growth管理并自动装配QQ回复、阶段反馈、任务结果。不是已采用人格，不能传递任务事实、系统指令或权限；临时要求直接遵循，不必都永久保存。',QqExpressionSaveSchema,true,(c,i)=>this.qqExpression.save(c,this.access(c,'memory-persona',true),i)),

@@ -7,7 +7,11 @@ import { createHash } from 'node:crypto';
 import type { RunResultRef } from './runtime-store.js';
 import {z} from 'zod';
 const visibleFailure=z.object({kind:z.literal('error'),error:z.object({message:z.string()})});
-export function turnFailureCode(value:unknown):string{const parsed=visibleFailure.safeParse(value);return parsed.success&&['SOURCE_VALIDATION_FAILED','PERSISTENCE_FAILED','MODEL_INCOMPLETE','DELIVERY_RENDER_TIMEOUT'].includes(parsed.data.error.message)?parsed.data.error.message:'MODEL_INCOMPLETE';}
+const contextFailures:Readonly<Record<string,string>>={'Required context exceeds budget':'REQUIRED_CONTEXT_CAPACITY','Required context unavailable':'REQUIRED_CONTEXT_UNAVAILABLE',
+  'Required context contributor missing':'REQUIRED_CONTEXT_PROVIDER_MISSING','Context request budget exceeded':'CONTEXT_REQUEST_CAPACITY'};
+export function safeRunFailure(message:string):string{return contextFailures[message]??(['SOURCE_VALIDATION_FAILED','PERSISTENCE_FAILED','MODEL_INCOMPLETE','DELIVERY_RENDER_TIMEOUT',
+  'CONTEXT_REQUEST_CAPACITY','MODEL_CONTEXT_CAPACITY','PERSONA_CONTEXT_CAPACITY','REQUIRED_CONTEXT_CAPACITY','REQUIRED_CONTEXT_UNAVAILABLE','REQUIRED_CONTEXT_PROVIDER_MISSING','NATIVE_CONTEXT_SNAPSHOT_MISMATCH','CONTEXT_PREPARE_TIMEOUT'].includes(message)?message:'MODEL_INCOMPLETE');}
+export function turnFailureCode(value:unknown):string{const parsed=visibleFailure.safeParse(value);return parsed.success?safeRunFailure(parsed.data.error.message):'MODEL_INCOMPLETE';}
 
 /** The two execution origins share DSH ownership, flush and final-message rules. */
 export async function openAgentSession(ctx:Context,id:string,model:AgentOptions,cwd:string,setup:(scope:Context)=>void){

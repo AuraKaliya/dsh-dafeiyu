@@ -24,6 +24,8 @@ export class ContextCoordinator {
   private readonly entries=new Map<string,Entry>();
   private readonly scopes=new WeakMap<ContextRequest,{scope:OperationScope;entry:Entry}>();
   private readonly pinnedRegions=new Set<string>();
+  private readonly latest=new Map<string,{manifest:ReturnType<typeof contextManifest>;requestBytes:number}>();
+  status(route:string){return this.latest.get(route)??null;}
   pinRegion(name:string):()=>void{this.pinnedRegions.add(name);return ()=>{this.pinnedRegions.delete(name);};}
   constructor(private readonly agentId:string,private readonly journal:Journal,config:z.input<typeof contextConfigSchema>={}){
     this.config=contextConfigSchema.parse(config);
@@ -35,7 +37,7 @@ export class ContextCoordinator {
       if(!/^[a-z][a-z0-9-]{0,63}$/.test(contributor.id))throw new Error('Invalid context region');
       z.enum(['working-state','evidence','operational-fact']).parse(contributor.kind);
       return {owner,version,contributor:{id:contributor.id,kind:contributor.kind,
-        prepare:contributor.prepare.bind(contributor),validate:contributor.validate.bind(contributor)},active:true,controller};
+        prepare:contributor.prepare.bind(contributor),validate:contributor.validate.bind(contributor),...(contributor.validateHistorical?{validateHistorical:contributor.validateHistorical.bind(contributor)}:{})},active:true,controller};
     });
     const names=entries.map(e=>`${owner}:${e.contributor.id}`);
     if(new Set(names).size!==names.length||names.some(n=>this.entries.has(n))||this.entries.size+names.length>32)throw new Error('Duplicate or excessive context regions');
@@ -75,7 +77,7 @@ export class ContextCoordinator {
   }
   private policy(region:PreparedRegion){
     const name=`${region.entry.owner}:${region.entry.contributor.id}`;
-    return this.config.regions[name]??policySchema.parse(name==='memory:working'?{priority:500,maxBytes:6000}:name==='memory:evidence'?{priority:200,maxBytes:8000}:name==='native-task-results:delivered-results'?{priority:450,maxBytes:6000}:{});
+    return this.config.regions[name]??policySchema.parse(name==='core-situation:responsibilities'?{priority:900,maxBytes:8000,required:true}:name==='memory:working'?{priority:500,maxBytes:6000}:name==='memory:evidence'?{priority:200,maxBytes:8000}:name==='native-task-results:delivered-results'?{priority:450,maxBytes:6000}:{});
   }
   packet(prepared:readonly PreparedRegion[],allowance=this.config.maxBytes):ContextPacket{
     for(const [name,policy] of Object.entries(this.config.regions))if(policy.required&&!prepared.some(r=>r.entry.active&&`${r.entry.owner}:${r.entry.contributor.id}`===name))
@@ -88,6 +90,7 @@ export class ContextCoordinator {
     };}),Math.max(0,Math.min(allowance,this.config.maxBytes)));
   }
   audit(item:PendingMessage,packet:ContextPacket,retired:number,nativeNames:readonly string[],requestBytes:number,capacity?:ReturnType<typeof requestCapacity>):void{
+    this.latest.delete(item.route);this.latest.set(item.route,{manifest:contextManifest('conversation',packet),requestBytes});while(this.latest.size>64)this.latest.delete(this.latest.keys().next().value!);
     this.journal.append({agentId:this.agentId,route:item.route,traceId:item.id,operationId:randomUUID(),causedBy:null,
       type:'context.admitted',plugin:'core',pluginVersion:CORE_VERSION,occurredAt:new Date().toISOString(),sources:[],
       data:{...(capacity?{capacity}:{}),plan:contextManifest('conversation',packet),bytes:bytes(packet.text),requestBytes,retired,decisions:packet.decisions,nativeRegions:[...nativeNames],selected:packet.regions.map(r=>({owner:r.owner,region:r.region,

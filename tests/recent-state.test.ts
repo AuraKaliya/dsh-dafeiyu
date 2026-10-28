@@ -27,10 +27,14 @@ test('recent attention is durable, scoped and never mutates the personality or t
 });
 test('only the exact independently reviewed publication can cross scopes; edits and revocation retire it',async t=>{
   const root=await mkdtemp(join(testTempDir(),'recent-publication-')),memory=new MemoryStore(join(root,'memory.sqlite'));t.after(()=>memory.close());let current=true;
-  const state=memory.recentStateStore(()=>current),owner=access(),saved=state.save(owner,input(),sources),publish={requestId:randomUUID(),id:saved.id,expectedVersion:1,view:'我最近对海洋有一些好奇。'},review={selfOnly:true,privateDetails:false,thirdPartyClaims:false} as const;
+  const state=memory.recentStateStore(()=>current),owner=access(),saved=state.save(owner,{...input(),topics:['海洋','PRIVATE_TOPIC']},sources),publish={requestId:randomUUID(),id:saved.id,expectedVersion:1,view:'我最近对海洋有一些好奇。'},review={selfOnly:true,privateDetails:false,thirdPartyClaims:false} as const;
   assert.throws(()=>state.publish(owner,publish,review,false),/SCOPE_DENIED/);state.publish(owner,publish,review,true);
   const shared=state.prepare(scope('b'),'海洋',true,3000);assert.equal(shared.length,1);assert.ok(shared[0]?.text.includes(publish.view));assert.ok(!shared[0]?.text.includes('我最近想了解海洋'));
   assert.equal(state.prepare(scope('b'),'无关话题',true,3000).length,0);assert.throws(()=>state.read(access('b'),saved.id),/SCOPE_DENIED/);
+  assert.equal(state.prepare(scope('b'),'PRIVATE_TOPIC',true,3000).length,0);
+  const published=state.published(scope('b'))[0]!;state.unpublish(access('b'),{requestId:'withdraw-view',publication:published.publication,expectedVersion:1},true);
+  assert.equal(state.prepare(scope('b'),'海洋',true,3000).length,0);assert.equal(state.read(owner,saved.id).version,1);
+  state.publish(owner,{...publish,requestId:'publish-again'},review,true);
   current=false;assert.equal(state.prepare(scope('b'),'海洋',true,3000).length,0);current=true;
   state.save(owner,{...input(),id:saved.id,expectedVersion:1,status:'dormant'},sources);assert.equal(state.prepare(scope('b'),'海洋',true,3000).length,0);
 });

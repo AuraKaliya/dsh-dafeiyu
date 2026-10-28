@@ -1,3 +1,5 @@
+import {ContextItemSchema} from '@dafeiyu/contracts';
+import {situationContributor} from './situation-context.js';
 import { Context, Service } from '@deepseek-ai/cordis';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -93,7 +95,11 @@ export class DafeiyuService extends Service {
   }
   phaseTimeouts(){return this.config.phaseTimeouts;}
   registerHarnessSection(name:string){return this.runtime.registerHarnessSection(name);}
+  originRecallScope(view:import('@dafeiyu/contracts').ExecutionView,owner:string){return this.executions?.originRecallScope(view,owner)??null;}
+  originRecallCurrent(runId:string,scene:Conversation,stamp:string){return this.executions?.originRecallCurrent(runId,scene,stamp)??false;}
+  contextBudget(){return this.config.context;}
   contextAssembly(){return this.config.context.assembly;}
+  contextStatus(context:ActionContext,offset=0,limit=16):Json{const scope=this.scopeFor(context);return z.json().parse({plan:this.contexts.status(scope.route),responsibilities:(this.executions?.responsibilityFacts(context.conversation,offset,limit)??[]).map(row=>{row.guard();return row.data;}),offset,limit,nextOffset:offset+limit});}
   private closedNativeDelivery:ReturnType<RuntimeStore['nativeDeliveries']['counts']>|null=null;
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
@@ -208,6 +214,10 @@ export class DafeiyuService extends Service {
     this.persona();
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
+    this.contexts.register('core-situation','1',[situationContributor(()=>this.config.context.assembly.mode==='unified',scene=>this.executions?.responsibilityFacts(scene)??[],
+      (request,item,proof)=>{const scope=this.contexts.scopeFor(request),runId=this.runStore?.findRequest('conversation',scope.traceId)?.runId;if(!runId||!this.runStore)throw new Error('RUN_NOT_RUNNING');this.runStore.bindInput(runId,'operational-context:'+runtimeHash([item.text,item.sources]),{route:scope.route,item,proof});},
+      (request,dependency)=>{try{const scope=this.contexts.scopeFor(request),record=z.object({route:z.string(),item:ContextItemSchema,proof:z.json()}).parse(this.runStore?.findContext('operational-context:'+dependency.hash));return record.route===scope.route&&record.item.id===dependency.id&&record.item.version===dependency.version&&runtimeHash([record.item.text,record.item.sources])===dependency.hash&&(this.executions?.responsibilitySnapshotCurrent(record.proof,request.conversation)??false);}catch{return false;}})]);
+    if(this.config.context.assembly.mode==='unified')this.contexts.pinRegion('core-situation:responsibilities');
     this.personas=new PersonaRuntime(this.config.context);
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,

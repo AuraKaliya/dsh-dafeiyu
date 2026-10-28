@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { CompactionRuntime,committedSummary } from './compaction-runtime.js';
 import type { CompactionBinding,CompactionAudit } from './compaction-runtime.js';
-import { openAgentSession,runAgentTurn,readPersistedResult } from './agent-session.js';
+import { openAgentSession,runAgentTurn,readPersistedResult,safeRunFailure } from './agent-session.js';
 import { visibleStream } from './visible-stream.js';
 import { NativeRuntime } from './native-runtime.js';
 import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame } from './execution-frame.js';
@@ -55,6 +55,7 @@ export class DshRuntime {
       const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
       const feedback=options.sessionId?sessions.get(options.sessionId)?.feedback:undefined;
       const compaction=options.sessionId?sessions.get(options.sessionId)?.compaction:undefined;
+      await context?.measure(options);
       feedback?.guard(options);
       if(context&&!context.guard(options,true,true)){
         yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
@@ -63,7 +64,7 @@ export class DshRuntime {
       const deliveryGuard=()=>{if(owned?.delivery){owned.delivery.guard();if(!owned.context.sourceItems().some(s=>s.owner==='task-delivery'&&s.item.id===owned.delivery!.id))throw new Error('Delivery material missing from context');}};
       deliveryGuard();
       const visible=new Map<number,number>();
-      for await(const chunk of owned&&managedProjection?visibleStream(next()):next()){deliveryGuard();context?.guard(options);feedback?.guard(options);compaction?.guard(options);
+      for await(const chunk of owned&&managedProjection?visibleStream(next()):next()){deliveryGuard();context?.guard(options,false,false,true);feedback?.guard(options);compaction?.guard(options);
         if(!owned?.delivery){yield chunk;continue;}
         if(chunk.type==='block-start'&&chunk.blockType==='tool-call'||chunk.type==='tool-call-delta'||chunk.type==='block-end'&&chunk.block.type==='tool-call')throw new Error('Delivery turn cannot call tools');
         // Delivery never resumes provider reasoning/opaque replay blocks. Persist only final text.
@@ -151,7 +152,7 @@ export class DshRuntime {
       disposers.push(this.harness.install(owned.scope,agent,nativeActions,signal));
       signal.throwIfAborted();
       const input=createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
-        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch?'：同一发送者的连续原消息，依序一起理解，引用保留各自身份':''}]\n${messageDisplayText(item.message)}` }] });
+        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, observedAt:new Date().toISOString(), replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch?'：同一发送者的连续原消息，依序一起理解，引用保留各自身份':''}]\n${messageDisplayText(item.message)}` }] });
       owned.compaction.expectInput(input);
       const {text,events,messageSeq,turnEndSeq}=await runAgentTurn(this.ctx,agent,input,signal,()=>owned!.compaction.seal(),allowEmpty);
       const result:RunResult={ text,resultRef:{sessionId:item.sessionId,messageSeq,turnEndSeq,textHash:createHash('sha256').update(text).digest('hex')}, sources: events.filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
@@ -163,7 +164,7 @@ export class DshRuntime {
     } catch (error) {
       throw new DshRunError(agent.session.snapshotEvents().slice(before)
         .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
-        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })),error instanceof Error&&['SOURCE_VALIDATION_FAILED','PERSISTENCE_FAILED'].includes(error.message)?error.message:'MODEL_INCOMPLETE');
+        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })),error instanceof Error?safeRunFailure(error.message):'MODEL_INCOMPLETE');
     } finally {
       try{owned.compaction.seal();}finally{
       owned.compaction.end();

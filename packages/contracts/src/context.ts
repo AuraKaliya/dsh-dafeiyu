@@ -49,4 +49,6 @@ export interface ContextContributor {
   prepare(request:ContextRequest):Promise<readonly ContextItem[]>;
   /** Synchronous admission check; false retires the entry without affecting other contributors. */
   validate(request:ContextRequest,item:Readonly<ContextItem>):boolean;
+  /** Optional persisted, source-checked historical fact view; never grants current-state authority. */
+  validateHistorical?(request:ContextRequest,dependency:Extract<import('./compaction.js').SourceDependency,{kind:'context'}>):boolean;
 }
