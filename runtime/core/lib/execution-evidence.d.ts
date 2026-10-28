@@ -25,6 +25,9 @@ export declare class ExecutionEvidence {
     private contexts;
     private readonly checking;
     private readonly validationMemo;
+    private accessMemo;
+    private readonly operationMemo;
+    private readonly runMemo;
     private validationDepth;
     private invalidated;
     private bound;
@@ -325,6 +328,10 @@ export declare class ExecutionEvidence {
         agentId: string;
         route: string;
     })[]): PersonaSourceRef[];
+    private clearValidation;
+    private readOperation;
+    private readRun;
+    readSources(read: () => void): void;
     validate(deps: readonly SourceDependency[]): boolean;
     private valid;
     binding(): {

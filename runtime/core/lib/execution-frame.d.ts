@@ -12,6 +12,10 @@ export interface NativeAction {
     metadata?(value: Json): ExecutionToolReceipt | undefined;
 }
 export interface TaskExecutionFrame {
+    readonly handoff?: import('#dafeiyu/contracts').ContextHandoff;
+    refreshContexts?(): Promise<void>;
+    contextPlan?(): Json;
+    contextAudit?(data: Record<string, Json>): void;
     assessmentTimeoutMs?: number;
     mode: 'task';
     sessionId: string;

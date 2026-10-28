@@ -46,7 +46,7 @@ export class MemorySourcePolicy {
     }
     context(scope, region, item) {
         try {
-            if (region === 'task-workspace' || region === 'growth')
+            if (region === 'task-workspace' || region === 'growth' || region === 'recent-state')
                 return [{ ...scoped(scope), kind: 'context', owner: 'memory', region, id: item.id, version: item.version, hash: digest(JSON.stringify([item.text, item.sources])) }];
             const result = [];
             if (region === 'working') {
@@ -77,6 +77,12 @@ export class MemorySourcePolicy {
     tool(scope, name, text, meta) {
         try {
             const data = JSON.parse(text);
+            // These are current-inbound acceptance receipts, not remembered content. A child
+            // task writing unrelated memory must not invalidate its parent's acknowledgement.
+            if (['qq_task_submit', 'qq_explore', 'local_owner_task_submit'].includes(name)) {
+                ActionOutcomeSchema.parse(data);
+                return [{ ...scoped(scope), kind: 'ephemeral', traceId: scope.traceId }];
+            }
             if (name === 'qq_browse') {
                 const outcome = ActionOutcomeSchema.parse(data);
                 if (outcome.data === null)

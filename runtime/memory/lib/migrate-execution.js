@@ -3,7 +3,7 @@ export const EXECUTION_MEMORY_TABLES = ['execution_scopes', 'execution_sources',
 /** Additive v7 migration. No old body, boundary, request fingerprint or tombstone is rewritten. */
 export function migrateExecutionMemory(db) {
     const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-    if (version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12) {
+    if (version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12 || version === 13) {
         for (const table of EXECUTION_MEMORY_TABLES)
             db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
         return;

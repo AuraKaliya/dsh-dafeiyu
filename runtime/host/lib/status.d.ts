@@ -46,6 +46,19 @@ declare const snapshotSchema: z.ZodObject<{
     features: z.ZodArray<z.ZodString>;
     services: z.ZodObject<{
         memory: z.ZodNullable<z.ZodObject<{
+            context: z.ZodOptional<z.ZodObject<{
+                mode: z.ZodEnum<{
+                    legacy: "legacy";
+                    unified: "unified";
+                }>;
+                automaticRecall: z.ZodBoolean;
+                recallStrategy: z.ZodEnum<{
+                    lexical: "lexical";
+                    hybrid: "hybrid";
+                }>;
+                recentState: z.ZodBoolean;
+                sharedRecentState: z.ZodBoolean;
+            }, z.core.$strict>>;
             lifecycle: z.ZodEnum<{
                 active: "active";
                 registered: "registered";
@@ -150,6 +163,7 @@ declare const snapshotSchema: z.ZodObject<{
                 pending: z.ZodNumber;
             }, z.core.$strict>;
             backoffUntil: z.ZodNullable<z.ZodNumber>;
+            diagnosticRequired: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>>>;
         executor: z.ZodOptional<z.ZodObject<{
             lifecycle: z.ZodEnum<{
@@ -239,11 +253,11 @@ declare const snapshotSchema: z.ZodObject<{
     }, z.core.$strict>;
     schemas: z.ZodObject<{
         journal: z.ZodLiteral<2>;
-        memory: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<9>, z.ZodLiteral<10>, z.ZodLiteral<11>, z.ZodLiteral<12>]>;
+        memory: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<9>, z.ZodLiteral<10>, z.ZodLiteral<11>, z.ZodLiteral<12>, z.ZodLiteral<13>]>;
         runtime: z.ZodUnion<readonly [z.ZodLiteral<2>, z.ZodLiteral<3>, z.ZodLiteral<4>]>;
         activity: z.ZodOptional<z.ZodNullable<z.ZodLiteral<1>>>;
         media: z.ZodOptional<z.ZodNullable<z.ZodLiteral<2>>>;
-        bilibili: z.ZodOptional<z.ZodNullable<z.ZodLiteral<1>>>;
+        bilibili: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>>>;
         executor: z.ZodOptional<z.ZodLiteral<1>>;
         biliOwner: z.ZodOptional<z.ZodLiteral<2>>;
     }, z.core.$strict>;
@@ -291,6 +305,13 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
                 };
                 retrieval: "configured" | "not-configured";
                 compaction: "configured" | "not-configured";
+                context?: {
+                    mode: "legacy" | "unified";
+                    automaticRecall: boolean;
+                    recallStrategy: "lexical" | "hybrid";
+                    recentState: boolean;
+                    sharedRecentState: boolean;
+                } | undefined;
                 sourceTracking?: "configured" | "not-configured" | undefined;
                 maintenance?: {
                     state: "paused" | "ready" | "not-configured" | "closed";
@@ -341,6 +362,7 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
                     pending: number;
                 };
                 backoffUntil: number | null;
+                diagnosticRequired?: boolean | undefined;
             } | null | undefined;
             executor?: {
                 lifecycle: "active" | "registered" | "recovered" | "quiescing" | "closed";
@@ -404,11 +426,11 @@ export declare function readHostStatus(config: PreparedHostConfig, coordination?
         };
         schemas: {
             journal: 2;
-            memory: 8 | 9 | 10 | 11 | 12;
+            memory: 8 | 9 | 10 | 11 | 12 | 13;
             runtime: 3 | 4 | 2;
             activity?: 1 | null | undefined;
             media?: 2 | null | undefined;
-            bilibili?: 1 | null | undefined;
+            bilibili?: 1 | 2 | null | undefined;
             executor?: 1 | undefined;
             biliOwner?: 2 | undefined;
         };

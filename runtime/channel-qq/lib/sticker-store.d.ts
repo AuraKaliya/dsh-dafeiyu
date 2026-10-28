@@ -156,6 +156,10 @@ export declare class QqStickerStore {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     };
     describe(key: string): {
         ref: {
@@ -183,6 +187,10 @@ export declare class QqStickerStore {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     } | null;
     current(proof: ResourceProof): boolean;
     open(key: string): {
@@ -213,6 +221,10 @@ export declare class QqStickerStore {
             durationMsHint: number | null;
             rangeReadable: boolean;
             publicContent: boolean;
+            sourceFrame?: {
+                positionMs: number;
+                durationMs: number;
+            } | undefined;
         };
     };
     bind(key: string, asset: MediaAssetRef): void;

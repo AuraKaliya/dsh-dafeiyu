@@ -63,13 +63,42 @@ export declare const HostConfigSchema: z.ZodObject<{
     context: z.ZodPrefault<z.ZodObject<{
         maxBytes: z.ZodDefault<z.ZodNumber>;
         requestMaxBytes: z.ZodDefault<z.ZodNumber>;
-        prepareTimeoutMs: z.ZodDefault<z.ZodNumber>;
         outputReserveBytes: z.ZodDefault<z.ZodNumber>;
+        prepareTimeoutMs: z.ZodDefault<z.ZodNumber>;
         regions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
             maxBytes: z.ZodDefault<z.ZodNumber>;
             priority: z.ZodDefault<z.ZodNumber>;
             required: z.ZodDefault<z.ZodBoolean>;
         }, z.core.$strict>>>;
+        assembly: z.ZodPrefault<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                legacy: "legacy";
+                unified: "unified";
+            }>>;
+            deadlineMs: z.ZodDefault<z.ZodNumber>;
+            recall: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                strategy: z.ZodDefault<z.ZodEnum<{
+                    lexical: "lexical";
+                    hybrid: "hybrid";
+                }>>;
+                candidates: z.ZodDefault<z.ZodNumber>;
+                limit: z.ZodDefault<z.ZodNumber>;
+                maxBytes: z.ZodDefault<z.ZodNumber>;
+                timeoutMs: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+            background: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                windowMs: z.ZodDefault<z.ZodNumber>;
+                limit: z.ZodDefault<z.ZodNumber>;
+                maxBytes: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+            recentState: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                shared: z.ZodDefault<z.ZodBoolean>;
+                maxBytes: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
         compactionInputTokens: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
     authorityPolicies: z.ZodDefault<z.ZodArray<z.ZodObject<{

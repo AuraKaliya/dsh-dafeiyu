@@ -1,6 +1,6 @@
 import { Context, Service } from '@deepseek-ai/cordis';
 import { z } from 'zod';
-import type { ActionContext, OperationScope, Extension, ExtensionHandle, Reply } from '#dafeiyu/contracts';
+import type { ActionContext, OperationScope, Extension, ExtensionHandle, Json, Reply } from '#dafeiyu/contracts';
 import { Journal } from '#dafeiyu/journal';
 import type { ContextRequest } from '#dafeiyu/contracts';
 import type { Conversation } from '#dafeiyu/contracts';
@@ -42,7 +42,7 @@ declare const ConfigSchema: z.ZodObject<{
         verification: z.ZodDefault<z.ZodNumber>;
         feedback: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
-    context: z.ZodDefault<z.ZodObject<{
+    context: z.ZodPrefault<z.ZodObject<{
         maxBytes: z.ZodDefault<z.ZodNumber>;
         requestMaxBytes: z.ZodDefault<z.ZodNumber>;
         outputReserveBytes: z.ZodDefault<z.ZodNumber>;
@@ -52,6 +52,35 @@ declare const ConfigSchema: z.ZodObject<{
             priority: z.ZodDefault<z.ZodNumber>;
             required: z.ZodDefault<z.ZodBoolean>;
         }, z.core.$strict>>>;
+        assembly: z.ZodPrefault<z.ZodObject<{
+            mode: z.ZodDefault<z.ZodEnum<{
+                legacy: "legacy";
+                unified: "unified";
+            }>>;
+            deadlineMs: z.ZodDefault<z.ZodNumber>;
+            recall: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                strategy: z.ZodDefault<z.ZodEnum<{
+                    lexical: "lexical";
+                    hybrid: "hybrid";
+                }>>;
+                candidates: z.ZodDefault<z.ZodNumber>;
+                limit: z.ZodDefault<z.ZodNumber>;
+                maxBytes: z.ZodDefault<z.ZodNumber>;
+                timeoutMs: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+            background: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                windowMs: z.ZodDefault<z.ZodNumber>;
+                limit: z.ZodDefault<z.ZodNumber>;
+                maxBytes: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+            recentState: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                shared: z.ZodDefault<z.ZodBoolean>;
+                maxBytes: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type Config = z.input<typeof ConfigSchema>;
@@ -64,12 +93,106 @@ declare module '@deepseek-ai/cordis' {
 export declare class DafeiyuService extends Service {
     private expressionPreferences;
     private nativeTaskDelivery;
+    /** Program-only provenance checks for Growth views; these methods return no source body. */
+    captureRecentStateSources(context: ExecutionContextV3, owner: string): readonly SourceDependency[];
+    recentStateSourcesCurrent(runId: string, sources: readonly SourceDependency[]): boolean;
     phaseTimeouts(): {
         assessment: number;
         render: number;
         verification: number;
         feedback: number;
     };
+    registerHarnessSection(name: string): () => void;
+    originRecallScope(view: import('#dafeiyu/contracts').ExecutionView, owner: string): {
+        conversation: Conversation;
+        query: string;
+        stamp: string;
+    } | null;
+    originRecallCurrent(runId: string, scene: Conversation, stamp: string): boolean;
+    contextBudget(): {
+        maxBytes: number;
+        requestMaxBytes: number;
+        outputReserveBytes: number;
+        prepareTimeoutMs: number;
+        regions: Record<string, {
+            maxBytes: number;
+            priority: number;
+            required: boolean;
+        }>;
+        assembly: {
+            mode: "legacy" | "unified";
+            deadlineMs: number;
+            recall: {
+                enabled: boolean;
+                strategy: "lexical" | "hybrid";
+                candidates: number;
+                limit: number;
+                maxBytes: number;
+                timeoutMs: number;
+            };
+            background: {
+                enabled: boolean;
+                windowMs: number;
+                limit: number;
+                maxBytes: number;
+            };
+            recentState: {
+                enabled: boolean;
+                shared: boolean;
+                maxBytes: number;
+            };
+        };
+    };
+    inspectContextRequest(options: import('@deepseek-ai/dsh-llm').GenerateOptions, maximum: number, reserve: number, known?: import('@deepseek-ai/dsh-llm').LlmResolvedModelInfo): Promise<{
+        messageBreakdown: {
+            system: number;
+            currentInput: number;
+            history: number;
+            toolResults: number;
+            runtimeContext: number;
+            mediaBlocks: number;
+        };
+        estimatedInputTokens: number;
+        tokenMeasurement: string;
+        modelContextWindow: number | null;
+        reservedOutputTokens: number | null;
+        estimateOnly: boolean;
+        modelLimitsKnown: boolean;
+        bytes: number;
+        reserveBytes: number;
+        maximumBytes: number;
+        categories: {
+            messages: number;
+            tools: number;
+            toolHistory: number;
+        };
+        withinBudget: boolean;
+        measurement: "utf8-serialized-bytes";
+    }>;
+    contextAssembly(): {
+        mode: "legacy" | "unified";
+        deadlineMs: number;
+        recall: {
+            enabled: boolean;
+            strategy: "lexical" | "hybrid";
+            candidates: number;
+            limit: number;
+            maxBytes: number;
+            timeoutMs: number;
+        };
+        background: {
+            enabled: boolean;
+            windowMs: number;
+            limit: number;
+            maxBytes: number;
+        };
+        recentState: {
+            enabled: boolean;
+            shared: boolean;
+            maxBytes: number;
+        };
+    };
+    contextStatus(context: ActionContext, offset?: number, limit?: number): Json;
     private closedNativeDelivery;
     deliverMessageTaskResult(runId: string): Promise<{
         deliveryId: string;
@@ -160,7 +283,7 @@ export declare class DafeiyuService extends Service {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "record" | "file" | "image";
+            delivery: "image" | "record" | "file";
             asset: {
                 schemaVersion: 1;
                 id: string;
@@ -209,7 +332,7 @@ export declare class DafeiyuService extends Service {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "record" | "file" | "image";
+                delivery: "image" | "record" | "file";
                 asset: {
                     schemaVersion: 1;
                     id: string;
@@ -259,7 +382,7 @@ export declare class DafeiyuService extends Service {
             sourceStamp: string;
             parts: ({
                 kind: "asset";
-                delivery: "record" | "file" | "image";
+                delivery: "image" | "record" | "file";
                 asset: {
                     schemaVersion: 1;
                     id: string;
@@ -279,6 +402,8 @@ export declare class DafeiyuService extends Service {
     readonly journal: Journal;
     private readonly config;
     private readonly runtime;
+    private readonly harness;
+    bindHarnessCatalog(provider: Pick<import('#dafeiyu/contracts').DshToolsPort, 'catalog'>): () => void;
     private readonly contexts;
     private readonly personas;
     private readonly taskCoordinator;
@@ -343,7 +468,7 @@ export declare class DafeiyuService extends Service {
         taskState: "completed" | "active" | "paused";
         title: string;
         goal: string;
-        motivation: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
+        motivation: "unknown" | "explicit-task" | "self-exploration" | "maintenance" | "conversation-invitation" | "mixed";
         resultCurrent: boolean;
         phase: {
             phase: z.core.util.JSONType | undefined;
@@ -378,6 +503,7 @@ export declare class DafeiyuService extends Service {
             requiresTask: boolean;
         }[];
     };
+    private configuredCapabilities;
     get accepting(): boolean;
     private dependenciesReady;
     private assertAccepting;
@@ -494,7 +620,7 @@ export declare class DafeiyuService extends Service {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "partial" | "failed" | "cancelled" | "unknown" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -520,7 +646,7 @@ export declare class DafeiyuService extends Service {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "partial" | "failed" | "cancelled" | "unknown" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -545,7 +671,7 @@ export declare class DafeiyuService extends Service {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "partial" | "failed" | "cancelled" | "unknown" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -590,7 +716,7 @@ export declare class DafeiyuService extends Service {
             scopeKey: string;
         };
         intentVersion: number;
-        kind: "maintenance" | "execution";
+        kind: "execution" | "maintenance";
         hash: string;
     };
     activityAnchorStatus(anchor: unknown): {
@@ -613,7 +739,7 @@ export declare class DafeiyuService extends Service {
             scopeKey: string;
         };
         intentVersion: number;
-        kind: "maintenance" | "execution";
+        kind: "execution" | "maintenance";
         hash: string;
     };
     activityPressure(): {
@@ -858,7 +984,7 @@ export declare class DafeiyuService extends Service {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+                        kind: "pending" | "result" | "fact" | "decision" | "constraint" | "correction" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -906,7 +1032,7 @@ export declare class DafeiyuService extends Service {
             };
             fragments: {
                 ref: string;
-                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+                kind: "pending" | "result" | "fact" | "decision" | "constraint" | "correction" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;
@@ -1076,9 +1202,16 @@ export declare class DafeiyuService extends Service {
         provider: string;
         model: string;
     }>;
+    private recoveryModel;
     registerExtension(extension: Extension): ExtensionHandle;
     private schedule;
     private enqueueTaskDelivery;
+    private notifyConversationFailure;
+    private pendingReplyFacts;
+    private replyStateFacts;
+    private decideRepliesBeforeTurn;
+    private resolvePendingReply;
+    private replyRecoveryActions;
     private actions;
     private parseAction;
     private process;

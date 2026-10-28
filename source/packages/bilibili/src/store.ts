@@ -5,31 +5,36 @@ import { createHash,randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
 import { PersonaSourceRefSchema,MediaSourceDescriptionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema } from '@dafeiyu/contracts';
-import type { ResourceProof,ExecutionContextV3,MediaSourceDescription,PersonaSourceRef } from '@dafeiyu/contracts';
-import { BILI_SCENE } from './config.js';
+import type { ResourceProof,ExecutionContextV3,MediaSourceDescription,PersonaSourceRef,Json } from '@dafeiyu/contracts';
+import { BILI_SCENE,BvidSchema } from './config.js';
+import { BiliDiagnostics,initializeBiliDiagnostics } from './diagnostics.js';
 
-export const BILI_APPLICATION_ID=0x44464236,BILI_SCHEMA_VERSION=1;
-export const BILI_TABLES=['bili_metadata','bili_clock','bili_requests','bili_sources','bili_revisions','bili_pages','bili_media','bili_outbox'] as const;
+export const BILI_APPLICATION_ID=0x44464236,BILI_SCHEMA_VERSION=2;
+export const BILI_TABLES=['bili_metadata','bili_clock','bili_requests','bili_sources','bili_revisions','bili_pages','bili_media','bili_outbox','bili_http_attempts','bili_http_control'] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
-function canonical(value:unknown):string{const v=z.json().parse(value);return v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';}
-export const biliHash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest('hex');
+const jsonValue=z.json();
+function canonical(v:Json):string{return v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k]!)).join(',')+'}';}
+export const biliHash=(value:unknown)=>createHash('sha256').update(canonical(jsonValue.parse(value))).digest('hex');
 export const biliOwner=(context:Pick<ExecutionContextV3,'scope'|'intentVersion'>)=>biliHash([context.scope,context.intentVersion]);
-export const BiliPageSchema=z.strictObject({id:z.uuid(),owner:z.string().length(64),kind:z.enum(['discover','search','video','comments','subtitles','danmaku','media']),
+export const BiliPageSchema=z.strictObject({id:z.uuid(),owner:z.string().length(64),kind:z.enum(['discover','search','video','comments','subtitles','danmaku','media','browser']),
   sourceKey:z.string().min(1).max(240),sourceVersion:z.number().int().positive(),fetchedAt:z.iso.datetime(),data:z.json(),coverage:z.array(z.string().max(500)).max(24),
   fields:z.array(z.strictObject({id:z.string().max(80),text:z.string().min(1).max(1000)})).max(100),parents:z.array(ResourceProofSchema).max(4).optional()});
 export type BiliPage=z.infer<typeof BiliPageSchema>;
 const requestState=z.enum(['pending','completed','failed','interrupted']);
 export class BiliStore {
   private readonly db:DatabaseSync;
+  readonly diagnostics:BiliDiagnostics;
   private readonly checking=new Set<string>();
   readonly identity:z.infer<typeof identitySchema>;
   constructor(file:string,identity:z.infer<typeof identitySchema>,create=false,private readonly maxPages=4096){this.identity=identitySchema.parse(identity);z.number().int().min(1).max(65536).parse(maxPages);
     if(!existsSync(file)&&!create)throw new Error('BILI_MIGRATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});this.db=new DatabaseSync(file);
     try{this.db.exec('PRAGMA busy_timeout=5000;');const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),app=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
       if(!version&&!app&&create&&!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table'").get()){configureSqlite(this.db);this.atomic(()=>this.initialize());}
-      else if(version!==1||app!==BILI_APPLICATION_ID)throw new Error('BILI_SCHEMA_UNSUPPORTED');
+      else if(![1,2].includes(version)||app!==BILI_APPLICATION_ID)throw new Error('BILI_SCHEMA_UNSUPPORTED');
       if(biliHash(JSON.parse(String(this.db.prepare('SELECT body FROM bili_metadata WHERE id=1').get()?.body)))!==biliHash(this.identity))throw new Error('BILI_IDENTITY_MISMATCH');
+      if(version===1){if(!create)throw new Error('BILI_MIGRATION_REQUIRED');this.atomic(()=>{initializeBiliDiagnostics(this.db);this.db.exec('PRAGMA user_version=2');});}
       for(const t of BILI_TABLES)this.db.prepare(`SELECT * FROM ${t} LIMIT 0`).all();configureSqlite(this.db);
+      this.diagnostics=new BiliDiagnostics(this.db);
     }catch(e){this.db.close();throw e;}}
   private initialize(){this.db.exec(`CREATE TABLE bili_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
     CREATE TABLE bili_clock(id INTEGER PRIMARY KEY CHECK(id=1),next_at INTEGER NOT NULL,blocked_until INTEGER NOT NULL,error TEXT);
@@ -40,7 +45,8 @@ export class BiliStore {
     CREATE TABLE bili_pages(id TEXT PRIMARY KEY,owner TEXT NOT NULL,body TEXT NOT NULL,hash TEXT NOT NULL,observation TEXT);
     CREATE TABLE bili_media(key TEXT PRIMARY KEY,description TEXT NOT NULL,hash TEXT NOT NULL,locator TEXT NOT NULL,expires_at INTEGER NOT NULL);
     CREATE TABLE bili_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,body TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0);
-    PRAGMA application_id=${BILI_APPLICATION_ID};PRAGMA user_version=1;`);
+    PRAGMA application_id=${BILI_APPLICATION_ID};PRAGMA user_version=2;`);
+    initializeBiliDiagnostics(this.db);
     for(const table of ['bili_metadata','bili_revisions'])this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable Bili history');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain Bili history');END;`);
     this.db.exec("CREATE TRIGGER bili_page_immutable BEFORE UPDATE OF id,owner,body,hash ON bili_pages BEGIN SELECT RAISE(ABORT,'Immutable Bili page');END;");this.db.prepare('INSERT INTO bili_metadata VALUES(1,?)').run(JSON.stringify(this.identity));}
   private atomic<T>(fn:()=>T){this.db.exec('BEGIN IMMEDIATE');try{const result=fn();this.db.exec('COMMIT');return result;}catch(e){this.db.exec('ROLLBACK');throw e;}}
@@ -61,11 +67,14 @@ export class BiliStore {
   pages(owner:string){return this.db.prepare('SELECT id FROM bili_pages WHERE owner=? ORDER BY rowid DESC LIMIT 64').all(owner).flatMap(r=>{try{return [this.page(owner,String(r.id))];}catch{return [];}});}
   sourceCurrent(key:string,version:number){const row=this.db.prepare('SELECT version,available FROM bili_sources WHERE key=?').get(key);return row?.version===version&&row.available===1;}
   unavailable(key:string){this.db.prepare('UPDATE bili_sources SET available=0 WHERE key=?').run(key);}
-  proof(page:BiliPage):ResourceProof{return {provider:'bilibili',scene:BILI_SCENE,key:page.id,version:page.sourceVersion,hash:biliHash(page),roots:['bilibili:'+page.sourceKey],detail:{owner:page.owner}};}
+  proof(page:BiliPage):ResourceProof{const frame=page.kind==='browser'&&page.sourceKey.startsWith('browser-frame:')?z.object({bvid:BvidSchema,section:z.literal('frame')}).safeParse(page.data):null;
+    return {provider:'bilibili',scene:BILI_SCENE,key:page.id,version:page.sourceVersion,hash:biliHash(page),roots:[frame?.success?'bilibili:video:'+frame.data.bvid:'bilibili:'+page.sourceKey],detail:{owner:page.owner}};}
   current(raw:ResourceProof):boolean{if(this.checking.has(raw.key)||this.checking.size>=64)return false;this.checking.add(raw.key);try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail),page=this.page(detail.owner,proof.key);return biliHash(proof)===biliHash(this.proof(page));}catch{return false;}finally{this.checking.delete(raw.key);}}
   bindObservation(page:BiliPage,source:PersonaSourceRef){const value=JSON.stringify(PersonaSourceRefSchema.parse(source)),old=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);if(!old)throw new Error('BILI_PAGE_UNAVAILABLE');if(old.observation&&old.observation!==value)throw new Error('BILI_OBSERVATION_CONFLICT');this.db.prepare('UPDATE bili_pages SET observation=? WHERE id=?').run(value,page.id);}
   observation(page:BiliPage){const row=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);return row?.observation?PersonaSourceRefSchema.parse(JSON.parse(String(row.observation))):null;}
-  registerMedia(key:string,description:MediaSourceDescription,locator:unknown,expiresAt:number){const body=MediaSourceDescriptionSchema.parse(description);this.db.prepare('INSERT INTO bili_media VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET description=excluded.description,hash=excluded.hash,locator=excluded.locator,expires_at=excluded.expires_at').run(key,JSON.stringify(body),biliHash(body),JSON.stringify(z.json().parse(locator)),z.number().int().positive().parse(expiresAt));}
+  registerMedia(key:string,description:MediaSourceDescription,locator:unknown,expiresAt:number){const body=MediaSourceDescriptionSchema.parse(description),location=JSON.stringify(z.json().parse(locator));
+    if(body.kind==='image'&&Number(this.db.prepare('SELECT coalesce(sum(length(locator)),0) AS bytes FROM bili_media').get()!.bytes)+Buffer.byteLength(location)>64*1024*1024)throw new Error('BILI_BROWSER_FRAME_STORAGE_LIMIT');
+    this.db.prepare('INSERT INTO bili_media VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET description=excluded.description,hash=excluded.hash,locator=excluded.locator,expires_at=excluded.expires_at').run(key,JSON.stringify(body),biliHash(body),location,z.number().int().positive().parse(expiresAt));}
   media(key:string,now=Date.now(),historical=false){const row=this.db.prepare('SELECT * FROM bili_media WHERE key=?').get(key);if(!row||!historical&&Number(row.expires_at)<=now)return null;const description=MediaSourceDescriptionSchema.parse(JSON.parse(String(row.description)));if(biliHash(description)!==row.hash)throw new Error('BILI_STATE_CORRUPT');return {description,locator:z.json().parse(JSON.parse(String(row.locator))),expiresAt:Number(row.expires_at)};}
   reserveRequest(now:number,interval:number,timeout:number){return this.atomic(()=>{const state=this.clock;if(state.blockedUntil>now)throw new Error('BILI_BACKOFF');const at=Math.max(now,state.nextAt);if(at-now>=timeout)throw new Error('BILI_RATE_LIMITED');this.db.prepare('UPDATE bili_clock SET next_at=? WHERE id=1').run(at+interval);return at-now;});}
   backoff(now:number,duration:number,error='BILI_BACKOFF'){this.db.prepare('UPDATE bili_clock SET blocked_until=max(blocked_until,?),error=? WHERE id=1').run(now+duration,error);}

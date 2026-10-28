@@ -21,6 +21,9 @@ export class ExecutionEvidence {
     contexts = [];
     checking = new Set();
     validationMemo = new Map();
+    accessMemo = new WeakMap();
+    operationMemo = new Map();
+    runMemo = new Map();
     validationDepth = 0;
     invalidated = false;
     bound;
@@ -37,9 +40,12 @@ export class ExecutionEvidence {
         this.authorityRequired = authorityRequired;
     }
     access(base = this.base) {
-        return { ...base, sourceRules: this.rules, historyDependencies: this.admitted, historyTracked: true,
+        const cached = this.validationDepth > 0 ? this.accessMemo.get(base) : undefined;
+        if (cached)
+            return cached;
+        const access = { ...base, sourceRules: this.rules, historyDependencies: this.admitted, historyTracked: true,
             validateHistory: deps => this.validate(deps), operationFinished: id => { try {
-                const op = this.store.operation(id), run = this.store.get(op.runId);
+                const op = this.readOperation(id), run = this.readRun(op.runId);
                 return run.definition.taskId === this.run.definition.taskId && op.state === 'finished' && ['succeeded', 'partial'].includes(op.outcome?.status ?? '');
             }
             catch {
@@ -56,6 +62,9 @@ export class ExecutionEvidence {
                     return null;
                 }
             } };
+        if (this.validationDepth > 0)
+            this.accessMemo.set(base, access);
+        return access;
     }
     recordInput(input, sources, continuity, authorities = []) { this.store.bindInput(this.run.id, 'native-program', { schemaVersion: 1, epoch: this.run.definition.intentVersion, inputHash: runtimeHash(input), sources, continuity, authorities }); }
     setContexts(contexts) {
@@ -72,6 +81,21 @@ export class ExecutionEvidence {
     exposed() { return structuredClone(this.admitted); }
     contextView() { return { sourceItems: () => this.contexts, nativeDependencies: () => [], validateHistorical: dep => this.validate([dep]) }; }
     sourceRefs(deps = this.admitted) { return [...new Map(deps.filter((dep) => dep.kind === 'execution-source').map(dep => [runtimeHash(dep.ref), dep.ref])).values()]; }
+    clearValidation() { this.validationMemo.clear(); this.accessMemo = new WeakMap(); this.operationMemo.clear(); this.runMemo.clear(); }
+    readOperation(id) { const cached = this.validationDepth ? this.operationMemo.get(id) : undefined; if (cached)
+        return cached; const value = this.store.operation(id); if (this.validationDepth)
+        this.operationMemo.set(id, value); return value; }
+    readRun(id) { const cached = this.validationDepth ? this.runMemo.get(id) : undefined; if (cached)
+        return cached; const value = this.store.get(id); if (this.validationDepth)
+        this.runMemo.set(id, value); return value; }
+    readSources(read) { const outer = this.validationDepth++ === 0; try {
+        read();
+    }
+    finally {
+        this.validationDepth--;
+        if (outer)
+            this.clearValidation();
+    } }
     validate(deps) {
         if (this.invalidated)
             return false;
@@ -100,7 +124,7 @@ export class ExecutionEvidence {
         finally {
             this.validationDepth--;
             if (outer)
-                this.validationMemo.clear();
+                this.clearValidation();
         }
     }
     valid(dep) {
@@ -110,13 +134,13 @@ export class ExecutionEvidence {
         if (dep.kind === 'execution-source')
             return this.memory()?.validate(this.access(), dep.ref) ?? false;
         if (dep.kind === 'execution-input') {
-            const run = this.store.get(dep.runId), body = inputProof.safeParse(this.store.readInput(dep.runId, 'native-program'));
+            const run = this.readRun(dep.runId), body = inputProof.safeParse(this.store.readInput(dep.runId, 'native-program'));
             return run.definition.taskId === this.run.definition.taskId && body.success && body.data.epoch === run.definition.intentVersion && runtimeHash(body.data) === dep.hash
                 && (!this.authorityRequired(run) || !!body.data.authorities?.length) && (body.data.authorities ?? []).every(anchor => this.authorityValid(anchor))
                 && body.data.sources.every(ref => this.memory()?.validate(this.access(), ref)) && (!body.data.continuity || (() => { const checkpoint = this.memory()?.checkpoint(this.access(), body.data.continuity.id, true); return !!checkpoint && runtimeHash(checkpoint) === body.data.continuity.hash; })());
         }
         if (dep.kind === 'execution-operation') {
-            const op = this.store.operation(dep.operationId), run = this.store.get(op.runId), body = this.store.readInput(op.runId, `operation-inputs:${op.id}`);
+            const op = this.readOperation(dep.operationId), run = this.readRun(op.runId), body = this.store.readInput(op.runId, `operation-inputs:${op.id}`);
             return op.runId === dep.runId && run.definition.taskId === this.run.definition.taskId && op.state === 'finished' && !!op.outcome && runtimeHash(op.outcome) === dep.hash
                 && body !== null && runtimeHash(body) === dep.inputHash && this.validate(dependencies.parse(body));
         }
@@ -179,6 +203,7 @@ export class ExecutionEvidence {
                     return unionDependencies([{ ...scopeFields, kind: 'execution-operation', runId: receipt.runId, operationId: receipt.operationId, hash: receipt.outcomeHash, inputHash: receipt.inputHash }], receipt.sources.map(ref => ({ ...scopeFields, kind: 'execution-source', ref })));
                 },
                 validate: (_scope, dep) => this.validate([dep]),
+                validateMany: (_scope, deps) => { let result = []; this.readSources(() => { result = deps.map(dep => this.validate([dep])); }); return result; },
             },
             summarize: (scope, sources, signal, check) => { if (!port)
                 throw new Error('DEPENDENCY_UNAVAILABLE'); return port.summarize(scope, sources, signal, check); },

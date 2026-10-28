@@ -2,6 +2,23 @@ import { z } from 'zod';
 /** No remote OneBot endpoints or credential-bearing URLs in this local development connector. */
 export declare function loopbackURL(value: string, protocol: 'http:' | 'ws:'): string;
 export declare const platformId: z.ZodPipe<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>, z.ZodTransform<string, string | number>>;
+export declare function oneBotDiagnostic(error: unknown): {
+    kind: "onebot-call";
+    action: string;
+    phase: "body" | "before-fetch" | "fetch" | "response";
+    elapsedMs: number;
+    fetchInvoked: boolean;
+    callerAborted: boolean;
+    requestTimedOut: boolean;
+    httpStatus?: number | undefined;
+    retcode?: number | undefined;
+    status?: "failed" | "ok" | "async" | "other" | undefined;
+    wording?: string | undefined;
+    errorName?: string | undefined;
+} | {
+    kind: "local-call";
+    errorName: string;
+};
 type OneBotAction = 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'get_forward_msg' | 'get_group_msg_history' | 'get_friend_msg_history' | 'send_private_msg' | 'send_group_msg';
 export declare class OneBot {
     private readonly base;

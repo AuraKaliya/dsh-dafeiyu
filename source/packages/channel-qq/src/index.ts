@@ -1,3 +1,4 @@
+import {backgroundContributor} from './context-background.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
@@ -7,11 +8,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import WebSocket from 'ws';
 import { z } from 'zod';
-import { loopbackURL, OneBot, platformId } from './onebot.js';
+import { loopbackURL, OneBot, platformId,oneBotDiagnostic } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
 import { readRecentQqHistory,QQ_HISTORY_WINDOW_MS } from './history.js';
-import { waitForQqReply,waitBetweenQqMessages } from './reply-delay.js';
+import { waitForQqReply,waitBetweenQqMessages,deliveryAbortCode } from './reply-delay.js';
 import { forwardHandles,recentForwardNodes } from './forward.js';
 export { qqReplyDelayMs } from './reply-delay.js';
 import { naturallyAddressed } from './trigger.js';
@@ -84,6 +85,7 @@ const quoteKey=(reply:Reply)=>reply.taskResult?'task:'+reply.taskResult.runId:re
 
 /** Explicitly scoped QQ transport. No model calls, shell tools, friend approvals or history replay. */
 export class QqChannel extends Service {
+  private localOwnerTransport:QqSegmentedTransport|undefined;
   private readonly config: z.output<typeof configSchema>;
   private readonly api: OneBot;
   private readonly store: QqStore;
@@ -98,6 +100,7 @@ export class QqChannel extends Service {
   private readonly batches:QqMessageBatches;
   private readonly stickers:QqStickers|undefined;
   private readonly sourceSignals=new Map<string,AbortController>();
+  private readonly processingSignals=new WeakMap<AbortController,{sources:readonly AbortSignal[];signal:AbortSignal}>();
   private readonly tails=new Map<string,{route:string;sender:string;controller:AbortController}>();
   private progress:ReturnType<typeof bindQqProgress>|undefined;
   private readonly token: string;
@@ -133,7 +136,7 @@ export class QqChannel extends Service {
     try {
       this.store.delivery.recover();
       this.store.mediaDelivery.recover();
-      this.transport=new QqSegmentedTransport({ledger:this.store.delivery,...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
+      this.transport=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
         confirmed:(reply,text,receipt)=>{this.counters.segmentsConfirmed++;if(this.store.delivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
           if(reply.taskResult)this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,'[任务交付占位：正文须经核心任务来源验证后回查，不能据此推断任务内容。]',{occurredAt:null,unsupported:['task-result-body-withheld']});
           else this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text);}});
@@ -146,7 +149,8 @@ export class QqChannel extends Service {
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
       this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
-        channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',
+        contexts:[backgroundContributor(ctx,{store:this.store,allowed:scene=>this.allowed(scene),accepts:(scene,time,generation)=>scene.kind==='group'&&this.groups.accepts(scene.id,time)&&generation===this.groups.generation(scene.id)})],
+        channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',deliveryProgress:id=>{const p=this.deliveryStatus(id);if(!p)return null;const segments='segments'in p?p.segments:p.parts;return {confirmed:p.confirmed,pending:p.pending,unknown:p.unknown,canResume:p.unknown===0&&p.pending>0&&segments.some(s=>s.state==='pending'&&s.code==='DELIVERY_INTERRUPTED_BY_MESSAGE')};},
           processingSignal: message => this.processingSignal(message),
           description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
@@ -164,6 +168,10 @@ export class QqChannel extends Service {
   private observation(type: Parameters<ExtensionHandle['observe']>[0]['type'], code: string, conversation?: Conversation): void {
     if (this.stopped) return;
     this.handle.observe({ conversation: conversation ?? { channel: 'qq', account: this.config.botId, kind: 'local', id: '__transport__' }, type, data: { code } });
+  }
+  private recordDeliveryDiagnostic(reply:Reply,error:unknown,position:number,invoked:boolean):void{
+    if(this.stopped)return;this.handle.observe({conversation:{channel:'qq',account:this.config.botId,kind:'local',id:'__transport__'},type:'delivery.diagnostic',
+      data:z.record(z.string(),z.union([z.string().max(200),z.number().finite(),z.boolean(),z.null()])).parse({replyId:reply.id,position,invoked,state:this.store.delivery.progress(reply.id)?.state??null,...oneBotDiagnostic(error)})});
   }
   getStatus() { return { state: this.state, error: this.error, botId: this.config.botId, ownerId: this.config.ownerId,
     messageBatch:{...this.config.messageBatch,pending:this.stopped?0:this.batches.count()},
@@ -184,7 +192,9 @@ export class QqChannel extends Service {
       return this.groups.processingSignal(part.conversation.id,Date.parse(part.occurredAt));
     });
     const key=JSON.stringify([scope.route,message.id]);let source=this.sourceSignals.get(key);if(!source){source=new AbortController();this.sourceSignals.set(key,source);}
-    return AbortSignal.any([this.controller.signal,source.signal,...signals]);
+    const inputs=[...new Set([this.controller.signal,source.signal,...signals])],cached=this.processingSignals.get(source);
+    if(cached&&inputs.length===cached.sources.length&&inputs.every((value,index)=>value===cached.sources[index]))return cached.signal;
+    const combined=AbortSignal.any(inputs);this.processingSignals.set(source,{sources:inputs,signal:combined});return combined;
   }
   /** Program-side refresh; no model invocation, privilege expansion or history replay. */
   refreshGroups(): Promise<void> { return this.groups.refresh(); }
@@ -295,7 +305,7 @@ export class QqChannel extends Service {
       this.store.acknowledge(route,message.message_id);this.counters.ignored++;return;
     }
     const tailContinuation=[...this.tails.values()].some(tail=>tail.route===route&&tail.sender===message.user_id);
-    for(const tail of this.tails.values())if(tail.route===route&&tail.sender===message.user_id)tail.controller.abort();
+    for(const tail of this.tails.values())if(tail.route===route&&tail.sender===message.user_id)tail.controller.abort(new Error('DELIVERY_INTERRUPTED_BY_MESSAGE'));
     const continuation=this.config.messageBatch.enabled&&this.batches.has({id:message.message_id,occurredAt:new Date(message.time*1000).toISOString(),conversation,sender:{id:message.user_id,displayName:''},text:'[pending]'});
     if (!triggered&&!continuation&&!tailContinuation) { this.store.acknowledge(route, message.message_id); this.counters.ignored++; return; }
     let content = plain;
@@ -336,6 +346,27 @@ export class QqChannel extends Service {
     const messages=result.messages.map(({parts,...node})=>{const selected=parts.filter(p=>['image','record','video','file'].includes(p.type)).slice(0,remaining);remaining-=selected.length;
       const media=this.media?.remember(scene,messageId,sender,{forward:proof.hash,node:node.index,parts:selected},selected,1000+(index*20+node.index)*1000);
       return {...node,kinds:[...new Set(parts.map(p=>p.type))],...(media?.attachments.length?{media:media.attachments}:{})};});return {...result,messages};}
+  /** Program-only local delegation transport. The source remains local-owner, never a forged QQ inbound. */
+  deliverLocalOwner(reply:Reply,signal:AbortSignal,authority?:()=>void):Promise<DeliveryResult>{
+    if(typeof authority!=='function'||reply.media)return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
+    const check=async(value:Reply,workSignal:AbortSignal)=>{workSignal.throwIfAborted();authority();
+      if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');
+      const scene=value.conversation;if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='local'||scene.id!==value.sourceMessageId||!/^local-owner:[a-f0-9-]{36}$/.test(scene.id))throw new Error('TARGET_NOT_ALLOWED');
+      const source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},value.sourceMessageId);
+      if(!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('SOURCE_MESSAGE_NOT_FOUND');
+      if(value.taskResult&&(value.taskResult.inboundId!==source.id||conversationKey(this.config.agentId,value.taskResult.target)!==conversationKey(this.config.agentId,scene)||Date.parse(value.taskResult.expiresAt)<=Date.now()))throw new Error('SOURCE_STALE');
+      await this.api.verify(workSignal);authority();};
+    // Each invocation supplies its own authority; the transport only retains immutable ledger state.
+    this.localOwnerTransport??=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),
+      ...(this.config.replyDelay?{beforeSend:(value:Reply,workSignal:AbortSignal)=>waitForQqReply(value.text,workSignal),betweenMessages:waitBetweenQqMessages}:{}),
+      check:async(value,workSignal)=>{if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');if(value.conversation.channel!=='local-owner'||value.conversation.account!==this.config.botId||value.conversation.kind!=='local'||value.conversation.id!==value.sourceMessageId)throw new Error('TARGET_NOT_ALLOWED');await this.api.verify(workSignal);},
+      send:async(_value,text,workSignal)=>z.object({message_id:platformId}).parse(await this.api.call('send_private_msg',{user_id:Number(this.config.ownerId),message:[{type:'text',data:{text}}]},workSignal)).message_id,
+      confirmed:(value,text,receipt)=>{const target={channel:'qq',account:this.config.botId,kind:'private' as const,id:this.config.ownerId};this.store.remember(this.cacheRoute(target),receipt,this.config.botId,value.taskResult?'[本地主人委托的任务结果已交付；正文须经任务来源核验。]':text,{occurredAt:new Date().toISOString(),unsupported:value.taskResult?['task-result-body-withheld']:[]});}});
+    const guarded=()=>{authority();const scene=reply.conversation,source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},reply.sourceMessageId);
+      if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='local'||scene.id!==reply.sourceMessageId||!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');};
+    const work=check(reply,signal).then(()=>this.localOwnerTransport!.deliver(reply,signal,guarded)).catch(()=>({status:'not-sent' as const,code:'LOCAL_OWNER_DELIVERY_REJECTED'}));
+    this.sending.add(work);void work.finally(()=>this.sending.delete(work));return work;
+  }
   deliver(reply: Reply, signal: AbortSignal, authority?:()=>void): Promise<DeliveryResult> {
     if(this.stopped)return Promise.resolve({status:'not-sent',code:'CHANNEL_OFFLINE'});
     if(reply.media||this.store.mediaDelivery.progress(reply.id))return Promise.resolve({status:'not-sent',code:'MEDIA_DELIVERY_AUTHORITY_REQUIRED'});
@@ -362,7 +393,7 @@ export class QqChannel extends Service {
       (conversation.kind === 'private' ? conversation.id === this.config.ownerId : conversation.kind === 'group' && this.groups.effective().includes(conversation.id));
     if (!allowed) throw new Error('TARGET_NOT_ALLOWED');
     try { await this.api.verify(signal); signal.throwIfAborted(); }
-    catch {if(signal.aborted)throw new Error('DELIVERY_CANCELLED');this.verified=false;this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate();throw new Error('IDENTITY_UNAVAILABLE');}
+    catch {if(signal.aborted)throw new Error(deliveryAbortCode(signal));this.verified=false;this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate();throw new Error('IDENTITY_UNAVAILABLE');}
     if(this.stopped||this.state!=='online')throw new Error('CHANNEL_OFFLINE');
     if (conversation.kind === 'group' && !this.groups.effective().includes(conversation.id)) throw new Error('TARGET_NOT_ALLOWED');
     if(this.ctx.dafeiyu.journal.messageRecalled({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},reply.sourceMessageId))throw new Error('SOURCE_STALE');

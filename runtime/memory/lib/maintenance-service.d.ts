@@ -31,7 +31,7 @@ export declare class MaintenanceService {
     };
     status(context: ExecutionContextV3, id?: string, pluginId?: string): {
         id: string;
-        state: "ready" | "stale" | "running" | "completed" | "failed" | "cancelled" | "waiting-scheduler";
+        state: "completed" | "failed" | "running" | "ready" | "cancelled" | "stale" | "waiting-scheduler";
         version: number;
         reason: string;
         watermark: string;
@@ -43,7 +43,7 @@ export declare class MaintenanceService {
         schemaVersion: 1;
         id: string;
         version: number;
-        state: "withdrawn" | "proposed" | "held" | "rejected" | "accepted";
+        state: "withdrawn" | "accepted" | "proposed" | "held" | "rejected";
         scope: {
             kind: "conversation";
             agentId: string;
@@ -195,13 +195,13 @@ export declare class MaintenanceService {
     review(context: ExecutionContextV3, input: unknown, pluginId?: string): z.core.util.JSONType | {
         id: string;
         version: number;
-        state: "withdrawn" | "held" | "rejected" | "accepted";
+        state: "withdrawn" | "accepted" | "held" | "rejected";
     };
     private result;
     inspect(context: ExecutionContextV3, id: string, pluginId?: string): {
         persona: {
             text: string;
-            kind: "preference" | "interest" | "view" | "habit" | "relationship" | "value-application";
+            kind: "preference" | "view" | "interest" | "habit" | "relationship" | "value-application";
             contentRef: {
                 kind: "memory";
                 revision: number;
@@ -393,11 +393,9 @@ export declare class MaintenanceService {
     cancel(): void;
     whenIdle(): Promise<void>;
     get health(): {
-        state: "ready" | "paused" | "closed";
+        state: "paused" | "closed" | "ready";
         active: number;
-        requests: {
-            [k: string]: number;
-        };
+        requests: Record<string, number>;
         scheduler: "connected" | "not-configured";
     };
     close(): Promise<void>;

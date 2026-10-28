@@ -18,13 +18,14 @@ import { createHash } from 'node:crypto';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { CompactionRuntime,committedSummary } from './compaction-runtime.js';
 import type { CompactionBinding,CompactionAudit } from './compaction-runtime.js';
-import { openAgentSession,runAgentTurn,readPersistedResult } from './agent-session.js';
+import { openAgentSession,runAgentTurn,readPersistedResult,safeRunFailure } from './agent-session.js';
 import { visibleStream } from './visible-stream.js';
 import { NativeRuntime } from './native-runtime.js';
 import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame } from './execution-frame.js';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { conversationHistory } from './history-frame.js';
 import { assessTask } from './task-assessment.js';
+import {HarnessRuntime} from './harness-runtime.js';
 
 interface OwnedSession { handle: AgentHandle; scope: Context; persona: PersonaSnapshot; context:ContextRuntime;feedback:FeedbackRuntime; compaction:CompactionRuntime;delivery?:RuntimeDelivery;lastRequest?:GenerateOptions }
 export interface RuntimeDelivery {id:string;guard:()=>void;finalize:(result:RunResult,guard:()=>void)=>Promise<void>}
@@ -36,7 +37,7 @@ export interface BoundAction {
 export interface RunResult { readonly text: string; readonly sources: SourceRef[]; readonly resultRef?:import('./runtime-store.js').RunResultRef }
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
-  constructor(readonly sources: SourceRef[]) { super('DSH turn failed; consult visible evidence'); }
+  constructor(readonly sources: SourceRef[],readonly code='MODEL_INCOMPLETE') { super('DSH turn failed; consult visible evidence'); }
 }
 
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
@@ -44,8 +45,8 @@ export class DshRuntime {
   private readonly handles = new Map<string, OwnedSession>();
   private readonly native:NativeRuntime;
   private meterLoading: Promise<unknown> | undefined;
-  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator,private readonly agentId:string,private readonly compactionBinding:()=>CompactionBinding|undefined,private readonly compactionAudit:CompactionAudit,managedProjection=false) {
-    this.native=new NativeRuntime(ctx,model,cwd);
+  constructor(private readonly ctx: Context, private readonly model: AgentOptions, private readonly cwd: string,private readonly coordinator:ContextCoordinator,private readonly validateFeedback:FeedbackValidator,private readonly agentId:string,private readonly compactionBinding:()=>CompactionBinding|undefined,private readonly compactionAudit:CompactionAudit,managedProjection=false,private readonly harness=new HarnessRuntime()) {
+    this.native=new NativeRuntime(ctx,model,cwd,harness);
     const sessions=this.handles;
     ctx.on('llm/stream',async function*(options,next){
       const owned=options.sessionId?sessions.get(options.sessionId):undefined;
@@ -54,6 +55,7 @@ export class DshRuntime {
       const context=options.sessionId?sessions.get(options.sessionId)?.context:undefined;
       const feedback=options.sessionId?sessions.get(options.sessionId)?.feedback:undefined;
       const compaction=options.sessionId?sessions.get(options.sessionId)?.compaction:undefined;
+      await context?.measure(options);
       feedback?.guard(options);
       if(context&&!context.guard(options,true,true)){
         yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
@@ -62,7 +64,7 @@ export class DshRuntime {
       const deliveryGuard=()=>{if(owned?.delivery){owned.delivery.guard();if(!owned.context.sourceItems().some(s=>s.owner==='task-delivery'&&s.item.id===owned.delivery!.id))throw new Error('Delivery material missing from context');}};
       deliveryGuard();
       const visible=new Map<number,number>();
-      for await(const chunk of owned&&managedProjection?visibleStream(next()):next()){deliveryGuard();context?.guard(options);feedback?.guard(options);compaction?.guard(options);
+      for await(const chunk of owned&&managedProjection?visibleStream(next()):next()){deliveryGuard();context?.guard(options,false,false,true);feedback?.guard(options);compaction?.guard(options);
         if(!owned?.delivery){yield chunk;continue;}
         if(chunk.type==='block-start'&&chunk.blockType==='tool-call'||chunk.type==='tool-call-delta'||chunk.type==='block-end'&&chunk.block.type==='tool-call')throw new Error('Delivery turn cannot call tools');
         // Delivery never resumes provider reasoning/opaque replay blocks. Persist only final text.
@@ -78,6 +80,7 @@ export class DshRuntime {
     });
   }
 
+  registerHarnessSection(name:string){return this.harness.allowSection(name);}
   async run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription = '当前接入仅提供文字消息。',delivery?:RuntimeDelivery,nativeActions:readonly NativeAction[]=[],allowEmpty:()=>boolean=()=>false): Promise<RunResult> {
     return this.runFrame({mode:delivery?'delivery-v2':'conversation',item,persona,actions,signal,channelDescription,...(delivery?{delivery}:{}),nativeActions,allowEmpty});
   }
@@ -146,9 +149,10 @@ export class DshRuntime {
       for(const action of nativeActions)disposers.push(owned.scope.tools.register({name:action.definition.id,description:action.definition.description,parameters:action.definition.parameters,
         output:{schema:{},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:async(raw,exec)=>{
           if(exec.agent!==agent)throw new Error('SCOPE_DENIED');return action.execute(raw,String(exec.callId),AbortSignal.any([signal,exec.signal]));}}));
+      disposers.push(this.harness.install(owned.scope,agent,nativeActions,signal));
       signal.throwIfAborted();
       const input=createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text:
-        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch?'：同一发送者的连续原消息，依序一起理解，引用保留各自身份':''}]\n${messageDisplayText(item.message)}` }] });
+        `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, observedAt:new Date().toISOString(), replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch?'：同一发送者的连续原消息，依序一起理解，引用保留各自身份':''}]\n${messageDisplayText(item.message)}` }] });
       owned.compaction.expectInput(input);
       const {text,events,messageSeq,turnEndSeq}=await runAgentTurn(this.ctx,agent,input,signal,()=>owned!.compaction.seal(),allowEmpty);
       const result:RunResult={ text,resultRef:{sessionId:item.sessionId,messageSeq,turnEndSeq,textHash:createHash('sha256').update(text).digest('hex')}, sources: events.filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
@@ -157,10 +161,10 @@ export class DshRuntime {
         const request=owned!.lastRequest;if(!request||!owned!.context.guard(request))throw new Error('Delivery context stale');owned!.feedback.guard(request);owned!.compaction.guard(request);
         if(!owned!.context.sourceItems().some(s=>s.owner==='task-delivery'&&s.item.id===delivery.id))throw new Error('Delivery material missing');});
       return result;
-    } catch {
+    } catch (error) {
       throw new DshRunError(agent.session.snapshotEvents().slice(before)
         .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
-        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })));
+        .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })),error instanceof Error?safeRunFailure(error.message):'MODEL_INCOMPLETE');
     } finally {
       try{owned.compaction.seal();}finally{
       owned.compaction.end();

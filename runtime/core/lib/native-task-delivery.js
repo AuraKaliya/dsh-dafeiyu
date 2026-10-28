@@ -1,10 +1,11 @@
-import { NativeExpressionPacketSchema, ContextItemSchema, conversationKey, qqVisibleText } from '#dafeiyu/contracts';
+import { NativeExpressionPacketSchema, NativeVerificationFeedbackSchema, ContextItemSchema, conversationKey, qqVisibleText, redactJson } from '#dafeiyu/contracts';
 import { nativeDeliveryHash } from './native-delivery-store.js';
 import { renderTaskResult, renderPublicProgress } from './target-renderer.js';
 import { readPersistedResult } from './agent-session.js';
 import { z } from 'zod';
+export const NATIVE_RENDER_ATTEMPTS = 2;
 const codes = new Set(['SOURCE_STALE', 'DEPENDENCY_UNAVAILABLE', 'DELIVERY_BINDING_CONFLICT', 'DELIVERY_RENDER_ALREADY_EXISTS', 'DELIVERY_TOOLS_FORBIDDEN', 'DELIVERY_CAPACITY', 'MODEL_INCOMPLETE', 'PERSISTENCE_FAILED', 'DELIVERY_CREDENTIAL_INVALID', 'DELIVERY_BODY_MISMATCH', 'NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL', 'NATIVE_EXPRESSION_UNAVAILABLE', 'NATIVE_EXPRESSION_CAPACITY', 'PRIVATE_INPUT_REJECTED', 'DELIVERY_UNFAITHFUL', 'DELIVERY_VERIFICATION_INCOMPLETE', 'MEDIA_TARGET_DENIED', 'MEDIA_SOURCE_SUPPRESSED', 'MEDIA_DELIVERY_NOT_CONFIGURED', 'MEDIA_DRAFT_AUTHORITY_MISMATCH']);
-const code = (error) => error instanceof Error && (codes.has(error.message.toUpperCase()) || ['DELIVERY_VERIFICATION_TIMEOUT', 'DELIVERY_RENDER_TIMEOUT'].includes(error.message)) ? error.message.toUpperCase() : 'NATIVE_DELIVERY_FAILED';
+const code = (error) => error instanceof Error && (codes.has(error.message.toUpperCase()) || ['DELIVERY_VERIFICATION_TIMEOUT', 'DELIVERY_VERIFICATION_MODEL_CHANGED', 'DELIVERY_VERIFICATION_MAX_TOKENS', 'DELIVERY_VERIFICATION_MODEL_ERROR', 'DELIVERY_VERIFICATION_ABORTED', 'DELIVERY_VERIFICATION_INVALID_RESULT', 'DELIVERY_RENDER_TIMEOUT'].includes(error.message)) ? error.message.toUpperCase() : 'NATIVE_DELIVERY_FAILED';
 const resultSchema = z.discriminatedUnion('status', [z.object({ status: z.literal('sent'), receiptId: z.string().min(1).max(256) }), z.object({ status: z.literal('not-sent'), code: z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/) }), z.object({ status: z.literal('unknown'), code: z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/) })]);
 const terminal = new Set(['sent', 'not-sent', 'partial', 'uncertain', 'rejected', 'interrupted']);
 /** One intent per completed native Run, a clean persona turn, verification, then anchored transport. */
@@ -158,18 +159,40 @@ export class NativeTaskDelivery {
             if (record.state === 'accepted') {
                 this.host.store.nativeDeliveries.start(runId, material);
                 this.host.flush();
-                this.host.store.appendExecutionEvent(runId, 'task.stage', { phase: 'rendering', deadlineAt: new Date(Date.now() + this.host.ctx.dafeiyu.phaseTimeouts().render).toISOString() });
-                this.host.flush();
-                const rendered = await renderTaskResult(this.host.ctx, model, this.host.cwd, record.id, persona.text, persona.items, packet, signal, guard, access.requestMaxBytes);
-                guard();
-                this.host.store.nativeDeliveries.rendered(runId, rendered.resultRef);
-                this.host.flush();
-                this.host.store.appendExecutionEvent(runId, 'task.stage', { phase: 'verification', deadlineAt: new Date(Date.now() + this.host.ctx.dafeiyu.phaseTimeouts().verification).toISOString() });
-                this.host.flush();
-                await provider.verify(access, packet.id, record.anchor.target.channel === 'qq' ? (qqVisibleText(rendered.text) || rendered.text) : rendered.text, signal, guard);
-                guard();
-                this.host.store.nativeDeliveries.approve(runId, rendered.text);
-                this.host.flush();
+                let repair;
+                for (let attempt = 0; attempt < NATIVE_RENDER_ATTEMPTS; attempt++) {
+                    this.host.store.appendExecutionEvent(runId, 'task.stage', { phase: 'rendering', attempt, deadlineAt: new Date(Date.now() + this.host.ctx.dafeiyu.phaseTimeouts().render).toISOString() });
+                    this.host.flush();
+                    const rendered = await renderTaskResult(this.host.ctx, model, this.host.cwd, record.id, persona.text, persona.items, packet, signal, guard, access.requestMaxBytes, repair);
+                    guard();
+                    this.host.store.nativeDeliveries.candidate(runId, rendered.resultRef);
+                    this.host.flush();
+                    this.host.store.appendExecutionEvent(runId, 'task.stage', { phase: 'verification', attempt, deadlineAt: new Date(Date.now() + this.host.ctx.dafeiyu.phaseTimeouts().verification).toISOString() });
+                    this.host.flush();
+                    try {
+                        await provider.verify(access, packet.id, ['qq', 'local-owner'].includes(record.anchor.target.channel) ? (qqVisibleText(rendered.text) || rendered.text) : rendered.text, signal, guard);
+                    }
+                    catch (error) {
+                        const feedback = NativeVerificationFeedbackSchema.safeParse(error instanceof Error && error.message === 'delivery_unfaithful' ? error.cause : null);
+                        if (!feedback.success)
+                            throw error;
+                        const safe = redactJson(z.json().parse(feedback.data));
+                        this.host.store.appendExecutionEvent(runId, 'native.delivery.verification-rejected', { attempt, renderRef: rendered.resultRef, feedback: safe.value });
+                        this.host.flush();
+                        if (attempt + 1 >= NATIVE_RENDER_ATTEMPTS || safe.redacted)
+                            throw error;
+                        guard();
+                        repair = { previousAnswer: rendered.text, issues: feedback.data.issues };
+                        this.host.store.nativeDeliveries.repair(runId);
+                        this.host.flush();
+                        continue;
+                    }
+                    guard();
+                    this.host.store.nativeDeliveries.rendered(runId, rendered.resultRef);
+                    this.host.store.nativeDeliveries.approve(runId, rendered.text);
+                    this.host.flush();
+                    break;
+                }
             }
             record = this.host.store.nativeDeliveries.get(runId);
             if (record.state !== 'ready' || nativeDeliveryHash(record.material) !== nativeDeliveryHash(material) || !record.renderRef)
@@ -258,7 +281,9 @@ export class NativeTaskDelivery {
         try {
             guard();
             const persona = this.host.persona(item, row.id, signal, guard), message = await renderPublicProgress(this.host.ctx, this.host.model(), this.host.cwd, row.id, persona.text, persona.items, { target: row.anchor.target, taskId: row.anchor.taskId, runId, inboundId: item.id, question: '向原会话说明本次任务的实际交付状态及当前限制。', taskState: row.state,
-                evidence: [{ id: 'STATUS', kind: 'reported', text: JSON.stringify({ state: row.state, error: row.error, resultWasSent: false, workPreserved: true, note: '程序未取得最终回复的发送回执；内部工作保留。仅说明状态，不复述未通过核验的草稿。' }) }] }, signal, () => { guard(); persona.guard(); }, 32000);
+                evidence: [{ id: 'STATUS', kind: 'reported', text: JSON.stringify({ state: row.state, error: row.error, resultWasSent: false, sendAttempted: row.state === 'not-sent', workPreserved: true,
+                            phase: row.state === 'not-sent' ? 'transport' : row.error?.startsWith('DELIVERY_VERIFICATION_') || row.error === 'DELIVERY_UNFAITHFUL' ? 'verification' : 'pre-send',
+                            note: row.state === 'not-sent' ? '发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。' : '回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。' }) }] }, signal, () => { guard(); persona.guard(); }, 32000);
             const receipt = await this.host.enqueue(item.route, async () => { guard(); persona.guard(); return channel.capability.deliver({ id: 'native-status:' + row.id, conversation: row.anchor.target, sourceMessageId: item.message.id, text: message.text }, signal, () => { guard(); persona.guard(); }); });
             this.host.store.appendExecutionEvent(runId, 'native.delivery.feedback', { status: receipt.status });
             this.host.flush();

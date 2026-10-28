@@ -38,8 +38,8 @@ export class ConversationRuns {
         const projection = projectionSchema.parse({ inboundId: item.id, startedEventId, reply: { id: `${item.id}:reply`, conversation: item.message.conversation, sourceMessageId: item.message.id, text: result.text }, sources: result.sources });
         this.store.completeWithProjection(run.id, this.store.get(run.id).version, result.resultRef, z.record(z.string(), z.json()).parse(projection));
     }
-    fail(run) { const current = this.store.get(run.id); if (['queued', 'running', 'cancelling'].includes(current.state))
-        this.store.transition(run.id, current.version, 'failed', 'MODEL_INCOMPLETE'); }
+    fail(run, code = 'MODEL_INCOMPLETE') { const current = this.store.get(run.id); if (['queued', 'running', 'cancelling'].includes(current.state))
+        this.store.transition(run.id, current.version, 'failed', code); }
     async project() {
         for (const event of this.store.outbox()) {
             const run = this.store.get(event.runId);

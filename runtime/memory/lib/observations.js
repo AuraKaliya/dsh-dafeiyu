@@ -11,7 +11,7 @@ export const observationSourceRef = (id) => `dafeiyu:observation-source:${id}`;
 const sourceId = (ref) => z.uuid().parse(/^dafeiyu:observation-source:(.+)$/.exec(ref)?.[1]);
 export function migrateObservations(db) {
     const version = db.prepare('PRAGMA user_version').get()?.user_version;
-    if (version === 3 || version === 4 || version === 5 || version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12) {
+    if (version === 3 || version === 4 || version === 5 || version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12 || version === 13) {
         for (const table of ['observation_sources', 'observation_activities', 'observation_contributions', 'observation_source_requests'])
             db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
         return;

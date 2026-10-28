@@ -14,7 +14,7 @@ const packetSchema = z.strictObject({ taskEpoch: z.number().int(), question: que
 const policyBodySchema = z.strictObject({ input: ExpressionPolicySchema, proofs: z.array(witnessSchema) });
 export function migrateExpression(db) {
     const version = db.prepare('PRAGMA user_version').get()?.user_version;
-    if (version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12) {
+    if (version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12 || version === 13) {
         for (const name of ['expression_policies', 'expression_policy_revisions', 'expression_requests', 'expression_packets', 'expression_jobs'])
             db.prepare(`SELECT * FROM ${name} LIMIT 0`).all();
         return;

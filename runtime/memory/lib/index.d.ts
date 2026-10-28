@@ -113,17 +113,17 @@ export declare const MemoryPluginConfigSchema: z.ZodObject<{
         timeoutMs: z.ZodDefault<z.ZodNumber>;
         maxPending: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
+    maintenance: z.ZodOptional<z.ZodObject<{
+        timeoutMs: z.ZodDefault<z.ZodNumber>;
+        maxInputBytes: z.ZodDefault<z.ZodNumber>;
+        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     feedback: z.ZodOptional<z.ZodObject<{
         maxArchiveBytes: z.ZodDefault<z.ZodNumber>;
         maxBriefBytes: z.ZodDefault<z.ZodNumber>;
         maxPageChars: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     context: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;
-    maintenance: z.ZodOptional<z.ZodObject<{
-        timeoutMs: z.ZodDefault<z.ZodNumber>;
-        maxInputBytes: z.ZodDefault<z.ZodNumber>;
-        maxOutputBytes: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strict>>;
     compaction: z.ZodOptional<z.ZodPipe<z.ZodObject<{
         inputTokens: z.ZodNumber;
         thresholdRatio: z.ZodDefault<z.ZodNumber>;
@@ -213,6 +213,9 @@ export declare class MemoryService extends Service {
     private readonly retrieval;
     private readonly analysis;
     private readonly working;
+    private readonly automaticRecall;
+    private nativeRecall;
+    private readonly assembly;
     private readonly feedbackArchive;
     private readonly tasks;
     private readonly expression;
@@ -231,20 +234,25 @@ export declare class MemoryService extends Service {
     constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies);
     get lifecycleState(): import("#dafeiyu/contracts").ServicePhase;
     runtimeHealth(): {
+        context: {
+            mode: "legacy" | "unified";
+            automaticRecall: boolean;
+            recallStrategy: "lexical" | "hybrid";
+            recentState: boolean;
+            sharedRecentState: boolean;
+        };
         lifecycle: import("#dafeiyu/contracts").ServicePhase;
         analysis: {
-            state: "ready" | "failed" | "paused" | "stopped";
+            state: "failed" | "paused" | "stopped" | "ready";
             active: boolean;
         } | {
             state: "not-configured";
             active: false;
         };
         maintenance: {
-            state: "ready" | "paused" | "closed";
+            state: "paused" | "closed" | "ready";
             active: number;
-            requests: {
-                [k: string]: number;
-            };
+            requests: Record<string, number>;
             scheduler: "connected" | "not-configured";
         } | {
             state: "not-configured";
@@ -397,7 +405,7 @@ export declare class MemoryService extends Service {
         generation: number;
         nextCursor: string | null;
         status: "ok";
-        mode: "normal" | "deleted";
+        mode: "deleted" | "normal";
         untrustedEvidence: boolean;
     };
     searchDeleted(context: ActionContext, raw: unknown): Failure | {
@@ -468,7 +476,7 @@ export declare class MemoryService extends Service {
         generation: number;
         nextCursor: string | null;
         status: "ok";
-        mode: "normal" | "deleted";
+        mode: "deleted" | "normal";
         untrustedEvidence: boolean;
     };
     private open;
@@ -824,7 +832,7 @@ export declare class MemoryService extends Service {
         duplicate: boolean;
         status: "ok";
         jobId: string;
-        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -839,7 +847,7 @@ export declare class MemoryService extends Service {
     analysisStatus(context: ActionContext, id: unknown): Failure | {
         status: "ok";
         jobId: string;
-        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -859,7 +867,7 @@ export declare class MemoryService extends Service {
             overview: string;
             gaps: string[];
             claims: {
-                action: "revise" | "none" | "add";
+                action: "add" | "revise" | "none";
                 kind: "experience" | "knowledge" | "preference" | "procedure";
                 claimType: "observation" | "self_report" | "reported_claim" | "inference";
                 subject: string;
@@ -908,7 +916,7 @@ export declare class MemoryService extends Service {
                 revision: number;
                 contentHash: string;
             };
-            origin: "memory" | "user" | "tool" | "event";
+            origin: "user" | "tool" | "memory" | "event";
             authorId?: string | undefined;
             version?: number | undefined;
         }[];
@@ -926,7 +934,7 @@ export declare class MemoryService extends Service {
         }[];
         status: "ok";
         jobId: string;
-        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -941,7 +949,7 @@ export declare class MemoryService extends Service {
     analysisCancel(context: ActionContext, id: unknown): Failure | {
         status: "ok";
         jobId: string;
-        state: "queued" | "running" | "committing" | "completed" | "failed" | "cancelled";
+        state: "completed" | "failed" | "running" | "queued" | "committing" | "cancelled";
         attempts: number;
         counts: {
             candidates: number;
@@ -997,7 +1005,15 @@ export declare class MemoryService extends Service {
     } | {
         status: "not_configured";
     };
-    contextStatus(context: ActionContext): {
+    contextStatus(context: ActionContext, raw?: unknown): {
+        automaticRecall: {
+            mode: "lexical" | "hybrid";
+            degraded: boolean;
+            partial: boolean;
+            candidates: number;
+            selected: number;
+            queryHash: string;
+        } | null;
         status: "ok";
         areas: {
             kind: "evidence" | "working";
@@ -1007,8 +1023,18 @@ export declare class MemoryService extends Service {
             storedCount: number;
             expired: boolean;
         }[];
+        current: Json;
     } | {
+        automaticRecall: {
+            mode: "lexical" | "hybrid";
+            degraded: boolean;
+            partial: boolean;
+            candidates: number;
+            selected: number;
+            queryHash: string;
+        } | null;
         status: "not_configured";
+        current: Json;
     };
     feedbackOpen(context: ActionContext, raw: unknown, deleted?: boolean): string | number | boolean | Json[] | {
         [key: string]: Json;

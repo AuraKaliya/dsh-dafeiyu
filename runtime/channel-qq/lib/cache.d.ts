@@ -33,6 +33,24 @@ export declare class QqCache {
     private atomic;
     private epoch;
     generation(route?: string): number;
+    /** Read-only trigger-bound context; never re-ingest history or create a browse snapshot. */
+    background(route: string, before: number, windowMs: number, limit: number, exclude: ReadonlySet<string>): {
+        id: string;
+        sender: string;
+        text: string;
+        occurredAt: string;
+        groupGeneration: number | undefined;
+        truncated: boolean | null;
+        proof: {
+            route: string;
+            parts: {
+                id: string;
+                version: number;
+                hash: string;
+            }[];
+            hash: string;
+        };
+    }[];
     known(route: string, id: string): boolean;
     completeHistoryMetadata(route: string, id: string, occurredAt: string, forwardIds?: readonly string[]): void;
     messageProof(route: string, id: string): QqCacheProof;

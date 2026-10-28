@@ -7,6 +7,7 @@ interface TransportHost {
     check(reply: Reply, signal: AbortSignal): Promise<void>;
     send(reply: Reply, text: string, signal: AbortSignal): Promise<string>;
     confirmed(reply: Reply, text: string, receipt: string): void;
+    failed?(reply: Reply, error: unknown, position: number, invoked: boolean): void;
 }
 /** One sender per reply; a durable unknown is never interpreted as permission to resend. */
 export declare class QqSegmentedTransport {

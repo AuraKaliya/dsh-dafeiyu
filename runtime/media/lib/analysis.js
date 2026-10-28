@@ -9,33 +9,38 @@ import Tools from '@deepseek-ai/dsh-tools';
 import LlmRuntime, { LlmAdapter, createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm';
 import { randomUUID } from 'node:crypto';
 import { ScopedImages } from './images.js';
+import { abortable } from './files.js';
 class MediaTransport extends LlmAdapter {
     host;
     session;
     images;
     lease;
     guard;
-    constructor(host, session, images, lease, guard) {
+    signal;
+    constructor(host, session, images, lease, guard, signal) {
         super();
         this.host = host;
         this.session = session;
         this.images = images;
         this.lease = lease;
         this.guard = guard;
+        this.signal = signal;
     }
     resolveModel(provider, model, signal) { return this.host.llm.resolveModelInfo(provider, model, signal); }
     async *stream(options) {
         this.guard();
         if (options.sessionId !== this.session || options.tools?.length)
             throw new Error('MEDIA_ANALYSIS_SCOPE_DENIED');
-        const iterator = this.host.llm.stream(options)[Symbol.asyncIterator](), visible = new Map();
+        const signal = AbortSignal.any([this.signal, ...(options.signal ? [options.signal] : [])]), iterator = this.host.llm.stream({ ...options, signal })[Symbol.asyncIterator](), visible = new Map();
         let bytes = 0;
         try {
             while (true) {
+                signal.throwIfAborted();
                 this.guard();
-                const next = await (this.lease ? this.images.run(this.lease, () => iterator.next()) : iterator.next());
+                const next = await abortable(this.lease ? this.images.run(this.lease, () => iterator.next()) : iterator.next(), signal);
                 if (next.done)
                     break;
+                signal.throwIfAborted();
                 this.guard();
                 const chunk = next.value;
                 if (chunk.type === 'block-start') {
@@ -67,7 +72,11 @@ class MediaTransport extends LlmAdapter {
             }
         }
         finally {
-            await iterator.return?.();
+            const closing = iterator.return?.();
+            if (signal.aborted)
+                void closing?.catch(() => { });
+            else
+                await closing;
         }
     }
 }
@@ -84,11 +93,9 @@ export class MediaAnalysis {
     async run(job, signal) {
         signal.throwIfAborted();
         job.guard();
-        if (job.refs?.length) {
-            const model = await this.host.llm.resolveModelInfo(job.route.provider, job.route.model, signal);
-            if (!model.inputModalities?.includes('image'))
-                throw new Error('MEDIA_IMAGE_MODEL_UNAVAILABLE');
-        }
+        const model = await this.host.llm.resolveModelInfo(job.route.provider, job.route.model, signal);
+        if (job.refs?.length && !model.inputModalities?.includes('image'))
+            throw new Error('MEDIA_IMAGE_MODEL_UNAVAILABLE');
         const ctx = new Context(), sessionId = SessionId('media-analysis-' + randomUUID());
         try {
             await ctx.plugin(LlmRuntime);
@@ -99,8 +106,8 @@ export class MediaAnalysis {
             await ctx.plugin(AgentRegistry);
             await ctx.plugin(Persistence, { root: this.directory, compression: 'none' });
             await ctx.plugin(AgentLoop, { agents: [] });
-            ctx.llm.registerAdapter([job.route.provider], new MediaTransport(this.host, sessionId, this.images, job.lease, job.guard));
-            const handle = await ctx.agents.create({ sessionId, meta: { cwd: this.directory }, agentOptions: { provider: job.route.provider, model: job.route.model, ...(job.route.reasoningEffort ? { reasoningEffort: ReasoningEffortId(job.route.reasoningEffort) } : {}) }, setup: scope => {
+            ctx.llm.registerAdapter([job.route.provider], new MediaTransport(this.host, sessionId, this.images, job.lease, job.guard, signal));
+            const handle = await ctx.agents.create({ sessionId, meta: { cwd: this.directory }, agentOptions: { provider: job.route.provider, model: job.route.model, maxTokens: Math.min(8192, model.defaultMaxTokens ?? 8192), ...(job.route.reasoningEffort ? { reasoningEffort: ReasoningEffortId(job.route.reasoningEffort) } : {}) }, setup: scope => {
                     scope.systemPrompt.section({ name: 'media-analysis', order: 0, complete: true, interpolate: false, text: job.instructions });
                     scope.tools.presentAs('native');
                     scope.tools.restrict({ allow: [] });
@@ -134,6 +141,11 @@ export class MediaAnalysis {
                 catch {
                     throw new Error('MEDIA_ANALYSIS_INVALID');
                 }
+            }
+            catch (error) {
+                if (signal.aborted)
+                    throw new Error(signal.reason instanceof Error && signal.reason.name === 'TimeoutError' ? 'MEDIA_ANALYSIS_TIMEOUT' : 'MEDIA_CANCELLED');
+                throw error;
             }
             finally {
                 signal.removeEventListener('abort', abort);

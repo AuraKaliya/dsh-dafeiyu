@@ -12,6 +12,11 @@ export class ExecutionSources {
     db;
     transaction;
     resolve;
+    sourceReadStatements = new Map();
+    sourceRead(sql) { let statement = this.sourceReadStatements.get(sql); if (!statement) {
+        statement = this.db.prepare(sql);
+        this.sourceReadStatements.set(sql, statement);
+    } return statement; }
     constructor(db, transaction, resolve) {
         this.db = db;
         this.transaction = transaction;
@@ -85,7 +90,7 @@ export class ExecutionSources {
         access.guard();
         if (ref.kind !== 'execution-source' || ref.agentId !== access.view.scope.agentId || ref.scopeKey !== personaScope(access.view.scope))
             return null;
-        const row = this.db.prepare('SELECT * FROM execution_sources WHERE id=? AND scope_key=? AND deleted=0').get(ref.id, ref.scopeKey);
+        const row = this.sourceRead('SELECT * FROM execution_sources WHERE id=? AND scope_key=? AND deleted=0').get(ref.id, ref.scopeKey);
         if (!row || row.state_version !== ref.version || row.content_hash !== ref.contentHash)
             return null;
         const body = storedSchema.parse(JSON.parse(String(row.body)));

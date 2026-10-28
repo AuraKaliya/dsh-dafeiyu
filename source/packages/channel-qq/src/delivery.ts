@@ -12,14 +12,14 @@ const planSchema=z.strictObject({version:z.literal(1),replyId:z.string(),target:
 export type QqDeliveryPlan=z.infer<typeof planSchema>;
 export interface QqDeliveryProgress {replyId:string;planHash:string|null;state:'ready'|'sending'|'partial'|'uncertain'|'sent';total:number;confirmed:number;pending:number;unknown:number;legacy:boolean;segments:z.infer<typeof segmentSchema>[]}
 
-/** Fixed UTF-16 transport budget, Unicode-safe boundaries, exact reconstruction. */
+/** Conservative short-message budget, Unicode-safe boundaries, exact reconstruction. */
 export function splitQqText(text:string):string[]{
   if(!text||text.length>32000)throw new Error('TEXT_SIZE_UNSUPPORTED');
   for(const char of text){const code=char.codePointAt(0)!;if(code>=0xd800&&code<=0xdfff)throw new Error('INVALID_TEXT_ENCODING');}
   const result:string[]=[];let start=0;
-  while(start<text.length){let end=Math.min(start+4000,text.length);
+  while(start<text.length){let end=Math.min(start+800,text.length);
     if(end<text.length){if(text.charCodeAt(end-1)>=0xd800&&text.charCodeAt(end-1)<=0xdbff)end--;
-      const newline=text.lastIndexOf('\n',end-1);if(newline>=start)end=newline+1;
+      const newline=text.lastIndexOf('\n',end-1);if(newline>=start+600||start===0&&newline>=start)end=newline+1;
       // Keep a CRLF pair together even when no LF fits in this window.
       if(text[end-1]==='\r'&&text[end]==='\n')end--;
     }
@@ -37,7 +37,7 @@ export class QqDeliveryLedger {
     const plan=planSchema.parse(JSON.parse(String(row.body)));if(plan.replyId!==id||digest(plan)!==row.plan_hash)throw new Error('DELIVERY_LEDGER_CORRUPT');return plan;}
   prepare(reply:Reply):QqDeliveryPlan|null {
     const plan=qqDeliveryPlan(reply),body=JSON.stringify(plan);
-    return this.atomic(()=>{const previous=this.readPlan(reply.id);if(previous){if(JSON.stringify(previous)!==body)throw new Error('DELIVERY_PLAN_CONFLICT');return previous;}
+    return this.atomic(()=>{const previous=this.readPlan(reply.id);if(previous){if(previous.bodyHash!==plan.bodyHash||JSON.stringify(previous.target)!==JSON.stringify(plan.target)||JSON.stringify(previous.anchor)!==JSON.stringify(plan.anchor)||previous.segments.join('')!==plan.segments.join(''))throw new Error('DELIVERY_PLAN_CONFLICT');return previous;}
       if(this.db.prepare('SELECT 1 FROM qq_media_deliveries WHERE reply_id=?').get(reply.id))throw new Error('DELIVERY_PROTOCOL_CONFLICT');
       if(this.db.prepare('SELECT 1 FROM receipts WHERE reply_id=?').get(reply.id))return null;
       this.db.prepare('INSERT INTO qq_delivery_plans VALUES(?,?,?)').run(reply.id,digest(plan),body);

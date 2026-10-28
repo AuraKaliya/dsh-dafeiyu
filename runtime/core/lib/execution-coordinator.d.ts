@@ -1,3 +1,4 @@
+import type { ExecutionView } from '#dafeiyu/contracts';
 import { z } from 'zod';
 import type { TaskRepositoryPort, TaskRef, RunRef, ExecutionContextV3, ExecutionInput, WakeAuthorityProvider, HostConfig, Json, PersonaAccess, Conversation } from '#dafeiyu/contracts';
 import type { PersonaRuntime } from './persona-runtime.js';
@@ -9,7 +10,7 @@ import type { DshRuntime } from './runtime.js';
 import type { CapabilityRegistryV3 } from './registry-v3.js';
 import type { RunScheduler } from './run-scheduler.js';
 import type { NativeAction } from './execution-frame.js';
-import type { ExecutionMemoryPort } from '#dafeiyu/contracts';
+import type { ExecutionMemoryPort, SourceDependency } from '#dafeiyu/contracts';
 import type { ActivityAnchor, MaintenanceLifecycle } from '#dafeiyu/contracts';
 import type { MessageTaskBinding, NativeExpressionAccess } from '#dafeiyu/contracts';
 import type { ExternalTaskAuthority } from '#dafeiyu/contracts';
@@ -63,6 +64,8 @@ interface Dependencies {
         outputReserveBytes: number;
         maxBytes: number;
         prepareTimeoutMs: number;
+        regions?: import('#dafeiyu/contracts').ContextBudget['regions'];
+        assembly?: import('#dafeiyu/contracts').ContextAssembly;
     };
     signal: AbortSignal;
     assessmentTimeoutMs?: number;
@@ -77,6 +80,7 @@ export declare class ExecutionCoordinator {
     private readonly d;
     private readonly refs;
     private readonly tasks;
+    private readonly contextLeases;
     private readonly grants;
     private readonly active;
     private readonly queued;
@@ -104,6 +108,20 @@ export declare class ExecutionCoordinator {
     };
     bindMessageTasks(binding: MessageTaskBinding): () => void;
     private messageBindingHash;
+    messageCapabilities(message: import('#dafeiyu/contracts').InboundMessage): {
+        kind: string;
+        bindings: {
+            id: string;
+            ownerTaskAuthorized: boolean;
+            actions: {
+                name: string;
+                registered: boolean;
+                ready: boolean;
+                requiresTask: boolean;
+            }[];
+        }[];
+        note: string;
+    };
     private messageDirective;
     describeMessageResult(id: string): {
         item: import("#dafeiyu/contracts").PendingMessage;
@@ -138,7 +156,16 @@ export declare class ExecutionCoordinator {
     };
     private findMessageTask;
     private messageIntent;
+    recentStateSourcesCurrent(runId: string, sources: readonly SourceDependency[]): boolean;
     nativeResultAccess(id: string): Promise<NativeExpressionAccess>;
+    originRecallScope(view: ExecutionView, owner: string): {
+        conversation: Conversation;
+        query: string;
+        stamp: string;
+    } | null;
+    originRecallCurrent(runId: string, scene: Conversation, stamp: string): boolean;
+    responsibilitySnapshotCurrent(raw: unknown, scene: Conversation): boolean;
+    responsibilityFacts(scene: Conversation, offset?: number, limit?: number): import('./situation-context.js').ResponsibilityFact[];
     messageTaskStatus(context: ExecutionContextV3, pluginId: string, raw: unknown): {
         taskId: string;
         runId: string;
@@ -149,7 +176,7 @@ export declare class ExecutionCoordinator {
         taskState: "completed" | "active" | "paused";
         title: string;
         goal: string;
-        motivation: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
+        motivation: "unknown" | "explicit-task" | "self-exploration" | "maintenance" | "conversation-invitation" | "mixed";
         resultCurrent: boolean;
         phase: {
             phase: z.core.util.JSONType | undefined;
@@ -188,10 +215,12 @@ export declare class ExecutionCoordinator {
         error: string | null;
         operations: {
             state: "unknown" | "started" | "finished";
-            status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+            status: "partial" | "failed" | "cancelled" | "unknown" | "succeeded" | null;
             effects: "unknown" | "none" | "confirmed" | null;
         }[];
     } | null;
+    private progressFacts;
+    private resultWorkflow;
     private assessmentStatus;
     reconcileCapabilityChange(raw: unknown): {
         accepted: boolean;
@@ -278,7 +307,7 @@ export declare class ExecutionCoordinator {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "partial" | "failed" | "cancelled" | "unknown" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -304,7 +333,7 @@ export declare class ExecutionCoordinator {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "partial" | "failed" | "cancelled" | "unknown" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -329,7 +358,7 @@ export declare class ExecutionCoordinator {
                 id: string;
                 action: string;
                 state: "unknown" | "started" | "finished";
-                status: "unknown" | "partial" | "failed" | "cancelled" | "succeeded" | null;
+                status: "partial" | "failed" | "cancelled" | "unknown" | "succeeded" | null;
                 effects: "unknown" | "none" | "confirmed" | null;
                 receipts: {
                     id: string;
@@ -402,10 +431,10 @@ export declare class ExecutionCoordinator {
             hash: string;
         };
         body: {
-            schemaVersion: 1;
             id: string;
+            schemaVersion: 1;
             runId: string;
-            operationId: string;
+            intentVersion: number;
             scope: {
                 kind: "conversation";
                 agentId: string;
@@ -416,7 +445,7 @@ export declare class ExecutionCoordinator {
                 taskId: string;
                 scopeKey: string;
             };
-            intentVersion: number;
+            operationId: string;
             kind: "media-reply-authority";
             payloadHash: string;
             inboundHash: string | null;
@@ -627,6 +656,7 @@ export declare class ExecutionCoordinator {
     private captureContinuity;
     private bindAction;
     conversationActions(run: StoredRun, producer: string, signal: AbortSignal, guard: () => void): NativeAction[];
+    private conversationPolicy;
     conversationSnapshot(producer: string): {
         policyId: string;
         authority: {

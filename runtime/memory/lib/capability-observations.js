@@ -13,7 +13,7 @@ const recordSchema = z.strictObject({ schemaVersion: z.literal(1), kind: z.enum(
     rawRetained: z.literal(false) });
 export function migrateCapabilityObservations(db) {
     const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-    if (version === 9 || version === 10 || version === 11 || version === 12) {
+    if (version === 9 || version === 10 || version === 11 || version === 12 || version === 13) {
         for (const table of ['capability_observations', 'capability_selections'])
             db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
         return;

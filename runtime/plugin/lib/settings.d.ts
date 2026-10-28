@@ -5,6 +5,55 @@ export declare const InstallationSettingsSchema: z.ZodObject<{
     instanceName: z.ZodDefault<z.ZodString>;
     foundationFile: z.ZodOptional<z.ZodString>;
     dshTools: z.ZodDefault<z.ZodBoolean>;
+    context: z.ZodOptional<z.ZodObject<{
+        mode: z.ZodDefault<z.ZodEnum<{
+            legacy: "legacy";
+            unified: "unified";
+        }>>;
+        deadlineMs: z.ZodDefault<z.ZodNumber>;
+        recall: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            strategy: z.ZodDefault<z.ZodEnum<{
+                lexical: "lexical";
+                hybrid: "hybrid";
+            }>>;
+            candidates: z.ZodDefault<z.ZodNumber>;
+            limit: z.ZodDefault<z.ZodNumber>;
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+            timeoutMs: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        background: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            windowMs: z.ZodDefault<z.ZodNumber>;
+            limit: z.ZodDefault<z.ZodNumber>;
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        recentState: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            shared: z.ZodDefault<z.ZodBoolean>;
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
+    contextBudget: z.ZodOptional<z.ZodObject<{
+        maxBytes: z.ZodDefault<z.ZodNumber>;
+        requestMaxBytes: z.ZodDefault<z.ZodNumber>;
+        outputReserveBytes: z.ZodDefault<z.ZodNumber>;
+        prepareTimeoutMs: z.ZodDefault<z.ZodNumber>;
+        regions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+            priority: z.ZodDefault<z.ZodNumber>;
+            required: z.ZodDefault<z.ZodBoolean>;
+        }, z.core.$strict>>>;
+    }, z.core.$strict>>;
+    growthMaxBytes: z.ZodOptional<z.ZodNumber>;
+    localOwnerControl: z.ZodDefault<z.ZodBoolean>;
+    taskTimeoutMs: z.ZodOptional<z.ZodNumber>;
+    phaseTimeouts: z.ZodOptional<z.ZodPrefault<z.ZodObject<{
+        assessment: z.ZodDefault<z.ZodNumber>;
+        render: z.ZodDefault<z.ZodNumber>;
+        verification: z.ZodDefault<z.ZodNumber>;
+        feedback: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>>;
     model: z.ZodObject<{
         auth: z.ZodOptional<z.ZodEnum<{
             "api-key": "api-key";
@@ -46,6 +95,16 @@ export declare const InstallationSettingsSchema: z.ZodObject<{
     }, z.core.$strict>;
     bilibili: z.ZodOptional<z.ZodObject<{
         capabilities: z.ZodDefault<z.ZodBoolean>;
+        browser: z.ZodOptional<z.ZodObject<{
+            expectedUid: z.ZodString;
+        }, z.core.$strict>>;
+        requestPolicy: z.ZodOptional<z.ZodObject<{
+            minIntervalMs: z.ZodOptional<z.ZodNumber>;
+            retry: z.ZodOptional<z.ZodObject<{
+                rateDelaysMs: z.ZodDefault<z.ZodArray<z.ZodNumber>>;
+                riskDelayMs: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
         session: z.ZodOptional<z.ZodObject<{
             file: z.ZodString;
             expectedUid: z.ZodString;

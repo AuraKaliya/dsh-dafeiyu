@@ -5,7 +5,6 @@ export { MediaRangeBroker } from './range-broker.js';
 export { MediaDecoder } from './decoder.js';
 export { MediaService, MEDIA_ACTIONS, mediaConfigSchema } from './service.js';
 export declare const MediaPluginConfigSchema: import("zod").ZodObject<{
-    timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
     audio: import("zod").ZodOptional<import("zod").ZodObject<{
         whisper: import("zod").ZodOptional<import("zod").ZodObject<{
             node: import("zod").ZodString;
@@ -37,6 +36,7 @@ export declare const MediaPluginConfigSchema: import("zod").ZodObject<{
     ffprobe: import("zod").ZodString;
     maxBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
     maxAssetBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
+    timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
     vision: import("zod").ZodOptional<import("zod").ZodObject<{
         provider: import("zod").ZodString;
         model: import("zod").ZodString;

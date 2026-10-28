@@ -47,7 +47,7 @@ export function verifyPersonaAdoptionSchema(db: DatabaseSync): void {
 /** Caller owns the transaction. v12 appends proof tables without reclassifying or rewriting legacy data. */
 export function migratePersonaAdoption(db: DatabaseSync): void {
   const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if (version === 12) { verifyPersonaAdoptionSchema(db); return; }
+  if (version === 12 || version === 13) { verifyPersonaAdoptionSchema(db); return; }
   if (version !== 11) throw new Error('Unsupported persona adoption database');
   db.exec(`
     CREATE TABLE persona_trial_selections(

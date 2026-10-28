@@ -29,7 +29,8 @@ export const RunSnapshotSchema = z.strictObject({ sessionId: z.string().min(1).m
 export const RunResultRefSchema = z.strictObject({ sessionId: z.string().min(1).max(300), messageSeq: z.number().int().positive(), turnEndSeq: z.number().int().positive(), textHash: hashSchema })
     .refine(value => value.messageSeq <= value.turnEndSeq, 'Result must precede turn end');
 const eventSchema = z.strictObject({ id: z.uuid(), runId: z.uuid(), type: z.string().min(1).max(120), at: z.iso.datetime(), data: z.record(z.string(), z.json()) });
-const string = (value) => z.string().parse(value);
+const stringValue = z.string(), jsonValue = z.json(), uuidValue = z.uuid();
+const string = (value) => stringValue.parse(value);
 function canonical(value) {
     if (value === null || typeof value !== 'object')
         return JSON.stringify(value);
@@ -37,11 +38,16 @@ function canonical(value) {
         return `[${value.map(canonical).join(',')}]`;
     return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
 }
-export function runtimeHash(value) { return createHash('sha256').update(canonical(z.json().parse(value))).digest('hex'); }
+export function runtimeHash(value) { return createHash('sha256').update(canonical(jsonValue.parse(value))).digest('hex'); }
 /** One-host execution ledger. Task definitions and complete DSH histories remain in their own stores. */
 export class RuntimeStore {
     file;
     options;
+    sourceReadStatements = new Map();
+    sourceRead(sql) { let statement = this.sourceReadStatements.get(sql); if (!statement) {
+        statement = this.db.prepare(sql);
+        this.sourceReadStatements.set(sql, statement);
+    } return statement; }
     nativeDeliveries;
     db;
     nonce = randomUUID();
@@ -187,11 +193,11 @@ export class RuntimeStore {
     }
     request(id) {
         this.open();
-        z.uuid().parse(id);
+        uuidValue.parse(id);
         const row = this.db.prepare('SELECT * FROM execution_requests WHERE id=?').get(id);
         if (!row)
             throw new Error('REQUEST_NOT_FOUND');
-        return { id, producer: string(row.producer), requestId: string(row.request_id), payload: z.json().parse(JSON.parse(string(row.body))), taskId: row.task_id === null ? null : z.uuid().parse(row.task_id), runId: row.run_id === null ? null : z.uuid().parse(row.run_id) };
+        return { id, producer: string(row.producer), requestId: string(row.request_id), payload: jsonValue.parse(JSON.parse(string(row.body))), taskId: row.task_id === null ? null : uuidValue.parse(row.task_id), runId: row.run_id === null ? null : uuidValue.parse(row.run_id) };
     }
     findRequest(producer, requestId) { this.open(); const row = this.db.prepare('SELECT id FROM execution_requests WHERE producer=? AND request_id=?').get(producer, requestId); return row ? this.request(string(row.id)) : null; }
     pendingRequests() { this.open(); return this.db.prepare('SELECT id FROM execution_requests WHERE run_id IS NULL ORDER BY rowid').all().map(row => this.request(string(row.id))); }
@@ -250,7 +256,7 @@ export class RuntimeStore {
     get(id) {
         this.open();
         z.uuid().parse(id);
-        const row = this.db.prepare('SELECT * FROM runs WHERE id=?').get(id);
+        const row = this.sourceRead('SELECT * FROM runs WHERE id=?').get(id);
         if (!row)
             throw new Error('RUN_NOT_FOUND');
         return { id, requestKey: string(row.request_key), definition: RunDefinitionSchema.parse(JSON.parse(string(row.definition))), state: RunStateSchema.parse(row.state), version: Number(row.version),
@@ -262,6 +268,13 @@ export class RuntimeStore {
             return [];
         const filter = states?.map(value => RunStateSchema.parse(value));
         return this.db.prepare(`SELECT id FROM runs${filter ? ' WHERE state IN (' + filter.map(() => '?').join(',') + ')' : ''} ORDER BY rowid`).all(...(filter ?? [])).map(row => this.get(string(row.id)));
+    }
+    latestConversationTasks(scene, offset = 0, limit = 32) {
+        this.open();
+        z.number().int().min(0).max(10000).parse(offset);
+        z.number().int().min(1).max(64).parse(limit);
+        return this.db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE r.rowid IN (SELECT max(rowid) FROM runs WHERE json_extract(definition,'$.taskId') IS NOT NULL GROUP BY json_extract(definition,'$.taskId')) AND json_extract(q.body,'$.messageSource.conversation.channel')=? AND json_extract(q.body,'$.messageSource.conversation.account')=? AND json_extract(q.body,'$.messageSource.conversation.kind')=? AND json_extract(q.body,'$.messageSource.conversation.id')=? ORDER BY r.rowid DESC LIMIT ? OFFSET ?")
+            .all(scene.channel, scene.account, scene.kind, scene.id, limit, offset).map(row => this.get(string(row.id)));
     }
     nativeDeliveryCandidates() { this.open(); return this.db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key LEFT JOIN native_deliveries d ON d.run_id=r.id WHERE r.state IN ('completed','waiting') AND json_extract(q.body,'$.messageSource.schemaVersion')=1 AND (d.id IS NULL OR d.state IN ('accepted','ready')) ORDER BY r.rowid").all().map(row => string(row.id)); }
     session(keyValue) { key.parse(keyValue); return this.transaction(() => { const old = this.db.prepare('SELECT session_id FROM execution_sessions WHERE session_key=?').get(keyValue); if (old)
@@ -355,10 +368,10 @@ export class RuntimeStore {
     }
     operation(id) {
         this.open();
-        const row = this.db.prepare('SELECT * FROM run_operations WHERE id=?').get(id);
+        const row = this.sourceRead('SELECT * FROM run_operations WHERE id=?').get(id);
         if (!row)
             throw new Error('OPERATION_NOT_FOUND');
-        const versionRow = this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(row.run_id, `operation-version:${id}`);
+        const versionRow = this.sourceRead('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(row.run_id, `operation-version:${id}`);
         const versions = versionRow ? z.strictObject({ schemaVersion: z.literal(1), pluginVersion: z.string(), actionVersion: z.string() }).parse(JSON.parse(string(versionRow.body))) : null;
         return { id, runId: string(row.run_id), callId: string(row.call_id), fingerprint: string(row.fingerprint), action: string(row.action), plugin: string(row.plugin), pluginVersion: string(row.plugin_version), actionVersion: versions?.actionVersion ?? null, versionsBound: versions !== null, state: z.enum(['started', 'finished', 'unknown']).parse(row.state), startedEventId: string(row.started_event), outcome: row.outcome === null ? null : ActionOutcomeSchema.parse(JSON.parse(string(row.outcome))) };
     }
@@ -368,7 +381,7 @@ export class RuntimeStore {
             const run = this.get(runId);
             if (!['accepted', 'queued', 'running', 'cancelling'].includes(run.state))
                 throw new Error('RUN_NOT_RUNNING');
-            const old = this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId, id);
+            const old = this.sourceRead('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId, id);
             if (old) {
                 if (runtimeHash(JSON.parse(string(old.body))) !== runtimeHash(value))
                     throw new Error('INPUT_BINDING_CONFLICT');
@@ -377,7 +390,7 @@ export class RuntimeStore {
             this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(runId, id, JSON.stringify(value));
         });
     }
-    readInput(runId, id) { this.get(runId); const row = this.db.prepare('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId, id); return row ? z.json().parse(JSON.parse(string(row.body))) : null; }
+    readInput(runId, id) { this.get(runId); const row = this.sourceRead('SELECT body FROM run_inputs WHERE run_id=? AND input_id=?').get(runId, id); return row ? z.json().parse(JSON.parse(string(row.body))) : null; }
     /** Core-only immutable receipt for a deferred capability change; never model supplied run output. */
     bindCapabilityReceipt(runId, id, body) {
         const value = z.json().parse(body), key = 'capability-change:' + z.uuid().parse(id) + ':' + runtimeHash(value);

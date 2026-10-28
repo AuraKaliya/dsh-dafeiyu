@@ -161,6 +161,88 @@ export declare class NativeDeliveryStore {
         receipt: string | null;
         error: string | null;
     };
+    candidate(runId: string, raw: z.infer<typeof renderRef>): {
+        id: string;
+        runId: string;
+        state: "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain" | "rejected" | "interrupted";
+        version: number;
+        anchor: {
+            kind: "task-result";
+            schemaVersion: 1;
+            taskId: string;
+            runId: string;
+            inboundId: string;
+            target: {
+                channel: string;
+                account: string;
+                kind: "private" | "group" | "local";
+                id: string;
+            };
+            intentVersion: number;
+            authorityVersion: string;
+            expiresAt: string;
+            outcome?: "waiting" | undefined;
+        };
+        material: {
+            packetId: string;
+            sourceStamp: string;
+            foundationHash: string;
+            personaHash: string;
+            modelHash: string;
+            mediaStamp?: string | undefined;
+        } | null;
+        renderRef: {
+            sessionId: string;
+            messageSeq: number;
+            turnEndSeq: number;
+            textHash: string;
+        } | null;
+        body: string | null;
+        credential: string | null;
+        receipt: string | null;
+        error: string | null;
+    };
+    repair(runId: string): {
+        id: string;
+        runId: string;
+        state: "accepted" | "rendering" | "verifying" | "ready" | "sending" | "sent" | "not-sent" | "partial" | "uncertain" | "rejected" | "interrupted";
+        version: number;
+        anchor: {
+            kind: "task-result";
+            schemaVersion: 1;
+            taskId: string;
+            runId: string;
+            inboundId: string;
+            target: {
+                channel: string;
+                account: string;
+                kind: "private" | "group" | "local";
+                id: string;
+            };
+            intentVersion: number;
+            authorityVersion: string;
+            expiresAt: string;
+            outcome?: "waiting" | undefined;
+        };
+        material: {
+            packetId: string;
+            sourceStamp: string;
+            foundationHash: string;
+            personaHash: string;
+            modelHash: string;
+            mediaStamp?: string | undefined;
+        } | null;
+        renderRef: {
+            sessionId: string;
+            messageSeq: number;
+            turnEndSeq: number;
+            textHash: string;
+        } | null;
+        body: string | null;
+        credential: string | null;
+        receipt: string | null;
+        error: string | null;
+    };
     rendered(runId: string, raw: z.infer<typeof renderRef>): {
         id: string;
         runId: string;

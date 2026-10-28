@@ -42,8 +42,11 @@ export class PersonaRuntime {
             const candidate = structuredClone(entry);
             ContextItemSchema.parse(candidate.item);
             entries.push(candidate);
-            if (Buffer.byteLength(JSON.stringify(entries.map(value => value.item))) > limit)
+            if (Buffer.byteLength(JSON.stringify(entries.map(value => value.item))) > limit) {
+                if (this.config.assembly.mode === 'unified')
+                    throw new Error('PERSONA_CONTEXT_CAPACITY');
                 entries.pop();
+            }
         }
         const stamp = runtimeHash({ scope: access.view.scope, selection: prepared?.selectionVersion ?? 0, entries: entries.map(entry => ({ candidate: entry.candidate, contentRef: entry.contentRef, dependencies: entry.dependencies })) });
         return { items: entries.map(entry => entry.item), stamp, guard: () => {
@@ -71,8 +74,11 @@ export class PersonaRuntime {
             if (!provider?.validate(access, candidate))
                 continue;
             admitted.push(candidate);
-            if (size(admitted.map(value => value.item)) > limit)
+            if (size(admitted.map(value => value.item)) > limit) {
+                if (this.config.assembly.mode === 'unified')
+                    throw new Error('PERSONA_CONTEXT_CAPACITY');
                 admitted.pop();
+            }
         }
         for (const entry of prepared?.trialEntries ?? []) {
             if (!provider?.trialAdmitted || !provider.completeTrial)
@@ -87,8 +93,11 @@ export class PersonaRuntime {
             if (!provider.validate(access, candidate))
                 continue;
             trials.push(candidate);
-            if (size([...admitted, ...trials].map(value => value.item)) > limit)
+            if (size([...admitted, ...trials].map(value => value.item)) > limit) {
+                if (this.config.assembly.mode === 'unified')
+                    throw new Error('PERSONA_CONTEXT_CAPACITY');
                 trials.pop();
+            }
         }
         let omitted = (prepared?.omitted ?? 0) + (prepared?.entries.length ?? 0) - admitted.length, omittedTrials = (prepared?.omittedTrials ?? 0) + (prepared?.trialEntries?.length ?? 0) - trials.length;
         const hasTrials = !!(prepared?.trialSelectionVersion || prepared?.trialEntries?.length || omittedTrials);

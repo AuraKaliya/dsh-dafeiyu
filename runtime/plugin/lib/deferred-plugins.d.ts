@@ -5,12 +5,12 @@ declare const rowSchema: z.ZodObject<{
     createdAt: z.ZodISODateTime;
     updatedAt: z.ZodISODateTime;
     state: z.ZodEnum<{
+        unknown: "unknown";
         queued: "queued";
         applying: "applying";
         applied: "applied";
         failed: "failed";
         "restart-required": "restart-required";
-        unknown: "unknown";
     }>;
     ownerPid: z.ZodDefault<z.ZodNullable<z.ZodNumber>>;
     hostPid: z.ZodDefault<z.ZodNullable<z.ZodNumber>>;
@@ -128,7 +128,7 @@ export declare class DeferredPluginChanges {
         id: string;
         createdAt: string;
         updatedAt: string;
-        state: "queued" | "applying" | "applied" | "failed" | "restart-required" | "unknown";
+        state: "unknown" | "queued" | "applying" | "applied" | "failed" | "restart-required";
         ownerPid: number | null;
         hostPid: number | null;
         catalogVersion: string | null;
@@ -216,14 +216,14 @@ export declare class DeferredPluginChanges {
     };
     status(): {
         id: string;
-        state: "queued" | "applying" | "applied" | "failed" | "restart-required" | "unknown";
+        state: "unknown" | "queued" | "applying" | "applied" | "failed" | "restart-required";
         updatedAt: string;
     }[];
     notifications(): {
         id: string;
         createdAt: string;
         updatedAt: string;
-        state: "queued" | "applying" | "applied" | "failed" | "restart-required" | "unknown";
+        state: "unknown" | "queued" | "applying" | "applied" | "failed" | "restart-required";
         ownerPid: number | null;
         hostPid: number | null;
         catalogVersion: string | null;

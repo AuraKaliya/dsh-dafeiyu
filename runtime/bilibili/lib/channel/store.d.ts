@@ -136,7 +136,7 @@ export declare class BiliOwnerStore {
     private transition;
     begin(replyId: string, now?: number): {
         version: number;
-        state: "unknown" | "sent" | "prepared" | "blocked" | "sending";
+        state: "unknown" | "blocked" | "sent" | "prepared" | "sending";
         receiptId: string | null;
         code: string | null;
         plan: BiliOwnerDeliveryPlan;
@@ -144,7 +144,7 @@ export declare class BiliOwnerStore {
     };
     confirm(replyId: string, receiptId: string, now?: number): {
         version: number;
-        state: "unknown" | "sent" | "prepared" | "blocked" | "sending";
+        state: "unknown" | "blocked" | "sent" | "prepared" | "sending";
         receiptId: string | null;
         code: string | null;
         plan: BiliOwnerDeliveryPlan;
@@ -152,7 +152,7 @@ export declare class BiliOwnerStore {
     };
     unknown(replyId: string, code: string, now?: number): {
         version: number;
-        state: "unknown" | "sent" | "prepared" | "blocked" | "sending";
+        state: "unknown" | "blocked" | "sent" | "prepared" | "sending";
         receiptId: string | null;
         code: string | null;
         plan: BiliOwnerDeliveryPlan;
@@ -160,7 +160,7 @@ export declare class BiliOwnerStore {
     };
     notDispatched(replyId: string, code: string, now?: number): {
         version: number;
-        state: "unknown" | "sent" | "prepared" | "blocked" | "sending";
+        state: "unknown" | "blocked" | "sent" | "prepared" | "sending";
         receiptId: string | null;
         code: string | null;
         plan: BiliOwnerDeliveryPlan;

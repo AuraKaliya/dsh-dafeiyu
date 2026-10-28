@@ -43,6 +43,10 @@ export declare class ReplySpeech {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     } | null;
     current(proof: ResourceProof): boolean;
     source(access: MediaReplyAccess, expected: string): {
@@ -71,6 +75,10 @@ export declare class ReplySpeech {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     };
     prepare(access: MediaReplyAccess, expected: string): Promise<{
         asset: {
@@ -108,6 +116,10 @@ export declare class ReplySpeech {
             durationMsHint: number | null;
             rangeReadable: boolean;
             publicContent: boolean;
+            sourceFrame?: {
+                positionMs: number;
+                durationMs: number;
+            } | undefined;
         };
     }>;
     verify(access: MediaReplyAccess, expected: string, asset: MediaAssetRef): {
@@ -136,6 +148,10 @@ export declare class ReplySpeech {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     };
     release(access: MediaReplyAccess): void;
     close(): void;

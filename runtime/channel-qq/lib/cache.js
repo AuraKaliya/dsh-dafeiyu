@@ -40,6 +40,22 @@ export class QqCache {
     } }
     epoch(route) { return Number(this.db.prepare('SELECT epoch FROM qq_cache_state WHERE route=?').get(route)?.epoch ?? 0); }
     generation(route) { return route ? this.epoch(route) : Number(this.db.prepare('SELECT coalesce(sum(epoch),0) AS n FROM qq_cache_state').get()?.n); }
+    /** Read-only trigger-bound context; never re-ingest history or create a browse snapshot. */
+    background(route, before, windowMs, limit, exclude) {
+        if (!Number.isFinite(before))
+            return [];
+        const since = Math.max(before - Math.min(windowMs, 86400000), this.now() - 86400000), rows = this.db.prepare("SELECT m.seq,m.id,m.sender,m.text FROM messages m JOIN qq_message_meta d ON d.route=m.route AND d.id=m.id WHERE m.route=? AND d.deleted=0 AND julianday(json_extract(d.body,'$.occurredAt'))>=julianday(?) AND julianday(json_extract(d.body,'$.occurredAt'))<=julianday(?) ORDER BY m.seq DESC LIMIT 64").all(route, new Date(since).toISOString(), new Date(before).toISOString());
+        return rows.flatMap(raw => {
+            const row = rowSchema.parse(raw);
+            if (exclude.has(row.id))
+                return [];
+            const meta = this.meta(route, row);
+            if (meta.deleted || !meta.known || !meta.occurredAt)
+                return [];
+            return [{ id: row.id, sender: row.sender, text: redactContent(row.text).value, occurredAt: meta.occurredAt, groupGeneration: meta.groupGeneration,
+                    truncated: meta.truncated, proof: this.messageProof(route, row.id) }];
+        }).slice(0, Math.min(32, Math.max(0, limit))).reverse();
+    }
     known(route, id) { return !!this.db.prepare('SELECT 1 FROM qq_message_meta WHERE route=? AND id=?').get(route, id) || !!this.db.prepare('SELECT 1 FROM messages WHERE route=? AND id=?').get(route, id); }
     completeHistoryMetadata(route, id, occurredAt, forwardIds) {
         const row = this.db.prepare('SELECT m.sender,m.text,d.body,d.deleted FROM messages m JOIN qq_message_meta d ON d.route=m.route AND d.id=m.id WHERE m.route=? AND m.id=?').get(route, id);

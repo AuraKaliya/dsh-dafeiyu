@@ -1,11 +1,12 @@
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
+import type { BiliBrowserPort } from '#dafeiyu/contracts';
 import { BiliStore } from './store.js';
 import type { BiliPage } from './store.js';
 import { BiliClient } from './client.js';
 import type { HttpTransport } from './http.js';
-export declare const BILI_ACTIONS: readonly ["bili_discover", "bili_search_sources", "bili_search", "bili_video", "bili_comments", "bili_subtitles", "bili_danmaku", "bili_media", "bili_observe_select"];
+export declare const BILI_ACTIONS: readonly ["bili_status", "bili_discover", "bili_search_sources", "bili_search", "bili_video", "bili_comments", "bili_subtitles", "bili_danmaku", "bili_media", "bili_observe_select"];
 export declare const biliServiceConfigSchema: z.ZodObject<{
     agentId: z.ZodString;
     profileId: z.ZodString;
@@ -14,12 +15,19 @@ export declare const biliServiceConfigSchema: z.ZodObject<{
     settings: z.ZodPrefault<z.ZodObject<{
         minIntervalMs: z.ZodDefault<z.ZodNumber>;
         timeoutMs: z.ZodDefault<z.ZodNumber>;
-        backoffMs: z.ZodDefault<z.ZodNumber>;
+        backoffMs: z.ZodOptional<z.ZodNumber>;
+        retry: z.ZodPrefault<z.ZodObject<{
+            rateDelaysMs: z.ZodDefault<z.ZodArray<z.ZodNumber>>;
+            riskDelayMs: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         maxResponseBytes: z.ZodDefault<z.ZodNumber>;
         maxMediaReadBytes: z.ZodDefault<z.ZodNumber>;
         maxPages: z.ZodDefault<z.ZodNumber>;
         session: z.ZodOptional<z.ZodObject<{
             file: z.ZodString;
+            expectedUid: z.ZodString;
+        }, z.core.$strict>>;
+        browser: z.ZodOptional<z.ZodObject<{
             expectedUid: z.ZodString;
         }, z.core.$strict>>;
         topics: z.ZodDefault<z.ZodArray<z.ZodObject<{
@@ -30,7 +38,7 @@ export declare const biliServiceConfigSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type Config = z.input<typeof biliServiceConfigSchema>;
 export declare function pageView(page: BiliPage): {
-    kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
+    kind: "video" | "comments" | "discover" | "browser" | "search" | "subtitles" | "danmaku" | "media";
     fetchedAt: string;
     data: z.core.util.JSONType;
     coverage: string[];
@@ -41,6 +49,7 @@ declare module '@deepseek-ai/cordis' {
     }
 }
 export declare class BiliService extends Service {
+    private readonly browser?;
     readonly config: z.output<typeof biliServiceConfigSchema>;
     readonly store: BiliStore;
     readonly client: BiliClient;
@@ -53,7 +62,8 @@ export declare class BiliService extends Service {
     private media;
     private unbindMedia;
     private finalBackoff;
-    constructor(ctx: Context, config: Config, transport?: HttpTransport);
+    private finalHeld;
+    constructor(ctx: Context, config: Config, transport?: HttpTransport, browser?: BiliBrowserPort | undefined);
     ready(): boolean;
     private access;
     private guard;
@@ -83,6 +93,7 @@ export declare class BiliService extends Service {
             pending: number;
         };
         backoffUntil: number | null;
+        diagnosticRequired: boolean;
     };
     close(): Promise<void>;
 }

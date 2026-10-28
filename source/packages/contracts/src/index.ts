@@ -31,6 +31,7 @@ export * from './activity.js';
 export * from './media.js';
 export * from './media-delivery.js';
 export * from './dsh-tools.js';
+export * from './bili-browser.js';
 export * from './qq-expression.js';
 export * from './task-assessment.js';
 import type { TaskExpressionProvider } from './expression.js';
@@ -71,7 +72,7 @@ export const messageMainText=(message:Pick<InboundMessage,'mainText'|'batch'>)=>
 export const messageDisplayText=(message:InboundMessage)=>message.batch?message.batch.sources.map(part=>`[原消息 ${part.id}；${part.occurredAt}${part.replyTo?'；引用 '+part.replyTo:''}]\n${part.text}`).join('\n\n'):message.text;
 export const ObservationSchema = z.strictObject({
   conversation: ConversationSchema,
-  type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled']),
+  type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled', 'delivery.diagnostic']),
   data: z.record(z.string(), z.union([z.string().max(200), z.number().finite(), z.boolean(), z.null()])),
 });
 export type Observation = z.infer<typeof ObservationSchema>;
@@ -99,6 +100,7 @@ export type DeliveryResult =
   | { readonly status: 'not-sent'; readonly code: string }
   | { readonly status: 'unknown'; readonly code: string };
 export interface ChannelCapability {
+  deliveryProgress?(replyId:string):{confirmed:number;pending:number;unknown:number;canResume:boolean}|null;
   readonly channel: string;
   readonly account: string;
   /** Actual transport capabilities/limits, independent of the model's own modalities. */
@@ -189,3 +191,5 @@ export interface PendingMessage {
   readonly sessionId: string;
   readonly reply: Reply | null;
 }
+
+export * from './recent-state.js';

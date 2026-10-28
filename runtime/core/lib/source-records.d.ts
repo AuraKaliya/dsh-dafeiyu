@@ -792,6 +792,13 @@ export declare const provenanceRecordSchema: z.ZodDiscriminatedUnion<[z.ZodObjec
 }, z.core.$strip>], "type">;
 declare module '@deepseek-ai/dsh-session' {
     interface PluginRecordMap {
+        'plugin:dafeiyu/source-invalid': {
+            traceId: string;
+            phase: 'dispatch' | 'stream';
+            dependency: SourceDependency;
+            dependencyHash: string;
+            reason: string;
+        };
         'plugin:dafeiyu/source-record': SourceRecord;
         'plugin:dafeiyu/request-sources': z.infer<typeof requestSchema>;
     }

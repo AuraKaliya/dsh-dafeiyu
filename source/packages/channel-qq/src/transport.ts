@@ -1,5 +1,6 @@
 import type { DeliveryResult,Reply } from '@dafeiyu/contracts';
 import type { QqDeliveryLedger,QqDeliveryPlan,QqDeliveryProgress } from './delivery.js';
+import {deliveryAbortCode} from './reply-delay.js';
 
 interface TransportHost {
   ledger:QqDeliveryLedger;
@@ -8,8 +9,9 @@ interface TransportHost {
   check(reply:Reply,signal:AbortSignal):Promise<void>;
   send(reply:Reply,text:string,signal:AbortSignal):Promise<string>;
   confirmed(reply:Reply,text:string,receipt:string):void;
+  failed?(reply:Reply,error:unknown,position:number,invoked:boolean):void;
 }
-const safeCode=(error:unknown,fallback:string)=>error instanceof Error&&['CHANNEL_OFFLINE','TARGET_NOT_ALLOWED','IDENTITY_UNAVAILABLE','SOURCE_MESSAGE_NOT_FOUND','SOURCE_STALE','DELIVERY_CANCELLED','DELIVERY_AUTHORITY_REVOKED','DELIVERY_PLAN_CONFLICT','TEXT_SIZE_UNSUPPORTED','INVALID_TEXT_ENCODING','QQ_MESSAGE_SEQUENCE_INVALID'].includes(error.message)?error.message:fallback;
+const safeCode=(error:unknown,fallback:string)=>error instanceof Error&&['CHANNEL_OFFLINE','TARGET_NOT_ALLOWED','IDENTITY_UNAVAILABLE','SOURCE_MESSAGE_NOT_FOUND','SOURCE_STALE','DELIVERY_CANCELLED','DELIVERY_INTERRUPTED_BY_MESSAGE','DELIVERY_AUTHORITY_REVOKED','DELIVERY_PLAN_CONFLICT','TEXT_SIZE_UNSUPPORTED','INVALID_TEXT_ENCODING','QQ_MESSAGE_SEQUENCE_INVALID'].includes(error.message)?error.message:fallback;
 function result(progress:QqDeliveryProgress,code:string):DeliveryResult {
   if(progress.state==='sent')return {status:'sent',receiptId:progress.segments[0]!.receipt!};
   return progress.confirmed||progress.unknown||progress.state==='sending'?{status:'unknown',code:progress.unknown||progress.state==='sending'?'PLATFORM_RESULT_UNKNOWN':'PARTIAL_DELIVERY'}:{status:'not-sent',code};
@@ -28,7 +30,7 @@ export class QqSegmentedTransport {
     const work=this.execute(snapshot,plan,signal,authority).finally(()=>this.active.delete(snapshot.id));this.active.set(snapshot.id,work);return work;
   }
   private async execute(reply:Reply,plan:QqDeliveryPlan,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>{
-    const guard=()=>{if(signal.aborted)throw new Error('DELIVERY_CANCELLED');try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};
+    const guard=()=>{if(signal.aborted)throw new Error(deliveryAbortCode(signal));try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};
     let delayed=false;
     for(let position=0;position<plan.segments.length;position++){
       const progress=this.host.ledger.progress(reply.id)!;if(progress.unknown||progress.state==='sending')return result(progress,'DELIVERY_NOT_RESUMABLE');if(progress.segments[position]!.state==='sent')continue;
@@ -42,6 +44,7 @@ export class QqSegmentedTransport {
       }catch(error){const current=this.host.ledger.progress(reply.id)!;
         if(current.segments[position]!.state==='sending')this.host.ledger.unknown(reply.id,position,'PLATFORM_RESULT_UNKNOWN');
         else if(current.segments[position]!.state==='pending')this.host.ledger.defer(reply.id,position,safeCode(error,'DELIVERY_PRECHECK_FAILED'));
+        try{this.host.failed?.(reply,error,position,invoked);}catch{/* Diagnostics cannot rewrite the recorded transport outcome. */}
         return result(this.host.ledger.progress(reply.id)!,invoked?'LOCAL_PROJECTION_FAILED':safeCode(error,'DELIVERY_PRECHECK_FAILED'));
       }
     }

@@ -5,20 +5,23 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { configureSqlite } from '#dafeiyu/journal';
 import { PersonaSourceRefSchema, MediaSourceDescriptionSchema, ResourceProofSchema, ExecutionScopeSchema, RunOriginSchema } from '#dafeiyu/contracts';
-import { BILI_SCENE } from './config.js';
-export const BILI_APPLICATION_ID = 0x44464236, BILI_SCHEMA_VERSION = 1;
-export const BILI_TABLES = ['bili_metadata', 'bili_clock', 'bili_requests', 'bili_sources', 'bili_revisions', 'bili_pages', 'bili_media', 'bili_outbox'];
+import { BILI_SCENE, BvidSchema } from './config.js';
+import { BiliDiagnostics, initializeBiliDiagnostics } from './diagnostics.js';
+export const BILI_APPLICATION_ID = 0x44464236, BILI_SCHEMA_VERSION = 2;
+export const BILI_TABLES = ['bili_metadata', 'bili_clock', 'bili_requests', 'bili_sources', 'bili_revisions', 'bili_pages', 'bili_media', 'bili_outbox', 'bili_http_attempts', 'bili_http_control'];
 const identitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: z.string().min(1).max(100) });
-function canonical(value) { const v = z.json().parse(value); return v === null || typeof v !== 'object' ? JSON.stringify(v) : Array.isArray(v) ? '[' + v.map(canonical).join(',') + ']' : '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}'; }
-export const biliHash = (value) => createHash('sha256').update(canonical(value)).digest('hex');
+const jsonValue = z.json();
+function canonical(v) { return v === null || typeof v !== 'object' ? JSON.stringify(v) : Array.isArray(v) ? '[' + v.map(canonical).join(',') + ']' : '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}'; }
+export const biliHash = (value) => createHash('sha256').update(canonical(jsonValue.parse(value))).digest('hex');
 export const biliOwner = (context) => biliHash([context.scope, context.intentVersion]);
-export const BiliPageSchema = z.strictObject({ id: z.uuid(), owner: z.string().length(64), kind: z.enum(['discover', 'search', 'video', 'comments', 'subtitles', 'danmaku', 'media']),
+export const BiliPageSchema = z.strictObject({ id: z.uuid(), owner: z.string().length(64), kind: z.enum(['discover', 'search', 'video', 'comments', 'subtitles', 'danmaku', 'media', 'browser']),
     sourceKey: z.string().min(1).max(240), sourceVersion: z.number().int().positive(), fetchedAt: z.iso.datetime(), data: z.json(), coverage: z.array(z.string().max(500)).max(24),
     fields: z.array(z.strictObject({ id: z.string().max(80), text: z.string().min(1).max(1000) })).max(100), parents: z.array(ResourceProofSchema).max(4).optional() });
 const requestState = z.enum(['pending', 'completed', 'failed', 'interrupted']);
 export class BiliStore {
     maxPages;
     db;
+    diagnostics;
     checking = new Set();
     identity;
     constructor(file, identity, create = false, maxPages = 4096) {
@@ -37,13 +40,19 @@ export class BiliStore {
                 configureSqlite(this.db);
                 this.atomic(() => this.initialize());
             }
-            else if (version !== 1 || app !== BILI_APPLICATION_ID)
+            else if (![1, 2].includes(version) || app !== BILI_APPLICATION_ID)
                 throw new Error('BILI_SCHEMA_UNSUPPORTED');
             if (biliHash(JSON.parse(String(this.db.prepare('SELECT body FROM bili_metadata WHERE id=1').get()?.body))) !== biliHash(this.identity))
                 throw new Error('BILI_IDENTITY_MISMATCH');
+            if (version === 1) {
+                if (!create)
+                    throw new Error('BILI_MIGRATION_REQUIRED');
+                this.atomic(() => { initializeBiliDiagnostics(this.db); this.db.exec('PRAGMA user_version=2'); });
+            }
             for (const t of BILI_TABLES)
                 this.db.prepare(`SELECT * FROM ${t} LIMIT 0`).all();
             configureSqlite(this.db);
+            this.diagnostics = new BiliDiagnostics(this.db);
         }
         catch (e) {
             this.db.close();
@@ -60,7 +69,8 @@ export class BiliStore {
     CREATE TABLE bili_pages(id TEXT PRIMARY KEY,owner TEXT NOT NULL,body TEXT NOT NULL,hash TEXT NOT NULL,observation TEXT);
     CREATE TABLE bili_media(key TEXT PRIMARY KEY,description TEXT NOT NULL,hash TEXT NOT NULL,locator TEXT NOT NULL,expires_at INTEGER NOT NULL);
     CREATE TABLE bili_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,body TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0);
-    PRAGMA application_id=${BILI_APPLICATION_ID};PRAGMA user_version=1;`);
+    PRAGMA application_id=${BILI_APPLICATION_ID};PRAGMA user_version=2;`);
+        initializeBiliDiagnostics(this.db);
         for (const table of ['bili_metadata', 'bili_revisions'])
             this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable Bili history');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain Bili history');END;`);
         this.db.exec("CREATE TRIGGER bili_page_immutable BEFORE UPDATE OF id,owner,body,hash ON bili_pages BEGIN SELECT RAISE(ABORT,'Immutable Bili page');END;");
@@ -134,7 +144,10 @@ export class BiliStore {
     } }); }
     sourceCurrent(key, version) { const row = this.db.prepare('SELECT version,available FROM bili_sources WHERE key=?').get(key); return row?.version === version && row.available === 1; }
     unavailable(key) { this.db.prepare('UPDATE bili_sources SET available=0 WHERE key=?').run(key); }
-    proof(page) { return { provider: 'bilibili', scene: BILI_SCENE, key: page.id, version: page.sourceVersion, hash: biliHash(page), roots: ['bilibili:' + page.sourceKey], detail: { owner: page.owner } }; }
+    proof(page) {
+        const frame = page.kind === 'browser' && page.sourceKey.startsWith('browser-frame:') ? z.object({ bvid: BvidSchema, section: z.literal('frame') }).safeParse(page.data) : null;
+        return { provider: 'bilibili', scene: BILI_SCENE, key: page.id, version: page.sourceVersion, hash: biliHash(page), roots: [frame?.success ? 'bilibili:video:' + frame.data.bvid : 'bilibili:' + page.sourceKey], detail: { owner: page.owner } };
+    }
     current(raw) { if (this.checking.has(raw.key) || this.checking.size >= 64)
         return false; this.checking.add(raw.key); try {
         const proof = ResourceProofSchema.parse(raw), detail = z.object({ owner: z.string() }).parse(proof.detail), page = this.page(detail.owner, proof.key);
@@ -150,7 +163,12 @@ export class BiliStore {
         throw new Error('BILI_PAGE_UNAVAILABLE'); if (old.observation && old.observation !== value)
         throw new Error('BILI_OBSERVATION_CONFLICT'); this.db.prepare('UPDATE bili_pages SET observation=? WHERE id=?').run(value, page.id); }
     observation(page) { const row = this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id); return row?.observation ? PersonaSourceRefSchema.parse(JSON.parse(String(row.observation))) : null; }
-    registerMedia(key, description, locator, expiresAt) { const body = MediaSourceDescriptionSchema.parse(description); this.db.prepare('INSERT INTO bili_media VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET description=excluded.description,hash=excluded.hash,locator=excluded.locator,expires_at=excluded.expires_at').run(key, JSON.stringify(body), biliHash(body), JSON.stringify(z.json().parse(locator)), z.number().int().positive().parse(expiresAt)); }
+    registerMedia(key, description, locator, expiresAt) {
+        const body = MediaSourceDescriptionSchema.parse(description), location = JSON.stringify(z.json().parse(locator));
+        if (body.kind === 'image' && Number(this.db.prepare('SELECT coalesce(sum(length(locator)),0) AS bytes FROM bili_media').get().bytes) + Buffer.byteLength(location) > 64 * 1024 * 1024)
+            throw new Error('BILI_BROWSER_FRAME_STORAGE_LIMIT');
+        this.db.prepare('INSERT INTO bili_media VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET description=excluded.description,hash=excluded.hash,locator=excluded.locator,expires_at=excluded.expires_at').run(key, JSON.stringify(body), biliHash(body), location, z.number().int().positive().parse(expiresAt));
+    }
     media(key, now = Date.now(), historical = false) { const row = this.db.prepare('SELECT * FROM bili_media WHERE key=?').get(key); if (!row || !historical && Number(row.expires_at) <= now)
         return null; const description = MediaSourceDescriptionSchema.parse(JSON.parse(String(row.description))); if (biliHash(description) !== row.hash)
         throw new Error('BILI_STATE_CORRUPT'); return { description, locator: z.json().parse(JSON.parse(String(row.locator))), expiresAt: Number(row.expires_at) }; }

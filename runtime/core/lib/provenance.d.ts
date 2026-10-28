@@ -40,9 +40,11 @@ export declare class SourceTracker {
     valid(record: SourceRecord): boolean;
     invalid(): Set<number>;
     private write;
+    recordReplacement(seq: number, parentSeq: number): void;
     /** Capture completed outputs before any pruning; record input hashes at first dispatch. */
     sync(): void;
     dependenciesFor(seq: number, legacyEpoch?: string): SourceDependency[];
     admit(options: GenerateOptions, legacy: (seq: number) => string | undefined): void;
+    private reject;
     guard(): void;
 }

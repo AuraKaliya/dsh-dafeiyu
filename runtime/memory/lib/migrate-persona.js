@@ -3,7 +3,7 @@ export const PERSONA_TABLES = ['persona_candidates', 'persona_candidate_revision
 /** v8 adds independent persona aggregates. No existing memory, boundary or task body is rewritten. */
 export function migratePersona(db) {
     const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-    if (version === 8 || version === 9 || version === 10 || version === 11 || version === 12) {
+    if (version === 8 || version === 9 || version === 10 || version === 11 || version === 12 || version === 13) {
         for (const table of PERSONA_TABLES)
             db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
         return;

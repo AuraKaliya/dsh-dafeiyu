@@ -102,11 +102,6 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         maxReadBytes: z.ZodDefault<z.ZodNumber>;
         voiceDirectives: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>>;
-    stickers: z.ZodPrefault<z.ZodObject<{
-        enabled: z.ZodDefault<z.ZodBoolean>;
-        maxBytes: z.ZodDefault<z.ZodNumber>;
-        maxEntries: z.ZodDefault<z.ZodNumber>;
-    }, z.core.$strict>>;
     botId: z.ZodString;
     ownerId: z.ZodString;
     groupIds: z.ZodArray<z.ZodString>;
@@ -131,6 +126,11 @@ export declare const QqPluginConfigSchema: z.ZodObject<{
         quietMs: z.ZodDefault<z.ZodNumber>;
         maxWaitMs: z.ZodDefault<z.ZodNumber>;
         maxMessages: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    stickers: z.ZodPrefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        maxBytes: z.ZodDefault<z.ZodNumber>;
+        maxEntries: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     tasks: z.ZodPrefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -165,6 +165,7 @@ declare module '@deepseek-ai/cordis' {
 type Status = 'starting' | 'online' | 'offline' | 'rejected' | 'stopped';
 /** Explicitly scoped QQ transport. No model calls, shell tools, friend approvals or history replay. */
 export declare class QqChannel extends Service {
+    private localOwnerTransport;
     private readonly config;
     private readonly api;
     private readonly store;
@@ -179,6 +180,7 @@ export declare class QqChannel extends Service {
     private readonly batches;
     private readonly stickers;
     private readonly sourceSignals;
+    private readonly processingSignals;
     private readonly tails;
     private progress;
     private readonly token;
@@ -200,6 +202,7 @@ export declare class QqChannel extends Service {
     private counters;
     constructor(ctx: Context, raw: Config);
     private observation;
+    private recordDeliveryDiagnostic;
     getStatus(): {
         state: Status;
         error: string | null;
@@ -283,6 +286,8 @@ export declare class QqChannel extends Service {
     private receive;
     private readHistory;
     private readForward;
+    /** Program-only local delegation transport. The source remains local-owner, never a forged QQ inbound. */
+    deliverLocalOwner(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
     deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
     deliverMedia(reply: Reply & {
         media: ReplyMediaManifest;

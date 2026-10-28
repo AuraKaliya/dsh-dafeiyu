@@ -1,9 +1,11 @@
+import { stageHandoff } from './context-handoff.js';
+import { admitNativeContexts, contextManifest, prepareWithin } from './context-plan.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ExecutionRequestSchema, ResumeRunSchema, WakeRequestSchema, RunControlSchema, ProducerSchema, taskScopeKey, HostConfigSchema, TaskUpdateSchema, redactJson, RunOriginSchema, MotivationSchema, ContextItemSchema, ContinuityCheckpointSchema, messageMainText, messageParts } from '#dafeiyu/contracts';
 import { foundationManifest } from './persona-manifest.js';
 import { RuntimeStore, runtimeHash } from './runtime-store.js';
-import { TaskAssessmentSchema } from '#dafeiyu/contracts';
+import { TaskAssessmentSchema, WakeWorkSchema } from '#dafeiyu/contracts';
 import { DshCapabilityChangeSchema } from '#dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
 import { SourceDependencySchema, MaintenanceLifecycleSchema, ActivityAnchorSchema, TaskCreateSchema } from '#dafeiyu/contracts';
@@ -13,6 +15,8 @@ import { ExecutionEvidence } from './execution-evidence.js';
 import { MediaReplyAuthoritySchema } from '#dafeiyu/contracts';
 import { mediaAuthorityBodySchema } from './media-authority.js';
 import { ExternalTaskAuthorizationSchema } from '#dafeiyu/contracts';
+import { CAPABILITY_OWNER, CAPABILITY_QUERY } from './harness-runtime.js';
+const basicCapability = (action) => action.owner === CAPABILITY_OWNER && action.id === CAPABILITY_QUERY && action.effects === 'read' && !action.requiresTask;
 export const ExecutionOptionsSchema = z.strictObject({ profileId: ProducerSchema, createStore: z.boolean().default(false),
     policies: HostConfigSchema.shape.authorityPolicies, maxPendingRuns: z.number().int().min(1).max(1000).default(100),
     maxConcurrentRuns: z.number().int().min(1).max(16).default(2) });
@@ -22,6 +26,7 @@ export class ExecutionCoordinator {
     d;
     refs = new WeakMap();
     tasks = new WeakMap();
+    contextLeases = new WeakMap();
     grants = new WeakMap();
     active = new Map();
     queued = new Map();
@@ -90,6 +95,14 @@ export class ExecutionCoordinator {
             this.messageBindings.delete(binding.id); };
     }
     messageBindingHash(binding) { const { classify: _classify, active: _active, autoDeliver: _auto, voice: _voice, ...identity } = binding; return runtimeHash({ identity, policy: this.policy(binding.id, binding.policyId) }); }
+    messageCapabilities(message) {
+        return { kind: 'task-capability-catalog',
+            bindings: [...this.messageBindings.values()].filter(binding => binding.active() && binding.channel === message.conversation.channel && binding.account === message.conversation.account).map(binding => {
+                const policy = this.policy(binding.id, binding.policyId);
+                return { id: binding.id, ownerTaskAuthorized: message.sender.id === binding.ownerId, actions: this.d.registry.actions().filter(action => policy.actions.includes(action.id)).map(action => ({ name: action.id, registered: true, ready: action.active(), requiresTask: action.requiresTask })) };
+            }),
+            note: '这是任务阶段的真实能力目录，不是本轮直接调用的工具。普通聊天通过当前任务入口受理主人指示或形成自主探索；当前工具子集缺少某项不能推断插件未加载。ready只说明组件就绪，平台成功须以实际回执为准。' };
+    }
     messageDirective(binding, context, message, exposureId) {
         const directive = binding.classify(message);
         if (messageMainText(message).trim() || exposureId === undefined)
@@ -179,6 +192,25 @@ export class ExecutionCoordinator {
             return null;
         return this.d.memory()?.intent(this.d.personas.access(run, this.inputsFor(run), this.d.signal, () => { if (this.repository().readState(this.d.agentId, task.id).epoch !== task.epoch)
             throw new Error('TASK_NOT_ACTIVE'); })) ?? null;
+    }
+    recentStateSourcesCurrent(runId, sources) {
+        try {
+            const run = this.d.store.get(runId);
+            if (run.definition.scope.kind !== 'task')
+                return false;
+            const task = this.repository().readState(this.d.agentId, run.definition.taskId);
+            if (task.epoch !== run.definition.intentVersion || task.status !== 'active')
+                return false;
+            this.validateMessageAncestors(run);
+            const guard = () => { if (this.repository().readState(this.d.agentId, task.id).epoch !== task.epoch)
+                throw new Error('SOURCE_STALE'); };
+            const access = this.d.personas.access(run, this.inputsFor(run), this.d.signal, guard), request = this.d.store.request(run.requestKey);
+            const evidence = new ExecutionEvidence(run, this.d.store, this.d.memory, this.d.personas, this.d.registry, this.repository(), this.policy(request.producer, run.definition.policyId).sourceRules, access, anchor => this.activityAnchorStatus(anchor).state === 'valid', sourceRun => this.wakeOrigins(sourceRun).some(origin => !!this.wakes.get(origin.producerId)?.sourceAnchor));
+            return evidence.validate(sources);
+        }
+        catch {
+            return false;
+        }
     }
     async nativeResultAccess(id) {
         const run = this.d.store.get(z.uuid().parse(id));
@@ -281,7 +313,13 @@ export class ExecutionCoordinator {
                         catch { /* Unsupported context cannot grant expression. */ }
                     }
                     if (dependency.owner === 'dsh-tools' && dependency.region === 'capabilities') { /* Operational declarations do not become world evidence. */ }
-                    else if (dependency.owner === 'memory' && dependency.region === 'execution' && selected?.success)
+                    else if (dependency.owner === 'memory-persona' && dependency.region === 'recent-state' && body.success && (() => { try {
+                        return z.object({ kind: z.literal('recent-self-state'), visibility: z.literal('shared-summary') }).safeParse(JSON.parse(body.data.item.text)).success;
+                    }
+                    catch {
+                        return false;
+                    } })()) { /* Only a validated, independently reviewed self-summary may influence target expression. */ }
+                    else if ((dependency.owner === 'memory' && dependency.region === 'execution' || dependency.owner === 'memory-origin-recall' && dependency.region === 'recall') && selected?.success)
                         add(selected.data);
                     else {
                         opaque = true;
@@ -305,16 +343,92 @@ export class ExecutionCoordinator {
         const expressionPolicy = this.validateMessageSource(source).binding.expressionPolicy;
         const progress = this.d.store.readInput(run.id, 'automatic-progress'), retention = this.d.store.readInput(run.id, 'assessment-retention');
         if (progress)
-            operationalEvidence.push({ id: 'PROGRESS', kind: 'reported', text: JSON.stringify({ kind: 'program-feedback-receipt', receipt: progress }) });
+            operationalEvidence.push({ id: 'PROGRESS', kind: 'reported', text: JSON.stringify(this.progressFacts(progress)) });
+        operationalEvidence.push({ id: 'WORKFLOW', kind: 'reported', text: JSON.stringify(this.resultWorkflow(run.id)) });
         if (retention)
             operationalEvidence.push({ id: 'RETENTION', kind: 'reported', text: JSON.stringify({ kind: 'assessment-retention', result: retention, note: '保存的是有来源的模型评价；经历整理和人格采用仍有独立流程。' }) });
         if (run.state === 'waiting')
             operationalEvidence.push({ id: 'STATE', kind: 'reported', text: JSON.stringify({ state: run.state, error: run.error, note: '程序等待状态，不表示目标已经满足。' }) });
         const reviewed = z.object({ assessment: TaskAssessmentSchema }).safeParse(this.d.store.readInput(run.id, 'task-assessment'));
         const selectedSourceIds = reviewed.success ? reviewed.data.assessment.evidenceIds.flatMap(id => this.d.store.operation(id).outcome?.sources.map(ref => ref.id) ?? []) : [];
-        const expression = { execution: access, anchor, question: source.kind === 'self-exploration' && !wake ? '根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。' : task.goal, output, candidates: [...candidates.values()], operationalEvidence, opaqueInfluence: opaque, derivedInputComplete, requestMaxBytes: this.d.context.requestMaxBytes - this.d.context.outputReserveBytes, ...(expressionPolicy ? { expressionPolicy } : {}), ...(reviewed.success ? { assessment: reviewed.data.assessment } : {}), ...(selectedSourceIds.length ? { selectedSourceIds } : {}), guard };
+        const handoff = this.d.store.readInput(run.id, 'stage-handoff') ? stageHandoff('delivery', source.kind === 'self-exploration' && !wake ? '向当前会话分享获准的探索结果' : task.goal, { taskId: task.id, runId: run.id, intentVersion: run.definition.intentVersion }, this.validateMessageSource(source).item.message, { state: run.state, answerVisibilityAtPreparation: 'candidate-not-yet-sent' }, source.control ? this.d.journal.get(source.control.inboundId).message : null) : undefined;
+        const expression = { execution: access, ...(handoff ? { handoff } : {}), readSources: read => evidence.readSources(read), anchor, question: source.kind === 'self-exploration' && !wake ? '根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。' : task.goal, output, candidates: [...candidates.values()], operationalEvidence, opaqueInfluence: opaque, derivedInputComplete, requestMaxBytes: this.d.context.requestMaxBytes - this.d.context.outputReserveBytes, ...(expressionPolicy ? { expressionPolicy } : {}), ...(reviewed.success ? { assessment: reviewed.data.assessment } : {}), ...(selectedSourceIds.length ? { selectedSourceIds } : {}), guard };
         const media = this.d.media?.()?.nativeMaterial?.(expression);
         return media ? { ...expression, media } : expression;
+    }
+    originRecallScope(view, owner) {
+        const lease = this.contextLeases.get(view);
+        if (!lease || lease.runId !== view.runId || lease.owner !== owner || owner !== 'memory-origin-recall')
+            return null;
+        try {
+            view.signal.throwIfAborted();
+            const run = this.d.store.get(view.runId), saved = savedSchema.parse(this.d.store.request(run.requestKey).payload), source = saved.messageSource;
+            if (!source || run.definition.scope.kind !== 'task' || runtimeHash(view.scope) !== runtimeHash(run.definition.scope))
+                return null;
+            const task = this.repository().readState(this.d.agentId, run.definition.taskId);
+            if (task.epoch !== run.definition.intentVersion || task.status !== 'active')
+                return null;
+            this.validateMessageSource(source);
+            return { conversation: source.conversation, query: task.goal, stamp: runtimeHash({ source, epoch: task.epoch }) };
+        }
+        catch {
+            return null;
+        }
+    }
+    originRecallCurrent(runId, scene, stamp) {
+        try {
+            const run = this.d.store.get(runId), saved = savedSchema.parse(this.d.store.request(run.requestKey).payload), source = saved.messageSource;
+            if (!source || run.definition.scope.kind !== 'task' || runtimeHash(source.conversation) !== runtimeHash(scene))
+                return false;
+            const task = this.repository().readState(this.d.agentId, run.definition.taskId);
+            if (task.status !== 'active' || task.epoch !== run.definition.intentVersion || runtimeHash({ source, epoch: task.epoch }) !== stamp)
+                return false;
+            this.validateMessageSource(source);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    responsibilitySnapshotCurrent(raw, scene) {
+        try {
+            const proof = z.strictObject({ runId: z.uuid(), taskId: z.uuid(), sourceHash: z.string() }).parse(raw), run = this.d.store.get(proof.runId), saved = savedSchema.parse(this.d.store.request(run.requestKey).payload), source = saved.messageSource;
+            if (!source || run.definition.taskId !== proof.taskId || runtimeHash(source) !== proof.sourceHash || runtimeHash(source.conversation) !== runtimeHash(scene))
+                return false;
+            this.validateMessageSource(source);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    responsibilityFacts(scene, offset = 0, limit = 32) {
+        const result = [];
+        for (const run of this.d.store.latestConversationTasks(scene, offset, limit)) {
+            try {
+                const saved = savedSchema.parse(this.d.store.request(run.requestKey).payload), source = saved.messageSource;
+                if (!source || run.definition.scope.kind !== 'task' || run.state === 'cancelled')
+                    continue;
+                this.validateMessageSource(source);
+                const task = this.repository().readState(this.d.agentId, run.definition.taskId);
+                if (task.status === 'completed' || task.epoch !== run.definition.intentVersion)
+                    continue;
+                const assessment = z.object({ assessment: TaskAssessmentSchema }).safeParse(this.d.store.readInput(run.id, 'task-assessment')), delivery = this.d.store.nativeDeliveries.status(run.id);
+                if (run.state === 'completed' && assessment.success && assessment.data.assessment.goalStatus === 'met' && delivery?.state === 'sent')
+                    continue;
+                const operations = this.d.store.operations(run.id);
+                const goal = source.kind === 'explicit-task' ? task.goal : '本会话关联的自主探索；内部目标不在此处展开', label = Array.from(goal).slice(0, 96).join('');
+                const data = z.json().parse({ kind: 'current-responsibility', taskId: task.id, runId: run.id, intentVersion: task.epoch, state: run.state, taskState: task.status,
+                    goalLabel: label, goalCoverage: { shown: Array.from(label).length, total: Array.from(goal).length }, assessment: assessment.success ? assessment.data.assessment.goalStatus : null,
+                    unfinished: assessment.success ? assessment.data.assessment.unfinished.length : null, confirmedOperationRecords: operations.filter(operation => operation.outcome?.effects === 'confirmed').length, unknownEffectRecords: operations.filter(operation => operation.outcome?.effects === 'unknown' || !operation.outcome && run.state !== 'running').length, delivery: delivery?.state ?? null, asOf: run.updatedAt,
+                    note: '本会话任务的时点索引；完整目标和约束以任务记录为准，运行结束不等于已完成或送达。需要时查询任务状态；本索引不创建新承诺。' });
+                const guard = () => { this.validateMessageSource(source); const current = this.repository().readState(this.d.agentId, task.id); if (current.status === 'completed' || current.epoch !== task.epoch || this.d.store.get(run.id).state === 'cancelled')
+                    throw new Error('SOURCE_STALE'); };
+                result.push({ id: task.id, version: runtimeHash(data), data, proof: { runId: run.id, taskId: task.id, sourceHash: runtimeHash(source) }, guard });
+            }
+            catch { /* A revoked source cannot supply a fallback goal. */ }
+        }
+        return result;
     }
     messageTaskStatus(context, pluginId, raw) {
         const { binding, item } = this.messageAuthority(context, pluginId, false), { taskId } = MessageTaskStatusSchema.parse(raw), run = this.findMessageTask(binding, item.message.conversation, taskId);
@@ -324,12 +438,21 @@ export class ExecutionCoordinator {
     }
     feedbackSource(runId) {
         const run = this.d.store.get(runId), saved = savedSchema.parse(this.d.store.request(run.requestKey).payload), source = saved.messageSource;
-        if (!source || source.kind !== 'explicit-task' || source.conversation.channel !== 'qq' || run.definition.scope.kind !== 'task')
+        if (!source || source.kind !== 'explicit-task' || !['qq', 'local-owner'].includes(source.conversation.channel) || run.definition.scope.kind !== 'task')
             return null;
         const { item } = this.validateMessageSource(source), task = this.repository().readState(this.d.agentId, run.definition.taskId);
         if (task.epoch !== run.definition.intentVersion || task.status !== 'active')
             return null;
         return { item, taskId: task.id, state: run.state, error: run.error, operations: this.d.store.operations(run.id).map(op => ({ state: op.state, status: op.outcome?.status ?? null, effects: op.outcome?.effects ?? null })) };
+    }
+    progressFacts(receipt) {
+        return { kind: 'program-feedback-receipt', purpose: 'intermediate-status-only', doesNotDescribeFinalDelivery: true, receipt,
+            note: '这里只记录执行中的阶段通知；未发送阶段通知不表示最终结果发送失败。最终正文仍须经人格整理和核验。' };
+    }
+    resultWorkflow(runId) {
+        const operations = this.d.store.operations(runId), used = [...new Set(operations.map(op => op.action))], registered = new Map(this.d.registry.actions().map(action => [action.id, action]));
+        return { kind: 'result-workflow', finalDelivery: 'after-persona-render-and-verification', actions: used.map(name => ({ name, registered: registered.has(name), declaredEffects: registered.get(name)?.effects ?? null, outcomes: [...new Map(operations.filter(op => op.action === name).map(op => { const outcome = { status: op.outcome?.status ?? null, effects: op.outcome?.effects ?? null }; return [runtimeHash(outcome), outcome]; })).values()] })),
+            note: '此材料用于生成最终答复，最终发送在正文核验之后；此时没有最终回执不表示发送失败。动作已注册与平台调用成功是两件事，暂停、超时或页面不可用不能推断缺少插件。' };
     }
     assessmentStatus(runId) { const value = z.object({ assessment: TaskAssessmentSchema, at: z.string() }).safeParse(this.d.store.readInput(runId, 'task-assessment')); return value.success ? { goalStatus: value.data.assessment.goalStatus, next: value.data.assessment.next, at: value.data.at } : null; }
     reconcileCapabilityChange(raw) {
@@ -667,7 +790,7 @@ export class ExecutionCoordinator {
         const producer = ProducerSchema.parse(provider.producerId);
         if (this.wakes.has(producer))
             throw new Error('DUPLICATE_PROVIDER');
-        const bound = { producerId: producer, validate: provider.validate.bind(provider), ...(provider.sourceAnchor ? { sourceAnchor: provider.sourceAnchor.bind(provider) } : {}) };
+        const bound = { producerId: producer, validate: provider.validate.bind(provider), ...(provider.sourceAnchor ? { sourceAnchor: provider.sourceAnchor.bind(provider) } : {}), ...(provider.work ? { work: provider.work.bind(provider) } : {}) };
         this.wakes.set(producer, bound);
         return () => { if (this.wakes.get(producer) === bound)
             this.wakes.delete(producer); };
@@ -982,8 +1105,8 @@ export class ExecutionCoordinator {
                     throw new Error('WAKE_NOT_AUTHORIZED');
                 const inputs = repository.readSelectedInputs(this.d.agentId, task.id, saved.input.inputRefs, policy.sourceRules), inputHash = runtimeHash(inputs), authorityVersion = runtimeHash(policy);
                 trialInputs = inputs;
-                const actions = this.d.registry.actions().filter(action => policy.actions.includes(action.id) && (action.effects === 'external-write' ? this.externalActionAllowed(run, policy, action) : action.effects !== 'local-write' || policy.allowLocalWrite));
-                const contributors = this.d.registry.contributors().filter(entry => entry.owner !== 'dsh-tools' || actions.some(action => action.owner === 'dsh-tools' && action.id === 'dsh_tool_call')), memory = this.d.memory();
+                const actions = this.d.registry.actions().filter(action => basicCapability(action) || policy.actions.includes(action.id) && (action.effects === 'external-write' ? this.externalActionAllowed(run, policy, action) : action.effects !== 'local-write' || policy.allowLocalWrite));
+                const contributors = this.d.registry.contributors(), memory = this.d.memory();
                 if (memory && !memory.ready())
                     throw new Error('DEPENDENCY_UNAVAILABLE');
                 const registryVersion = runtimeHash({ actions: actions.map(action => [action.id, action.owner, action.pluginVersion, action.version, action.input, action.effects]), contexts: contributors.map(entry => [entry.owner, entry.version, entry.context.id]) });
@@ -1009,7 +1132,7 @@ export class ExecutionCoordinator {
                 const evidence = this.evidence.get(id), access = this.d.personas.access(run, inputs, signal, guard);
                 memory?.acceptIntent({ ...access, producer: `producer:${request.producer}` });
                 const prior = this.previousContinuity(run, access, persona.version);
-                const sessionId = this.d.store.session(runtimeHash({ task: task.id, epoch: task.epoch, authorityVersion, inputHash, registryVersion, persona: runPersona.projectionKey, executionHistory: 1 }));
+                const sessionId = this.d.store.session(runtimeHash({ task: task.id, epoch: task.epoch, authorityVersion, inputHash, registryVersion, policyId: run.definition.policyId, motivation: access.motivation.kind, persona: runPersona.projectionKey, executionHistory: 1 }));
                 this.d.store.bindInput(id, 'task-facts', { goal: task.goal, epoch: task.epoch });
                 run = this.d.store.start(id, run.version, { sessionId, personaVersion: persona.version, model: this.d.model, registryVersion, authorityVersion,
                     inputs: inputs.map(input => ({ id: input.id, version: input.version, hash: runtimeHash([input.contentHash, input.proofHash]), scopeKey: input.scopeKey })) }, { ...runPersona.manifest, continuityCheckpointId: prior?.id ?? null });
@@ -1017,44 +1140,77 @@ export class ExecutionCoordinator {
                 this.d.store.checkpoint(id, { kind: 'run-start', intentVersion: task.epoch });
                 this.flushEvents();
                 const view = Object.freeze({ runId: id, taskId: task.id, scope: Object.freeze({ ...run.definition.scope }), origin: Object.freeze({ ...run.definition.origin }), signal });
-                const contexts = runPersona.items.map(item => ({ owner: 'memory', region: 'growth', item })), operationalCapabilities = [];
-                let contextBytes = Buffer.byteLength(JSON.stringify(contexts), 'utf8'), omitted = 0;
-                const add = (owner, region, item) => { const parsed = ContextItemSchema.parse(item), bytes = Buffer.byteLength(JSON.stringify(parsed), 'utf8'); if (Date.parse(parsed.expiresAt) <= Date.now() || contextBytes + bytes > this.d.context.maxBytes) {
-                    omitted++;
-                    return;
-                } contextBytes += bytes; contexts.push({ owner, region, item: parsed }); };
-                for (const item of memory?.prepareContext(access) ?? [])
-                    add('memory', 'execution', item);
-                for (const contributor of contributors) {
-                    const prepared = await Promise.race([contributor.context.prepare(view), new Promise((_resolve, reject) => { const timer = setTimeout(() => reject(new Error('CONTEXT_PREPARE_TIMEOUT')), this.d.context.prepareTimeoutMs); timer.unref(); })]);
-                    guard();
-                    for (const item of prepared)
-                        if (contributor.context.validate(view, item)) {
-                            if (contributor.owner === 'dsh-tools' && contributor.context.id === 'capabilities')
-                                operationalCapabilities.push(z.json().parse(JSON.parse(item.text)));
-                            else
-                                add(contributor.owner, contributor.context.id, item);
+                const operationalCapabilities = { source: 'current-native-tool-schemas', refreshed: 'each-model-step', hostCatalogConfigured: actions.some(action => action.owner === 'dsh-tools') };
+                const contexts = [];
+                let omitted = 0, lastPlan = null;
+                const refreshContexts = async () => {
+                    const candidates = runPersona.items.map(item => ({ owner: 'memory', region: 'growth', item })), unavailable = [];
+                    const deadline = Date.now() + (this.d.context.assembly?.mode === 'unified' ? this.d.context.assembly.deadlineMs : this.d.context.prepareTimeoutMs * Math.max(1, contributors.length));
+                    omitted = 0;
+                    const add = (owner, region, item) => { const parsed = ContextItemSchema.parse(item); if (Date.parse(parsed.expiresAt) <= Date.now()) {
+                        omitted++;
+                        return;
+                    } candidates.push({ owner, region, item: parsed }); };
+                    for (const item of memory?.prepareContext(access) ?? [])
+                        add('memory', 'execution', item);
+                    for (const contributor of contributors) {
+                        try {
+                            const prepared = await prepareWithin(current => { const leased = Object.freeze({ ...view, signal: current }); this.contextLeases.set(leased, { runId: id, owner: contributor.owner }); return contributor.context.prepare(leased); }, signal, Math.max(0, Math.min(this.d.context.prepareTimeoutMs, deadline - Date.now())));
+                            guard();
+                            for (const item of z.array(ContextItemSchema).max(64).parse(prepared))
+                                if (contributor.context.validate(view, item))
+                                    add(contributor.owner, contributor.context.id, item);
+                                else
+                                    omitted++;
                         }
-                        else
-                            omitted++;
-                }
-                evidence.setContexts(contexts);
+                        catch (error) {
+                            signal.throwIfAborted();
+                            if (this.d.context.assembly?.mode !== 'unified')
+                                throw error;
+                            const region = contributor.owner + ':' + contributor.context.id;
+                            if (this.d.context.regions?.[region]?.required)
+                                throw new Error('REQUIRED_CONTEXT_UNAVAILABLE');
+                            unavailable.push(region);
+                        }
+                    }
+                    guard();
+                    runPersona.guard();
+                    const admitted = admitNativeContexts(candidates, this.d.context.maxBytes, this.d.context.regions);
+                    contexts.splice(0, contexts.length, ...admitted.contexts);
+                    omitted += admitted.packet.decisions.reduce((sum, row) => sum + row.invalid + row.overBudget, 0) + unavailable.length;
+                    lastPlan = z.json().parse({ ...contextManifest('exploration', admitted.packet), unavailable });
+                    this.d.store.bindInput(id, 'context-plan:' + runtimeHash(lastPlan), lastPlan);
+                    evidence.setContexts(contexts);
+                };
+                await refreshContexts();
+                this.d.store.bindInput(id, 'context-plan', lastPlan);
                 const trigger = saved.messageSource ? this.validateMessageSource(saved.messageSource).item : null;
-                const intent = memory?.intent(access), program = z.json().parse({ goal: task.goal, inputs, operationalCapabilities, ...(saved.input.data === undefined ? {} : { providedData: { producer: request.producer, content: saved.input.data, note: '本轮提交的数据，不改变任务目标或授予额外权限' } }), motivation: access.motivation, intent: intent ?? null,
+                const wake = this.wakeOrigins(run)[0], wakeProvider = wake ? this.wakes.get(wake.producerId) : undefined;
+                const work = access.motivation.kind === 'maintenance' && wake ? WakeWorkSchema.parse(wakeProvider?.work?.(wake, task)) : null;
+                const runGoal = work?.goal ?? task.goal;
+                const intent = memory?.intent(access), program = z.json().parse({ goal: runGoal, workflow: { taskAccepted: true, currentPhase: work ? 'memory-maintenance' : 'task-execution', taskId: task.id, runId: id,
+                        resultDelivery: saved.messageSource ? { automatic: this.messageBindings.get(saved.messageSource.bindingId)?.autoDeliver === true, target: saved.messageSource.conversation, stage: 'after-persona-render-and-verification', candidate: 'return-final-answer' } : { automatic: false },
+                        note: '任务入口已完成受理。本轮直接开展目标所需工作，结束时输出结果草稿；后续程序独立进行成果评价、人格整理、核验和配置中的交付，不需寻找发送工具或再次提交本任务。' }, ...(work ? { work: { ...work, taskId: task.id, toolArguments: { dafeiyu_memory_maintenance_status: { id: work.requestId }, dafeiyu_memory_consolidate: { id: work.requestId }, dafeiyu_memory_maintenance_result: { id: work.requestId } }, backgroundTaskGoal: task.goal,
+                            note: '本轮只整理该请求已保存的经历，不执行背景任务。requestId是整理请求ID，不能用taskId替代。当前工具是维护阶段的授权子集，不表示其他阶段能力未安装。' } } : {}), inputs, operationalCapabilities, ...(saved.input.data === undefined ? {} : { providedData: { producer: request.producer, content: saved.input.data, note: '本轮提交的数据，不改变任务目标或授予额外权限' } }), motivation: access.motivation, intent: intent ?? null,
                     trigger: trigger ? redactJson(z.json().parse({ conversation: trigger.message.conversation, messageId: trigger.message.id, occurredAt: trigger.message.occurredAt, replyTo: trigger.message.replyTo ?? null, mainText: messageMainText(trigger.message), wake: run.definition.origin.kind === 'wake' ? run.definition.origin : null, note: '仅为实际触发来源与资料，不改变任务目标或授予额外权限' })).value : null,
                     continuation: saved.parentRunId ? { parentRunId: saved.parentRunId, checkpoint: this.d.store.readCheckpoint(saved.parentRunId, saved.checkpointId), operations: this.d.store.operations(saved.parentRunId).map(op => ({ id: op.id, action: op.action, state: op.state, status: op.outcome?.status ?? null, effects: op.outcome?.effects ?? null, receipts: op.outcome?.receipts ?? [] })) } : null,
                     continuity: prior ? { checkpointId: prior.id, previousRunId: prior.runId, sessionChanged: prior.sessionId !== sessionId, completedOperations: prior.completedOperations, unknownOperations: prior.unknownOperations, summary: prior.summary, gaps: prior.gaps } : null,
                     gaps: [...(omitted ? [`${omitted}项上下文未进入本轮，不能猜测其内容`] : []), ...(!prior ? ['未取得可核验接续检查点；不据此虚构过去'] : [])] });
+                const handoff = this.d.context.assembly?.mode === 'unified' ? stageHandoff('exploration', runGoal, { taskId: task.id, runId: id, intentVersion: task.epoch }, trigger?.message ?? null, { state: 'running', continuation: prior?.id ?? null }) : undefined;
+                if (handoff)
+                    this.d.store.bindInput(id, 'stage-handoff', handoff);
                 evidence.recordInput(program, inputs.flatMap(input => input.sourceRef ? [input.sourceRef] : []), prior ? { id: prior.id, hash: runtimeHash(prior) } : null, this.wakeSources(run, task));
                 const admittedGuard = () => { guard(); runPersona.guard(); if (!evidence.validate(evidence.exposed()))
                     throw new Error('SOURCE_STALE'); }, bound = actions.map(action => this.bindAction(run, action, signal, admittedGuard, guard));
+                let contextUsed = false;
                 let stage = 0, previousAssessment;
                 for (;;) {
                     this.d.store.appendExecutionEvent(id, 'task.stage', { phase: 'exploration', stage, deadlineAt: new Date(Date.parse(run.updatedAt) + this.d.turnTimeoutMs).toISOString() });
                     this.flushEvents();
                     let checkpoint;
-                    const frame = { mode: 'task', sessionId, view, persona, personaItems: runPersona.items, goal: task.goal, inputs, actions: bound, guard: admittedGuard, ...(this.d.assessmentTimeoutMs ? { assessmentTimeoutMs: this.d.assessmentTimeoutMs } : {}),
-                        program: z.json().parse({ ...z.record(z.string(), z.json()).parse(program), stage: { kind: 'exploration', index: stage, previousAssessment: previousAssessment ?? null } }), contexts, evidence,
+                    const frame = { mode: 'task', sessionId, view, persona, personaItems: runPersona.items, goal: runGoal, inputs, actions: bound, guard: admittedGuard, ...(this.d.assessmentTimeoutMs ? { assessmentTimeoutMs: this.d.assessmentTimeoutMs } : {}),
+                        ...(handoff ? { handoff } : {}), ...(this.d.context.assembly?.mode === 'unified' ? { refreshContexts: async () => { if (contextUsed)
+                                await refreshContexts(); contextUsed = true; }, contextPlan: () => lastPlan, contextAudit: (data) => { this.d.store.appendExecutionEvent(id, 'context.admitted', data); this.flushEvents(); } } : {}), program: z.json().parse({ ...z.record(z.string(), z.json()).parse(program), ...(handoff ? { handoff } : {}), stage: { kind: 'exploration', index: stage, previousAssessment: previousAssessment ?? null } }), contexts, evidence,
                         audit: data => { this.d.store.appendExecutionEvent(id, 'execution.compaction', data); this.flushEvents(); },
                         checkpoint: (session, seq, deps, text) => { checkpoint = { session, seq, deps, text }; }, ...this.d.context };
                     const result = await this.d.runtime.runExecution(frame);
@@ -1065,7 +1221,7 @@ export class ExecutionCoordinator {
                     this.flushEvents();
                     let reviewed;
                     try {
-                        reviewed = await this.d.runtime.assessExecution(frame, result, z.json().parse({ operations, programFeedback: this.d.store.readInput(id, 'automatic-progress'), blocking: memory?.intent(access).blocking ?? false, coverage: { complete: true } }));
+                        reviewed = await this.d.runtime.assessExecution(frame, result, z.json().parse({ operations, programFeedback: this.progressFacts(this.d.store.readInput(id, 'automatic-progress')), workflow: this.resultWorkflow(id), blocking: memory?.intent(access).blocking ?? false, coverage: { complete: true } }));
                         if (reviewed.assessment.evidenceIds.some(ref => !operations.some(op => op.id === ref)))
                             throw new Error('TASK_ASSESSMENT_EVIDENCE_INVALID');
                     }
@@ -1078,7 +1234,7 @@ export class ExecutionCoordinator {
                         this.d.store.transition(id, this.d.store.get(id).version, 'waiting', safeCode(e));
                         return;
                     }
-                    const record = { schemaVersion: 1, assessment: reviewed.assessment, model: this.d.model, resultRef: reviewed.resultRef, draftRef: result.resultRef, basisHash: runtimeHash(operations), at: new Date().toISOString() };
+                    const record = { schemaVersion: 1, assessment: reviewed.assessment, model: reviewed.model, resultRef: reviewed.resultRef, draftRef: result.resultRef, basisHash: runtimeHash(operations), at: new Date().toISOString() };
                     this.d.store.bindInput(id, `task-assessment:${stage}`, record);
                     if (reviewed.assessment.next === 'continue') {
                         previousAssessment = reviewed.assessment;
@@ -1270,17 +1426,16 @@ export class ExecutionCoordinator {
             } };
     }
     conversationActions(run, producer, signal, guard) {
-        const policy = this.d.options.policies.find(policy => policy.id === 'conversation' && policy.producers.includes(producer));
-        if (!policy)
-            return [];
-        return this.d.registry.actions().filter(action => !action.requiresTask && policy.actions.includes(action.id) && action.effects !== 'external-write' && (action.effects !== 'local-write' || policy.allowLocalWrite))
+        const policy = this.conversationPolicy(producer);
+        return this.d.registry.actions().filter(action => basicCapability(action) || !action.requiresTask && policy?.actions.includes(action.id) && action.effects !== 'external-write' && (action.effects !== 'local-write' || policy.allowLocalWrite))
             .map(action => { const base = () => { signal.throwIfAborted(); guard(); if (!action.active() || this.d.store.get(run.id).state !== 'running')
             throw new Error('SCOPE_DENIED'); }; return this.bindAction(run, action, signal, () => { base(); this.d.personas.current(run.id)?.guard(); }, base); });
     }
+    conversationPolicy(producer) { return this.d.options.policies.find(policy => policy.id === `conversation-${producer}` && policy.producers.includes(producer)) ?? this.d.options.policies.find(policy => policy.id === 'conversation' && policy.producers.includes(producer)); }
     conversationSnapshot(producer) {
-        const policy = this.d.options.policies.find(policy => policy.id === 'conversation' && policy.producers.includes(producer));
+        const policy = this.conversationPolicy(producer);
         return { policyId: policy?.id ?? 'conversation-v2', authority: policy ?? null, actions: this.d.registry.actions()
-                .filter(action => policy?.actions.includes(action.id) && !action.requiresTask && action.effects !== 'external-write' && (action.effects !== 'local-write' || policy.allowLocalWrite))
+                .filter(action => basicCapability(action) || policy?.actions.includes(action.id) && !action.requiresTask && action.effects !== 'external-write' && (action.effects !== 'local-write' || policy.allowLocalWrite))
                 .map(action => ({ id: action.id, owner: action.owner, version: action.version, input: action.input, effects: action.effects })) };
     }
     authority(context, pluginId, effect = 'read') {

@@ -44,6 +44,10 @@ export declare class QqMediaStore {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     };
     reference(key: string): {
         ref: {
@@ -71,6 +75,10 @@ export declare class QqMediaStore {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     };
     locator(key: string): {
         file?: string | undefined;
@@ -103,6 +111,10 @@ export declare class QqMediaStore {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     }[];
     current(proof: ResourceProof): boolean;
     revoke(scene: Conversation, messageId: string): number | bigint;

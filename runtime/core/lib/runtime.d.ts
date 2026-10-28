@@ -8,6 +8,7 @@ import type { FeedbackMeta } from '#dafeiyu/contracts';
 import type { CompactionBinding, CompactionAudit } from './compaction-runtime.js';
 import { NativeRuntime } from './native-runtime.js';
 import type { TaskExecutionFrame, NativeAction, ConversationExecutionFrame } from './execution-frame.js';
+import { HarnessRuntime } from './harness-runtime.js';
 export interface RuntimeDelivery {
     id: string;
     guard: () => void;
@@ -29,7 +30,8 @@ export interface RunResult {
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export declare class DshRunError extends Error {
     readonly sources: SourceRef[];
-    constructor(sources: SourceRef[]);
+    readonly code: string;
+    constructor(sources: SourceRef[], code?: string);
 }
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
 export declare class DshRuntime {
@@ -41,10 +43,12 @@ export declare class DshRuntime {
     private readonly agentId;
     private readonly compactionBinding;
     private readonly compactionAudit;
+    private readonly harness;
     private readonly handles;
     private readonly native;
     private meterLoading;
-    constructor(ctx: Context, model: AgentOptions, cwd: string, coordinator: ContextCoordinator, validateFeedback: FeedbackValidator, agentId: string, compactionBinding: () => CompactionBinding | undefined, compactionAudit: CompactionAudit, managedProjection?: boolean);
+    constructor(ctx: Context, model: AgentOptions, cwd: string, coordinator: ContextCoordinator, validateFeedback: FeedbackValidator, agentId: string, compactionBinding: () => CompactionBinding | undefined, compactionAudit: CompactionAudit, managedProjection?: boolean, harness?: HarnessRuntime);
+    registerHarnessSection(name: string): () => void;
     run(item: PendingMessage, persona: PersonaSnapshot, actions: readonly BoundAction[], signal: AbortSignal, channelDescription?: string, delivery?: RuntimeDelivery, nativeActions?: readonly NativeAction[], allowEmpty?: () => boolean): Promise<RunResult>;
     runFrame(frame: TaskExecutionFrame): ReturnType<NativeRuntime['run']>;
     runFrame(frame: ConversationExecutionFrame): Promise<RunResult>;
@@ -70,6 +74,7 @@ export declare class DshRuntime {
             retainExperience: boolean;
             next: "continue" | "deliver" | "wait" | "capability-change";
         };
+        model: AgentOptions;
         resultRef: {
             sessionId: string;
             messageSeq: import("@deepseek-ai/dsh-session").SessionSeq;
@@ -292,7 +297,7 @@ export declare class DshRuntime {
                 inputHash: string;
                 result: {
                     fragment: {
-                        kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+                        kind: "pending" | "result" | "fact" | "decision" | "constraint" | "correction" | "uncertainty" | "note";
                         text: string;
                     };
                     qualifiers: {
@@ -340,7 +345,7 @@ export declare class DshRuntime {
             };
             fragments: {
                 ref: string;
-                kind: "result" | "fact" | "decision" | "constraint" | "correction" | "pending" | "uncertainty" | "note";
+                kind: "pending" | "result" | "fact" | "decision" | "constraint" | "correction" | "uncertainty" | "note";
                 text: string;
                 version: 1;
                 group: string;

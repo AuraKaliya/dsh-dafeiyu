@@ -67,8 +67,12 @@ export class NativeDeliveryStore {
     }
     start(runId, raw) { return this.atomic(() => { const current = this.get(runId); if (!current || current.state !== 'accepted')
         throw new Error('DELIVERY_STATE_CONFLICT'); this.db.prepare('UPDATE native_deliveries SET material=? WHERE run_id=?').run(JSON.stringify(materialSchema.parse(raw)), runId); return this.advance(runId, 'accepted', 'rendering'); }); }
-    rendered(runId, raw) { return this.atomic(() => { if (this.get(runId)?.state !== 'rendering')
-        throw new Error('DELIVERY_STATE_CONFLICT'); this.db.prepare('UPDATE native_deliveries SET render_ref=? WHERE run_id=?').run(JSON.stringify(renderRef.parse(raw)), runId); return this.advance(runId, 'rendering', 'verifying'); }); }
+    candidate(runId, raw) { return this.atomic(() => { const row = this.get(runId); if (row?.state !== 'rendering' || row.renderRef || row.credential)
+        throw new Error('DELIVERY_STATE_CONFLICT'); this.event(runId, 'native.delivery.candidate', { renderRef: renderRef.parse(raw) }); return this.advance(runId, 'rendering', 'verifying'); }); }
+    repair(runId) { return this.atomic(() => { const row = this.get(runId); if (row?.state !== 'verifying' || row.renderRef || row.credential)
+        throw new Error('DELIVERY_STATE_CONFLICT'); return this.advance(runId, 'verifying', 'rendering'); }); }
+    rendered(runId, raw) { return this.atomic(() => { const row = this.get(runId); if (!row || !['rendering', 'verifying'].includes(row.state) || row.renderRef)
+        throw new Error('DELIVERY_STATE_CONFLICT'); this.db.prepare('UPDATE native_deliveries SET render_ref=? WHERE run_id=?').run(JSON.stringify(renderRef.parse(raw)), runId); return this.advance(runId, row.state, 'verifying'); }); }
     approve(runId, body) {
         return this.atomic(() => {
             const current = this.get(runId);

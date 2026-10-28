@@ -29,6 +29,7 @@ export * from './activity.js';
 export * from './media.js';
 export * from './media-delivery.js';
 export * from './dsh-tools.js';
+export * from './bili-browser.js';
 export * from './qq-expression.js';
 export * from './task-assessment.js';
 import type { TaskExpressionProvider } from './expression.js';
@@ -199,6 +200,7 @@ export declare const ObservationSchema: z.ZodObject<{
         "message.ignored": "message.ignored";
         "message.unsupported": "message.unsupported";
         "message.recalled": "message.recalled";
+        "delivery.diagnostic": "delivery.diagnostic";
     }>;
     data: z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean, z.ZodNull]>>;
 }, z.core.$strict>;
@@ -235,6 +237,12 @@ export type DeliveryResult = {
     readonly code: string;
 };
 export interface ChannelCapability {
+    deliveryProgress?(replyId: string): {
+        confirmed: number;
+        pending: number;
+        unknown: number;
+        canResume: boolean;
+    } | null;
     readonly channel: string;
     readonly account: string;
     /** Actual transport capabilities/limits, independent of the model's own modalities. */
@@ -337,3 +345,4 @@ export interface PendingMessage {
     readonly sessionId: string;
     readonly reply: Reply | null;
 }
+export * from './recent-state.js';

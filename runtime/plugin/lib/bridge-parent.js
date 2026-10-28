@@ -1,14 +1,16 @@
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { ToolCallId } from '@deepseek-ai/dsh-llm';
 import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { DeferredPluginChanges } from './deferred-plugins.js';
 import { readInstallationSettings } from './settings.js';
+import { readBiliBrowser } from './bili-browser.js';
 import { z } from 'zod';
-import { DshBridgeRequestSchema, DshToolCatalogSchema, ExternalTaskAuthorizationSchema, DshCapabilityChangeSchema, redactJson } from '#dafeiyu/contracts';
+import { DshBridgeRequestSchema, DshToolCatalogSchema, ExternalTaskAuthorizationSchema, DshCapabilityChangeSchema, redactJson, orderedDshCatalog, stableJson } from '#dafeiyu/contracts';
 // These have dedicated Dafeiyu owners, or would escape the authenticated QQ source.
 const excluded = /^(?:schedule_|bili_|learn_|(?:send_message|interrupt_agent|list_agents|subagent|subagent_fork|workflow|ask_user_question|exit_plan_mode|voice_listen|voice_speak|dsh_browser_auth|dsh_browser_replay|create_goal|update_goal|get_goal)$)/;
+const excludedSkill = (name) => /^(?:bilibili|bili[-_].*)$/i.test(name);
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const readTools = new Set(['read', 'glob', 'grep', 'read_image', 'web_search', 'web_fetch', 'read_page', 'x_search', 'load_workspace_dependencies', 'voice_status', 'voice_transcribe', 'dsh_browser_snapshot', 'dsh_browser_a11y', 'dsh_browser_challenge', 'dsh_browser_content', 'dsh_browser_get_value', 'dsh_browser_list_tabs', 'dsh_browser_session', 'dsh_browser_history', 'dsh_browser_visited', 'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource', 'cordis_inspect_list', 'cordis_inspect_query', 'job_output', 'job_list']);
 const code = (error) => error instanceof Error && /^[A-Z0-9_]{1,100}$/.test(error.message) ? error.message : 'DSH_TOOL_FAILED';
@@ -61,10 +63,11 @@ export function attachDshBridge(ctx, child, settingsFile) {
         const tools = ctx.tools.schemas(h.agent).filter(tool => !excluded.test(tool.name));
         const registry = ctx.get('skills');
         const snapshot = registry && tools.some(tool => tool.name === 'skill') ? z.object({ skills: z.array(z.object({ name: z.string(), description: z.string(), invocation: z.object({ modelInvocable: z.boolean() }) })), complete: z.boolean() }).parse(await registry.snapshot({ scope: h.agent, cwd: dirname(settings.dataDir), signal })) : null;
-        const skills = snapshot?.skills.filter(item => item.invocation.modelInvocable).map(item => ({ name: item.name, description: item.description, load: { name: 'skill', arguments: { name: item.name } } }));
+        const skills = snapshot?.skills.filter(item => item.invocation.modelInvocable && !excludedSkill(item.name)).map(item => ({ name: item.name, description: item.description, load: { name: 'skill', arguments: { name: item.name } } }));
         const directories = ctx.get('workingDirectory');
         const workingDirectory = directories ? await directories.ensure(h.agent, signal) : dirname(settings.dataDir), environment = { workingDirectory, developmentDirectory: join(dirname(settings.dataDir), 'development', taskId ?? 'shared'), platform: process.platform };
-        return DshToolCatalogSchema.parse({ version: hash({ tools, skills: skills ?? null, workingDirectory }), tools, environment, ...(skills ? { skills, skillsComplete: snapshot?.complete } : {}), pluginChanges: changes.status() });
+        const catalog = orderedDshCatalog(DshToolCatalogSchema.parse({ version: '0'.repeat(64), tools, environment, ...(skills ? { skills, skillsComplete: snapshot?.complete } : {}), pluginChanges: changes.status() }));
+        return { ...catalog, version: createHash('sha256').update(stableJson(z.json().parse({ tools: catalog.tools, skills: catalog.skills ?? null, workingDirectory }))).digest('hex') };
     };
     const announced = new Set(), lastAttempt = new Map();
     const notifyChanges = async () => {
@@ -115,6 +118,21 @@ export function attachDshBridge(ctx, child, settingsFile) {
                     send(message.id, z.json().parse(await catalog(await handle(message.taskId ?? 'catalog'), controller.signal, message.taskId)));
                     return;
                 }
+                if (message.type === 'dsh.bili-read') {
+                    if (!settings.bilibili?.capabilities || !settings.bilibili.browser)
+                        throw new Error('BILI_BROWSER_NOT_CONFIGURED');
+                    const h = await handle('bili:' + message.request.taskId);
+                    const value = await readBiliBrowser(message.request, settings.bilibili.browser.expectedUid, async (name, args, signal) => {
+                        if (!['dsh_browser_open', 'dsh_browser_execute', 'dsh_browser_scroll'].includes(name))
+                            throw new Error('BILI_BROWSER_ACTION_DENIED');
+                        const result = await owner.agents.withInitiator(h.agent, () => owner.tools.execute({ callId: ToolCallId(randomUUID()), name, arguments: args, agent: h.agent, signal }));
+                        if (result.isError)
+                            throw new Error('BILI_BROWSER_READ_FAILED');
+                        return result.value;
+                    }, controller.signal);
+                    send(message.id, z.json().parse(value));
+                    return;
+                }
                 const authorization = ExternalTaskAuthorizationSchema.parse(message.authorization);
                 if (authorization.action.owner !== 'dsh-tools' || authorization.action.id !== 'dsh_tool_call' || authorization.source.kind === 'owner-message' && (authorization.source.senderId !== settings.qq.ownerId || authorization.source.conversation.account !== settings.qq.botId))
                     throw new Error('DSH_AUTHORITY_INVALID');
@@ -125,6 +143,11 @@ export function attachDshBridge(ctx, child, settingsFile) {
                 if (validateJsonSchemaValue(tool.parameters, args).length)
                     throw new Error('DSH_TOOL_ARGUMENTS_INVALID');
                 controller.signal.throwIfAborted();
+                if (tool.name === 'skill') {
+                    const skill = z.object({ name: z.string() }).safeParse(args);
+                    if (skill.success && excludedSkill(skill.data.name))
+                        throw new Error('DSH_SKILL_NOT_AVAILABLE');
+                }
                 const management = z.object({ action: z.string() }).safeParse(args);
                 if (tool.name === 'plugin_manager' && management.success && !management.data.action.startsWith('list_')) {
                     const row = changes.enqueue(authorization, z.json().parse(args), current.version);

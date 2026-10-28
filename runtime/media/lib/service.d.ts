@@ -125,7 +125,7 @@ export declare class MediaService extends Service implements MediaPort {
         sourceId: string;
         sourceVersion: number;
         kind: "image" | "audio" | "video" | "document";
-        state: "ready" | "failed" | "deleted" | "staging" | "evicted";
+        state: "deleted" | "failed" | "staging" | "ready" | "evicted";
         sha256: string | null;
         bytes: number | null;
         mime: string | null;
@@ -175,7 +175,7 @@ export declare class MediaService extends Service implements MediaPort {
             completeness: "unknown" | "complete" | "partial";
         };
         readProgress: {
-            state: "failed" | "unavailable" | "observed" | "unread";
+            state: "failed" | "observed" | "unread" | "unavailable";
             subject: "source-range" | "reference" | "provided-page";
             completeness: "unknown" | "complete" | "partial";
         };
@@ -217,7 +217,7 @@ export declare class MediaService extends Service implements MediaPort {
         understood: boolean;
     } | {
         metadata: {
-            kind: "unknown" | "image" | "audio" | "video";
+            kind: "image" | "audio" | "video" | "unknown";
             width: number | null;
             height: number | null;
             durationMs: number | null;
@@ -270,6 +270,10 @@ export declare class MediaService extends Service implements MediaPort {
             durationMsHint: number | null;
             rangeReadable: boolean;
             publicContent: boolean;
+            sourceFrame?: {
+                positionMs: number;
+                durationMs: number;
+            } | undefined;
         };
     }>;
     replyDraft(runId: string): {
@@ -381,7 +385,7 @@ export declare class MediaService extends Service implements MediaPort {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "record" | "file" | "image";
+            delivery: "image" | "file" | "record";
             asset: {
                 schemaVersion: 1;
                 id: string;

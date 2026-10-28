@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { ResourceProof, ExecutionContextV3, MediaSourceDescription, PersonaSourceRef } from '#dafeiyu/contracts';
-export declare const BILI_APPLICATION_ID = 1145455158, BILI_SCHEMA_VERSION = 1;
-export declare const BILI_TABLES: readonly ["bili_metadata", "bili_clock", "bili_requests", "bili_sources", "bili_revisions", "bili_pages", "bili_media", "bili_outbox"];
+import { BiliDiagnostics } from './diagnostics.js';
+export declare const BILI_APPLICATION_ID = 1145455158, BILI_SCHEMA_VERSION = 2;
+export declare const BILI_TABLES: readonly ["bili_metadata", "bili_clock", "bili_requests", "bili_sources", "bili_revisions", "bili_pages", "bili_media", "bili_outbox", "bili_http_attempts", "bili_http_control"];
 declare const identitySchema: z.ZodObject<{
     agentId: z.ZodString;
     profileId: z.ZodString;
@@ -16,9 +17,10 @@ export declare const BiliPageSchema: z.ZodObject<{
         search: "search";
         video: "video";
         comments: "comments";
-        subtitles: "subtitles";
         danmaku: "danmaku";
         media: "media";
+        browser: "browser";
+        subtitles: "subtitles";
     }>;
     sourceKey: z.ZodString;
     sourceVersion: z.ZodNumber;
@@ -52,6 +54,7 @@ export type BiliPage = z.infer<typeof BiliPageSchema>;
 export declare class BiliStore {
     private readonly maxPages;
     private readonly db;
+    readonly diagnostics: BiliDiagnostics;
     private readonly checking;
     readonly identity: z.infer<typeof identitySchema>;
     constructor(file: string, identity: z.infer<typeof identitySchema>, create?: boolean, maxPages?: number);
@@ -61,7 +64,7 @@ export declare class BiliStore {
     begin(context: ExecutionContextV3, requestId: string, input: unknown): {
         id: string;
         owner: string;
-        kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
+        kind: "discover" | "search" | "video" | "comments" | "danmaku" | "media" | "browser" | "subtitles";
         sourceKey: string;
         sourceVersion: number;
         fetchedAt: string;
@@ -90,7 +93,7 @@ export declare class BiliStore {
     complete(context: ExecutionContextV3, requestId: string, value: Omit<BiliPage, 'id' | 'owner' | 'fetchedAt' | 'sourceVersion'>, now?: number, related?: (page: BiliPage) => void): {
         id: string;
         owner: string;
-        kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
+        kind: "discover" | "search" | "video" | "comments" | "danmaku" | "media" | "browser" | "subtitles";
         sourceKey: string;
         sourceVersion: number;
         fetchedAt: string;
@@ -120,7 +123,7 @@ export declare class BiliStore {
     pages(owner: string): {
         id: string;
         owner: string;
-        kind: "discover" | "search" | "video" | "comments" | "subtitles" | "danmaku" | "media";
+        kind: "discover" | "search" | "video" | "comments" | "danmaku" | "media" | "browser" | "subtitles";
         sourceKey: string;
         sourceVersion: number;
         fetchedAt: string;
@@ -207,6 +210,10 @@ export declare class BiliStore {
             durationMsHint: number | null;
             rangeReadable: boolean;
             publicContent: boolean;
+            sourceFrame?: {
+                positionMs: number;
+                durationMs: number;
+            } | undefined;
         };
         locator: z.core.util.JSONType;
         expiresAt: number;

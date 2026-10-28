@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-token-meter';
 import type { CompactionBasis, CompactionProvider, CompactionScope, CompactionSource } from '@dafeiyu/contracts';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import {toolReceiptView} from './tool-receipt-view.js';
 import { SourceTracker,provenanceRecordSchema,dependenciesSchema,unionDependencies,readProvenance } from './provenance.js';
 import type { SourceDependency } from '@dafeiyu/contracts';
 import type { ContextEvidenceView } from './context-runtime.js';
@@ -38,7 +39,10 @@ const recordSchema=z.discriminatedUnion('type',[
 /** DSH's supported plugin-record seam preserves these non-surface records across resume. */
 export function readCompactionEvents(session:Session):(SessionEvent|z.infer<typeof recordSchema>)[]{
   return session.snapshotEvents().map(event=>{const record=pluginRecordOf(event);
-    return record?.type.startsWith('plugin:dafeiyu/')?recordSchema.parse(record):event;});
+    // Diagnostics share the namespace but are not compaction/provenance state records.
+    return record&&['plugin:dafeiyu/turn-open','plugin:dafeiyu/turn-seal','plugin:dafeiyu/compaction-check',
+      'plugin:dafeiyu/source-record','plugin:dafeiyu/request-sources','plugin:dafeiyu/summary-manifest','plugin:dafeiyu/summary-view'].includes(record.type)
+      ?recordSchema.parse(record):event;});
 }
 export function committedSummary(session:Session,id:string,text:string):boolean {
   const events=session.snapshotEvents();
@@ -250,6 +254,19 @@ export class CompactionRuntime {
       Math.ceil((Buffer.byteLength(JSON.stringify(history),'utf8')+(pending?Buffer.byteLength(JSON.stringify(pending),'utf8'):0))/3));
     const target = Math.floor(p.inputTokens * p.targetRatio), threshold = p.inputTokens * p.thresholdRatio;
     if (pressure < threshold) { this.record('below-threshold', pressure, target); return; }
+    if(this.item?.inputKind==='dafeiyu-execution'&&this.ctx.tools.schemas(agent).some(tool=>tool.name==='dafeiyu_execution_source_open')){
+      const all=session.snapshotEvents(),bySeq=new Map(all.map(event=>[event.seq,event])),visible=session.surface.nodes.map(seq=>bySeq.get(seq)).filter((event):event is Extract<SessionEvent,{type:'tool/result'}>=>event?.type==='tool/result');
+      const exposed=new Set(readProvenance(session).flatMap(event=>event.type==='plugin:dafeiyu/request-sources'?event.data.parents:[]));let saved=0,count=0;
+      for(const event of visible.slice(0,-8)){
+        signal.throwIfAborted();if(!exposed.has(event.seq))continue;const record=this.provenance.get(event.seq);if(!record||!this.provenance.valid(record))continue;
+        const content=event.data.message.content;if(content.some(block=>block.type!=='text'))continue;
+        const text=content.map(block=>block.type==='text'?block.text:'').join('\n'),view=toolReceiptView(text,event.data.meta,String(event.data.message.toolCallId));if(!view)continue;
+        const message={...event.data.message,content:[{type:'text' as const,text:view}]},benefit=meter.estimateMessage(event.data.message)-meter.estimateMessage(message);if(benefit<=0)continue;
+        priceRetirement(this.ctx,session,[event.seq]);const replacement=session.append('tool/result',{...event.data,message},{surfaceOp:{op:'replace',startSeq:event.seq,endSeq:event.seq},sourceEventSeqs:[event.seq]});
+        this.provenance.recordReplacement(replacement.seq,event.seq);saved+=benefit;count++;if(pressure-saved<=target)break;
+      }
+      if(count){this.record('tool-receipts-compacted',pressure,target,saved);this.audit(this.item,{status:'tool-receipts-compacted',count,saved,retainedRecent:8},[]);if(!await this.ctx.sessions.flush(session))throw new Error('PERSISTENCE_FAILED');return;}
+    }
     const events = readCompactionEvents(session), last = events.findLast(e => e.type === 'plugin:dafeiyu/compaction-check' && ['compacted', 'composed', 'rewritten', 'rewrite-failed', 'rewrite-no-benefit', 'summary-failed', 'no-benefit', 'conflict'].includes(e.data.status));
     if (last?.type === 'plugin:dafeiyu/compaction-check' && (Date.now() - last.data.at < p.cooldownMs
       || pressure - (last.data.pressure - last.data.saved) < p.minGrowthTokens)) { this.record('cooldown-or-growth', pressure, target); return; }
@@ -372,7 +389,10 @@ export class CompactionRuntime {
     const selected = new Set(seqs), priced = measurement.nodes.filter(n => selected.has(n.seq));
     const oldTokens = priced.reduce((sum, n) => sum + n.tokens, 0);
     if (!seqs.length || oldTokens < p.minSavingsTokens + 256 || !toolPairingBalancedBefore(session, seqs[0]!) || !toolPairingBalancedAfter(session, seqs.at(-1)!)) {
-      this.record('protected-or-insufficient', pressure, target); return;
+      const data=this.record('protected-or-insufficient', pressure, target,0,false);
+      this.audit(this.item!,{...data,protected:{currentInput:pending?1:0,recentTurns:p.retainTurns,
+        toolResults:history.filter(message=>message.role==='tool').length,activeTask:binding.provider.basis(this.scope()).taskId!==null},
+        recovery:'Keep current constraints and unknown effects; reopen older verified results by source reference. If required material still cannot fit, report capacity instead of replaying actions.'},[]);return;
     }
     const generation = session.surface.replaceGeneration, basis = binding.provider.basis(this.scope()), id = CompactionId(randomUUID());
     const dependencies=binding.provider.sources?unionDependencies(...seqs.map(seq=>this.provenance.dependenciesFor(seq,this.legacyEpoch(seq)))):undefined;

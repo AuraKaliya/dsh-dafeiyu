@@ -2,10 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { NativeExpressionPacketSchema, NativeExpressionCandidateSchema, TaskResultAnchorSchema, redactJson } from '#dafeiyu/contracts';
 import { verifyPersonaDelivery } from './expression-runtime.js';
+import { packNativeEvidence } from './native-evidence.js';
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function migrateNativeExpression(db) {
     const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-    if (version === 10 || version === 11 || version === 12) {
+    if (version === 10 || version === 11 || version === 12 || version === 13) {
         db.prepare('SELECT * FROM native_expression_packets LIMIT 0').all();
         return;
     }
@@ -45,42 +46,51 @@ export class NativeExpression {
             throw new Error('SOURCE_STALE');
         if (access.media && hash(this.ctx.dafeiyu.nativeMediaTargetMaterial(access)) !== hash(access.media))
             throw new Error('SOURCE_STALE');
-        const candidates = z.array(NativeExpressionCandidateSchema).max(64).parse(access.candidates), evidence = [], proofs = [], targetInferences = [];
-        let forbidden = false;
-        for (const candidate of candidates) {
-            const source = candidate.source;
-            let material = null, fence = null, kind = 'reported', mediaStamp = null, targetStamp = null;
-            if (source.kind === 'memory')
-                material = this.expression.nativeMemoryMaterial(scope.agentId, source, anchor.target, access.expressionPolicy ?? null);
-            else if (candidate.view !== null) {
-                const observed = this.store.capabilities.withAccess(access.execution, () => {
-                    const media = this.ctx.dafeiyu.nativeMediaObservedMaterial(access.execution, source, anchor.target, candidate.view);
-                    if (media) {
-                        kind = media.kind;
-                        mediaStamp = media.stamp;
+        // This read is synchronous: retain per-source checks and validate the entire authority/history
+        // before and after the batch, rather than repeating that traversal for every nested read.
+        const readAccess = { ...access.execution, guard: () => { access.execution.view.signal.throwIfAborted(); if (!this.ready())
+                throw new Error('DEPENDENCY_UNAVAILABLE'); } };
+        const candidates = z.array(NativeExpressionCandidateSchema).max(64).parse(access.candidates), proofs = [], targetInferences = [];
+        let forbidden = false, evidence = [];
+        const read = () => {
+            for (const candidate of candidates) {
+                const source = candidate.source;
+                let material = null, fence = null, kind = 'reported', mediaStamp = null, targetStamp = null;
+                if (source.kind === 'memory')
+                    material = this.expression.nativeMemoryMaterial(scope.agentId, source, anchor.target, access.expressionPolicy ?? null);
+                else if (candidate.view !== null) {
+                    const observed = this.store.capabilities.withAccess(readAccess, () => {
+                        const media = this.ctx.dafeiyu.nativeMediaObservedMaterial(readAccess, source, anchor.target, candidate.view);
+                        if (media) {
+                            kind = media.kind;
+                            mediaStamp = media.stamp;
+                        }
+                        return this.store.capabilities.expressionView(readAccess, source, anchor.target, candidate.view, !!media, (proof, view) => this.ctx.dafeiyu.capabilityPublicView(proof, view), (proof, view) => this.ctx.dafeiyu.capabilityTargetView(proof, view, anchor.target, scope));
+                    });
+                    material = observed?.text ?? null;
+                    fence = observed?.fence ?? null;
+                    if (observed?.target) {
+                        kind = observed.target.kind;
+                        targetStamp = observed.target.stamp;
                     }
-                    return this.store.capabilities.expressionView(access.execution, source, anchor.target, candidate.view, !!media, (proof, view) => this.ctx.dafeiyu.capabilityPublicView(proof, view), (proof, view) => this.ctx.dafeiyu.capabilityTargetView(proof, view, anchor.target, scope));
-                });
-                material = observed?.text ?? null;
-                fence = observed?.fence ?? null;
-                if (observed?.target) {
-                    kind = observed.target.kind;
-                    targetStamp = observed.target.stamp;
                 }
+                if (material === null) {
+                    forbidden = true;
+                    continue;
+                }
+                proofs.push({ source, viewHash: hash(material), fence, ...(mediaStamp ? { mediaStamp } : {}), ...(targetStamp ? { targetStamp } : {}) });
+                if (access.selectedSourceIds?.length && !access.selectedSourceIds.includes(source.id))
+                    continue;
+                if (targetStamp && kind === 'inference')
+                    targetInferences.push(evidence.length);
+                evidence.push({ id: `S${evidence.length + 1}`, kind, text: material });
             }
-            if (material === null) {
-                forbidden = true;
-                continue;
-            }
-            proofs.push({ source, viewHash: hash(material), fence, ...(mediaStamp ? { mediaStamp } : {}), ...(targetStamp ? { targetStamp } : {}) });
-            if (access.selectedSourceIds?.length && !access.selectedSourceIds.includes(source.id))
-                continue;
-            if (evidence.length >= 16)
-                throw new Error('NATIVE_EXPRESSION_CAPACITY');
-            if (targetStamp && kind === 'inference')
-                targetInferences.push(evidence.length);
-            evidence.push({ id: `S${evidence.length + 1}`, kind, text: material });
-        }
+        };
+        if (access.readSources)
+            access.readSources(read);
+        else
+            read();
+        access.guard();
         if (targetInferences.length && (forbidden || access.derivedInputComplete !== true)) {
             for (const index of targetInferences.reverse()) {
                 evidence.splice(index, 1);
@@ -91,8 +101,8 @@ export class NativeExpression {
         }
         const resultIncluded = !forbidden && !access.opaqueInfluence;
         for (const receipt of access.operationalEvidence ?? []) {
-            if (evidence.length >= 16)
-                throw new Error('NATIVE_EXPRESSION_CAPACITY');
+            if (receipt.id === 'WORKFLOW' && !evidence.length && !resultIncluded && anchor.outcome !== 'waiting')
+                continue;
             evidence.push({ ...receipt, id: 'O' + evidence.length });
         }
         if (anchor.outcome === 'waiting')
@@ -105,13 +115,16 @@ export class NativeExpression {
             evidence.push({ id: 'M', kind: 'reported', text: JSON.stringify({ note: '程序已核验可用于此目标的媒体部件。以下仅为字节／类型元信息，不表示读懂其内容；正文只据其他获准证据描述内容。', parts: access.media.parts }) });
         if (!evidence.length)
             throw new Error('NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL');
+        if (access.handoff)
+            evidence.push({ id: 'CONTEXT', kind: 'reported', text: JSON.stringify({ kind: 'stage-handoff', ...access.handoff }) });
+        evidence = packNativeEvidence(evidence);
         const question = z.string().min(1).max(2000).parse(access.question);
         if (Buffer.byteLength(JSON.stringify({ question, evidence })) > 128000)
             throw new Error('NATIVE_EXPRESSION_CAPACITY');
         if (redactJson(z.json().parse({ question, evidence })).redacted)
             throw new Error('PRIVATE_INPUT_REJECTED');
         access.guard();
-        return { anchor, question, evidence, resultIncluded, ...(access.media ? { media: access.media } : {}), sourceStamp: hash({ anchor, proofs, outputHash: resultIncluded ? hash(access.output) : null, opaque: access.opaqueInfluence, policy: access.expressionPolicy ?? null, ...(access.media ? { media: access.media } : {}) }) };
+        return { anchor, question, evidence, resultIncluded, ...(access.media ? { media: access.media } : {}), sourceStamp: hash({ anchor, proofs, ...(access.handoff ? { handoff: access.handoff } : {}), outputHash: resultIncluded ? hash(access.output) : null, opaque: access.opaqueInfluence, policy: access.expressionPolicy ?? null, ...(access.media ? { media: access.media } : {}) }) };
     }
     prepare(access) {
         try {

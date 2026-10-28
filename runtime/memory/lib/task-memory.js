@@ -10,7 +10,7 @@ const grantBodySchema = z.strictObject({ input: TaskMemoryGrantSchema, authoriza
 const hitSchema = z.strictObject({ proof: witnessSchema, start: z.number().int(), end: z.number().int(), profile: z.string() });
 export function migrateTaskMemory(db) {
     const version = db.prepare('PRAGMA user_version').get()?.user_version;
-    if (version === 5 || version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12) {
+    if (version === 5 || version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12 || version === 13) {
         for (const table of ['task_memory_policies', 'task_memory_policy_revisions', 'task_memory_grants', 'task_memory_requests', 'task_memory_hits'])
             db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
         return;

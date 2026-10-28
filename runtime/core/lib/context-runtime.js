@@ -1,8 +1,32 @@
+import { requestCapacity, inspectRequestCapacity } from './context-plan.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { joinContextSections, renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt';
 import { createHash } from 'node:crypto';
 import { ContextCoordinator, CONTEXT_CARRIER, bytes } from './context.js';
 import { priceRetirement } from './compaction-runtime.js';
+import { CAPABILITY_CONTEXT } from './harness-runtime.js';
+export function retireContextCarrier(scope, agent, name, current) {
+    const session = agent.session, events = new Map(session.snapshotEvents().map(event => [event.seq, event]));
+    let retained = false, retired = 0;
+    for (const seq of [...session.surface.nodes].reverse()) {
+        const event = events.get(seq);
+        if (event?.type !== 'user/message' || event.data.source.kind !== 'runtime-context' || event.data.source.form !== 'snapshot')
+            continue;
+        const owned = event.data.source.sections.find(section => section.name === name);
+        if (!owned)
+            continue;
+        if (current && owned.text === current && !retained) {
+            retained = true;
+            continue;
+        }
+        const sections = event.data.source.sections.filter(section => section.name !== name);
+        priceRetirement(scope, session, [seq]);
+        session.append('user/message', createUserMessage({ source: { kind: 'dafeiyu-context-retirement', form: 'snapshot', sections },
+            content: [{ type: 'text', text: joinContextSections(sections) || '此前的上下文快照已退出当前工作视图。' }] }), { surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq] });
+        retired++;
+    }
+    return retired;
+}
 /** Only the named core carrier is replaced; other DSH snapshot contributions survive verbatim. */
 export class ContextRuntime {
     scope;
@@ -19,6 +43,8 @@ export class ContextRuntime {
     repairs = 0;
     retryPending = false;
     nativeSections = [];
+    capacity;
+    lastValidation = 0;
     constructor(scope, coordinator) {
         this.scope = scope;
         this.coordinator = coordinator;
@@ -53,9 +79,12 @@ export class ContextRuntime {
     }
     begin(item, agent) { this.item = item; this.agent = agent; this.preparing = true; this.retired = 0; }
     end() { this.coordinator.release(this.prepared); this.prepared = []; this.item = undefined; this.preparing = true; }
+    async measure(options) { this.capacity = { request: options, data: await inspectRequestCapacity(this.scope, options, this.coordinator.config.requestMaxBytes, this.coordinator.config.outputReserveBytes) }; }
     sourceItems() { return this.packet.regions.flatMap(region => region.items.map(item => ({ owner: region.owner, region: region.region, item }))); }
+    // Capability declarations have the same authority as tool schemas, not evidence about the world.
+    // Their availability is rechecked at dispatch; a catalog refresh does not revoke old factual replies.
     nativeDependencies(scope) {
-        return this.nativeSections.filter(s => s.text).map(s => ({
+        return this.nativeSections.filter(s => s.text && s.name !== CAPABILITY_CONTEXT).map(s => ({
             agentId: scope.agentId, route: scope.route, kind: 'context', owner: '$native', region: s.name, id: s.name, version: '1', hash: createHash('sha256').update(s.text).digest('hex')
         }));
     }
@@ -65,8 +94,32 @@ export class ContextRuntime {
         if (dep.owner === '$native')
             return this.nativeSections.some(s => s.name === dep.id && createHash('sha256').update(s.text).digest('hex') === dep.hash);
         return this.prepared.some(region => region.entry.active && region.entry.owner === dep.owner && region.entry.contributor.id === dep.region
-            && region.items.some(item => item.id === dep.id && item.version === dep.version && createHash('sha256').update(JSON.stringify([item.text, item.sources])).digest('hex') === dep.hash
-                && Date.parse(item.expiresAt) > Date.now() && region.entry.contributor.validate(region.request, item)));
+            && (region.items.some(item => item.id === dep.id && item.version === dep.version && createHash('sha256').update(JSON.stringify([item.text, item.sources])).digest('hex') === dep.hash
+                && Date.parse(item.expiresAt) > Date.now() && region.entry.contributor.validate(region.request, item))
+                || !!region.entry.contributor.validateHistorical?.(region.request, dep)));
+    }
+    explainHistorical(dep) {
+        if (this.preparing)
+            return 'context-preparing';
+        if (dep.owner === '$native')
+            return 'native-context-changed';
+        const region = this.prepared.find(r => r.entry.owner === dep.owner && r.entry.contributor.id === dep.region);
+        if (!region)
+            return 'context-region-missing';
+        if (!region.entry.active)
+            return 'context-provider-removed';
+        if (region.request.signal.aborted)
+            return 'context-request-cancelled';
+        const item = region.items.find(i => i.id === dep.id);
+        if (!item)
+            return 'context-item-missing';
+        if (item.version !== dep.version)
+            return 'context-version-changed';
+        if (Date.parse(item.expiresAt) <= Date.now())
+            return 'context-expired';
+        if (createHash('sha256').update(JSON.stringify([item.text, item.sources])).digest('hex') !== dep.hash)
+            return 'context-content-changed';
+        return 'context-provider-rejected';
     }
     available(assembly) {
         const native = renderContextSections({ ...assembly, contexts: assembly.contexts.filter(c => c.name !== CONTEXT_CARRIER) });
@@ -115,10 +168,13 @@ export class ContextRuntime {
         return this.packet.text;
     }
     /** Fail closed if a source changes after admission, or final native context exceeds the shared ceiling. */
-    guard(options, audit = false, allowRepair = false) {
+    guard(options, audit = false, allowRepair = false, stream = false) {
         if (!this.item || !this.used)
             return true;
         options.signal?.throwIfAborted();
+        // Cancellation remains immediate. Full source checks also run at dispatch and completion.
+        if (stream && performance.now() - this.lastValidation < 250)
+            return true;
         const packet = this.coordinator.packet(this.prepared, this.allowance);
         if (packet.text !== this.packet.text)
             throw new Error('Controlled context changed after admission');
@@ -134,13 +190,14 @@ export class ContextRuntime {
         }
         if (carriers.length !== (packet.text ? 1 : 0) || carriers.some(s => s.text !== packet.text))
             throw new Error('Controlled context snapshot mismatch');
-        const requestBytes = bytes({ messages: options.messages, tools: options.tools ?? [], toolHistory: options.toolHistory ?? null });
-        if (requestBytes + this.coordinator.config.outputReserveBytes > this.coordinator.config.requestMaxBytes)
+        const capacity = this.capacity?.request === options ? this.capacity.data : requestCapacity(options, this.coordinator.config.requestMaxBytes, this.coordinator.config.outputReserveBytes), requestBytes = capacity.bytes;
+        if (!capacity.withinBudget)
             throw new Error('Context request budget exceeded');
         if (audit) {
-            this.coordinator.audit(this.item, packet, this.retired, this.nativeNames, requestBytes);
+            this.coordinator.audit(this.item, packet, this.retired, this.nativeNames, requestBytes, capacity);
             this.retired = 0;
         }
+        this.lastValidation = performance.now();
         return true;
     }
 }

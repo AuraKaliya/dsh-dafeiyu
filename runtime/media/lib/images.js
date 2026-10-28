@@ -2,9 +2,43 @@ import { AttachmentStore, AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { mediaHash } from './store.js';
+function dimensions(image) {
+    const data = image.data;
+    if (image.mime === 'image/png') {
+        if (data.length < 24 || data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a')
+            throw new Error('MEDIA_IMAGE_INVALID');
+        return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
+    }
+    if (data.length < 4 || data[0] !== 255 || data[1] !== 216 || image.hasAlpha)
+        throw new Error('MEDIA_IMAGE_INVALID');
+    let at = 2;
+    while (at + 3 < data.length) {
+        if (data[at++] !== 255)
+            throw new Error('MEDIA_IMAGE_INVALID');
+        while (data[at] === 255)
+            at++;
+        const marker = data[at++];
+        if (marker === 217 || marker === 218)
+            break;
+        if (marker === 1 || marker !== undefined && marker >= 208 && marker <= 215)
+            continue;
+        if (at + 2 > data.length)
+            break;
+        const length = data.readUInt16BE(at);
+        if (length < 2 || at + length > data.length)
+            break;
+        if (marker !== undefined && [192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker)) {
+            if (length < 8)
+                break;
+            return { height: data.readUInt16BE(at + 3), width: data.readUInt16BE(at + 5) };
+        }
+        at += length;
+    }
+    throw new Error('MEDIA_IMAGE_INVALID');
+}
 /** Only the isolated transport can open its current lease. No generic file or upload service. */
 export class ScopedImages extends AttachmentStore {
-    imageLimits = { maxImageBytes: 16 * 1024 ** 2, maxImagesPerMessage: 8, maxMessageImageBytes: 32 * 1024 ** 2, maxImagePixels: 16000000, maxImageDimension: 1024, mediaTypes: ['image/png'] };
+    imageLimits = { maxImageBytes: 16 * 1024 ** 2, maxImagesPerMessage: 8, maxMessageImageBytes: 32 * 1024 ** 2, maxImagePixels: 16000000, maxImageDimension: 1024, mediaTypes: ['image/png', 'image/jpeg'] };
     active = new AsyncLocalStorage();
     leases = new Map();
     constructor(ctx) { if (ctx.get('attachments'))
@@ -14,10 +48,11 @@ export class ScopedImages extends AttachmentStore {
         if (!images.length || images.length > 8 || images.reduce((n, i) => n + i.data.length, 0) > this.imageLimits.maxMessageImageBytes)
             throw new Error('MEDIA_IMAGE_LIMIT');
         const id = randomUUID(), lease = { guard, images: images.map(image => {
-                if (image.data.length > this.imageLimits.maxImageBytes || image.data.readUInt32BE(16) !== image.width || image.data.readUInt32BE(20) !== image.height || image.data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a')
+                const size = dimensions(image);
+                if (image.data.length > this.imageLimits.maxImageBytes || size.width !== image.width || size.height !== image.height || image.width < 1 || image.height < 1 || image.width > this.imageLimits.maxImageDimension || image.height > this.imageLimits.maxImageDimension)
                     throw new Error('MEDIA_IMAGE_INVALID');
                 const data = Buffer.from(image.data);
-                return { ref: { attachmentId: AttachmentId(mediaHash([id, randomUUID()])), mediaType: 'image/png', bytes: data.length, width: image.width, height: image.height }, data, hasAlpha: image.hasAlpha, reads: 0, sha256: createHash('sha256').update(data).digest('hex') };
+                return { ref: { attachmentId: AttachmentId(mediaHash([id, randomUUID()])), mediaType: image.mime, bytes: data.length, width: image.width, height: image.height }, data, hasAlpha: image.hasAlpha, reads: 0, sha256: createHash('sha256').update(data).digest('hex') };
             }) };
         this.leases.set(id, lease);
         return { id, refs: lease.images.map(i => ({ ...i.ref })), exposure: () => { guard(); if (!this.leases.has(id) || lease.images.some(i => i.reads < 1))
@@ -45,7 +80,7 @@ export class ScopedImages extends AttachmentStore {
             throw new Error('MEDIA_IMAGE_TARGET_TOO_SMALL');
         guard();
         image.reads++;
-        return { variantId: ImageVariantId(mediaHash([ref, target])), attachment: { ...ref }, data: Buffer.from(image.data), mediaType: 'image/png', bytes: ref.bytes, width: ref.width, height: ref.height, depth: 'uchar', space: 'srgb', hasAlpha: image.hasAlpha };
+        return { variantId: ImageVariantId(mediaHash([ref, target])), attachment: { ...ref }, data: Buffer.from(image.data), mediaType: ref.mediaType, bytes: ref.bytes, width: ref.width, height: ref.height, depth: 'uchar', space: 'srgb', hasAlpha: image.hasAlpha };
     }
     close() { this.leases.clear(); this.active.disable(); }
 }

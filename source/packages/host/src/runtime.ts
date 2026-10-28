@@ -42,12 +42,12 @@ import { claim } from './coordination.js';
 import type { HostLease } from './coordination.js';
 import { installInlineDeepSeek } from './inline-model.js';
 import { bindDshTools } from './dsh-tools.js';
-import type { DshToolsPort } from '@dafeiyu/contracts';
+import type { DshToolsPort,BiliBrowserPort } from '@dafeiyu/contracts';
 
 const importedHome=process.env.DSH_HOME;
 export type HostPhase='created'|'inspected'|'opening'|'binding'|'recovering'|'ready'|'degraded'|'draining'|'failed'|'stopped';
 export interface HostRuntimeOptions {
-  readonly dshTools?:DshToolsPort;
+  readonly dshTools?:DshToolsPort;readonly biliBrowser?:BiliBrowserPort;
   readonly mode?:'daemon'|'single-run';readonly coordination?:string;
   readonly signal?:AbortSignal;
   /** Program-only test seam, forbidden for formal or real-provider profiles. */
@@ -62,6 +62,8 @@ export interface HostRuntimeOptions {
   readonly createBiliOwnerPorts?:()=>Promise<BiliOwnerPorts>;
   /** Trusted program hook, awaited before Core/Memory or channel admission; never loaded from profile JSON. */
   readonly installModelAdmission?:(ctx:Context,config:PreparedHostConfig)=>void|Promise<void>;
+  /** Trusted native ingress registration, before policy validation and Core admission. */
+  readonly installChannels?:(ctx:Context,config:PreparedHostConfig)=>void|Promise<void>;
   readonly onPhase?:(phase:HostPhase,host:ManagedHost)=>void;
   readonly onModelCall?:(call:{provider:string;model:string;purpose:string;status:'started'|'completed'|'failed'})=>void;
 }
@@ -69,7 +71,7 @@ export interface PluginHealth {id:string;required:boolean;state:'configured'|'st
 export interface HostSnapshot {schemaVersion:1;profileId:string;agentId:string;instanceId:string;pid:number;at:string;configHash:string;foundationHash:string;
   phase:HostPhase;mode:'daemon'|'single-run';accepting:boolean;error:string|null;plugins:PluginHealth[];features:string[];
   services:{memory:ReturnType<Memory.MemoryService['runtimeHealth']>|null;activity:Activity.ActivityService['health']|null;media:Media.MediaService['health']|null;bilibili:Bili.BiliService['health']|null;executor?:ServerExecutorService['health'];biliOwner?:ReturnType<BiliOwnerChannel['getStatus']>;taskDelivery:ReturnType<Core.DafeiyuService['getStatus']>['nativeDelivery'];qq:{state:string;groupSync:string;groupError:string|null;effectiveGroups:number;lastGroupSync:string|null;capabilities:boolean;tasks:{enabled:boolean;registered:boolean;deliverResults:boolean};delivery:{plans:number;pending:number;unknown:number}}|null};
-  counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:2;memory:typeof MEMORY_SCHEMA_VERSION;runtime:typeof RUNTIME_SCHEMA_VERSION;activity:1|null;media:typeof Media.MEDIA_SCHEMA_VERSION|null;bilibili:1|null;executor?:typeof EXECUTOR_SCHEMA_VERSION;biliOwner?:typeof BILI_OWNER_SCHEMA_VERSION};}
+  counts:{activeRuns:number;queuedRuns:number;queuedRoutes:number;pendingMessages:number;outbox:number};schemas:{journal:2;memory:typeof MEMORY_SCHEMA_VERSION;runtime:typeof RUNTIME_SCHEMA_VERSION;activity:1|null;media:typeof Media.MEDIA_SCHEMA_VERSION|null;bilibili:typeof Bili.BILI_SCHEMA_VERSION|null;executor?:typeof EXECUTOR_SCHEMA_VERSION;biliOwner?:typeof BILI_OWNER_SCHEMA_VERSION};}
 export interface HostRunResult {taskId:string;runId:string;state:string;error:string|null;result:string|null}
 class FixedModel extends LlmAdapter {
   constructor(private readonly response:string){super();}
@@ -144,7 +146,7 @@ export class ManagedHost {
     const activity=pluginConfig(this.config,'activity');if(activity){this.activityValue=new Activity.ActivityService(ctx,{agentId:this.config.config.agent.id,profileId:this.config.config.profileId,dataDir:this.config.paths.core,settings:activity},this.options.activityClock?.now??Date.now,this.options.activityClock?.monotonic??(()=>performance.now()));
       if(activity.maintenance){const port=this.memoryValue?.maintenance?.schedulingPort();if(!port)throw new Error('HOST_ACTIVITY_MAINTENANCE_REQUIRED');this.activityValue.bindMaintenance(port);}this.plugin('activity','ready',this.mode==='single-run'?'HOST_SINGLE_RUN':undefined);}
     const media=pluginConfig(this.config,'media');if(media){await ctx.plugin(Media,{...media,agentId:this.config.config.agent.id,profileId:this.config.config.profileId,dataDir:this.config.paths.core,createStore:false});this.mediaValue=ctx.dafeiyuMedia;this.plugin('media','ready');}
-    const bili=pluginConfig(this.config,'bilibili');if(bili){this.biliValue=new Bili.BiliService(ctx,{agentId:this.config.config.agent.id,profileId:this.config.config.profileId,dataDir:this.config.paths.core,createStore:false,settings:bili},this.options.biliTransport);this.plugin('bilibili','ready');}
+    const bili=pluginConfig(this.config,'bilibili');if(bili){this.biliValue=new Bili.BiliService(ctx,{agentId:this.config.config.agent.id,profileId:this.config.config.profileId,dataDir:this.config.paths.core,createStore:false,settings:bili},this.options.biliTransport,this.options.biliBrowser);this.plugin('bilibili','ready');}
     const simulator=pluginConfig(this.config,'channel-simulator');if(simulator){await ctx.plugin(Simulator,{agentId:this.config.config.agent.id,...simulator});this.plugin('channel-simulator',this.mode==='single-run'?'disabled':'ready');}
     const qq=pluginConfig(this.config,'channel-qq');if(qq&&this.mode==='daemon'){
       if(!existsSync(qq.tokenFile)){if(this.health.find(p=>p.id==='channel-qq')?.required)throw new Error('HOST_QQ_CREDENTIAL_FILE_MISSING');this.plugin('channel-qq','degraded','HOST_QQ_CREDENTIAL_FILE_MISSING');}
@@ -155,6 +157,7 @@ export class ManagedHost {
       else{try{const ports=await this.options.createBiliOwnerPorts();this.biliOwnerValue=await openBiliOwnerChannel(ctx,{agentId:this.config.config.agent.id,profileId:this.config.config.profileId,dataDir:this.config.paths.core,createStore:false,settings:biliOwner},ports);this.biliOwnerValue.holdIngress();this.plugin('channel-bili-owner','starting');}
         catch(error){if(this.health.find(plugin=>plugin.id==='channel-bili-owner')?.required)throw error;this.biliOwnerValue=undefined;this.plugin('channel-bili-owner','degraded',stableCode(error,'HOST_BILI_OWNER_UNAVAILABLE'));}}
     }else if(biliOwner)this.plugin('channel-bili-owner','disabled','HOST_SINGLE_RUN');
+    if(this.mode==='daemon')await this.options.installChannels?.(ctx,this.config);
     if(this.mode==='daemon'&&biliOwner&&!this.biliOwnerValue&&this.biliOwnerPendingWork())throw new Error('HOST_BILI_OWNER_PENDING_WORK_REQUIRES_CHANNEL');
     const producerActive=(producer:string)=>producer==='activity'?!!this.activityValue&&this.mode==='daemon':producer==='channel-qq'?!!this.qqValue:producer==='qq-tasks'?!!this.qqValue?.getStatus().tasks.registered:producer==='channel-bili-owner'?!!this.biliOwnerValue:producer==='bili-owner-tasks'?!!this.biliOwnerValue&&!!biliOwner?.tasks.enabled:producer==='channel-simulator'?!!simulator&&this.mode==='daemon':true;
     const absentChannelActions=new Set<string>([...(!this.qqValue&&qq?[...QQ.QQ_ACTIONS,...QQ.QQ_TASK_ACTIONS,...QQ.QQ_MEDIA_ACTIONS,...QQ.QQ_PROGRESS_ACTIONS]:[]),...(!this.biliOwnerValue&&biliOwner?[...BILI_OWNER_TASK_ACTIONS]:[])]);
@@ -181,7 +184,7 @@ export class ManagedHost {
     this.executorHealth();this.biliOwnerHealth();
     this.biliHealth();
     this.phase=this.health.some(p=>p.state==='degraded')?'degraded':'ready';}
-  private biliHealth(){if(this.biliValue){const blocked=(this.biliValue.health.backoffUntil??0)>Date.now();this.plugin('bilibili',blocked?'degraded':'ready',blocked?'HOST_BILI_BACKOFF':null);}}
+  private biliHealth(){if(this.biliValue){const held=this.biliValue.health.diagnosticRequired,blocked=held||(this.biliValue.health.backoffUntil??0)>Date.now();this.plugin('bilibili',blocked?'degraded':'ready',held?'HOST_BILI_DIAGNOSTIC_REQUIRED':blocked?'HOST_BILI_BACKOFF':null);}}
   /** Missing optional IO must not turn retained private work into stale-source failures during global recovery. */
   private biliOwnerPendingWork():boolean{
     if(this.core.journal.list(['accepted','processing','reply-ready','sending']).some(item=>item.extensionId==='channel-bili-owner'))return true;
@@ -205,7 +208,7 @@ export class ManagedHost {
   snapshot():HostSnapshot{const core=this.coreValue?.getStatus(),qq=this.qqValue?.getStatus();return {schemaVersion:1,profileId:this.config.config.profileId,agentId:this.config.config.agent.id,instanceId:this.instanceId,pid:process.pid,at:new Date().toISOString(),configHash:this.config.hash,foundationHash:this.config.foundation.hash,
       phase:this.phase,mode:this.mode,accepting:['ready','degraded'].includes(this.phase)&&!!this.coreValue?.accepting,error:this.error,plugins:this.health.map(p=>({...p})),features:this.coreValue?.capabilityManifest().features??[],
       services:{memory:this.memoryValue?.runtimeHealth()??null,activity:this.activityValue?.health??null,media:this.mediaValue?.health??null,bilibili:this.biliValue?.health??null,...(this.executorValue?{executor:this.executorValue.health}:{}),...(this.biliOwnerValue?{biliOwner:this.biliOwnerValue.getStatus()}:{}),taskDelivery:core?.nativeDelivery??null,qq:qq?{state:qq.state,groupSync:qq.groupSync.state,groupError:qq.groupSync.error,effectiveGroups:qq.groupSync.effectiveIds.length,lastGroupSync:qq.groupSync.lastSuccessAt,capabilities:qq.capabilities.registered,tasks:{enabled:qq.tasks.enabled,registered:qq.tasks.registered,deliverResults:qq.tasks.deliverResults},delivery:qq.delivery}:null},
-      counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:2,memory:MEMORY_SCHEMA_VERSION,runtime:RUNTIME_SCHEMA_VERSION,activity:existsSync(join(this.config.paths.core,'activity.sqlite'))?1:null,media:existsSync(join(this.config.paths.core,'media.sqlite'))?Media.MEDIA_SCHEMA_VERSION:null,bilibili:existsSync(join(this.config.paths.core,'bilibili.sqlite'))?1:null,...(this.executorValue?{executor:EXECUTOR_SCHEMA_VERSION}:{}),...(this.biliOwnerValue?{biliOwner:BILI_OWNER_SCHEMA_VERSION}:{})}};}
+      counts:{activeRuns:core?.execution?.active??0,queuedRuns:core?.execution?.queued??0,queuedRoutes:core?.queuedRoutes??0,pendingMessages:core?.messages.filter(m=>['accepted','processing','reply-ready','sending'].includes(m.state)).length??0,outbox:this.lease?this.outbox():0},schemas:{journal:2,memory:MEMORY_SCHEMA_VERSION,runtime:RUNTIME_SCHEMA_VERSION,activity:existsSync(join(this.config.paths.core,'activity.sqlite'))?1:null,media:existsSync(join(this.config.paths.core,'media.sqlite'))?Media.MEDIA_SCHEMA_VERSION:null,bilibili:existsSync(join(this.config.paths.core,'bilibili.sqlite'))?Bili.BILI_SCHEMA_VERSION:null,...(this.executorValue?{executor:EXECUTOR_SCHEMA_VERSION}:{}),...(this.biliOwnerValue?{biliOwner:BILI_OWNER_SCHEMA_VERSION}:{})}};}
   publish(){if(!this.lease)return;const file=join(this.config.paths.core,'host-status.json'),temp=file+'.'+randomUUID()+'.tmp';writeFileSync(temp,JSON.stringify(this.snapshot(),null,2)+'\n',{flag:'wx'});renameSync(temp,file);}
   run(raw:unknown):Promise<HostRunResult>{if(!['ready','degraded'].includes(this.phase))throw new Error('HOST_NOT_READY');if(!this.memoryValue)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     const work=this.performRun(raw).finally(()=>this.jobs.delete(work));this.jobs.add(work);return work;}

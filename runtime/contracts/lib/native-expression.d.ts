@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { TaskAssessment } from './task-assessment.js';
+import type { ContextHandoff } from './context.js';
 import type { PersonaAccess } from './persona.js';
 import type { NativeMediaMaterial } from './media.js';
 export declare const TaskResultAnchorSchema: z.ZodObject<{
@@ -123,15 +124,22 @@ export declare const NativeExpressionPacketSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type NativeExpressionPacket = z.infer<typeof NativeExpressionPacketSchema>;
+export declare const NativeVerificationFeedbackSchema: z.ZodObject<{
+    kind: z.ZodLiteral<"delivery-fidelity">;
+    issues: z.ZodArray<z.ZodString>;
+}, z.core.$strict>;
 /** Created by the core from persisted, verified native execution facts, never model-supplied. */
 export interface NativeExpressionAccess {
     readonly execution: PersonaAccess;
     readonly anchor: TaskResultAnchor;
     readonly question: string;
     readonly output: string;
+    readonly handoff?: ContextHandoff;
     readonly assessment?: TaskAssessment;
     readonly selectedSourceIds?: readonly string[];
     readonly operationalEvidence?: readonly NativeExpressionPacket['evidence'][number][];
+    /** Core-owned synchronous read scope only; caller rechecks guard after it returns. */
+    readSources?(read: () => void): void;
     readonly candidates: readonly z.infer<typeof NativeExpressionCandidateSchema>[];
     readonly opaqueInfluence: boolean;
     /** Only the Core source walk can attest that a derived target page has no unclassified input influence. */

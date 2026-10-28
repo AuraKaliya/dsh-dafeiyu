@@ -67,7 +67,7 @@ export declare class MediaReplies {
         sourceStamp: string;
         parts: ({
             kind: "asset";
-            delivery: "record" | "file" | "image";
+            delivery: "image" | "file" | "record";
             asset: {
                 schemaVersion: 1;
                 id: string;

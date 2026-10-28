@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { deliveryAbortCode } from './reply-delay.js';
 const safe = (error) => error instanceof Error && /^[A-Z][A-Z0-9_]{0,99}$/.test(error.message) ? error.message : 'MEDIA_DELIVERY_PRECHECK_FAILED';
 function result(value, code) {
     if (value.state === 'sent')
@@ -36,7 +37,7 @@ export class QqMediaTransport {
     }
     async execute(reply, plan, signal, authority, bytes) {
         const guard = () => { if (signal.aborted)
-            throw new Error('DELIVERY_CANCELLED'); try {
+            throw new Error(deliveryAbortCode(signal)); try {
             authority();
         }
         catch {

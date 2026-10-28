@@ -7,7 +7,7 @@ export type DecoderInput = {
 };
 export interface DecodedImage {
     data: Buffer;
-    mime: 'image/png';
+    mime: 'image/png' | 'image/jpeg';
     width: number;
     height: number;
     hasAlpha: boolean;

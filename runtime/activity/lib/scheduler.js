@@ -30,7 +30,13 @@ export class ActivityScheduler {
         this.monotonic = monotonic;
         this.explore = ctx.dafeiyu.executionProducer('activity', { motivation: { kind: 'self-exploration', basis: ['scheduled-autonomous-exploration'] } });
         this.maintain = ctx.dafeiyu.executionProducer('activity', { motivation: { kind: 'maintenance', basis: ['durable-memory-maintenance-request'] } });
-        this.unbindWake = ctx.dafeiyu.bindWakeAuthority({ producerId: 'activity', validate: (origin, task) => this.authorized(origin, task), sourceAnchor: origin => this.store.snapshot(origin.scheduleId, origin.scheduleVersion).anchor });
+        this.unbindWake = ctx.dafeiyu.bindWakeAuthority({ producerId: 'activity', validate: (origin, task) => this.authorized(origin, task), sourceAnchor: origin => this.store.snapshot(origin.scheduleId, origin.scheduleVersion).anchor,
+            work: (origin, task) => {
+                if (!this.authorized(origin, task))
+                    return null;
+                const plan = this.store.snapshot(origin.scheduleId, origin.scheduleVersion);
+                return plan.purpose === 'maintenance' && plan.maintenanceId ? { kind: 'memory-maintenance', requestId: plan.maintenanceId, goal: plan.goal } : null;
+            } });
         try {
             this.unbindEvents = ctx.dafeiyu.bindExecutionLifecycle('activity', event => this.receive(event));
         }

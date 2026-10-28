@@ -12,10 +12,11 @@ import type { ServerExecutorDependencies } from '#dafeiyu/server-executor';
 import { BILI_OWNER_SCHEMA_VERSION } from '#dafeiyu/bilibili/channel';
 import type { BiliOwnerChannel, BiliOwnerPorts } from '#dafeiyu/bilibili/channel';
 import type { PreparedHostConfig } from './configuration.js';
-import type { DshToolsPort } from '#dafeiyu/contracts';
+import type { DshToolsPort, BiliBrowserPort } from '#dafeiyu/contracts';
 export type HostPhase = 'created' | 'inspected' | 'opening' | 'binding' | 'recovering' | 'ready' | 'degraded' | 'draining' | 'failed' | 'stopped';
 export interface HostRuntimeOptions {
     readonly dshTools?: DshToolsPort;
+    readonly biliBrowser?: BiliBrowserPort;
     readonly mode?: 'daemon' | 'single-run';
     readonly coordination?: string;
     readonly signal?: AbortSignal;
@@ -34,6 +35,8 @@ export interface HostRuntimeOptions {
     readonly createBiliOwnerPorts?: () => Promise<BiliOwnerPorts>;
     /** Trusted program hook, awaited before Core/Memory or channel admission; never loaded from profile JSON. */
     readonly installModelAdmission?: (ctx: Context, config: PreparedHostConfig) => void | Promise<void>;
+    /** Trusted native ingress registration, before policy validation and Core admission. */
+    readonly installChannels?: (ctx: Context, config: PreparedHostConfig) => void | Promise<void>;
     readonly onPhase?: (phase: HostPhase, host: ManagedHost) => void;
     readonly onModelCall?: (call: {
         provider: string;
@@ -104,7 +107,7 @@ export interface HostSnapshot {
         runtime: typeof RUNTIME_SCHEMA_VERSION;
         activity: 1 | null;
         media: typeof Media.MEDIA_SCHEMA_VERSION | null;
-        bilibili: 1 | null;
+        bilibili: typeof Bili.BILI_SCHEMA_VERSION | null;
         executor?: typeof EXECUTOR_SCHEMA_VERSION;
         biliOwner?: typeof BILI_OWNER_SCHEMA_VERSION;
     };

@@ -67,6 +67,10 @@ export declare const mediaDraftContentSchema: z.ZodObject<{
             mimeHint: z.ZodNullable<z.ZodString>;
             bytesHint: z.ZodNullable<z.ZodNumber>;
             durationMsHint: z.ZodNullable<z.ZodNumber>;
+            sourceFrame: z.ZodOptional<z.ZodObject<{
+                positionMs: z.ZodNumber;
+                durationMs: z.ZodNumber;
+            }, z.core.$strict>>;
             rangeReadable: z.ZodBoolean;
             publicContent: z.ZodDefault<z.ZodBoolean>;
         }, z.core.$strict>;
@@ -143,6 +147,10 @@ export declare const mediaDraftSchema: z.ZodObject<{
             mimeHint: z.ZodNullable<z.ZodString>;
             bytesHint: z.ZodNullable<z.ZodNumber>;
             durationMsHint: z.ZodNullable<z.ZodNumber>;
+            sourceFrame: z.ZodOptional<z.ZodObject<{
+                positionMs: z.ZodNumber;
+                durationMs: z.ZodNumber;
+            }, z.core.$strict>>;
             rangeReadable: z.ZodBoolean;
             publicContent: z.ZodDefault<z.ZodBoolean>;
         }, z.core.$strict>;
@@ -343,6 +351,10 @@ export declare class MediaReplyStore {
                 durationMsHint: number | null;
                 rangeReadable: boolean;
                 publicContent: boolean;
+                sourceFrame?: {
+                    positionMs: number;
+                    durationMs: number;
+                } | undefined;
             };
             as?: "record" | "file" | "image" | undefined;
         } | {
@@ -425,6 +437,10 @@ export declare class MediaReplyStore {
                     durationMsHint: number | null;
                     rangeReadable: boolean;
                     publicContent: boolean;
+                    sourceFrame?: {
+                        positionMs: number;
+                        durationMs: number;
+                    } | undefined;
                 };
                 as?: "record" | "file" | "image" | undefined;
             } | {
@@ -513,6 +529,10 @@ export declare class MediaReplyStore {
                 durationMsHint: number | null;
                 rangeReadable: boolean;
                 publicContent: boolean;
+                sourceFrame?: {
+                    positionMs: number;
+                    durationMs: number;
+                } | undefined;
             };
             as?: "record" | "file" | "image" | undefined;
         } | {

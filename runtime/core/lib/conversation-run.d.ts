@@ -19,7 +19,7 @@ export declare class ConversationRuns {
         actions: unknown;
     }, preparePersona?: (run: StoredRun) => PersonaManifest): StoredRun;
     complete(run: StoredRun, item: PendingMessage, result: RunResult, startedEventId: string): void;
-    fail(run: StoredRun): void;
+    fail(run: StoredRun, code?: string): void;
     project(): Promise<void>;
     recover(): Promise<void>;
 }

@@ -14,6 +14,9 @@ export interface ContextEvidenceView {
     validateHistorical(dependency: Extract<SourceDependency, {
         kind: 'context';
     }>): boolean;
+    explainHistorical?(dependency: Extract<SourceDependency, {
+        kind: 'context';
+    }>): string;
 }
 declare module '@deepseek-ai/dsh-llm' {
     interface MessageSourceMap {
@@ -25,6 +28,7 @@ declare module '@deepseek-ai/dsh-llm' {
         } & ContextFormed;
     }
 }
+export declare function retireContextCarrier(scope: Context, agent: Agent, name: string, current: string): number;
 /** Only the named core carrier is replaced; other DSH snapshot contributions survive verbatim. */
 export declare class ContextRuntime {
     private readonly scope;
@@ -41,9 +45,12 @@ export declare class ContextRuntime {
     private repairs;
     private retryPending;
     private nativeSections;
+    private capacity;
+    private lastValidation;
     constructor(scope: Context, coordinator: ContextCoordinator);
     begin(item: PendingMessage, agent: Agent): void;
     end(): void;
+    measure(options: GenerateOptions): Promise<void>;
     sourceItems(): {
         owner: string;
         region: string;
@@ -63,9 +70,12 @@ export declare class ContextRuntime {
     validateHistorical(dep: Extract<SourceDependency, {
         kind: 'context';
     }>): boolean;
+    explainHistorical(dep: Extract<SourceDependency, {
+        kind: 'context';
+    }>): string;
     private available;
     private retire;
     private render;
     /** Fail closed if a source changes after admission, or final native context exceeds the shared ceiling. */
-    guard(options: GenerateOptions, audit?: boolean, allowRepair?: boolean): boolean;
+    guard(options: GenerateOptions, audit?: boolean, allowRepair?: boolean, stream?: boolean): boolean;
 }

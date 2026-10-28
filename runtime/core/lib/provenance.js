@@ -74,6 +74,17 @@ export class SourceTracker {
             this.validationStamp = stamp;
             this.validationProvider = b.provider;
         }
+        if (b.provider.sources?.validateMany) {
+            const pending = dependencies.filter(dep => dep.agentId === scope.agentId && dep.route === scope.route && dep.kind !== 'context' && !this.validationCache.has(JSON.stringify(dep)));
+            if (pending.length) {
+                const values = b.provider.sources.validateMany(scope, pending);
+                if (values.length !== pending.length)
+                    throw new Error('SOURCE_VALIDATION_FAILED');
+                if (this.validationCache.size + pending.length > 8192)
+                    this.validationCache.clear();
+                pending.forEach((dep, index) => this.validationCache.set(JSON.stringify(dep), values[index] === true));
+            }
+        }
         return dependencies.every(dep => dep.agentId === scope.agentId && dep.route === scope.route && (dep.kind === 'context'
             ? this.context.validateHistorical(dep) : (() => {
             const key = JSON.stringify(dep), cached = this.validationCache.get(key);
@@ -93,6 +104,8 @@ export class SourceTracker {
     invalid() {
         this.index();
         const invalid = new Set();
+        if (this.binding()?.provider.sources?.validateMany)
+            this.validate([...this.reverse.keys()].map(key => SourceDependencySchema.parse(JSON.parse(key))));
         for (const [key, seqs] of this.reverse)
             if (!this.validate([SourceDependencySchema.parse(JSON.parse(key))]))
                 for (const seq of seqs)
@@ -112,6 +125,12 @@ export class SourceTracker {
             return;
         appendPluginRecord(this.session, 'plugin:dafeiyu/source-record', { ...this.common(), schemaVersion: 1, targetSeq: event.seq, hash: digestSource(text),
             parents: [...new Set(parents)].sort((a, b) => a - b), dependencies: unionDependencies(dependencies), ...(requestSeq === undefined ? {} : { requestSeq }) });
+    }
+    recordReplacement(seq, parentSeq) {
+        const parent = this.get(parentSeq), event = this.session?.snapshotEvents()[seq];
+        if (!parent || !event || !this.valid(parent))
+            throw new Error('SOURCE_VALIDATION_FAILED');
+        this.write(event, parent.dependencies, [parentSeq]);
     }
     /** Capture completed outputs before any pruning; record input hashes at first dispatch. */
     sync() {
@@ -196,13 +215,19 @@ export class SourceTracker {
         deps.push(this.context.nativeDependencies(this.scope()));
         this.admitted = unionDependencies(...deps);
         if (!this.validate(this.admitted))
-            throw new Error('Invalid exposed source');
+            this.reject('dispatch');
         const step = events.findLast(e => e.type === 'step/start');
         if (step?.type !== 'step/start')
             throw new Error('Missing DSH step');
         appendPluginRecord(this.session, 'plugin:dafeiyu/request-sources', { ...this.common(), turn: step.data.turn, step: step.data.step, parents, dependencies: this.admitted,
             contexts: this.context.sourceItems().map(r => ({ owner: r.owner, region: r.region, id: r.item.id, version: r.item.version, hash: digestSource(r.item.text), sources: r.item.sources })) });
     }
+    reject(phase) {
+        const dependency = this.admitted.find(dep => !this.validate([dep]));
+        if (dependency && this.session && this.item)
+            appendPluginRecord(this.session, 'plugin:dafeiyu/source-invalid', { traceId: this.item.id, phase, dependency, dependencyHash: digestSource(JSON.stringify(dependency)), reason: dependency.kind === 'context' ? (this.context.explainHistorical?.(dependency) ?? 'context-rejected') : 'source-dependency-rejected' });
+        throw new Error('SOURCE_VALIDATION_FAILED');
+    }
     guard() { if (this.item && this.binding()?.provider.sources && !this.validate(this.admitted))
-        throw new Error('Exposed source changed after admission'); }
+        this.reject('stream'); }
 }

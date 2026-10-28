@@ -45,7 +45,7 @@ export function verifyPersonaAdoptionSchema(db) {
 /** Caller owns the transaction. v12 appends proof tables without reclassifying or rewriting legacy data. */
 export function migratePersonaAdoption(db) {
     const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-    if (version === 12) {
+    if (version === 12 || version === 13) {
         verifyPersonaAdoptionSchema(db);
         return;
     }

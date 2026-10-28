@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { redactContent } from '#dafeiyu/contracts';
 import { parseSnowLumaGroups, SNOWLUMA_GROUP_LIST_REQUEST } from './snowluma-groups.js';
 /** No remote OneBot endpoints or credential-bearing URLs in this local development connector. */
 export function loopbackURL(value, protocol) {
@@ -9,7 +10,16 @@ export function loopbackURL(value, protocol) {
     return url.href;
 }
 export const platformId = z.union([z.string().regex(/^-?\d+$/), z.number().int().safe()]).transform(String);
-const responseSchema = z.object({ status: z.string(), retcode: z.number(), data: z.unknown() });
+const responseSchema = z.object({ status: z.string(), retcode: z.number(), data: z.unknown(), wording: z.unknown().optional(), message: z.unknown().optional() });
+const diagnosticSchema = z.strictObject({ kind: z.literal('onebot-call'), action: z.string().max(80), phase: z.enum(['before-fetch', 'fetch', 'body', 'response']), elapsedMs: z.number().nonnegative(), fetchInvoked: z.boolean(), callerAborted: z.boolean(), requestTimedOut: z.boolean(), httpStatus: z.number().int().optional(), retcode: z.number().optional(), status: z.enum(['ok', 'failed', 'async', 'other']).optional(), wording: z.string().max(200).optional(), errorName: z.string().max(40).optional() });
+class OneBotFailure extends Error {
+    diagnostic;
+    constructor(message, diagnostic) {
+        super(message);
+        this.diagnostic = diagnostic;
+    }
+}
+export function oneBotDiagnostic(error) { return error instanceof OneBotFailure ? error.diagnostic : { kind: 'local-call', errorName: error instanceof Error && /^[A-Za-z]{1,40}$/.test(error.name) ? error.name : 'Error' }; }
 export class OneBot {
     base;
     token;
@@ -24,46 +34,64 @@ export class OneBot {
     call(action, params, signal) { return this.request(action, params, signal); }
     async request(action, params, signal) {
         const timeout = AbortSignal.timeout(this.timeoutMs);
-        const response = await fetch(new URL(action, this.base), { method: 'POST', redirect: 'error',
-            // Local processing can outlast an idle socket's server timeout. Avoid reusing that socket;
-            // never repair an ambiguous send by automatically issuing the POST again.
-            headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json', Connection: 'close' }, body: JSON.stringify(params),
-            signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-        if (!response.ok)
-            throw new Error('ONEBOT_HTTP_FAILURE');
-        const reader = response.body?.getReader();
-        if (!reader)
-            throw new Error('ONEBOT_INVALID_RESPONSE');
-        const chunks = [];
-        let bytes = 0;
-        const maxResponse = action === 'get_record' ? 32 * 1024 ** 2 : 2 * 1024 ** 2;
+        const started = Date.now();
+        let fetchInvoked = false, phase = 'before-fetch';
+        const failure = (message, extra = {}) => new OneBotFailure(message, diagnosticSchema.parse({ kind: 'onebot-call', action, phase, elapsedMs: Math.max(0, Date.now() - started), fetchInvoked, callerAborted: signal?.aborted ?? false, requestTimedOut: timeout.aborted, ...extra }));
         try {
-            while (true) {
-                const part = await reader.read();
-                if (part.done)
-                    break;
-                bytes += part.value.byteLength;
-                if (bytes > maxResponse) {
-                    await reader.cancel();
-                    throw new Error('ONEBOT_RESPONSE_LIMIT');
+            signal?.throwIfAborted();
+            fetchInvoked = true;
+            phase = 'fetch';
+            const response = await fetch(new URL(action, this.base), { method: 'POST', redirect: 'error',
+                // Local processing can outlast an idle socket's server timeout. Avoid reusing that socket;
+                // never repair an ambiguous send by automatically issuing the POST again.
+                headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json', Connection: 'close' }, body: JSON.stringify(params),
+                signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+            phase = 'body';
+            if (!response.ok)
+                throw failure('ONEBOT_HTTP_FAILURE', { httpStatus: response.status });
+            const reader = response.body?.getReader();
+            if (!reader)
+                throw failure('ONEBOT_INVALID_RESPONSE');
+            const chunks = [];
+            let bytes = 0;
+            const maxResponse = action === 'get_record' ? 32 * 1024 ** 2 : 2 * 1024 ** 2;
+            try {
+                while (true) {
+                    const part = await reader.read();
+                    if (part.done)
+                        break;
+                    bytes += part.value.byteLength;
+                    if (bytes > maxResponse) {
+                        await reader.cancel();
+                        throw failure('ONEBOT_RESPONSE_LIMIT');
+                    }
+                    chunks.push(part.value);
                 }
-                chunks.push(part.value);
             }
+            finally {
+                reader.releaseLock();
+            }
+            let raw;
+            try {
+                raw = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            }
+            catch {
+                throw failure('ONEBOT_INVALID_RESPONSE');
+            }
+            const body = responseSchema.parse(raw);
+            phase = 'response';
+            if (body.status !== 'ok' || body.retcode !== 0) {
+                const rawWording = typeof body.wording === 'string' ? body.wording : typeof body.message === 'string' ? body.message : '';
+                const wording = redactContent(this.token ? rawWording.replaceAll(this.token, '[REDACTED]') : rawWording).value.replace(/[A-Za-z0-9+/_=-]{40,}/g, '[REDACTED]').slice(0, 200);
+                throw failure('ONEBOT_REJECTED_OR_UNKNOWN', { httpStatus: response.status, retcode: body.retcode, status: body.status === 'failed' ? 'failed' : body.status === 'async' ? 'async' : 'other', wording });
+            }
+            return body.data;
         }
-        finally {
-            reader.releaseLock();
+        catch (error) {
+            if (error instanceof OneBotFailure)
+                throw error;
+            throw failure('ONEBOT_CALL_UNCERTAIN', { errorName: error instanceof Error && /^[A-Za-z]{1,40}$/.test(error.name) ? error.name : 'Error' });
         }
-        let raw;
-        try {
-            raw = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        }
-        catch {
-            throw new Error('ONEBOT_INVALID_RESPONSE');
-        }
-        const body = responseSchema.parse(raw);
-        if (body.status !== 'ok' || body.retcode !== 0)
-            throw new Error('ONEBOT_REJECTED_OR_UNKNOWN');
-        return body.data;
     }
     async verify(signal) {
         const info = z.object({ user_id: platformId }).parse(await this.call('get_login_info', {}, signal));

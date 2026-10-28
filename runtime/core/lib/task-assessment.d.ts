@@ -18,6 +18,7 @@ export declare function assessTask(ctx: Context, model: AgentOptions, cwd: strin
         retainExperience: boolean;
         next: "continue" | "deliver" | "wait" | "capability-change";
     };
+    model: AgentOptions;
     resultRef: {
         sessionId: string;
         messageSeq: import("@deepseek-ai/dsh-session").SessionSeq;

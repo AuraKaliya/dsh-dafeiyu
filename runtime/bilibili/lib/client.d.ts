@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { BiliConfig } from './config.js';
 import type { BiliStore } from './store.js';
 import type { HttpTransport, HttpResponse } from './http.js';
+import type { BiliBrowserPort, BiliBrowserRequest } from '#dafeiyu/contracts';
 declare const endpoints: {
     readonly nav: {
         readonly path: "/x/web-interface/nav";
@@ -95,11 +96,55 @@ export declare class BiliClient {
     readonly config: BiliConfig;
     private readonly store;
     private readonly transport;
+    private readonly context;
     constructor(config: BiliConfig, store: BiliStore, transport?: HttpTransport);
+    withContext<T>(context: {
+        taskId: string | null;
+        runId: string;
+        operationId: string;
+    }, work: () => T): T;
     accountStamp(): string;
+    private anonymousHttpCondition;
+    status(): {
+        http: {
+            identity: string;
+            state: string;
+        };
+        browser: {
+            configured: boolean;
+            state: string;
+        };
+        pause: {
+            scope: string;
+            kind: string | null;
+            endpoint: string | null;
+            failures: number;
+            held: boolean;
+            waitUntil: string | null;
+            automaticProbe: boolean;
+        };
+        note: string;
+    };
+    browserRead(port: BiliBrowserPort, request: BiliBrowserRequest, signal: AbortSignal, guard: () => void): Promise<{
+        transport: "dsh-browser";
+        accountUid: string;
+        bvid: string | null;
+        section: "discover" | "video" | "comments" | "frame";
+        url: string;
+        title: string;
+        text: string;
+        truncated: boolean;
+        observedAt: string;
+        feed?: "home" | "popular" | undefined;
+        frame?: {
+            dataUrl: string;
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
+    }>;
     private session;
     private slot;
-    private get;
+    private request;
     private json;
     read(endpoint: Endpoint, input: unknown, caller: AbortSignal, guard: () => void): Promise<unknown>;
     external(urlValue: string, kind: 'media' | 'subtitle', range: {

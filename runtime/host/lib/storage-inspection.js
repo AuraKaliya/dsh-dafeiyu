@@ -1,3 +1,4 @@
+import { verifyRecentStateSchema } from '#dafeiyu/memory/store';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { inspectJournal } from '#dafeiyu/journal';
@@ -12,7 +13,7 @@ import { ExecutorIdentitySchema, executorHash } from '#dafeiyu/server-executor/t
 import { BILI_OWNER_APPLICATION_ID, BILI_OWNER_SCHEMA_VERSION, BILI_OWNER_TABLES, BiliOwnerIdentitySchema, inspectBiliOwnerStorage } from '#dafeiyu/bilibili/channel';
 const definitions = {
     query: { app: 1146308689, versions: [8], tables: ['search_state', 'persisted_sessions', 'persisted_docs'] },
-    memory: { app: MEMORY_APPLICATION_ID, versions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], tables: ['memory_items', 'memory_revisions', 'dependencies', 'outbox', 'requests'] },
+    memory: { app: MEMORY_APPLICATION_ID, versions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], tables: ['memory_items', 'memory_revisions', 'dependencies', 'outbox', 'requests'] },
     runtime: { app: RUNTIME_APPLICATION_ID, versions: [1, 2, 3, 4], tables: ['runtime_metadata', 'runtime_ownership', 'execution_requests', 'runs', 'run_operations', 'runtime_outbox'] },
     delivery: { app: 0x44464433, versions: [1], tables: ['deliveries', 'events'] },
     analysis: { app: 0x44464131, versions: [1], tables: ['jobs', 'ownership', 'audit_outbox'] },
@@ -20,7 +21,7 @@ const definitions = {
     feedback: { app: 0x44464631, versions: [1], tables: ['archives', 'states', 'requests', 'events', 'outbox'] },
     activity: { app: ACTIVITY_APPLICATION_ID, versions: [ACTIVITY_SCHEMA_VERSION], tables: ACTIVITY_TABLES },
     media: { app: MEDIA_APPLICATION_ID, versions: [1, 2], tables: MEDIA_TABLES.filter(t => !t.startsWith('media_reply_')) },
-    bilibili: { app: BILI_APPLICATION_ID, versions: [1], tables: BILI_TABLES },
+    bilibili: { app: BILI_APPLICATION_ID, versions: [1, 2], tables: BILI_TABLES.filter(t => !t.startsWith('bili_http_')) },
     executor: { app: EXECUTOR_APPLICATION_ID, versions: [EXECUTOR_SCHEMA_VERSION], tables: ['executor_metadata', 'executor_clock', 'executor_jobs', 'executor_job_operations', 'executor_events', 'executor_receipts', 'executor_budget_links'] },
     'bili-owner': { app: BILI_OWNER_APPLICATION_ID, versions: [BILI_OWNER_SCHEMA_VERSION], tables: BILI_OWNER_TABLES },
     retrieval: { app: 0x44465232, versions: [1, 2], tables: ['chunks', 'snapshots', 'vector_cache'] },
@@ -76,10 +77,14 @@ export function inspectStorage(file, kind, identity) {
             const stored = RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));
             identityMatches = stored.success && stored.data.agentId === identity.agentId && stored.data.profileId === identity.profileId;
         }
-        if (kind === 'bilibili' && supported && identity) {
-            const row = db.prepare('SELECT body FROM bili_metadata WHERE id=1').get();
-            const stored = RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));
-            identityMatches = stored.success && stored.data.agentId === identity.agentId && stored.data.profileId === identity.profileId;
+        if (kind === 'bilibili' && supported) {
+            if (version >= 2)
+                supported = BILI_TABLES.every(t => tables.has(t));
+            if (identity) {
+                const row = db.prepare('SELECT body FROM bili_metadata WHERE id=1').get();
+                const stored = RuntimeIdentitySchema.safeParse(JSON.parse(String(row?.body)));
+                identityMatches = stored.success && stored.data.agentId === identity.agentId && stored.data.profileId === identity.profileId;
+            }
         }
         if (kind === 'bili-owner' && supported) {
             const row = db.prepare('SELECT body FROM bili_owner_binding WHERE id=1').get(), stored = BiliOwnerIdentitySchema.parse(JSON.parse(String(row?.body)));
@@ -114,6 +119,14 @@ export function inspectStorage(file, kind, identity) {
                 11: ['experience_items', 'experience_revisions', 'experience_relations', 'maintenance_events', 'maintenance_requests', 'maintenance_receipts', 'maintenance_watermarks'],
                 12: PERSONA_ADOPTION_TABLES };
             supported = Object.entries(stages).every(([stage, names]) => version < Number(stage) || names.every(name => tables.has(name)));
+            if (supported && version >= 13) {
+                try {
+                    verifyRecentStateSchema(db);
+                }
+                catch {
+                    supported = false;
+                }
+            }
             if (supported && version >= 12) {
                 try {
                     verifyPersonaAdoptionSchema(db);

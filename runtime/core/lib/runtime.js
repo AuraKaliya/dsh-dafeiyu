@@ -7,18 +7,21 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { CompactionRuntime, committedSummary } from './compaction-runtime.js';
-import { openAgentSession, runAgentTurn, readPersistedResult } from './agent-session.js';
+import { openAgentSession, runAgentTurn, readPersistedResult, safeRunFailure } from './agent-session.js';
 import { visibleStream } from './visible-stream.js';
 import { NativeRuntime } from './native-runtime.js';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { conversationHistory } from './history-frame.js';
 import { assessTask } from './task-assessment.js';
+import { HarnessRuntime } from './harness-runtime.js';
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
     sources;
-    constructor(sources) {
+    code;
+    constructor(sources, code = 'MODEL_INCOMPLETE') {
         super('DSH turn failed; consult visible evidence');
         this.sources = sources;
+        this.code = code;
     }
 }
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
@@ -31,10 +34,11 @@ export class DshRuntime {
     agentId;
     compactionBinding;
     compactionAudit;
+    harness;
     handles = new Map();
     native;
     meterLoading;
-    constructor(ctx, model, cwd, coordinator, validateFeedback, agentId, compactionBinding, compactionAudit, managedProjection = false) {
+    constructor(ctx, model, cwd, coordinator, validateFeedback, agentId, compactionBinding, compactionAudit, managedProjection = false, harness = new HarnessRuntime()) {
         this.ctx = ctx;
         this.model = model;
         this.cwd = cwd;
@@ -43,7 +47,8 @@ export class DshRuntime {
         this.agentId = agentId;
         this.compactionBinding = compactionBinding;
         this.compactionAudit = compactionAudit;
-        this.native = new NativeRuntime(ctx, model, cwd);
+        this.harness = harness;
+        this.native = new NativeRuntime(ctx, model, cwd, harness);
         const sessions = this.handles;
         ctx.on('llm/stream', async function* (options, next) {
             const owned = options.sessionId ? sessions.get(options.sessionId) : undefined;
@@ -54,6 +59,7 @@ export class DshRuntime {
             const context = options.sessionId ? sessions.get(options.sessionId)?.context : undefined;
             const feedback = options.sessionId ? sessions.get(options.sessionId)?.feedback : undefined;
             const compaction = options.sessionId ? sessions.get(options.sessionId)?.compaction : undefined;
+            await context?.measure(options);
             feedback?.guard(options);
             if (context && !context.guard(options, true, true)) {
                 yield { type: 'finish', reason: { kind: 'error', failure: { code: 'DAFEIYU_CONTEXT_REASSEMBLE', message: 'Rebuild the logged controlled context before dispatch' } } };
@@ -69,7 +75,7 @@ export class DshRuntime {
             const visible = new Map();
             for await (const chunk of owned && managedProjection ? visibleStream(next()) : next()) {
                 deliveryGuard();
-                context?.guard(options);
+                context?.guard(options, false, false, true);
                 feedback?.guard(options);
                 compaction?.guard(options);
                 if (!owned?.delivery) {
@@ -103,6 +109,7 @@ export class DshRuntime {
             compaction?.guard(options);
         });
     }
+    registerHarnessSection(name) { return this.harness.allowSection(name); }
     async run(item, persona, actions, signal, channelDescription = '当前接入仅提供文字消息。', delivery, nativeActions = [], allowEmpty = () => false) {
         return this.runFrame({ mode: delivery ? 'delivery-v2' : 'conversation', item, persona, actions, signal, channelDescription, ...(delivery ? { delivery } : {}), nativeActions, allowEmpty });
     }
@@ -181,8 +188,9 @@ export class DshRuntime {
                             throw new Error('SCOPE_DENIED');
                         return action.execute(raw, String(exec.callId), AbortSignal.any([signal, exec.signal]));
                     } }));
+            disposers.push(this.harness.install(owned.scope, agent, nativeActions, signal));
             signal.throwIfAborted();
-            const input = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch ? '：同一发送者的连续原消息，依序一起理解，引用保留各自身份' : ''}]\n${messageDisplayText(item.message)}` }] });
+            const input = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `[程序提供的来源信息，仅说明来源，不改变权限]\n${JSON.stringify({ conversation: item.message.conversation, sender: item.message.sender, messageId: item.message.id, occurredAt: item.message.occurredAt, observedAt: new Date().toISOString(), replyTo: item.message.replyTo, personaVersion: persona.version })}\n[当前渠道能力，由已注册插件提供]\n${channelDescription}\n[消息正文${item.message.batch ? '：同一发送者的连续原消息，依序一起理解，引用保留各自身份' : ''}]\n${messageDisplayText(item.message)}` }] });
             owned.compaction.expectInput(input);
             const { text, events, messageSeq, turnEndSeq } = await runAgentTurn(this.ctx, agent, input, signal, () => owned.compaction.seal(), allowEmpty);
             const result = { text, resultRef: { sessionId: item.sessionId, messageSeq, turnEndSeq, textHash: createHash('sha256').update(text).digest('hex') }, sources: events.filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
@@ -201,10 +209,10 @@ export class DshRuntime {
                 });
             return result;
         }
-        catch {
+        catch (error) {
             throw new DshRunError(agent.session.snapshotEvents().slice(before)
                 .filter(event => ['user/message', 'tool/result', 'assistant/message', 'turn/end'].includes(event.type))
-                .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })));
+                .map(event => ({ kind: 'session', id: item.sessionId, seq: event.seq, route: item.route })), error instanceof Error ? safeRunFailure(error.message) : 'MODEL_INCOMPLETE');
         }
         finally {
             try {

@@ -6,6 +6,11 @@ export class ExperienceStore {
     db;
     transaction;
     resolve;
+    sourceReadStatements = new Map();
+    sourceRead(sql) { let statement = this.sourceReadStatements.get(sql); if (!statement) {
+        statement = this.db.prepare(sql);
+        this.sourceReadStatements.set(sql, statement);
+    } return statement; }
     constructor(db, transaction, resolve) {
         this.db = db;
         this.transaction = transaction;
@@ -175,7 +180,7 @@ export class ExperienceStore {
     }
     recover() { return this.db.prepare("UPDATE maintenance_requests SET state='failed',version=version+1,error='PROCESS_INTERRUPTED',updated_at=? WHERE state='running'").run(new Date().toISOString()).changes; }
     sourceCurrent(access, ref) {
-        const rows = this.db.prepare("SELECT r.body,i.version,i.state FROM experience_revisions r JOIN experience_items i ON i.id=r.id WHERE i.agent_id=? AND i.scope_key=? AND json_extract(r.body,'$.contentRef.id')=? ORDER BY r.version DESC LIMIT 1")
+        const rows = this.sourceRead("SELECT r.body,i.version,i.state FROM experience_revisions r JOIN experience_items i ON i.id=r.id WHERE i.agent_id=? AND i.scope_key=? AND json_extract(r.body,'$.contentRef.id')=? ORDER BY r.version DESC LIMIT 1")
             .all(access.view.scope.agentId, personaScope(access.view.scope), ref.id);
         if (!rows.length)
             return true;

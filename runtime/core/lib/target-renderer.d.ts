@@ -14,7 +14,11 @@ declare module '@deepseek-ai/dsh-llm' {
     }
 }
 /** A real, persisted DSH turn in a new target-persona session; no executor or chat transcript is inherited. */
-export declare function renderTaskResult(ctx: Context, model: AgentOptions, cwd: string, id: string, foundation: string, growth: readonly ContextItem[], packet: NativeExpressionPacket, signal: AbortSignal, guard: () => void, requestMaxBytes: number): Promise<{
+export interface DeliveryRepair {
+    previousAnswer: string;
+    issues: readonly string[];
+}
+export declare function renderTaskResult(ctx: Context, model: AgentOptions, cwd: string, id: string, foundation: string, growth: readonly ContextItem[], packet: NativeExpressionPacket, signal: AbortSignal, guard: () => void, requestMaxBytes: number, repair?: DeliveryRepair): Promise<{
     text: string;
     resultRef: {
         sessionId: string;
@@ -32,6 +36,7 @@ interface TargetMaterial {
     evidence: NativeExpressionPacket['evidence'];
     taskState: string;
     progress?: true;
+    repair?: DeliveryRepair;
 }
 export declare function renderPublicProgress(ctx: Context, model: AgentOptions, cwd: string, id: string, foundation: string, growth: readonly ContextItem[], material: TargetMaterial, signal: AbortSignal, guard: () => void, requestMaxBytes: number): Promise<{
     text: string;

@@ -74,11 +74,11 @@ export declare class MemoryCompaction implements CompactionProvider {
     summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal, checkSources?: () => void): Promise<string>;
     summarizeFragments(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal, checkSources: () => void, maxChars: number, maxFragments?: number, targetChars?: number): Promise<{
         text: string;
-        kind: "result" | "decision" | "constraint" | "correction" | "pending" | "fact" | "uncertainty" | "note";
+        kind: "result" | "note" | "constraint" | "correction" | "pending" | "fact" | "decision" | "uncertainty";
     }[]>;
     rewrite(_scope: CompactionScope, request: SemanticRequest, signal: AbortSignal, checkSources: () => void): Promise<{
         fragment: {
-            kind: "result" | "decision" | "constraint" | "correction" | "pending" | "fact" | "uncertainty" | "note";
+            kind: "result" | "note" | "constraint" | "correction" | "pending" | "fact" | "decision" | "uncertainty";
             text: string;
         };
         qualifiers: {

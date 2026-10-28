@@ -140,9 +140,9 @@ export declare const BiliOwnerInboundStateSchema: z.ZodEnum<{
 }>;
 export declare const BiliOwnerDeliveryStateSchema: z.ZodEnum<{
     unknown: "unknown";
+    blocked: "blocked";
     sent: "sent";
     prepared: "prepared";
-    blocked: "blocked";
     sending: "sending";
 }>;
 export declare const BiliOwnerDeliveryPlanSchema: z.ZodObject<{

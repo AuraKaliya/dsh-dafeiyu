@@ -12,10 +12,11 @@ import { BILI_OWNER_AUTH_HASH } from '#dafeiyu/bilibili/channel/production-confi
 import { ACTIVITY_ACTIONS } from '#dafeiyu/activity';
 import { MEDIA_ACTIONS } from '#dafeiyu/media';
 import { readInstallationSettings, checkInstallationFiles } from './settings.js';
+import { attachLocalOwnerControl } from './local-owner.js';
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const metadataSchema = z.strictObject({ schemaVersion: z.literal(1), instanceId: z.uuid(), profileId: z.string(), agentId: z.string(), createdAt: z.iso.datetime(), identityHash: z.string().length(64),
     biliOwner: z.strictObject({ accountUid: z.string(), ownerUid: z.string(), since: z.iso.datetime() }).nullable() });
-const growthActions = ['dafeiyu_qq_expression_save', 'dafeiyu_qq_expression_status', 'dafeiyu_persona_propose', 'dafeiyu_persona_review', 'dafeiyu_persona_trial_select', 'dafeiyu_persona_adoption_review', 'dafeiyu_persona_publish', 'dafeiyu_persona_select', 'dafeiyu_persona_withdraw', 'dafeiyu_persona_status'];
+const growthActions = ['dafeiyu_recent_state_unpublish', 'dafeiyu_recent_state_save', 'dafeiyu_recent_state_status', 'dafeiyu_recent_state_publish', 'dafeiyu_qq_expression_save', 'dafeiyu_qq_expression_status', 'dafeiyu_persona_propose', 'dafeiyu_persona_review', 'dafeiyu_persona_trial_select', 'dafeiyu_persona_adoption_review', 'dafeiyu_persona_publish', 'dafeiyu_persona_select', 'dafeiyu_persona_withdraw', 'dafeiyu_persona_status'];
 const taskActions = ['dafeiyu_task_intent', 'dafeiyu_task_object', 'dafeiyu_execution_source_open', 'dafeiyu_execution_contribute', 'dafeiyu_execution_select', 'dafeiyu_execution_source_state', 'dafeiyu_execution_contribution_state'];
 const maintenanceActions = ['dafeiyu_memory_maintenance_request', 'dafeiyu_memory_maintenance_status', 'dafeiyu_memory_consolidate', 'dafeiyu_memory_maintenance_result', 'dafeiyu_experience_read', 'dafeiyu_experience_review', 'dafeiyu_memory_persona_candidate'];
 const mediaActions = ['dafeiyu_media_acquire', 'dafeiyu_media_inspect', 'dafeiyu_media_read', 'dafeiyu_media_select'];
@@ -25,8 +26,8 @@ export function installationProfile(settings, meta, foundationFile, settingsFile
     const resources = bili?.capabilities ? [BILI_PUBLIC_SCENE] : [];
     const enabledMediaActions = settings.qq.media?.sendEnabled ? MEDIA_ACTIONS : mediaActions;
     const stickerActions = settings.qq.stickers.enabled ? [...QQ_STICKER_ACTIONS] : [];
-    const actions = [...taskActions, ...growthActions, ...maintenanceActions, ...QQ_ACTIONS, ...QQ_PROGRESS_ACTIONS, ...stickerActions, ...(settings.dshTools ? DSH_TOOL_ACTIONS : []), ...(activity ? ACTIVITY_ACTIONS : []), ...(bili?.capabilities ? BILI_ACTIONS : []), ...(settings.media ? [...QQ_MEDIA_ACTIONS, ...enabledMediaActions] : [])];
-    const conversation = [...growthActions, ...QQ_ACTIONS, ...QQ_TASK_ACTIONS, ...stickerActions, ...(settings.media ? [...QQ_MEDIA_ACTIONS, ...enabledMediaActions] : []), ...(bili?.channel ? BILI_OWNER_TASK_ACTIONS : [])];
+    const actions = [...taskActions, ...growthActions, ...maintenanceActions, ...QQ_ACTIONS, ...QQ_PROGRESS_ACTIONS, ...stickerActions, ...(settings.dshTools ? DSH_TOOL_ACTIONS : []), ...(activity ? ACTIVITY_ACTIONS : []), ...(bili?.capabilities ? [...BILI_ACTIONS, ...(bili.browser ? ['bili_browser_read'] : [])] : []), ...(settings.media ? [...QQ_MEDIA_ACTIONS, ...enabledMediaActions] : [])];
+    const conversation = [...growthActions, ...QQ_ACTIONS, ...QQ_TASK_ACTIONS, ...(settings.dshTools ? ['dsh_tool_list'] : []), ...stickerActions, ...(settings.media ? [...QQ_MEDIA_ACTIONS, ...enabledMediaActions] : []), ...(bili?.channel ? BILI_OWNER_TASK_ACTIONS : [])];
     const plugins = [{ id: options.scripted ? 'model-scripted' : 'model-deepseek', required: true, config: options.scripted ? {} : { credentialStore: settings.model.credentialStore, ...(settings.model.auth ? { auth: settings.model.auth } : {}), ...(settings.model.baseURL ? { baseURL: settings.model.baseURL } : {}), ...(settings.model.inlineTransport ? { inlineTransport: settings.model.inlineTransport } : {}) } },
         { id: 'timeline', required: true, config: { execution: true } }, { id: 'memory-growth', required: true, config: { sourceTracking: true, context: {}, maintenance: {} } },
         { id: 'qq', required: true, config: { ...settings.qq, joinedGroups: undefined, capabilities: { enabled: true }, tasks: { enabled: true, policyId: 'qq-task', deliverResults: true, explorationResources: resources }, ...(settings.media ? { media: { enabled: true, ...settings.qq.media } } : {}), groupSync: { enabled: true, mode: settings.qq.joinedGroups ? 'joined' : 'allowlist' } } }];
@@ -62,12 +63,15 @@ export function installationProfile(settings, meta, foundationFile, settingsFile
         plugins.push({ id: 'media', required: true, config: media });
     }
     if (bili)
-        plugins.push({ id: 'bilibili', required: true, config: { ...(bili.capabilities ? { capabilities: { ...(bili.session ? { session: bili.session } : {}) } } : {}), ...(bili.channel ? { channel: { accountUid: bili.channel.accountUid, ownerUid: bili.channel.ownerUid, tasks: { enabled: bili.capabilities } } } : {}) } });
+        plugins.push({ id: 'bilibili', required: true, config: { ...(bili.capabilities ? { capabilities: { ...bili.requestPolicy, ...(bili.browser ? { browser: bili.browser } : {}), ...(bili.session ? { session: bili.session } : {}) } } : {}), ...(bili.channel ? { channel: { accountUid: bili.channel.accountUid, ownerUid: bili.channel.ownerUid, tasks: { enabled: bili.capabilities } } } : {}) } });
     const policies = [{ id: 'conversation', producers: ['channel-qq', ...(bili?.channel ? ['channel-bili-owner'] : [])], actions: conversation, allowLocalWrite: true },
         { id: 'qq-task', producers: ['qq-tasks'], actions, allowLocalWrite: true, resources },
         { id: 'local-task', producers: ['host-cli'], actions, allowLocalWrite: true, resources: [...resources, { channel: 'qq', account: settings.qq.botId, kind: 'private', id: settings.qq.ownerId }] }];
     if (activity)
         policies.push({ id: 'activity-explore', producers: ['activity'], actions, allowLocalWrite: true, resources }, { id: 'activity-maintenance', producers: ['activity'], actions: [...maintenanceActions, ...growthActions], allowLocalWrite: true, resources });
+    if (settings.localOwnerControl)
+        policies.push({ id: 'conversation-local-owner-tasks', producers: ['local-owner-tasks'], actions: ['local_owner_task_submit', ...(settings.dshTools ? ['dsh_tool_list'] : [])], allowLocalWrite: true }, { id: 'local-owner-task', producers: ['local-owner-tasks'], actions, allowLocalWrite: true, resources,
+            externalActions: settings.dshTools ? [{ extensionId: 'dsh-tools', actionId: 'dsh_tool_call', actionVersion: '1' }] : [] });
     for (const policy of policies) {
         const entry = z.object({ id: z.string() }).parse(policy);
         if (['qq-task', 'activity-explore'].includes(entry.id))
@@ -77,7 +81,7 @@ export function installationProfile(settings, meta, foundationFile, settingsFile
         policies.push({ id: 'bili-owner-task', producers: ['bili-owner-tasks'], actions: [...BILI_OWNER_NATIVE_ACTIONS], allowLocalWrite: true, resources: [BILI_PUBLIC_SCENE, biliOwnerScene(bili.channel)] });
     return HostConfigSchema.parse(JSON.parse(JSON.stringify({ schemaVersion: 1, profileId: meta.profileId, agent: { id: meta.agentId }, paths: { core: join(root, 'core'), memory: join(root, 'memory'), sessions: join(root, 'sessions'), query: join(root, 'query.sqlite'), channels: { qq: join(root, 'qq') } },
         modelRoutes: { chat: options.scripted ? { provider: 'local-test', model: 'scripted' } : { provider: settings.model.auth === 'dsh-account' ? 'deepseek-account' : 'deepseek-official', model: settings.model.model, ...(settings.model.reasoningEffort ? { reasoningEffort: settings.model.reasoningEffort } : {}) } },
-        persona: { fixedFile: foundationFile, kind: options.scripted ? 'test' : 'formal' }, context: { compactionInputTokens: 48000, regions: { 'memory:qq-expression': { maxBytes: 6000, priority: 420 } } }, plugins, authorityPolicies: policies })));
+        persona: { fixedFile: foundationFile, kind: options.scripted ? 'test' : 'formal', ...(settings.growthMaxBytes === undefined ? {} : { growthRegion: { maxBytes: settings.growthMaxBytes } }) }, ...(settings.taskTimeoutMs || settings.phaseTimeouts ? { runtime: { ...(settings.taskTimeoutMs ? { turnTimeoutMs: settings.taskTimeoutMs } : {}), ...(settings.phaseTimeouts ? { phaseTimeouts: settings.phaseTimeouts } : {}) } } : {}), context: { compactionInputTokens: 48000, ...settings.contextBudget, assembly: settings.context ?? { mode: 'legacy' }, regions: { 'memory:qq-expression': { maxBytes: 6000, priority: 420 }, ...settings.contextBudget?.regions } }, plugins, authorityPolicies: policies })));
 }
 export function prepareInstallation(settingsFile, options = {}) {
     const settings = readInstallationSettings(settingsFile), root = settings.dataDir, metaFile = join(root, 'installation.json');
@@ -159,5 +163,11 @@ export async function startInstallation(settingsFile, options = {}, runtime = {}
     if (!prepared.inspection.ready)
         throw new Error(prepared.inspection.codes[0] ?? 'INSTALL_NOT_READY');
     const createBiliOwnerPorts = runtime.createBiliOwnerPorts ?? ownerPorts(prepared.settings);
-    return ManagedHost.start(prepared.prepared, { ...runtime, ...(createBiliOwnerPorts ? { createBiliOwnerPorts } : {}) });
+    return ManagedHost.start(prepared.prepared, { ...runtime, ...(createBiliOwnerPorts ? { createBiliOwnerPorts } : {}), installChannels: async (ctx, config) => {
+            await runtime.installChannels?.(ctx, config);
+            if (prepared.settings.localOwnerControl) {
+                const close = attachLocalOwnerControl(ctx, prepared.settings, config.config.agent.id);
+                ctx.effect(() => close);
+            }
+        } });
 }

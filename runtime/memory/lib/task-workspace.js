@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { conversationKey, redactContent, TaskMemoryAuthorizationSchema } from '#dafeiyu/contracts';
 import { MEMORY_VERSION, sourceVersionSchema, sourceFenceSchema } from './types.js';
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const string = (v) => z.string().parse(v), integer = (v) => z.number().int().safe().parse(v);
+const stringValue = z.string(), integerValue = z.number().int().safe(), taskBody = z.strictObject({ title: z.string(), goal: z.string() }), taskStatus = z.enum(['active', 'paused', 'completed']);
+const string = (v) => stringValue.parse(v), integer = (v) => integerValue.parse(v);
 export const witnessSchema = z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('memory'), route: z.string(), id: z.uuid(), revision: z.number().int().positive(), version: z.number().int().positive(), contentHash: z.string(),
         ancestors: z.array(sourceVersionSchema), fences: z.array(sourceFenceSchema), authorization: TaskMemoryAuthorizationSchema.optional(), range: z.strictObject({ start: z.number().int().nonnegative(), end: z.number().int().positive() }).optional() }),
@@ -21,7 +22,7 @@ const privateRoute = (agentId, taskId) => conversationKey(agentId, { channel: 'a
 export function migrateTaskWorkspaces(db) {
     const version = db.prepare('PRAGMA user_version').get()?.user_version;
     const tables = ['task_workspaces', 'task_revisions', 'task_members', 'task_selections', 'task_links', 'task_jobs', 'task_slots', 'task_requests', 'task_observations'];
-    if (version === 4 || version === 5 || version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12) {
+    if (version === 4 || version === 5 || version === 6 || version === 7 || version === 8 || version === 9 || version === 10 || version === 11 || version === 12 || version === 13) {
         for (const table of tables)
             db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
         return;
@@ -91,8 +92,8 @@ export class TaskWorkspace {
         const row = this.db.prepare('SELECT * FROM task_workspaces WHERE id=? AND agent_id=?').get(id, agentId);
         if (!row)
             throw new Error('task_not_found');
-        const body = z.strictObject({ title: z.string(), goal: z.string() }).parse(JSON.parse(string(row.body)));
-        return { id, agentId, version: integer(row.version), epoch: integer(row.epoch), status: z.enum(['active', 'paused', 'completed']).parse(row.status), ...body };
+        const body = taskBody.parse(JSON.parse(string(row.body)));
+        return { id, agentId, version: integer(row.version), epoch: integer(row.epoch), status: taskStatus.parse(row.status), ...body };
     }
     record(task, type, data, authority) {
         const eventId = randomUUID(), event = { agentId: task.agentId, route: authority?.route ?? privateRoute(task.agentId, task.id), traceId: authority?.parent?.traceId ?? task.id,

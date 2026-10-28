@@ -4,6 +4,7 @@ import type { NativeExpressionAccess, NativeExpressionPort, PendingMessage, Task
 import type { ContextCoordinator } from './context.js';
 import type { RuntimeStore } from './runtime-store.js';
 import type { DeliveryChannel } from './task-delivery.js';
+export declare const NATIVE_RENDER_ATTEMPTS = 2;
 interface Host {
     ctx: Context;
     store: RuntimeStore;

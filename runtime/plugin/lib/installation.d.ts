@@ -78,13 +78,36 @@ export declare function installationProfile(settings: InstallationSettings, meta
     context: {
         maxBytes: number;
         requestMaxBytes: number;
-        prepareTimeoutMs: number;
         outputReserveBytes: number;
+        prepareTimeoutMs: number;
         regions: Record<string, {
             maxBytes: number;
             priority: number;
             required: boolean;
         }>;
+        assembly: {
+            mode: "legacy" | "unified";
+            deadlineMs: number;
+            recall: {
+                enabled: boolean;
+                strategy: "lexical" | "hybrid";
+                candidates: number;
+                limit: number;
+                maxBytes: number;
+                timeoutMs: number;
+            };
+            background: {
+                enabled: boolean;
+                windowMs: number;
+                limit: number;
+                maxBytes: number;
+            };
+            recentState: {
+                enabled: boolean;
+                shared: boolean;
+                maxBytes: number;
+            };
+        };
         compactionInputTokens?: number | undefined;
     };
     authorityPolicies: {
@@ -115,6 +138,7 @@ export declare function prepareInstallation(settingsFile: string, options?: Inst
         dataDir: string;
         instanceName: string;
         dshTools: boolean;
+        localOwnerControl: boolean;
         model: {
             model: string;
             credentialStore: string;
@@ -157,8 +181,60 @@ export declare function prepareInstallation(settingsFile: string, options?: Inst
             dailyActiveMs: number;
         };
         foundationFile?: string | undefined;
+        context?: {
+            mode: "legacy" | "unified";
+            deadlineMs: number;
+            recall: {
+                enabled: boolean;
+                strategy: "lexical" | "hybrid";
+                candidates: number;
+                limit: number;
+                maxBytes: number;
+                timeoutMs: number;
+            };
+            background: {
+                enabled: boolean;
+                windowMs: number;
+                limit: number;
+                maxBytes: number;
+            };
+            recentState: {
+                enabled: boolean;
+                shared: boolean;
+                maxBytes: number;
+            };
+        } | undefined;
+        contextBudget?: {
+            maxBytes: number;
+            requestMaxBytes: number;
+            outputReserveBytes: number;
+            prepareTimeoutMs: number;
+            regions: Record<string, {
+                maxBytes: number;
+                priority: number;
+                required: boolean;
+            }>;
+        } | undefined;
+        growthMaxBytes?: number | undefined;
+        taskTimeoutMs?: number | undefined;
+        phaseTimeouts?: {
+            assessment: number;
+            render: number;
+            verification: number;
+            feedback: number;
+        } | undefined;
         bilibili?: {
             capabilities: boolean;
+            browser?: {
+                expectedUid: string;
+            } | undefined;
+            requestPolicy?: {
+                minIntervalMs?: number | undefined;
+                retry?: {
+                    rateDelaysMs: number[];
+                    riskDelayMs: number;
+                } | undefined;
+            } | undefined;
             session?: {
                 file: string;
                 expectedUid: string;

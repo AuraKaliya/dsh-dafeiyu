@@ -30,6 +30,7 @@ export * from './activity.js';
 export * from './media.js';
 export * from './media-delivery.js';
 export * from './dsh-tools.js';
+export * from './bili-browser.js';
 export * from './qq-expression.js';
 export * from './task-assessment.js';
 export const API_VERSION = 2;
@@ -59,10 +60,11 @@ export const messageMainText = (message) => message.batch ? message.batch.source
 export const messageDisplayText = (message) => message.batch ? message.batch.sources.map(part => `[原消息 ${part.id}；${part.occurredAt}${part.replyTo ? '；引用 ' + part.replyTo : ''}]\n${part.text}`).join('\n\n') : message.text;
 export const ObservationSchema = z.strictObject({
     conversation: ConversationSchema,
-    type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled']),
+    type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled', 'delivery.diagnostic']),
     data: z.record(z.string(), z.union([z.string().max(200), z.number().finite(), z.boolean(), z.null()])),
 });
 /** Collision-free identity; group participants share one conversation, never one global transcript. */
 export function conversationKey(agentId, c) {
     return JSON.stringify([agentId, c.channel, c.account, c.kind, c.id]);
 }
+export * from './recent-state.js';

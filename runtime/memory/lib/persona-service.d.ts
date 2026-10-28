@@ -1,3 +1,4 @@
+import { RecentStateService } from './recent-state.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { PersonaAccess, PersonaSourceRef, ExecutionContextV3 } from '#dafeiyu/contracts';
 import { z } from 'zod';
@@ -14,6 +15,7 @@ export declare class GrowthService {
     private readonly tasks;
     private readonly agentId;
     private readonly ready;
+    readonly recent: RecentStateService;
     readonly qqExpression: QqExpressionPreferences;
     readonly experiences: ExperienceStore;
     private readonly store;
@@ -26,6 +28,7 @@ export declare class GrowthService {
     private readonly handle;
     constructor(ctx: Context, memory: MemoryStore, tasks: TaskWorkspace, agentId: string, ready: () => boolean, compaction?: z.input<typeof compactionConfigSchema>, maintenanceEnabled?: boolean);
     resolve(access: PersonaAccess, ref: PersonaSourceRef): PersonaMaterial | null;
+    private resolutionMemo;
     private access;
     /** A source key selects only a reference already exposed in this live execution access. */
     private resolveExposedSource;
@@ -78,7 +81,7 @@ export declare class GrowthService {
     review(context: ExecutionContextV3, raw: unknown, pluginId?: string): {
         id: string;
         version: number;
-        state: "superseded" | "withdrawn" | "proposed" | "held" | "trial" | "adopted" | "rejected" | "dormant";
+        state: "superseded" | "withdrawn" | "dormant" | "proposed" | "held" | "trial" | "adopted" | "rejected";
     };
     selectTrial(context: ExecutionContextV3, raw: unknown, pluginId?: string): {
         selection: {
@@ -151,7 +154,7 @@ export declare class GrowthService {
                 version: number;
             };
             runId: string;
-            state: "completed" | "failed" | "cancelled" | "interrupted";
+            state: "completed" | "interrupted" | "failed" | "cancelled";
             gaps: string[];
         }[];
         stageRevision: number;
@@ -160,8 +163,8 @@ export declare class GrowthService {
         candidates: {
             id: string;
             version: number;
-            state: "superseded" | "withdrawn" | "proposed" | "held" | "trial" | "adopted" | "rejected" | "dormant";
-            kind: "preference" | "interest" | "view" | "habit" | "relationship" | "value-application";
+            state: "superseded" | "withdrawn" | "dormant" | "proposed" | "held" | "trial" | "adopted" | "rejected";
+            kind: "preference" | "view" | "interest" | "habit" | "relationship" | "value-application";
             applicability: string;
             maturity: string;
             available: boolean;
@@ -335,7 +338,7 @@ export declare class GrowthService {
             kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
             basis: string[];
         };
-        category: "preference" | "none" | "method" | "scope" | "premise" | "missing-information";
+        category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
         blocking: boolean;
         reason: string;
         evidence: ({
@@ -392,7 +395,7 @@ export declare class GrowthService {
                 kind: "unknown" | "maintenance" | "explicit-task" | "self-exploration" | "conversation-invitation" | "mixed";
                 basis: string[];
             };
-            category: "preference" | "none" | "method" | "scope" | "premise" | "missing-information";
+            category: "none" | "preference" | "scope" | "method" | "premise" | "missing-information";
             blocking: boolean;
             reason: string;
             evidence: ({

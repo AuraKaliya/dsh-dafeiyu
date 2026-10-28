@@ -10,6 +10,13 @@ export const qqTextHash = (text) => createHash('sha256').update(text).digest('he
 const state = z.enum(['pending', 'sending', 'sent', 'unknown']);
 const part = z.union([z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(4000) }), ReplyMediaPartSchema]);
 const planSchema = z.strictObject({ version: z.literal(2), replyId: z.string(), target: ConversationSchema, sourceMessageId: z.string(), textHash: z.string().length(64), manifest: ReplyMediaManifestSchema, parts: z.array(part).min(1).max(72), originalText: z.string().max(32000).optional() });
+function semanticPlanHash(plan) { const parts = []; for (const part of plan.parts) {
+    const last = parts.at(-1);
+    if (part.kind === 'text' && last?.kind === 'text')
+        last.text += part.text;
+    else
+        parts.push({ ...part });
+} return qqMediaHash({ ...plan, parts }); }
 const progressPart = z.strictObject({ position: z.number().int().nonnegative(), state, receipt: z.string().nullable(), code: z.string().nullable() });
 /** Builds fixed bytes/identity metadata, never authorizes those bytes or invokes a platform. */
 export function qqMediaDeliveryPlan(reply) {
@@ -48,7 +55,7 @@ export class QqMediaDeliveryLedger {
         if (plan.replyId !== id || qqMediaHash(plan) !== row.plan_hash)
             throw new Error('DELIVERY_LEDGER_CORRUPT');
         const expected = qqMediaDeliveryPlan({ id: plan.replyId, conversation: plan.target, sourceMessageId: plan.sourceMessageId, text: plan.originalText ?? plan.parts.filter(p => p.kind === 'text').map(p => p.text).join(''), media: plan.manifest, ...(plan.manifest.anchor.kind === 'task-result' ? { taskResult: plan.manifest.anchor } : {}) });
-        if (qqMediaHash(plan) !== qqMediaHash(expected))
+        if (semanticPlanHash(plan) !== semanticPlanHash(expected))
             throw new Error('DELIVERY_LEDGER_CORRUPT');
         return plan;
     }
@@ -57,7 +64,7 @@ export class QqMediaDeliveryLedger {
         return this.atomic(() => {
             const old = this.plan(reply.id);
             if (old) {
-                if (qqMediaHash(old) !== qqMediaHash(plan))
+                if (semanticPlanHash(old) !== semanticPlanHash(plan))
                     throw new Error('DELIVERY_PLAN_CONFLICT');
                 return old;
             }

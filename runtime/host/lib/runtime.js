@@ -239,7 +239,7 @@ export class ManagedHost {
         }
         const bili = pluginConfig(this.config, 'bilibili');
         if (bili) {
-            this.biliValue = new Bili.BiliService(ctx, { agentId: this.config.config.agent.id, profileId: this.config.config.profileId, dataDir: this.config.paths.core, createStore: false, settings: bili }, this.options.biliTransport);
+            this.biliValue = new Bili.BiliService(ctx, { agentId: this.config.config.agent.id, profileId: this.config.config.profileId, dataDir: this.config.paths.core, createStore: false, settings: bili }, this.options.biliTransport, this.options.biliBrowser);
             this.plugin('bilibili', 'ready');
         }
         const simulator = pluginConfig(this.config, 'channel-simulator');
@@ -287,6 +287,8 @@ export class ManagedHost {
         }
         else if (biliOwner)
             this.plugin('channel-bili-owner', 'disabled', 'HOST_SINGLE_RUN');
+        if (this.mode === 'daemon')
+            await this.options.installChannels?.(ctx, this.config);
         if (this.mode === 'daemon' && biliOwner && !this.biliOwnerValue && this.biliOwnerPendingWork())
             throw new Error('HOST_BILI_OWNER_PENDING_WORK_REQUIRES_CHANNEL');
         const producerActive = (producer) => producer === 'activity' ? !!this.activityValue && this.mode === 'daemon' : producer === 'channel-qq' ? !!this.qqValue : producer === 'qq-tasks' ? !!this.qqValue?.getStatus().tasks.registered : producer === 'channel-bili-owner' ? !!this.biliOwnerValue : producer === 'bili-owner-tasks' ? !!this.biliOwnerValue && !!biliOwner?.tasks.enabled : producer === 'channel-simulator' ? !!simulator && this.mode === 'daemon' : true;
@@ -401,8 +403,8 @@ export class ManagedHost {
         this.phase = this.health.some(p => p.state === 'degraded') ? 'degraded' : 'ready';
     }
     biliHealth() { if (this.biliValue) {
-        const blocked = (this.biliValue.health.backoffUntil ?? 0) > Date.now();
-        this.plugin('bilibili', blocked ? 'degraded' : 'ready', blocked ? 'HOST_BILI_BACKOFF' : null);
+        const held = this.biliValue.health.diagnosticRequired, blocked = held || (this.biliValue.health.backoffUntil ?? 0) > Date.now();
+        this.plugin('bilibili', blocked ? 'degraded' : 'ready', held ? 'HOST_BILI_DIAGNOSTIC_REQUIRED' : blocked ? 'HOST_BILI_BACKOFF' : null);
     } }
     /** Missing optional IO must not turn retained private work into stale-source failures during global recovery. */
     biliOwnerPendingWork() {
@@ -490,7 +492,7 @@ export class ManagedHost {
         return { schemaVersion: 1, profileId: this.config.config.profileId, agentId: this.config.config.agent.id, instanceId: this.instanceId, pid: process.pid, at: new Date().toISOString(), configHash: this.config.hash, foundationHash: this.config.foundation.hash,
             phase: this.phase, mode: this.mode, accepting: ['ready', 'degraded'].includes(this.phase) && !!this.coreValue?.accepting, error: this.error, plugins: this.health.map(p => ({ ...p })), features: this.coreValue?.capabilityManifest().features ?? [],
             services: { memory: this.memoryValue?.runtimeHealth() ?? null, activity: this.activityValue?.health ?? null, media: this.mediaValue?.health ?? null, bilibili: this.biliValue?.health ?? null, ...(this.executorValue ? { executor: this.executorValue.health } : {}), ...(this.biliOwnerValue ? { biliOwner: this.biliOwnerValue.getStatus() } : {}), taskDelivery: core?.nativeDelivery ?? null, qq: qq ? { state: qq.state, groupSync: qq.groupSync.state, groupError: qq.groupSync.error, effectiveGroups: qq.groupSync.effectiveIds.length, lastGroupSync: qq.groupSync.lastSuccessAt, capabilities: qq.capabilities.registered, tasks: { enabled: qq.tasks.enabled, registered: qq.tasks.registered, deliverResults: qq.tasks.deliverResults }, delivery: qq.delivery } : null },
-            counts: { activeRuns: core?.execution?.active ?? 0, queuedRuns: core?.execution?.queued ?? 0, queuedRoutes: core?.queuedRoutes ?? 0, pendingMessages: core?.messages.filter(m => ['accepted', 'processing', 'reply-ready', 'sending'].includes(m.state)).length ?? 0, outbox: this.lease ? this.outbox() : 0 }, schemas: { journal: 2, memory: MEMORY_SCHEMA_VERSION, runtime: RUNTIME_SCHEMA_VERSION, activity: existsSync(join(this.config.paths.core, 'activity.sqlite')) ? 1 : null, media: existsSync(join(this.config.paths.core, 'media.sqlite')) ? Media.MEDIA_SCHEMA_VERSION : null, bilibili: existsSync(join(this.config.paths.core, 'bilibili.sqlite')) ? 1 : null, ...(this.executorValue ? { executor: EXECUTOR_SCHEMA_VERSION } : {}), ...(this.biliOwnerValue ? { biliOwner: BILI_OWNER_SCHEMA_VERSION } : {}) } };
+            counts: { activeRuns: core?.execution?.active ?? 0, queuedRuns: core?.execution?.queued ?? 0, queuedRoutes: core?.queuedRoutes ?? 0, pendingMessages: core?.messages.filter(m => ['accepted', 'processing', 'reply-ready', 'sending'].includes(m.state)).length ?? 0, outbox: this.lease ? this.outbox() : 0 }, schemas: { journal: 2, memory: MEMORY_SCHEMA_VERSION, runtime: RUNTIME_SCHEMA_VERSION, activity: existsSync(join(this.config.paths.core, 'activity.sqlite')) ? 1 : null, media: existsSync(join(this.config.paths.core, 'media.sqlite')) ? Media.MEDIA_SCHEMA_VERSION : null, bilibili: existsSync(join(this.config.paths.core, 'bilibili.sqlite')) ? Bili.BILI_SCHEMA_VERSION : null, ...(this.executorValue ? { executor: EXECUTOR_SCHEMA_VERSION } : {}), ...(this.biliOwnerValue ? { biliOwner: BILI_OWNER_SCHEMA_VERSION } : {}) } };
     }
     publish() { if (!this.lease)
         return; const file = join(this.config.paths.core, 'host-status.json'), temp = file + '.' + randomUUID() + '.tmp'; writeFileSync(temp, JSON.stringify(this.snapshot(), null, 2) + '\n', { flag: 'wx' }); renameSync(temp, file); }

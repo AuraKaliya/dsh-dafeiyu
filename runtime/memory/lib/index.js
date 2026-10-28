@@ -1,3 +1,4 @@
+import { AutomaticRecall } from './automatic-recall.js';
 import { Service } from '@deepseek-ai/cordis';
 import { API_VERSION, redactContent, ContextItemSchema, LifecycleModeSchema, ServiceGate } from '#dafeiyu/contracts';
 import { resolve } from 'node:path';
@@ -42,6 +43,9 @@ export class MemoryService extends Service {
     retrieval;
     analysis;
     working;
+    automaticRecall;
+    nativeRecall;
+    assembly;
     feedbackArchive;
     tasks;
     expression;
@@ -60,6 +64,7 @@ export class MemoryService extends Service {
     constructor(ctx, config, dependencies) {
         super(ctx, 'dafeiyuMemory');
         this.config = configSchema.parse(config);
+        this.assembly = ctx.dafeiyu.contextAssembly();
         if (this.config.maintenance && (this.config.lifecycleMode !== 'managed' || !this.config.sourceTracking && !this.config.compaction))
             throw new Error('MAINTENANCE_REQUIRES_TRACKED_NATIVE_EXECUTION');
         this.store = new MemoryStore(resolve(this.config.dataDir, 'memory.sqlite'));
@@ -71,6 +76,7 @@ export class MemoryService extends Service {
             this.store.close();
             throw error;
         }
+        this.automaticRecall = new AutomaticRecall(ctx, this.store, this.retrieval);
         try {
             this.analysis = this.config.analysis ? new MemoryAnalysis(ctx, this.store, this.config.dataDir, this.config.analysis, this.config.lifecycleMode === 'managed', () => ctx.dafeiyu.accepting && this.gate.active) : null;
         }
@@ -158,7 +164,7 @@ export class MemoryService extends Service {
                         throw new Error('Memory unavailable'); return this.store.observations.open(authority, input); },
                     change: (authority, input) => { if (this.closed)
                         throw new Error('Memory unavailable'); const receipt = this.store.observations.change(authority, input); return { ...receipt, auditPending: this.flush() }; } },
-                agentId: this.config.agentId, actions: this.actions(), contexts: [...(this.working?.contributors() ?? []), ...(this.config.lifecycleMode === 'managed' ? [{ id: 'qq-expression', kind: 'working-state',
+                agentId: this.config.agentId, actions: this.actions(), contexts: [{ id: 'recent-state', kind: 'working-state', prepare: async (request) => this.growth?.recent.prepare(request) ?? [], validate: (request, item) => this.growth?.recent.validate(request, item) ?? false }, this.automaticRecall.contributor(), ...(this.working?.contributors() ?? []), ...(this.config.lifecycleMode === 'managed' ? [{ id: 'qq-expression', kind: 'working-state',
                             prepare: async (request) => { ctx.dafeiyu.scopeForContext(request); return this.growth?.qqExpression.prepare(request.conversation) ?? []; },
                             validate: (request, item) => { ctx.dafeiyu.scopeForContext(request); return this.growth?.qqExpression.prepare(request.conversation).some(current => JSON.stringify(current) === JSON.stringify(item)) ?? false; } }, { id: 'growth', kind: 'working-state',
                             prepare: async (request) => ctx.dafeiyu.personaContext(request),
@@ -181,6 +187,8 @@ export class MemoryService extends Service {
             this.unbindRepository = ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks, this.config.agentId, () => { if (this.closed || this.gate.state === 'registered')
                 throw new Error('DEPENDENCY_UNAVAILABLE'); }, () => this.gate.active, () => { this.flush(); }, (route, ref) => ctx.dafeiyuTimeline.archivedSourceIdentity({ agentId: this.config.agentId, route }, ref)));
         if (this.config.lifecycleMode === 'managed')
+            this.nativeRecall = ctx.dafeiyu.registerExtensionV3({ protocolVersion: 3, id: 'memory-origin-recall', version: MEMORY_VERSION, agentId: this.config.agentId, lifecycleReady: () => !this.closed && this.gate.active, actions: [], contexts: [{ id: 'recall', prepare: view => this.automaticRecall.prepareNative(view), validate: (view, item) => this.automaticRecall.validateNative(view, item) }] });
+        if (this.config.lifecycleMode === 'managed')
             this.growth = new GrowthService(ctx, this.store, this.tasks, this.config.agentId, () => !this.closed && this.gate.active, this.config.compaction, !!this.config.maintenance);
         if (this.config.maintenance && this.persona)
             this.maintenance = new MaintenanceService(ctx, this.store, this.persona, this.config.dataDir, this.config.maintenance, this.config.agentId, () => !this.closed && this.gate.active);
@@ -198,7 +206,7 @@ export class MemoryService extends Service {
         }
     }
     get lifecycleState() { return this.gate.state; }
-    runtimeHealth() { return { lifecycle: this.gate.state, analysis: this.analysis?.health ?? { state: 'not-configured', active: false }, maintenance: this.maintenance?.health ?? { state: 'not-configured', active: 0, requests: this.emptyMaintenanceCounts, scheduler: 'not-configured' }, retrieval: this.config.retrieval ? 'configured' : 'not-configured', compaction: this.config.compaction ? 'configured' : 'not-configured', sourceTracking: this.config.sourceTracking || this.config.compaction ? 'configured' : 'not-configured' }; }
+    runtimeHealth() { const assembly = this.assembly; return { context: { mode: assembly.mode, automaticRecall: assembly.mode === 'unified' && assembly.recall.enabled, recallStrategy: assembly.recall.strategy, recentState: assembly.mode === 'unified' && assembly.recentState.enabled, sharedRecentState: assembly.mode === 'unified' && assembly.recentState.shared }, lifecycle: this.gate.state, analysis: this.analysis?.health ?? { state: 'not-configured', active: false }, maintenance: this.maintenance?.health ?? { state: 'not-configured', active: 0, requests: this.emptyMaintenanceCounts, scheduler: 'not-configured' }, retrieval: this.config.retrieval ? 'configured' : 'not-configured', compaction: this.config.compaction ? 'configured' : 'not-configured', sourceTracking: this.config.sourceTracking || this.config.compaction ? 'configured' : 'not-configured' }; }
     recover() {
         if (this.closed)
             throw new Error('Memory capability is unregistered');
@@ -226,6 +234,7 @@ export class MemoryService extends Service {
         this.quiesce();
         this.closed = true;
         this.unbindNativeExpression?.();
+        this.nativeRecall?.dispose();
         this.capabilityService?.close();
         this.persona?.close();
         this.handle.dispose();
@@ -477,7 +486,7 @@ export class MemoryService extends Service {
     catch (e) {
         return this.failure(e);
     } }
-    contextStatus(context) { this.scope(context); return this.working?.status(context) ?? { status: 'not_configured' }; }
+    contextStatus(context, raw = {}) { const input = z.strictObject({ offset: z.number().int().min(0).max(10000).default(0), limit: z.number().int().min(1).max(64).default(16) }).parse(raw), scope = this.scope(context); return { current: this.ctx.dafeiyu.contextStatus(context, input.offset, input.limit), ...(this.working?.status(context) ?? { status: 'not_configured' }), automaticRecall: this.automaticRecall.status(scope) }; }
     feedbackOpen(context, raw, deleted = false) { this.scope(context); try {
         return this.feedbackArchive?.open(context, raw, deleted) ?? { status: 'not_configured' };
     }
@@ -539,7 +548,7 @@ export class MemoryService extends Service {
                 action('dafeiyu_memory_working_set', '替换当前会话的工作状态。只返回回执，来源校验后由核心在下次请求装配。不会自动提炼分析报告。', { requestId: field('幂等标识'), expectedVersion: field('工作区状态版本，首次0'), taskId: field('当前任务标识'), expiresAt: field('有效期ISO时间，24小时以内'), items: field('JSON数组：id、category(goal/constraint/correction/pending/result/gap)、text、sourceRefs') }, (args, ctx) => this.updateWorking(ctx, { ...args, expectedVersion: Number(args.expectedVersion), items: JSON.parse(args.items ?? '') })),
                 action('dafeiyu_memory_context_select', '选择有效记忆片段供核心装配；必须携带读取时的版本、哈希及Unicode码点范围。不直接写入聊天消息。', { requestId: field('幂等标识'), expectedVersion: field('检索证据区状态版本，首次0'), taskId: field('当前任务标识'), expiresAt: field('有效期ISO时间，24小时以内'), items: field('JSON数组：id、revision、version、contentHash、start、end') }, (args, ctx) => this.selectContext(ctx, { ...args, expectedVersion: Number(args.expectedVersion), items: JSON.parse(args.items ?? '') })),
                 action('dafeiyu_memory_context_retrieve', '内部检索并选择前若干有效记忆完整分片；仅返回回执，完整命中列表和分析结果不注入聊天。', { requestId: field('幂等标识'), expectedVersion: field('检索证据区版本，首次0'), taskId: field('当前任务标识'), expiresAt: field('有效期ISO时间，24小时以内'), query: field('检索问题'), strategy: field('lexical/semantic/hybrid', false), limit: field('最多1至12条，默认3', false) }, (args, ctx) => this.retrieveContext(ctx, { ...args, expectedVersion: Number(args.expectedVersion), ...(args.limit ? { limit: Number(args.limit) } : {}) })),
-                action('dafeiyu_memory_context_status', '查询工作区和证据区版本与存储条数；不返回记忆正文，不表示全部条目已获准装配。', {}, (_args, ctx) => this.contextStatus(ctx)),
+                action('dafeiyu_memory_context_status', '查询本会话的上下文准入清单、自动召回模式及任务责任索引；不返回其它会话正文。offset/limit用于任务索引分页。', { offset: field('分页偏移', false), limit: field('每页最多64项', false) }, (args, ctx) => this.contextStatus(ctx, { ...(args.offset ? { offset: Number(args.offset) } : {}), ...(args.limit ? { limit: Number(args.limit) } : {}) })),
                 action('dafeiyu_memory_context_clear', '清空所选装配区；保留长期记忆与审计，旧受控快照将在下一请求前退出。', { requestId: field('幂等标识'), kind: field('working/evidence'), expectedVersion: field('该区状态版本') }, (args, ctx) => this.clearContext(ctx, { ...args, expectedVersion: Number(args.expectedVersion) })),
             ] : []),
             ...(this.analysis ? [

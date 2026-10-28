@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Reply,ReplyMediaManifest,DeliveryResult } from '@dafeiyu/contracts';
 import type { QqMediaDeliveryLedger,QqMediaDeliveryPlan,QqMediaDeliveryProgress } from './media-delivery.js';
+import {deliveryAbortCode} from './reply-delay.js';
 type MediaReply=Reply&{media:ReplyMediaManifest};
 type Part=QqMediaDeliveryPlan['parts'][number];
 interface Host {ledger:QqMediaDeliveryLedger;legacyProgress(id:string):{confirmed:number;unknown:number;state:string}|null;
@@ -20,7 +21,7 @@ export class QqMediaTransport {
     const snapshot:MediaReply={id:plan.replyId,conversation:plan.target,sourceMessageId:plan.sourceMessageId,text:plan.originalText??plan.parts.filter(p=>p.kind==='text').map(p=>p.text).join(''),media:plan.manifest,...(plan.manifest.anchor.kind==='task-result'?{taskResult:plan.manifest.anchor}:{})};
     const work=this.execute(snapshot,plan,signal,authority,bytes).finally(()=>this.active.delete(reply.id));this.active.set(reply.id,work);return work;
   }
-  private async execute(reply:MediaReply,plan:QqMediaDeliveryPlan,signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>):Promise<DeliveryResult>{const guard=()=>{if(signal.aborted)throw new Error('DELIVERY_CANCELLED');try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};let mediaPosition=0,delayed=false;
+  private async execute(reply:MediaReply,plan:QqMediaDeliveryPlan,signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>):Promise<DeliveryResult>{const guard=()=>{if(signal.aborted)throw new Error(deliveryAbortCode(signal));try{authority();}catch{throw new Error('DELIVERY_AUTHORITY_REVOKED');}};let mediaPosition=0,delayed=false;
     for(const [position,part] of plan.parts.entries()){const mediaIndex=part.kind==='text'?null:mediaPosition++;const progress=this.host.ledger.progress(reply.id)!;if(progress.state==='sent'||progress.unknown||progress.state==='sending')return result(progress,'DELIVERY_NOT_RESUMABLE');if(progress.parts[position]!.state==='sent')continue;
       let invoked=false;try{guard();let data:Buffer|null=null;
         if(part.kind!=='text'){data=Buffer.from(await bytes(mediaIndex!));if(data.length!==part.asset.bytes||data.length>16*1024**2||createHash('sha256').update(data).digest('hex')!==part.asset.sha256)throw new Error('MEDIA_BLOB_CORRUPT');}

@@ -8,12 +8,19 @@ export declare const BILI_SCENE: {
 export declare const BiliConfigSchema: z.ZodObject<{
     minIntervalMs: z.ZodDefault<z.ZodNumber>;
     timeoutMs: z.ZodDefault<z.ZodNumber>;
-    backoffMs: z.ZodDefault<z.ZodNumber>;
+    backoffMs: z.ZodOptional<z.ZodNumber>;
+    retry: z.ZodPrefault<z.ZodObject<{
+        rateDelaysMs: z.ZodDefault<z.ZodArray<z.ZodNumber>>;
+        riskDelayMs: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     maxResponseBytes: z.ZodDefault<z.ZodNumber>;
     maxMediaReadBytes: z.ZodDefault<z.ZodNumber>;
     maxPages: z.ZodDefault<z.ZodNumber>;
     session: z.ZodOptional<z.ZodObject<{
         file: z.ZodString;
+        expectedUid: z.ZodString;
+    }, z.core.$strict>>;
+    browser: z.ZodOptional<z.ZodObject<{
         expectedUid: z.ZodString;
     }, z.core.$strict>>;
     topics: z.ZodDefault<z.ZodArray<z.ZodObject<{
@@ -25,12 +32,19 @@ export type BiliConfig = z.output<typeof BiliConfigSchema>;
 export declare const BiliPluginConfigSchema: z.ZodObject<{
     minIntervalMs: z.ZodDefault<z.ZodNumber>;
     timeoutMs: z.ZodDefault<z.ZodNumber>;
-    backoffMs: z.ZodDefault<z.ZodNumber>;
+    backoffMs: z.ZodOptional<z.ZodNumber>;
+    retry: z.ZodPrefault<z.ZodObject<{
+        rateDelaysMs: z.ZodDefault<z.ZodArray<z.ZodNumber>>;
+        riskDelayMs: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     maxResponseBytes: z.ZodDefault<z.ZodNumber>;
     maxMediaReadBytes: z.ZodDefault<z.ZodNumber>;
     maxPages: z.ZodDefault<z.ZodNumber>;
     session: z.ZodOptional<z.ZodObject<{
         file: z.ZodString;
+        expectedUid: z.ZodString;
+    }, z.core.$strict>>;
+    browser: z.ZodOptional<z.ZodObject<{
         expectedUid: z.ZodString;
     }, z.core.$strict>>;
     topics: z.ZodDefault<z.ZodArray<z.ZodObject<{

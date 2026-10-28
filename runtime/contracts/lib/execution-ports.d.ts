@@ -127,6 +127,12 @@ export declare const WakeRequestSchema: z.ZodObject<{
         dueAt: z.ZodISODateTime;
     }, z.core.$strict>;
 }, z.core.$strict>;
+/** Trusted wake purpose; it describes this run without changing its task or authority. */
+export declare const WakeWorkSchema: z.ZodObject<{
+    kind: z.ZodLiteral<"memory-maintenance">;
+    requestId: z.ZodUUID;
+    goal: z.ZodString;
+}, z.core.$strict>;
 export interface WakeAuthorityProvider {
     readonly producerId: string;
     validate(origin: Extract<z.infer<typeof RunOriginSchema>, {
@@ -135,5 +141,8 @@ export interface WakeAuthorityProvider {
     sourceAnchor?(origin: Extract<z.infer<typeof RunOriginSchema>, {
         kind: 'wake';
     }>, task: TaskState): import('./activity.js').ActivityAnchor | null;
+    work?(origin: Extract<z.infer<typeof RunOriginSchema>, {
+        kind: 'wake';
+    }>, task: TaskState): z.infer<typeof WakeWorkSchema> | null;
 }
 export declare const ProducerSchema: z.ZodString;

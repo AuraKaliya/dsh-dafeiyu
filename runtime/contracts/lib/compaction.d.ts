@@ -151,6 +151,8 @@ export interface SourcePolicy {
     context(scope: CompactionScope, region: string, item: ContextItem): readonly SourceDependency[];
     tool(scope: CompactionScope, name: string, text: string, meta: unknown): readonly SourceDependency[];
     validate(scope: CompactionScope, dependency: SourceDependency): boolean;
+    /** One synchronous traversal; results stay aligned with the supplied dependencies. */
+    validateMany?(scope: CompactionScope, dependencies: readonly SourceDependency[]): readonly boolean[];
 }
 /** Trusted extension seam. Routes are supplied by the core, never by model arguments. */
 export interface CompactionScope extends TimelineScope {

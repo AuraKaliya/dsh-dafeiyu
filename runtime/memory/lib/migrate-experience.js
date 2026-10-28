@@ -2,7 +2,7 @@ export const EXPERIENCE_TABLES = ['experience_items', 'experience_revisions', 'e
     'maintenance_events', 'maintenance_requests', 'maintenance_receipts', 'maintenance_watermarks'];
 export function migrateExperience(db) {
     const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-    if (version === 11 || version === 12) {
+    if (version === 11 || version === 12 || version === 13) {
         for (const table of EXPERIENCE_TABLES)
             db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
         return;

@@ -39,17 +39,17 @@ export declare const pluginSchemas: {
             timeoutMs: z.ZodDefault<z.ZodNumber>;
             maxPending: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
+        maintenance: z.ZodOptional<z.ZodObject<{
+            timeoutMs: z.ZodDefault<z.ZodNumber>;
+            maxInputBytes: z.ZodDefault<z.ZodNumber>;
+            maxOutputBytes: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         feedback: z.ZodOptional<z.ZodObject<{
             maxArchiveBytes: z.ZodDefault<z.ZodNumber>;
             maxBriefBytes: z.ZodDefault<z.ZodNumber>;
             maxPageChars: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         context: z.ZodOptional<z.ZodObject<{}, z.core.$strict>>;
-        maintenance: z.ZodOptional<z.ZodObject<{
-            timeoutMs: z.ZodDefault<z.ZodNumber>;
-            maxInputBytes: z.ZodDefault<z.ZodNumber>;
-            maxOutputBytes: z.ZodDefault<z.ZodNumber>;
-        }, z.core.$strict>>;
         compaction: z.ZodOptional<z.ZodPipe<z.ZodObject<{
             inputTokens: z.ZodNumber;
             thresholdRatio: z.ZodDefault<z.ZodNumber>;
@@ -141,7 +141,6 @@ export declare const pluginSchemas: {
         maintenance: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>;
     readonly media: z.ZodObject<{
-        timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
         audio: import("zod").ZodOptional<import("zod").ZodObject<{
             whisper: import("zod").ZodOptional<import("zod").ZodObject<{
                 node: import("zod").ZodString;
@@ -173,6 +172,7 @@ export declare const pluginSchemas: {
         ffprobe: import("zod").ZodString;
         maxBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
         maxAssetBytes: import("zod").ZodDefault<import("zod").ZodNumber>;
+        timeoutMs: import("zod").ZodDefault<import("zod").ZodNumber>;
         vision: import("zod").ZodOptional<import("zod").ZodObject<{
             provider: import("zod").ZodString;
             model: import("zod").ZodString;
@@ -190,12 +190,19 @@ export declare const pluginSchemas: {
     readonly bilibili: z.ZodObject<{
         minIntervalMs: z.ZodDefault<z.ZodNumber>;
         timeoutMs: z.ZodDefault<z.ZodNumber>;
-        backoffMs: z.ZodDefault<z.ZodNumber>;
+        backoffMs: z.ZodOptional<z.ZodNumber>;
+        retry: z.ZodPrefault<z.ZodObject<{
+            rateDelaysMs: z.ZodDefault<z.ZodArray<z.ZodNumber>>;
+            riskDelayMs: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         maxResponseBytes: z.ZodDefault<z.ZodNumber>;
         maxMediaReadBytes: z.ZodDefault<z.ZodNumber>;
         maxPages: z.ZodDefault<z.ZodNumber>;
         session: z.ZodOptional<z.ZodObject<{
             file: z.ZodString;
+            expectedUid: z.ZodString;
+        }, z.core.$strict>>;
+        browser: z.ZodOptional<z.ZodObject<{
             expectedUid: z.ZodString;
         }, z.core.$strict>>;
         topics: z.ZodDefault<z.ZodArray<z.ZodObject<{
@@ -257,11 +264,6 @@ export declare const pluginSchemas: {
             maxReadBytes: z.ZodDefault<z.ZodNumber>;
             voiceDirectives: z.ZodDefault<z.ZodBoolean>;
         }, z.core.$strict>>;
-        stickers: z.ZodPrefault<z.ZodObject<{
-            enabled: z.ZodDefault<z.ZodBoolean>;
-            maxBytes: z.ZodDefault<z.ZodNumber>;
-            maxEntries: z.ZodDefault<z.ZodNumber>;
-        }, z.core.$strict>>;
         botId: z.ZodString;
         ownerId: z.ZodString;
         groupIds: z.ZodArray<z.ZodString>;
@@ -286,6 +288,11 @@ export declare const pluginSchemas: {
             quietMs: z.ZodDefault<z.ZodNumber>;
             maxWaitMs: z.ZodDefault<z.ZodNumber>;
             maxMessages: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        stickers: z.ZodPrefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            maxBytes: z.ZodDefault<z.ZodNumber>;
+            maxEntries: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>;
         tasks: z.ZodPrefault<z.ZodObject<{
             enabled: z.ZodDefault<z.ZodBoolean>;

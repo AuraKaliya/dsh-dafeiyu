@@ -66,7 +66,7 @@ export interface QqDeliveryProgress {
     legacy: boolean;
     segments: z.infer<typeof segmentSchema>[];
 }
-/** Fixed UTF-16 transport budget, Unicode-safe boundaries, exact reconstruction. */
+/** Conservative short-message budget, Unicode-safe boundaries, exact reconstruction. */
 export declare function splitQqText(text: string): string[];
 export declare function qqDeliveryPlan(reply: Reply): QqDeliveryPlan;
 /** Ledger only: no network, automatic retransmission, model calls or source authority. */

@@ -11,6 +11,22 @@ export declare class BiliMedia implements MediaSourceProvider {
     readonly id = "bilibili";
     constructor(store: BiliStore, client: BiliClient, ready: () => boolean);
     describe(key: string): MediaSourceDescription | null;
+    prepareBrowserFrame(raw: unknown): {
+        data: {
+            source: {
+                provider: string;
+                key: string;
+            };
+            kind: string;
+            positionMs: number;
+            durationMs: number;
+            bytes: number;
+            sha256: string;
+            next: string;
+            coverage: string;
+        };
+        register: (page: BiliPage) => void;
+    };
     private probe;
     prepare(raw: unknown, part: {
         bvid: string;

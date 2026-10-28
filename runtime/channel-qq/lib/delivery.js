@@ -6,7 +6,7 @@ const replySchema = z.strictObject({ id: z.string().min(1).max(200), conversatio
 const segmentState = z.enum(['pending', 'sending', 'sent', 'unknown']);
 const segmentSchema = z.object({ position: z.number().int().nonnegative(), state: segmentState, receipt: z.string().nullable(), code: z.string().nullable() });
 const planSchema = z.strictObject({ version: z.literal(1), replyId: z.string(), target: ConversationSchema, anchor: z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('reply'), messageId: z.string() }), TaskResultAnchorSchema.extend({ messageId: z.string() })]), bodyHash: z.string(), segments: z.array(z.string().min(1).max(4000)).min(1).max(64), originalText: z.string().max(32000).optional() });
-/** Fixed UTF-16 transport budget, Unicode-safe boundaries, exact reconstruction. */
+/** Conservative short-message budget, Unicode-safe boundaries, exact reconstruction. */
 export function splitQqText(text) {
     if (!text || text.length > 32000)
         throw new Error('TEXT_SIZE_UNSUPPORTED');
@@ -18,12 +18,12 @@ export function splitQqText(text) {
     const result = [];
     let start = 0;
     while (start < text.length) {
-        let end = Math.min(start + 4000, text.length);
+        let end = Math.min(start + 800, text.length);
         if (end < text.length) {
             if (text.charCodeAt(end - 1) >= 0xd800 && text.charCodeAt(end - 1) <= 0xdbff)
                 end--;
             const newline = text.lastIndexOf('\n', end - 1);
-            if (newline >= start)
+            if (newline >= start + 600 || start === 0 && newline >= start)
                 end = newline + 1;
             // Keep a CRLF pair together even when no LF fits in this window.
             if (text[end - 1] === '\r' && text[end] === '\n')
@@ -65,7 +65,7 @@ export class QqDeliveryLedger {
         return this.atomic(() => {
             const previous = this.readPlan(reply.id);
             if (previous) {
-                if (JSON.stringify(previous) !== body)
+                if (previous.bodyHash !== plan.bodyHash || JSON.stringify(previous.target) !== JSON.stringify(plan.target) || JSON.stringify(previous.anchor) !== JSON.stringify(plan.anchor) || previous.segments.join('') !== plan.segments.join(''))
                     throw new Error('DELIVERY_PLAN_CONFLICT');
                 return previous;
             }

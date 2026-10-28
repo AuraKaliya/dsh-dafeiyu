@@ -1,3 +1,5 @@
+import { RecentStateStore } from './recent-state-store.js';
+export { verifyRecentStateSchema } from './recent-state-store.js';
 import type { OperationScope, TimelineScope } from '#dafeiyu/contracts';
 import type { NewEvent } from '#dafeiyu/journal';
 import type { NewExecutionEvent } from '#dafeiyu/contracts';
@@ -18,7 +20,7 @@ import { NativeExpression } from './native-expression.js';
 import { ExperienceStore } from './experience-store.js';
 export { PERSONA_ADOPTION_TABLES, verifyPersonaAdoptionSchema } from './migrate-persona-adoption.js';
 export declare const MEMORY_APPLICATION_ID = 1145457969;
-export declare const MEMORY_SCHEMA_VERSION = 12;
+export declare const MEMORY_SCHEMA_VERSION = 13;
 export interface MemoryView extends Revision {
     readonly boundary: MemoryBoundary;
     readonly effectiveAccess: Pick<MemoryBoundary, 'internalUse' | 'externalExpression'>;
@@ -60,6 +62,7 @@ export declare class MemoryStore {
     taskWorkspace(timeline: (scope: TimelineScope, ref: string, hash: string) => boolean, sameSource: (scope: TimelineScope, a: string, b: string) => boolean): TaskWorkspace;
     taskSourceState(agentId: string, jobId: string, purpose?: MemoryAccessPurpose): 'valid' | 'deleted' | 'changed' | 'unavailable';
     taskMemory(tasks: TaskWorkspace, retrieval: MemoryRetrieval | null): TaskMemory;
+    recentStateStore(current: (runId: string, sources: readonly import('#dafeiyu/contracts').SourceDependency[]) => boolean): RecentStateStore;
     personaStore(resolve: PersonaResolver): PersonaStore;
     experienceStore(resolve: PersonaResolver): ExperienceStore;
     executionSources(resolve: PersonaResolver): ExecutionSources;

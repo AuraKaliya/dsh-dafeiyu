@@ -47,6 +47,10 @@ export declare const MediaSourceDescriptionSchema: z.ZodObject<{
     mimeHint: z.ZodNullable<z.ZodString>;
     bytesHint: z.ZodNullable<z.ZodNumber>;
     durationMsHint: z.ZodNullable<z.ZodNumber>;
+    sourceFrame: z.ZodOptional<z.ZodObject<{
+        positionMs: z.ZodNumber;
+        durationMs: z.ZodNumber;
+    }, z.core.$strict>>;
     rangeReadable: z.ZodBoolean;
     publicContent: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strict>;

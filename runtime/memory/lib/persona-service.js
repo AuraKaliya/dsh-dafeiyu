@@ -1,3 +1,5 @@
+import { RecentStateService } from './recent-state.js';
+import { RecentStateSaveSchema, RecentStatePublishSchema, RecentStateUnpublishSchema } from '#dafeiyu/contracts';
 import { PersonaSourceRefSchema, PersonaKindSchema, PersonaRequestIdSchema, ExecutionScopeSchema, RunOriginSchema, ExecutionContributionSchema, TaskObjectionSchema, PersonaTrialSelectInputSchema, PersonaAdoptionReviewInputSchema, PersonaPublishInputSchema } from '#dafeiyu/contracts';
 import { z } from 'zod';
 import { PersonaStore } from './persona-store.js';
@@ -19,6 +21,7 @@ export class GrowthService {
     tasks;
     agentId;
     ready;
+    recent;
     qqExpression;
     experiences;
     store;
@@ -35,6 +38,7 @@ export class GrowthService {
         this.tasks = tasks;
         this.agentId = agentId;
         this.ready = ready;
+        this.recent = new RecentStateService(ctx, memory, tasks, agentId, ready);
         this.qqExpression = new QqExpressionPreferences(ctx, memory, agentId, ready);
         this.experiences = memory.experienceStore((access, ref) => this.resolve(access, ref));
         this.sources = memory.executionSources((access, ref) => this.resolve(access, ref));
@@ -74,7 +78,7 @@ export class GrowthService {
             } },
             ...(compact ? { compactionPolicy: compact.policy, summarize: compact.summarize.bind(compact), summarizeFragments: compact.summarizeFragments.bind(compact), rewrite: compact.rewrite.bind(compact) } : { summarize: async () => { throw new Error('COMPACTION_NOT_CONFIGURED'); } }) };
         this.unbindExecution = ctx.dafeiyu.bindExecutionMemory(port);
-        this.unbind = ctx.dafeiyu.bindGrowthProvider({ ready, expressionPreferences: scene => this.qqExpression.prepare(scene), prepare: access => this.store.prepare(access), validate: (access, entry) => this.ready() && this.store.validate(access, entry),
+        this.unbind = ctx.dafeiyu.bindGrowthProvider({ ready, expressionPreferences: (scene, query) => [...this.qqExpression.prepare(scene), ...this.recent.prepareConversation(scene, query)], prepare: access => this.store.prepare(access), validate: (access, entry) => this.ready() && this.store.validate(access, entry),
             validateHistoricalTrial: (access, dependency) => this.ready() && this.store.validateHistoricalTrial(access, dependency),
             trialAdmitted: (input, authority) => { try {
                 return this.store.admitTrial(ctx.dafeiyu.personaTrialAccess(authority, input), input);
@@ -89,7 +93,7 @@ export class GrowthService {
                 this.flush();
             } } });
         try {
-            this.handle = ctx.dafeiyu.registerExtensionV3({ protocolVersion: 3, id: 'memory-persona', version: MEMORY_VERSION, agentId, requires: ['persona.stage-state.v1'], lifecycleReady: ready, actions: this.actions() });
+            this.handle = ctx.dafeiyu.registerExtensionV3({ protocolVersion: 3, id: 'memory-persona', version: MEMORY_VERSION, agentId, requires: ['persona.stage-state.v1'], lifecycleReady: ready, contexts: [{ id: 'recent-state', prepare: async (view) => this.recent.taskContext(view), validate: (view, item) => this.recent.taskContext(view).some(current => JSON.stringify(current) === JSON.stringify(item)) }], actions: this.actions() });
         }
         catch (error) {
             this.unbind();
@@ -107,36 +111,50 @@ export class GrowthService {
             return null;
         this.resolving.add(key);
         try {
-            if (ref.kind === 'execution-source')
-                return this.experiences.sourceCurrent(access, ref) ? this.memory.capabilities.material(access, ref) ?? this.sources.open(access, ref) : null;
-            if (access.view.scope.kind === 'task') {
-                if (ref.scopeKey === access.view.scope.scopeKey)
-                    return this.memory.capabilities.memoryMaterial(access, ref) ?? this.executionState.memoryMaterial(access, ref);
-                const input = access.inputs.find(input => input.sourceRef && personaDigest(input.sourceRef) === personaDigest(ref));
-                if (input)
-                    return { text: input.text, dependencies: [ref], rootSources: input.rootSources ?? [sourceKey(ref)] };
-                const material = access.verifyMemorySource?.(ref);
-                return material ? { text: material.text, dependencies: [ref], rootSources: [...material.rootSources] } : null;
-            }
-            if (ref.scopeKey !== access.view.scope.route || ref.authorization || ref.range || ref.selectionId)
-                return null;
-            const scope = { agentId: this.agentId, route: ref.scopeKey };
-            const memory = this.memory.read(scope, ref.id, 'normal', ref.revision, 'expression');
-            if (!memory || memory.version !== ref.version || memory.contentHash !== ref.contentHash)
-                return null;
-            const proof = this.tasks.memoryProof(scope, ref.id, ref.revision, ref.version, ref.contentHash);
-            if (!proof || proof.kind !== 'memory')
-                return null;
-            const dependencies = proof.ancestors.map(parent => PersonaSourceRefSchema.parse({ kind: 'memory', agentId: this.agentId, scopeKey: ref.scopeKey, ...parent }));
-            return { text: memory.content, dependencies, rootSources: [...new Set(proof.fences.map(fence => JSON.stringify(['timeline', this.agentId, ref.scopeKey, this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope, fence.ref) ?? fence.ref])))] };
+            const memo = this.resolutionMemo.get(access) ?? new Map();
+            this.resolutionMemo.set(access, memo);
+            const cached = memo.get(key);
+            if (cached !== undefined)
+                return cached;
+            const material = (() => {
+                if (ref.kind === 'execution-source')
+                    return this.experiences.sourceCurrent(access, ref) ? this.memory.capabilities.material(access, ref) ?? this.sources.open(access, ref) : null;
+                if (access.view.scope.kind === 'task') {
+                    if (ref.scopeKey === access.view.scope.scopeKey)
+                        return this.memory.capabilities.memoryMaterial(access, ref) ?? this.executionState.memoryMaterial(access, ref);
+                    const input = access.inputs.find(input => input.sourceRef && personaDigest(input.sourceRef) === personaDigest(ref));
+                    if (input)
+                        return { text: input.text, dependencies: [ref], rootSources: input.rootSources ?? [sourceKey(ref)] };
+                    const material = access.verifyMemorySource?.(ref);
+                    return material ? { text: material.text, dependencies: [ref], rootSources: [...material.rootSources] } : null;
+                }
+                if (ref.scopeKey !== access.view.scope.route || ref.authorization || ref.range || ref.selectionId)
+                    return null;
+                const scope = { agentId: this.agentId, route: ref.scopeKey };
+                const memory = this.memory.read(scope, ref.id, 'normal', ref.revision, 'expression');
+                if (!memory || memory.version !== ref.version || memory.contentHash !== ref.contentHash)
+                    return null;
+                const proof = this.tasks.memoryProof(scope, ref.id, ref.revision, ref.version, ref.contentHash);
+                if (!proof || proof.kind !== 'memory')
+                    return null;
+                const dependencies = proof.ancestors.map(parent => PersonaSourceRefSchema.parse({ kind: 'memory', agentId: this.agentId, scopeKey: ref.scopeKey, ...parent }));
+                return { text: memory.content, dependencies, rootSources: [...new Set(proof.fences.map(fence => JSON.stringify(['timeline', this.agentId, ref.scopeKey, this.ctx.dafeiyuTimeline.archivedSourceIdentity(scope, fence.ref) ?? fence.ref])))] };
+            })();
+            memo.set(key, material);
+            return material;
         }
         catch {
             return null;
         }
         finally {
             this.resolving.delete(key);
+            if (!this.resolving.size)
+                this.resolutionMemo = new WeakMap();
         }
     }
+    // Shared ancestors are checked once per synchronous traversal and exact authority object.
+    // Never reuse this cache after a traversal, a write, or an asynchronous boundary.
+    resolutionMemo = new WeakMap();
     access(context, pluginId, write) { if (!this.ready())
         throw new Error('DEPENDENCY_UNAVAILABLE'); return this.ctx.dafeiyu.personaAccess(context, pluginId, write ? 'local-write' : 'read'); }
     /** A source key selects only a reference already exposed in this live execution access. */
@@ -272,7 +290,7 @@ export class GrowthService {
         const make = (id, description, schema, write, execute) => ({ id, description, version: '1', inputSchema: schema, outputSchema: z.json(), effects: write ? 'local-write' : 'read', requiresTask: true,
             execute: async (input, context) => {
                 try {
-                    return { status: 'succeeded', effects: write ? 'confirmed' : 'none', completeness: 'complete', data: z.json().parse(execute(context, input)), sources: [], receipts: [] };
+                    return { status: 'succeeded', effects: write ? 'confirmed' : 'none', completeness: 'complete', data: z.json().parse(await execute(context, input)), sources: [], receipts: [] };
                 }
                 catch (error) {
                     const code = error instanceof z.ZodError ? 'INVALID_INPUT' : error instanceof Error ? error.message : '';
@@ -295,7 +313,7 @@ export class GrowthService {
         const make = (id, description, inputSchema, write, execute, requiresTask = false) => ({ id, version: '1', description, inputSchema, outputSchema: z.json(), effects: write ? 'local-write' : 'read', requiresTask,
             execute: async (input, context) => {
                 try {
-                    return { status: 'succeeded', effects: write ? 'confirmed' : 'none', completeness: 'complete', data: z.json().parse(execute(context, input)), sources: [], receipts: [] };
+                    return { status: 'succeeded', effects: write ? 'confirmed' : 'none', completeness: 'complete', data: z.json().parse(await execute(context, input)), sources: [], receipts: [] };
                 }
                 catch (error) {
                     const code = error instanceof z.ZodError ? 'INVALID_INPUT' : error instanceof Error ? error.message : '';
@@ -305,6 +323,10 @@ export class GrowthService {
                 }
             } });
         return [
+            make('dafeiyu_recent_state_save', '保存、修订、休眠或撤下当前范围的近期自我关注。保留受托/自主/混合/未知动机；不是稳定人格，也不创建或完成任务。首次expectedVersion=0，expiresAt在未来30天内。', RecentStateSaveSchema, true, (c, i) => { const result = this.recent.save(c, this.access(c, 'memory-persona', true), i); this.flush(); return result; }),
+            make('dafeiyu_recent_state_status', '读取本范围近期关注及共享策略状态；不读取其它会话原文。', z.strictObject({}), false, c => this.recent.status(this.access(c, 'memory-persona', false))),
+            make('dafeiyu_recent_state_unpublish', '撤下指定版本的共享自我表达。可在已授权共享范围内撤下公开视图，不读取或改写其原会话记录。先status取得publication及version。', RecentStateUnpublishSchema, true, (c, i) => { const result = this.recent.unpublish(this.access(c, 'memory-persona', true), i); this.flush(); return result; }),
+            make('dafeiyu_recent_state_publish', '提交指定近期关注版本的简短跨会话自我表达。须通过独立检查；不分享原始来源，不包含他人/私聊/任务细节，不改为稳定人格。', RecentStatePublishSchema, true, async (c, i) => { const result = await this.recent.publish(this.access(c, 'memory-persona', true), i); this.flush(); return result; }),
             make('dafeiyu_qq_expression_status', '读取当前QQ场景已长期保存的表达规则和版本；这是表达偏好，不是身份或事实权限。', z.strictObject({}), false, c => this.qqExpression.status(this.ctx.dafeiyu.quoteReplySource(c, 'memory-persona').target)),
             make('dafeiyu_qq_expression_save', '保存或调整当前QQ场景的长期表达偏好／可调整表达规则。自主选择tone/length/structure/pacing/address/other；首次expectedVersion=0，修改先status。自选用self-preference，真实用户要求用user-request；空text撤下。保存到既有Memory，由Growth管理并自动装配QQ回复、阶段反馈、任务结果。不是已采用人格，不能传递任务事实、系统指令或权限；临时要求直接遵循，不必都永久保存。', QqExpressionSaveSchema, true, (c, i) => this.qqExpression.save(c, this.access(c, 'memory-persona', true), i)),
             make('dafeiyu_persona_propose', '提出暂定候选。text是自述，不是世界事实，也不证明已经试行。sources/counters只接受当前已曝光的task-link输入、execution-source:来源ID或memory:记忆ID:修订号。不改底色或直接形成稳定偏好。', proposal, true, (context, input) => this.propose(context, input), true),

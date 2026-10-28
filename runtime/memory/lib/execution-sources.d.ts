@@ -5,6 +5,8 @@ export declare class ExecutionSources {
     private readonly db;
     private readonly transaction;
     private readonly resolve;
+    private readonly sourceReadStatements;
+    private sourceRead;
     constructor(db: DatabaseSync, transaction: <T>(work: () => T) => T, resolve: PersonaResolver);
     private ensureTask;
     private event;
@@ -14,8 +16,55 @@ export declare class ExecutionSources {
     reference(access: PersonaAccess, id: string): PersonaSourceRef | null;
     open(access: PersonaAccess, ref: PersonaSourceRef): PersonaMaterial | null;
     metadata(access: PersonaAccess, ref: PersonaSourceRef): {
+        schemaVersion: 1;
+        kind: "self-report";
+        text: string;
+        scope: {
+            kind: "conversation";
+            agentId: string;
+            route: string;
+        } | {
+            kind: "task";
+            agentId: string;
+            taskId: string;
+            scopeKey: string;
+        };
+        runId: string;
+        producer: string;
+        operationId: string;
+        dependencies: ({
+            kind: "memory";
+            revision: number;
+            id: string;
+            agentId: string;
+            scopeKey: string;
+            version: number;
+            contentHash: string;
+            authorization?: {
+                taskId: string;
+                taskEpoch: number;
+                grantId: string;
+                grantVersion: number;
+                policyId: string;
+                policyVersion: number;
+            } | undefined;
+            selectionId?: string | undefined;
+            range?: {
+                start: number;
+                end: number;
+            } | undefined;
+        } | {
+            kind: "execution-source";
+            id: string;
+            agentId: string;
+            scopeKey: string;
+            version: number;
+            contentHash: string;
+        })[];
+        rootSources: string[];
+    } | {
         schemaVersion: 2;
-        kind: "digest" | "self-report" | "primary";
+        kind: "self-report" | "primary" | "digest";
         text: string;
         scope: {
             kind: "conversation";
@@ -206,54 +255,7 @@ export declare class ExecutionSources {
         resource: string;
         coverage: string[];
         completeness: "unknown" | "complete" | "partial";
-        nature?: "unknown" | "observed" | "synthetic" | "hypothetical" | "self-report" | "derived" | undefined;
-    } | {
-        schemaVersion: 1;
-        kind: "self-report";
-        text: string;
-        scope: {
-            kind: "conversation";
-            agentId: string;
-            route: string;
-        } | {
-            kind: "task";
-            agentId: string;
-            taskId: string;
-            scopeKey: string;
-        };
-        runId: string;
-        producer: string;
-        operationId: string;
-        dependencies: ({
-            kind: "memory";
-            revision: number;
-            id: string;
-            agentId: string;
-            scopeKey: string;
-            version: number;
-            contentHash: string;
-            authorization?: {
-                taskId: string;
-                taskEpoch: number;
-                grantId: string;
-                grantVersion: number;
-                policyId: string;
-                policyVersion: number;
-            } | undefined;
-            selectionId?: string | undefined;
-            range?: {
-                start: number;
-                end: number;
-            } | undefined;
-        } | {
-            kind: "execution-source";
-            id: string;
-            agentId: string;
-            scopeKey: string;
-            version: number;
-            contentHash: string;
-        })[];
-        rootSources: string[];
+        nature?: "self-report" | "unknown" | "observed" | "synthetic" | "hypothetical" | "derived" | undefined;
     };
     operationSources(access: PersonaAccess, operationId: string): PersonaSourceRef[];
     private bump;

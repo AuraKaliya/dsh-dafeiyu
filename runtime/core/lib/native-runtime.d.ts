@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
 import type { ContextFormed } from '@deepseek-ai/dsh-llm';
 import type { TaskExecutionFrame } from './execution-frame.js';
+import { HarnessRuntime } from './harness-runtime.js';
 export declare const EXECUTION_MESSAGE_SOURCE: "dafeiyu-execution";
 declare module '@deepseek-ai/dsh-llm' {
     interface MessageSourceMap {
@@ -18,9 +19,10 @@ export declare class NativeRuntime {
     private readonly ctx;
     private readonly model;
     private readonly cwd;
+    private readonly harness;
     private readonly sessions;
     private meterLoading;
-    constructor(ctx: Context, model: AgentOptions, cwd: string);
+    constructor(ctx: Context, model: AgentOptions, cwd: string, harness?: HarnessRuntime);
     run(frame: TaskExecutionFrame): Promise<{
         text: string;
         resultRef: {

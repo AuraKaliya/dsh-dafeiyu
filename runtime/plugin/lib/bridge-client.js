@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { DshBridgeResponseSchema, DshToolCatalogSchema } from '#dafeiyu/contracts';
+import { DshBridgeResponseSchema, DshToolCatalogSchema, BiliBrowserResultSchema } from '#dafeiyu/contracts';
 /** The inherited Node IPC pipe is the only bridge endpoint; no listener or public token. */
 export function createDshBridgeClient() {
     const pending = new Map();
@@ -16,12 +16,19 @@ export function createDshBridgeClient() {
         if (!process.connected || !process.send)
             throw new Error('DSH_BRIDGE_UNAVAILABLE');
         const id = randomUUID();
-        let invoked = false;
-        const abort = () => { if (invoked && process.connected)
-            process.send?.({ type: 'dsh.cancel', id }); if (type === 'dsh.catalog') {
-            pending.get(id)?.reject(new Error('DSH_BRIDGE_UNAVAILABLE'));
-            pending.delete(id);
-        } };
+        let invoked = false, grace;
+        const abandon = () => { pending.get(id)?.reject(new Error(type === 'dsh.call' && invoked ? 'DSH_TOOL_OUTCOME_UNKNOWN' : 'DSH_BRIDGE_UNAVAILABLE')); pending.delete(id); };
+        const abort = () => {
+            if (invoked && process.connected)
+                process.send?.({ type: 'dsh.cancel', id }, undefined, {}, () => { });
+            if (type !== 'dsh.call') {
+                abandon();
+                return;
+            }
+            // Give an already dispatched operation a brief chance to return its receipt. Never await an
+            // uncooperative tool forever after caller cancellation, and never claim it was not executed.
+            grace ??= setTimeout(abandon, 1000);
+        };
         signal.addEventListener('abort', abort, { once: true });
         try {
             const result = await new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); invoked = true; process.send({ type, id, ...data }, undefined, {}, (error) => { if (error) {
@@ -29,13 +36,16 @@ export function createDshBridgeClient() {
                 reject(new Error('DSH_BRIDGE_DISCONNECTED'));
             } }); if (signal.aborted)
                 abort(); });
-            signal.throwIfAborted();
+            if (type !== 'dsh.call')
+                signal.throwIfAborted();
             return result;
         }
         finally {
+            if (grace)
+                clearTimeout(grace);
             signal.removeEventListener('abort', abort);
             pending.delete(id);
         }
     };
-    return { catalog: async (signal, taskId) => DshToolCatalogSchema.parse(await request('dsh.catalog', taskId ? { taskId } : {}, AbortSignal.any([signal, AbortSignal.timeout(10000)]))), execute: async (call, authority, signal) => { authority.guard(); const value = await request('dsh.call', { call, authorization: authority.authorization }, signal); authority.guard(); return value; } };
+    return { biliBrowser: { read: async (input, signal) => BiliBrowserResultSchema.parse(await request('dsh.bili-read', { request: input }, signal)) }, catalog: async (signal, taskId) => DshToolCatalogSchema.parse(await request('dsh.catalog', taskId ? { taskId } : {}, AbortSignal.any([signal, AbortSignal.timeout(10000)]))), execute: async (call, authority, signal) => { authority.guard(); return request('dsh.call', { call, authorization: authority.authorization }, signal); } };
 }

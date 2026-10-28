@@ -1,3 +1,4 @@
+import {AutomaticRecall} from './automatic-recall.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
@@ -59,6 +60,9 @@ export class MemoryService extends Service {
   private readonly retrieval: MemoryRetrieval | null;
   private readonly analysis: MemoryAnalysis | null;
   private readonly working:WorkingMemory|null;
+  private readonly automaticRecall:AutomaticRecall;
+  private nativeRecall:ReturnType<Context['dafeiyu']['registerExtensionV3']>|undefined;
+  private readonly assembly:import('@dafeiyu/contracts').ContextAssembly;
   private readonly feedbackArchive:ToolFeedbackArchive|null;
   private readonly tasks:TaskWorkspace;
   private readonly expression:TaskExpression;
@@ -76,12 +80,13 @@ export class MemoryService extends Service {
   private readonly capabilityService:CapabilityObservationService|undefined;
   constructor(ctx: Context, config: Config, dependencies?: RetrievalDependencies) {
     super(ctx, 'dafeiyuMemory');
-    this.config = configSchema.parse(config);
+    this.config = configSchema.parse(config);this.assembly=ctx.dafeiyu.contextAssembly();
     if(this.config.maintenance&&(this.config.lifecycleMode!=='managed'||!this.config.sourceTracking&&!this.config.compaction))throw new Error('MAINTENANCE_REQUIRES_TRACKED_NATIVE_EXECUTION');
     this.store = new MemoryStore(resolve(this.config.dataDir, 'memory.sqlite'));
     this.tasks=this.store.taskWorkspace((scope,ref,hash)=>ctx.dafeiyuTimeline.checkArchivedSource(scope,ref,hash),(scope,a,b)=>ctx.dafeiyuTimeline.sameArchivedSource(scope,a,b));
     try { this.retrieval = this.config.retrieval ? new MemoryRetrieval(this.store, this.config.dataDir, this.config.retrieval, dependencies) : null; }
     catch (error) { this.store.close(); throw error; }
+    this.automaticRecall=new AutomaticRecall(ctx,this.store,this.retrieval);
     try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis,this.config.lifecycleMode==='managed',()=>ctx.dafeiyu.accepting&&this.gate.active):null; }
     catch(error){this.retrieval?.close();this.store.close();throw error;}
     try{this.working=this.config.context?new WorkingMemory(ctx,this.store,this.retrieval,this.config.dataDir,(c,refs)=>this.evidence(c,refs),!!this.config.compaction):null;}
@@ -136,7 +141,7 @@ export class MemoryService extends Service {
         memoryObservationProvider:{submit:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.submit(authority,input);return {...receipt,auditPending:this.flush()};},
           open:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');return this.store.observations.open(authority,input);},
           change:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.change(authority,input);return {...receipt,auditPending:this.flush()};}},
-        agentId: this.config.agentId, actions: this.actions(),contexts:[...(this.working?.contributors()??[]),...(this.config.lifecycleMode==='managed'?[{id:'qq-expression',kind:'working-state' as const,
+        agentId: this.config.agentId, actions: this.actions(),contexts:[{id:'recent-state',kind:'working-state',prepare:async request=>this.growth?.recent.prepare(request)??[],validate:(request,item)=>this.growth?.recent.validate(request,item)??false},this.automaticRecall.contributor(),...(this.working?.contributors()??[]),...(this.config.lifecycleMode==='managed'?[{id:'qq-expression',kind:'working-state' as const,
           prepare:async(request:import('@dafeiyu/contracts').ContextRequest)=>{ctx.dafeiyu.scopeForContext(request);return this.growth?.qqExpression.prepare(request.conversation)??[];},
           validate:(request:import('@dafeiyu/contracts').ContextRequest,item:import('@dafeiyu/contracts').ContextItem)=>{ctx.dafeiyu.scopeForContext(request);return this.growth?.qqExpression.prepare(request.conversation).some(current=>JSON.stringify(current)===JSON.stringify(item))??false;}},{id:'growth',kind:'working-state' as const,
           prepare:async(request:import('@dafeiyu/contracts').ContextRequest)=>ctx.dafeiyu.personaContext(request),
@@ -149,6 +154,7 @@ export class MemoryService extends Service {
     ctx.effect(() => () => this.close(), 'memory.close');
     if(this.config.lifecycleMode==='managed')this.unbindRepository=ctx.dafeiyu.bindTaskRepository(taskRepository(this.tasks,this.config.agentId,
       ()=>{if(this.closed||this.gate.state==='registered')throw new Error('DEPENDENCY_UNAVAILABLE');},()=>this.gate.active,()=>{this.flush();},(route,ref)=>ctx.dafeiyuTimeline.archivedSourceIdentity({agentId:this.config.agentId,route},ref)));
+    if(this.config.lifecycleMode==='managed')this.nativeRecall=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,id:'memory-origin-recall',version:MEMORY_VERSION,agentId:this.config.agentId,lifecycleReady:()=>!this.closed&&this.gate.active,actions:[],contexts:[{id:'recall',prepare:view=>this.automaticRecall.prepareNative(view),validate:(view,item)=>this.automaticRecall.validateNative(view,item)}]});
     if(this.config.lifecycleMode==='managed')this.growth=new GrowthService(ctx,this.store,this.tasks,this.config.agentId,()=>!this.closed&&this.gate.active,this.config.compaction,!!this.config.maintenance);
     if(this.config.maintenance&&this.persona)this.maintenance=new MaintenanceService(ctx,this.store,this.persona,this.config.dataDir,this.config.maintenance,this.config.agentId,()=>!this.closed&&this.gate.active);
     if(this.config.lifecycleMode==='managed')this.capabilityService=new CapabilityObservationService(ctx,this.store,()=>!this.closed&&this.gate.active,sourcePolicy,()=>{this.flush();this.persona?.flush();});
@@ -157,7 +163,7 @@ export class MemoryService extends Service {
     if(this.config.lifecycleMode==='legacy'){this.recover();this.activate();}
   }
   get lifecycleState(){return this.gate.state;}
-  runtimeHealth(){return {lifecycle:this.gate.state,analysis:this.analysis?.health??{state:'not-configured' as const,active:false},maintenance:this.maintenance?.health??{state:'not-configured' as const,active:0,requests:this.emptyMaintenanceCounts,scheduler:'not-configured' as const},retrieval:this.config.retrieval?'configured' as const:'not-configured' as const,compaction:this.config.compaction?'configured' as const:'not-configured' as const,sourceTracking:this.config.sourceTracking||this.config.compaction?'configured' as const:'not-configured' as const};}
+  runtimeHealth(){const assembly=this.assembly;return {context:{mode:assembly.mode,automaticRecall:assembly.mode==='unified'&&assembly.recall.enabled,recallStrategy:assembly.recall.strategy,recentState:assembly.mode==='unified'&&assembly.recentState.enabled,sharedRecentState:assembly.mode==='unified'&&assembly.recentState.shared},lifecycle:this.gate.state,analysis:this.analysis?.health??{state:'not-configured' as const,active:false},maintenance:this.maintenance?.health??{state:'not-configured' as const,active:0,requests:this.emptyMaintenanceCounts,scheduler:'not-configured' as const},retrieval:this.config.retrieval?'configured' as const:'not-configured' as const,compaction:this.config.compaction?'configured' as const:'not-configured' as const,sourceTracking:this.config.sourceTracking||this.config.compaction?'configured' as const:'not-configured' as const};}
   recover():void {
     if(this.closed)throw new Error('Memory capability is unregistered');
     if(this.gate.state==='recovered'||this.gate.active)return;
@@ -171,7 +177,7 @@ export class MemoryService extends Service {
   async whenIdle():Promise<void>{await this.analysis?.whenIdle();await this.nativeExpression?.whenIdle();await this.maintenance?.whenIdle();}
   close():Promise<void>{
     if(this.closing)return this.closing;
-    this.quiesce();this.closed=true;this.unbindNativeExpression?.();this.capabilityService?.close();this.persona?.close();this.handle.dispose();this.unbindRepository?.();
+    this.quiesce();this.closed=true;this.unbindNativeExpression?.();this.nativeRecall?.dispose();this.capabilityService?.close();this.persona?.close();this.handle.dispose();this.unbindRepository?.();
     this.closing=(async()=>{try{await this.maintenance?.close();await this.expression.close();await this.nativeExpression?.close();await this.analysis?.close();}finally{this.feedbackArchive?.close();this.working?.close();this.retrieval?.close();this.store.close();this.gate.close();}})();
     return this.closing;
   }
@@ -319,7 +325,7 @@ export class MemoryService extends Service {
   selectContext(context:ActionContext,raw:unknown){this.scope(context);try{return this.working?.select(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   async retrieveContext(context:ActionContext,raw:unknown){this.scope(context);try{return await this.working?.retrieve(context,raw)??{status:'not_configured'};}catch(e){this.scope(context);return this.failure(e);}}
   clearContext(context:ActionContext,raw:unknown){this.scope(context);try{return this.working?.clear(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
-  contextStatus(context:ActionContext){this.scope(context);return this.working?.status(context)??{status:'not_configured'};}
+  contextStatus(context:ActionContext,raw:unknown={}){const input=z.strictObject({offset:z.number().int().min(0).max(10000).default(0),limit:z.number().int().min(1).max(64).default(16)}).parse(raw),scope=this.scope(context);return {current:this.ctx.dafeiyu.contextStatus(context,input.offset,input.limit),...(this.working?.status(context)??{status:'not_configured'}),automaticRecall:this.automaticRecall.status(scope)};}
   feedbackOpen(context:ActionContext,raw:unknown,deleted=false){this.scope(context);try{return this.feedbackArchive?.open(context,raw,deleted)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   feedbackList(context:ActionContext,raw:unknown){this.scope(context);try{return this.feedbackArchive?.list(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   feedbackDelete(context:ActionContext,raw:unknown){this.scope(context);try{return this.feedbackArchive?.change(context,raw,true)??{status:'not_configured'};}catch(e){return this.failure(e);}}
@@ -369,7 +375,7 @@ export class MemoryService extends Service {
         action('dafeiyu_memory_context_retrieve','内部检索并选择前若干有效记忆完整分片；仅返回回执，完整命中列表和分析结果不注入聊天。',
           {requestId:field('幂等标识'),expectedVersion:field('检索证据区版本，首次0'),taskId:field('当前任务标识'),expiresAt:field('有效期ISO时间，24小时以内'),query:field('检索问题'),strategy:field('lexical/semantic/hybrid',false),limit:field('最多1至12条，默认3',false)},
           (args,ctx)=>this.retrieveContext(ctx,{...args,expectedVersion:Number(args.expectedVersion),...(args.limit?{limit:Number(args.limit)}:{})})),
-        action('dafeiyu_memory_context_status','查询工作区和证据区版本与存储条数；不返回记忆正文，不表示全部条目已获准装配。',{},(_args,ctx)=>this.contextStatus(ctx)),
+        action('dafeiyu_memory_context_status','查询本会话的上下文准入清单、自动召回模式及任务责任索引；不返回其它会话正文。offset/limit用于任务索引分页。',{offset:field('分页偏移',false),limit:field('每页最多64项',false)},(args,ctx)=>this.contextStatus(ctx,{...(args.offset?{offset:Number(args.offset)}:{}),...(args.limit?{limit:Number(args.limit)}:{})})),
         action('dafeiyu_memory_context_clear','清空所选装配区；保留长期记忆与审计，旧受控快照将在下一请求前退出。',
           {requestId:field('幂等标识'),kind:field('working/evidence'),expectedVersion:field('该区状态版本')},
           (args,ctx)=>this.clearContext(ctx,{...args,expectedVersion:Number(args.expectedVersion)})),

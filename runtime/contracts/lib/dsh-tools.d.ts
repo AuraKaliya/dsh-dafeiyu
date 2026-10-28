@@ -32,6 +32,9 @@ export declare const DshToolCatalogSchema: z.ZodObject<{
     }, z.core.$strict>>>;
 }, z.core.$strict>;
 export type DshToolCatalog = z.infer<typeof DshToolCatalogSchema>;
+/** Canonical program data. Array order remains semantic except named capability inventories. */
+export declare function stableJson(value: Json): string;
+export declare function orderedDshCatalog(value: DshToolCatalog): DshToolCatalog;
 export declare const DshToolCallSchema: z.ZodObject<{
     catalogVersion: z.ZodString;
     name: z.ZodString;
@@ -170,6 +173,26 @@ export declare const DshBridgeRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObjec
         argumentsJson: z.ZodString;
     }, z.core.$strict>;
     authorization: z.ZodJSONSchema;
+}, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"dsh.bili-read">;
+    id: z.ZodUUID;
+    request: z.ZodObject<{
+        taskId: z.ZodUUID;
+        runId: z.ZodUUID;
+        operationId: z.ZodUUID;
+        bvid: z.ZodOptional<z.ZodString>;
+        section: z.ZodDefault<z.ZodEnum<{
+            video: "video";
+            frame: "frame";
+            comments: "comments";
+            discover: "discover";
+        }>>;
+        feed: z.ZodOptional<z.ZodEnum<{
+            home: "home";
+            popular: "popular";
+        }>>;
+        positionMs: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>;
 }, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"dsh.cancel">;
     id: z.ZodUUID;

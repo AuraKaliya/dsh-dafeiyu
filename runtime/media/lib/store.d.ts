@@ -46,6 +46,10 @@ declare const sourceRecord: z.ZodObject<{
         mimeHint: z.ZodNullable<z.ZodString>;
         bytesHint: z.ZodNullable<z.ZodNumber>;
         durationMsHint: z.ZodNullable<z.ZodNumber>;
+        sourceFrame: z.ZodOptional<z.ZodObject<{
+            positionMs: z.ZodNumber;
+            durationMs: z.ZodNumber;
+        }, z.core.$strict>>;
         rangeReadable: z.ZodBoolean;
         publicContent: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>;
@@ -155,6 +159,10 @@ export declare class MediaStore {
             durationMsHint: number | null;
             rangeReadable: boolean;
             publicContent: boolean;
+            sourceFrame?: {
+                positionMs: number;
+                durationMs: number;
+            } | undefined;
         };
     };
     changeSource(access: MediaAccess, id: string, expectedVersion: number, deleted: boolean): {
@@ -187,6 +195,10 @@ export declare class MediaStore {
             durationMsHint: number | null;
             rangeReadable: boolean;
             publicContent: boolean;
+            sourceFrame?: {
+                positionMs: number;
+                durationMs: number;
+            } | undefined;
         };
     };
     private asset;
@@ -361,6 +373,10 @@ export declare class MediaStore {
             durationMsHint: number | null;
             rangeReadable: boolean;
             publicContent: boolean;
+            sourceFrame?: {
+                positionMs: number;
+                durationMs: number;
+            } | undefined;
         };
     };
     readReceipt(access: MediaAccess, key: string, input: unknown): string | null;
@@ -474,6 +490,10 @@ export declare class MediaStore {
         durationMsHint: number | null;
         rangeReadable: boolean;
         publicContent: boolean;
+        sourceFrame?: {
+            positionMs: number;
+            durationMs: number;
+        } | undefined;
     };
     /** Program-only immutable witness lookup; public reads must first pass exposure(access, id). */
     exposureWitness(id: string): {

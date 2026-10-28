@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
+import { BiliBrowserFrameSchema } from '#dafeiyu/contracts';
 import { biliUrl, boundedBytes } from './http.js';
 import { BiliStore, biliHash } from './store.js';
 const track = z.object({ id: z.number().int().nonnegative(), baseUrl: z.string().max(8192).optional(), base_url: z.string().max(8192).optional(), codecs: z.string().max(100), mimeType: z.string().max(100).optional(), mime_type: z.string().max(100).optional(), bandwidth: z.number().nonnegative().finite() });
@@ -33,6 +34,15 @@ export class BiliMedia {
     catch {
         return null;
     } }
+    prepareBrowserFrame(raw) {
+        const frame = BiliBrowserFrameSchema.parse(raw), base64 = frame.dataUrl.slice('data:image/jpeg;base64,'.length), bytes = Buffer.from(base64, 'base64');
+        if (bytes.toString('base64') !== base64 || bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216 || bytes[2] !== 255)
+            throw new Error('BILI_BROWSER_FRAME_INVALID');
+        const key = 'frame:' + randomUUID(), sha256 = createHash('sha256').update(bytes).digest('hex'), source = { provider: 'bilibili', key };
+        return { data: { source, kind: 'image', positionMs: frame.positionMs, durationMs: frame.durationMs, bytes: bytes.length, sha256, next: 'dafeiyu_media_read(mode=image, source=source)', coverage: '仅该时间点的实际视频画面；尚未视觉阅读，不含音轨' }, register: (page) => {
+                this.store.registerMedia(key, { ref: source, origin: this.store.proof(page), kind: 'image', name: `bilibili-frame-${frame.positionMs}ms.jpg`, mimeHint: 'image/jpeg', bytesHint: bytes.length, durationMsHint: null, sourceFrame: { positionMs: frame.positionMs, durationMs: frame.durationMs }, rangeReadable: false, publicContent: true }, { kind: 'browser-frame', base64, sha256 }, Date.now() + 7 * 86400000);
+            } };
+    }
     async probe(urlValue, signal, guard) {
         const url = biliUrl(urlValue, 'media'), opened = await this.client.external(url.href, 'media', { start: 0, end: 0 }, signal, guard, { allowWhole: true }), response = opened.response;
         try {
@@ -87,6 +97,14 @@ export class BiliMedia {
         const saved = this.store.media(key);
         if (!saved || !this.describe(key))
             throw new Error('BILI_MEDIA_EXPIRED');
+        if (saved.description.kind === 'image') {
+            const locator = z.strictObject({ kind: z.literal('browser-frame'), base64: z.string().max(2000000), sha256: z.string().length(64) }).parse(saved.locator), bytes = Buffer.from(locator.base64, 'base64'), stamp = biliHash(saved.description), guard = () => { signal.throwIfAborted(); if (!this.ready() || biliHash(this.describe(key)) !== stamp || !this.store.media(key))
+                throw new Error('MEDIA_SOURCE_STALE'); };
+            guard();
+            if (range || createHash('sha256').update(bytes).digest('hex') !== locator.sha256 || bytes.length !== saved.description.bytesHint)
+                throw new Error('BILI_BROWSER_FRAME_INVALID');
+            return { bytes: bytes.length, totalBytes: bytes.length, mime: 'image/jpeg', range: null, stream: (async function* () { guard(); yield bytes; guard(); })() };
+        }
         const locator = locatorSchema.parse(saved.locator), hash = biliHash(saved.description), guard = () => { signal.throwIfAborted(); if (!this.ready() || biliHash(this.describe(key)) !== hash || !this.store.media(key))
             throw new Error('MEDIA_SOURCE_STALE'); if (this.client.accountStamp() !== locator.accountStamp)
             throw new Error('BILI_SESSION_CHANGED'); };
