@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "at": "2026-10-28T10:10:54.1077370+00:00",
+  "kind": "development-plan-document-review",
+  "developmentHead": "9fddd7ba5ba610c38dec1327bc760ae8bcb2c067",
+  "deployedRelease": "v0.22.3",
+  "publicCommit": "c2406206432cec61e16ff8ed1a1d9aba3236a25c",
+  "existingPinPriorityFixVerified": true,
+  "plan": {
+    "path": "docs/context-assembly-development-plan-20261028.md",
+    "sections": 15,
+    "batches": [
+      "P0",
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6"
+    ],
+    "plannedAcceptanceCases": [
+      "A01",
+      "A02",
+      "A03",
+      "A04",
+      "A05",
+      "A06",
+      "B01",
+      "B02",
+      "B03",
+      "B04",
+      "B05",
+      "B06",
+      "B07",
+      "C01",
+      "C02",
+      "C03",
+      "D01",
+      "D02",
+      "D03",
+      "D04",
+      "D05",
+      "D06",
+      "E01",
+      "E02",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "F01",
+      "F02",
+      "F03",
+      "F04",
+      "F05",
+      "G01",
+      "G02",
+      "G03",
+      "G04"
+    ],
+    "acceptanceExecuted": false
+  },
+  "validation": {
+    "allLocalLinksExist": true,
+    "fencesBalanced": true,
+    "sourceFilesExist": true,
+    "uniquePlannedCaseIds": true,
+    "protectedMemoryHash": "CB9A2383531A39461C50D7CA8F58C6C1879CF12A0A0DAFDF8CFA5B387911F730"
+  },
+  "execution": {
+    "productCodeChanged": false,
+    "configurationChanged": false,
+    "build": false,
+    "programTests": false,
+    "realModel": false,
+    "realPlatform": false,
+    "serverAccess": false,
+    "deployment": false,
+    "publicPush": false
+  },
+  "documents": [
+    {
+      "path": "docs/context-assembly-development-plan-20261028.md",
+      "sha256": "1BD3CDC484758663454B63E9A6A538133F55D3C5C76D6A18DE45E01C5300EBF3"
+    },
+    {
+      "path": "docs/checks/context-development-plan-20261028.md",
+      "sha256": "0E4D2D14F295E6522CD12A9C5037ED1ABF923612CF1770AF4B2BEB95F30F33B0"
+    }
+  ],
+  "links": [
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "architecture.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "current-scope-and-cleanup.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "checks/process-context-responsibility-review-20261027.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "checks/context-assembly-analysis-20261028.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "checks/dsh-harness-context-20261028.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "integrated-acceptance-plan.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "agent-memory-continuity-plan.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "persona-growth-continuity-plan.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "runtime-deployment-plan.md",
+      "exists": true
+    },
+    {
+      "document": "docs/context-assembly-development-plan-20261028.md",
+      "target": "checks/context-development-plan-20261028.md",
+      "exists": true
+    },
+    {
+      "document": "docs/checks/context-development-plan-20261028.md",
+      "target": "../context-assembly-development-plan-20261028.md",
+      "exists": true
+    }
+  ],
+  "sources": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "9F32384008B76AA3041B1F086352D06DD7B0935056EDC7757B5FF81EB4D6CDEF"
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "5F35E0D418C2440C9ED0B8F95DF80A07029FF4F9701C9DFFE2AD314E7D26E6A8"
+    },
+    {
+      "path": "docs/current-scope-and-cleanup.md",
+      "sha256": "53BFF390E5A0E0469A9481B242DFC2D0F3CBCBAD2B35736355224BF70A4675C8"
+    },
+    {
+      "path": "docs/checks/context-assembly-analysis-20261028.md",
+      "sha256": "B1A1EE1DCB1CDB95142A3C191C418128C42AFE32AACE3A66FEB9F842B90469D6"
+    },
+    {
+      "path": "docs/checks/dsh-harness-context-20261028.md",
+      "sha256": "9CCF7C6DD4EAD1CA37FB450E29A6433FF86D35895760E666184790F100B8017B"
+    },
+    {
+      "path": "docs/integrated-acceptance-plan.md",
+      "sha256": "32439C9C3C8748DD97A3802AACD78DD4EEFF55EDD72727986627CD21E08BD592"
+    },
+    {
+      "path": "docs/runtime-deployment-plan.md",
+      "sha256": "4D23FC82947D00F2A817A7202CAA4BDA305D0E8C677F640A157C002289A2D043"
+    },
+    {
+      "path": "packages/core/src/context.ts",
+      "sha256": "24EE82D467B38504C1AEABB57280157855E60B0AC74C2B5FA11C3C550F95C3CD"
+    },
+    {
+      "path": "packages/core/src/context-runtime.ts",
+      "sha256": "561926CDE03C4AC3E9A7982AF8AD9AAEF9FBECDC04AD5379E24A810D371AB3C0"
+    },
+    {
+      "path": "packages/core/src/harness-runtime.ts",
+      "sha256": "DD8E00713C4CBC6DDE7EDA174EC4E12D4B5BBFA638247DABD0DCE9171ECEB8A9"
+    },
+    {
+      "path": "packages/core/src/execution-frame.ts",
+      "sha256": "30F297A5F1240909F80B8F151F56B4C55F027C215B900F03F456377CABDBF9BD"
+    },
+    {
+      "path": "packages/core/src/execution-coordinator.ts",
+      "sha256": "045980C89BE6AFDA3213DDE73CB8E19B291DD7A5C7E934E44F7E577228439976"
+    },
+    {
+      "path": "packages/core/src/native-runtime.ts",
+      "sha256": "74F22F51605C62B887B2A43AF287ABC313072D2A400F7A71BD88741BDEDF9BC0"
+    },
+    {
+      "path": "packages/core/src/target-renderer.ts",
+      "sha256": "F3BE5379ED5FE37DA6EE97F255F68B9CCFA5301C25533BCBD849E6BB9884904C"
+    },
+    {
+      "path": "packages/core/src/task-assessment.ts",
+      "sha256": "7B7C88761669C13830BC6B730C330E0E3CEF5C5217B9ECDBED994FCA340F06AD"
+    },
+    {
+      "path": "packages/contracts/src/context.ts",
+      "sha256": "2F2E8C727CD9E02540CA494206325F7AE14CBF3BF436799C13C0D38C9F80CA1A"
+    },
+    {
+      "path": "packages/contracts/src/memory-boundary.ts",
+      "sha256": "5E84F46E58CB3F49A0DB7F78608CB282276A1C8F37E372E4460C400411D940E3"
+    },
+    {
+      "path": "packages/contracts/src/execution-memory.ts",
+      "sha256": "F4F5AB75CD2527764CF5A310FE2E8B12C99D814E18CB9651E28A8771B78F91AA"
+    },
+    {
+      "path": "packages/contracts/src/native-expression.ts",
+      "sha256": "E1EB4CED8122D52848A3304CAA5A9E6E6028ED236A7D8AE79C9FBEA19AF605D7"
+    },
+    {
+      "path": "packages/memory/src/persona-service.ts",
+      "sha256": "E7F1CFE07DF3707AD89A6E96421AC369C551BD77A96AC5657ADC42FB0BE7E1F0"
+    },
+    {
+      "path": "packages/memory/src/store.ts",
+      "sha256": "F839DAEB3C36EDF5845FA2993F750B988F98E3C056C90E28957A9A3C9FF2EBC1"
+    },
+    {
+      "path": "packages/memory/src/retrieval.ts",
+      "sha256": "A6145952B753F79507E58AC5BC7D0CC9279DB77DB337E7C7AC99EB0BC5464698"
+    },
+    {
+      "path": "packages/plugin/src/settings.ts",
+      "sha256": "ED4951E9E555270872ACA66BCB1CB3636DFA5F9A6A726046D2607326D75ADA29"
+    },
+    {
+      "path": "packages/plugin/src/installation.ts",
+      "sha256": "AC0EC1D997A5CBF6110808A793ACD621089F15421BB322F870B05083C729E557"
+    }
+  ]
+}
