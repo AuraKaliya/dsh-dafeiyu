@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { createSystemMessage,createUserMessage,ReasoningEffortId } from '@deepseek-ai/dsh-llm';
+import type {GenerateOptions} from '@deepseek-ai/dsh-llm';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -16,9 +17,11 @@ export async function verifyPersonaDelivery(ctx:Context,input:ExpressionModelInp
   try{const info=await ctx.llm.resolveModelInfo(model.provider,model.model,deadline);
   const effort=['off','low'].find(id=>info.reasoning?.efforts.some(value=>value.id===id))??model.reasoningEffort;
   // A cutoff is not a fidelity decision. Retry only a truncated verifier, with unchanged evidence and one shared deadline.
-  for(const maxTokens of [8192,16384]){let output='',size=0,finish='missing';guard();deadline.throwIfAborted();
-  for await(const chunk of ctx.llm.stream({provider:model.provider,model:model.model,...(effort?{reasoningEffort:ReasoningEffortId(effort)}:{}),
-    sessionId:SessionId(`memory-expression-verify-delivery-${randomUUID()}`),signal:deadline,maxTokens,temperature:0,messages:[createSystemMessage(DELIVERY_VERIFICATION_INSTRUCTIONS),createUserMessage({source:{kind:'user'},content:[{type:'text',text:body}]})]})){
+  for(const maxTokens of [8192,16384]){let output='',size=0,finish='missing';deadline.throwIfAborted();
+  const request:GenerateOptions={provider:model.provider,model:model.model,...(effort?{reasoningEffort:ReasoningEffortId(effort)}:{}),
+    sessionId:SessionId(`memory-expression-verify-delivery-${randomUUID()}`),signal:deadline,maxTokens,temperature:0,messages:[createSystemMessage(DELIVERY_VERIFICATION_INSTRUCTIONS),createUserMessage({source:{kind:'user'},content:[{type:'text',text:body}]})]};
+  await ctx.dafeiyu.inspectContextRequest(request,bounds.maxInputBytes,0,info);guard();
+  for await(const chunk of ctx.llm.stream(request)){
     deadline.throwIfAborted();if(chunk.type==='block-start'&&chunk.blockType==='tool-call'||chunk.type==='tool-call-delta'||chunk.type==='block-end'&&chunk.block.type==='tool-call')throw new Error('delivery_tools_forbidden');
     if(chunk.type==='text-delta')size+=chunk.text.length;if(size>12000)throw new Error('delivery_output_capacity');
     if(chunk.type==='block-end'&&chunk.block.type==='text')output+=chunk.block.text;if(output.length>12000)throw new Error('delivery_output_capacity');

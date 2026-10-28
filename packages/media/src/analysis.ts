@@ -35,12 +35,13 @@ export class MediaAnalysis {
   constructor(private readonly host:Context,private readonly images:ScopedImages,private readonly directory:string){}
   async run<T>(job:{route:MediaModelRoute;instructions:string;input:unknown;refs?:readonly ImageAttachmentRef[];lease?:string;guard:()=>void;parse:(value:unknown)=>T},signal:AbortSignal):Promise<T>{
     signal.throwIfAborted();job.guard();
-    if(job.refs?.length){const model=await this.host.llm.resolveModelInfo(job.route.provider,job.route.model,signal);if(!model.inputModalities?.includes('image'))throw new Error('MEDIA_IMAGE_MODEL_UNAVAILABLE');}
+    const model=await this.host.llm.resolveModelInfo(job.route.provider,job.route.model,signal);
+    if(job.refs?.length&&!model.inputModalities?.includes('image'))throw new Error('MEDIA_IMAGE_MODEL_UNAVAILABLE');
     const ctx=new Context(),sessionId=SessionId('media-analysis-'+randomUUID());
     try{await ctx.plugin(LlmRuntime);await ctx.plugin(SessionStore);await ctx.plugin(Projection);await ctx.plugin(Prompt);await ctx.plugin(Tools);await ctx.plugin(AgentRegistry);
       await ctx.plugin(Persistence,{root:this.directory,compression:'none'});await ctx.plugin(AgentLoop,{agents:[]});
       ctx.llm.registerAdapter([job.route.provider],new MediaTransport(this.host,sessionId,this.images,job.lease,job.guard,signal));
-      const handle=await ctx.agents.create({sessionId,meta:{cwd:this.directory},agentOptions:{provider:job.route.provider,model:job.route.model,maxTokens:8192,...(job.route.reasoningEffort?{reasoningEffort:ReasoningEffortId(job.route.reasoningEffort)}:{})},setup:scope=>{
+      const handle=await ctx.agents.create({sessionId,meta:{cwd:this.directory},agentOptions:{provider:job.route.provider,model:job.route.model,maxTokens:Math.min(8192,model.defaultMaxTokens??8192),...(job.route.reasoningEffort?{reasoningEffort:ReasoningEffortId(job.route.reasoningEffort)}:{})},setup:scope=>{
         scope.systemPrompt.section({name:'media-analysis',order:0,complete:true,interpolate:false,text:job.instructions});scope.tools.presentAs('native');scope.tools.restrict({allow:[]});}});
       const agent=handle.agent,abort=()=>agent.cancel({kind:'hook',reason:'Media analysis cancelled'});signal.addEventListener('abort',abort,{once:true});
       try{signal.throwIfAborted();job.guard();agent.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:JSON.stringify(job.input)},...(job.refs??[]).map(attachment=>({type:'image' as const,attachment}))]}));await agent.whenIdle();

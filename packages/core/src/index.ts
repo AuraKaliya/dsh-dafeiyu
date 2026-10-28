@@ -1,5 +1,6 @@
 import {ContextItemSchema} from '@dafeiyu/contracts';
 import {situationContributor} from './situation-context.js';
+import {inspectRequestCapacity} from './context-plan.js';
 import { Context, Service } from '@deepseek-ai/cordis';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -98,6 +99,7 @@ export class DafeiyuService extends Service {
   originRecallScope(view:import('@dafeiyu/contracts').ExecutionView,owner:string){return this.executions?.originRecallScope(view,owner)??null;}
   originRecallCurrent(runId:string,scene:Conversation,stamp:string){return this.executions?.originRecallCurrent(runId,scene,stamp)??false;}
   contextBudget(){return this.config.context;}
+  inspectContextRequest(options:import('@deepseek-ai/dsh-llm').GenerateOptions,maximum:number,reserve:number,known?:import('@deepseek-ai/dsh-llm').LlmResolvedModelInfo){return inspectRequestCapacity(this.ctx,options,maximum,reserve,known);}
   contextAssembly(){return this.config.context.assembly;}
   contextStatus(context:ActionContext,offset=0,limit=16):Json{const scope=this.scopeFor(context);return z.json().parse({plan:this.contexts.status(scope.route),responsibilities:(this.executions?.responsibilityFacts(context.conversation,offset,limit)??[]).map(row=>{row.guard();return row.data;}),offset,limit,nextOffset:offset+limit});}
   private closedNativeDelivery:ReturnType<RuntimeStore['nativeDeliveries']['counts']>|null=null;

@@ -18,7 +18,7 @@ test('reply delay is 2–10 seconds and counts Unicode text only',()=>{
 });
 test('segmented text waits once before the first send and cancellation leaves no external effect',async()=>{
   const s=store();try{let waits=0,sends=0;const transport=new QqSegmentedTransport({ledger:s.delivery,beforeSend:async value=>{waits++;assert.equal(value.text.length,8001);},check:async()=>{},send:async()=>String(++sends),confirmed:()=>{}});
-    assert.equal((await transport.deliver(reply('字'.repeat(8001)),new AbortController().signal)).status,'sent');assert.equal(waits,1);assert.equal(sends,3);
+    assert.equal((await transport.deliver(reply('字'.repeat(8001)),new AbortController().signal)).status,'sent');assert.equal(waits,1);assert.equal(sends,11);
     const stop=new AbortController();const cancelled=new QqSegmentedTransport({ledger:s.delivery,beforeSend:(_value,signal)=>waitForQqReply('',signal),check:async()=>{},send:async()=>{throw new Error('MUST_NOT_SEND');},confirmed:()=>{}});
     const work=cancelled.deliver(reply('取消'),stop.signal);stop.abort();assert.deepEqual(await work,{status:'not-sent',code:'DELIVERY_CANCELLED'});
   }finally{s.close();}

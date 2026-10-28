@@ -45,7 +45,7 @@ test('Whisper worker actually consumes a synthetic WAV and releases its injected
 });
 
 test('Python window coverage and format validation run with injected scores and no ONNX model',async()=>{
-  const f=await fixture(),worker=new BoundedProcess(f.work);const result=await worker.run({executable:resolve('.runtime/fastembed-bench/venv/Scripts/python.exe'),arguments:[resolve('tests/media_audio_worker_test.py'),resolve('packages/media/workers/audio_events.py')],timeoutMs:10000,memoryBytes:256*1024**2,maxStdoutBytes:1024,maxStderrBytes:8192,signal:new AbortController().signal});
+  const f=await fixture(),worker=new BoundedProcess(f.work);const result=await worker.run({executable:process.env.DAFEIYU_TEST_AUDIO_PYTHON??process.env.DAFEIYU_TEST_DOCUMENT_PYTHON??'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe',arguments:[resolve('tests/media_audio_worker_test.py'),resolve('packages/media/workers/audio_events.py')],timeoutMs:10000,memoryBytes:256*1024**2,maxStdoutBytes:1024,maxStderrBytes:8192,signal:new AbortController().signal});
   assert.match(result.stdout.toString('utf8'),/"passed": true/);assert.deepEqual(await readdir(f.work),[]);
 });
 

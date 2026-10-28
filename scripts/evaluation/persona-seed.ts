@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ExecutionScopeSchema,PersonaSourceRefSchema,PersonaCandidateRevisionV1Schema,PersonaStageSchema,PersonaKindSchema } from '@dafeiyu/contracts';
 import type { ExecutionContextV3,PersonaSourceRef } from '@dafeiyu/contracts';
 import { runtimeHash } from '@dafeiyu/core/runtime-store';
+import {MEMORY_SCHEMA_VERSION} from '@dafeiyu/memory/store';
 import type { EvaluationWorkspace } from './workspace.ts';
 import { sha256 } from './catalog.ts';
 
@@ -51,7 +52,7 @@ export async function seedLegacyPersonaFixture(workspace:EvaluationWorkspace,pro
   const idle=()=>{if(Number(runtime.prepare('SELECT count(*) AS n FROM runtime_ownership').get()?.n)!==0||Number(journal.prepare('SELECT count(*) AS n FROM ownership').get()?.n)!==0)throw new Error('EVALUATION_SEED_PROFILE_ACTIVE');};
   try{
     idle();memory.exec('PRAGMA foreign_keys=ON;PRAGMA busy_timeout=5000;');
-    if(Number(memory.prepare('PRAGMA user_version').get()?.user_version)!==12)throw new Error('EVALUATION_SEED_SCHEMA_REQUIRED');
+    if(Number(memory.prepare('PRAGMA user_version').get()?.user_version)!==MEMORY_SCHEMA_VERSION)throw new Error('EVALUATION_SEED_SCHEMA_REQUIRED');
     const run=runtime.prepare('SELECT definition,state FROM runs WHERE id=?').get(request.preparationRunId),definition=run?z.object({scope:ExecutionScopeSchema,taskId:z.uuid()}).parse(JSON.parse(String(run.definition))):null;
     if(!run||run.state!=='completed'||runtimeHash(definition?.scope)!==runtimeHash(request.scope)||definition?.taskId!==request.scope.taskId||Number(runtime.prepare('SELECT count(*) AS n FROM runs').get()?.n)!==1)throw new Error('EVALUATION_SEED_PREPARATION_REQUIRED');
     const operation=runtime.prepare('SELECT action,state,outcome FROM run_operations WHERE id=? AND run_id=?').get(request.operationId,request.preparationRunId);

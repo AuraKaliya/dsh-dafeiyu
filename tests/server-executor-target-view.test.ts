@@ -36,7 +36,8 @@ async function fixture(options:{mixedPrivate?:boolean;opaqueContext?:boolean}={}
 
 test('a recipient-bound inference reaches a fresh persona session without becoming public or admitting opaque task text',async t=>{
   const h=await fixture();t.after(h.close);await h.message('任务：给我整理虚构执行器结果',{trigger:true,target:privateTarget});h.assertObserved();const id=runId(h);
-  const packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.resultIncluded,false);assert.equal(packet.evidence.length,1);assert.equal(packet.evidence[0]!.kind,'inference');assert.match(packet.evidence[0]!.text,/RECIPIENT_ONLY_SELF_REPORT/);
+  const packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.resultIncluded,false);assert.equal(packet.evidence.length,2);assert.equal(packet.evidence[0]!.kind,'inference');assert.match(packet.evidence[0]!.text,/RECIPIENT_ONLY_SELF_REPORT/);
+  assert.equal(packet.evidence[1]!.kind,'reported');assert.equal(JSON.parse(packet.evidence[1]!.text).kind,'result-workflow');
   assert.equal(h.core.capabilityPublicView(h.proof(),JSON.stringify(view)),false);assert.equal(h.core.capabilityTargetView(h.proof(),JSON.stringify(view),scene,h.scope()),null);
   assert.equal(h.core.capabilityTargetView(h.proof(),JSON.stringify(view),privateTarget,{...h.scope(),agentId:'other'}),null);
   assert.equal((await h.core.deliverMessageTaskResult(id))?.state,'sent');const renderer=JSON.stringify(h.adapter.requests.find(r=>render(r.sessionId)));

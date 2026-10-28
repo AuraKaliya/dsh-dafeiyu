@@ -27,19 +27,20 @@ export const PRIVATE_STREAM_SENTINEL='EVALUATION_SYNTHETIC_REASONING_MUST_NOT_PE
 /** A test backend with no credentials or network. Token numbers below are synthetic counters, not a real bill. */
 export class EvaluationScriptedAdapter extends LlmAdapter {
   response:EvaluationResponse;readonly requests:GenerateOptions[]=[];
-  constructor(response:EvaluationResponse){super();this.response=response;}
-  override async resolveModel(provider:string,id:string):Promise<LlmResolvedModelInfo>{return {provider,id,name:id,context:{contextWindow:65536},defaultMaxTokens:8192,systemPromptUpdate:'in-history',toolUpdate:'in-history'};}
+  private readonly contextWindow:number;
+  constructor(response:EvaluationResponse,contextWindow=65536){super();this.response=response;this.contextWindow=contextWindow;}
+  override async resolveModel(provider:string,id:string):Promise<LlmResolvedModelInfo>{return {provider,id,name:id,context:{contextWindow:this.contextWindow},defaultMaxTokens:8192,systemPromptUpdate:'in-history',toolUpdate:'in-history'};}
   override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{options.signal?.throwIfAborted();this.requests.push(options);
     const chunks=String(options.sessionId).startsWith('dafeiyu-assessment-')?evaluationText(JSON.stringify({goalStatus:'uncertain',summary:'离线传输测试的固定阶段评价，仅验证程序流程。',evidenceIds:[],limitations:['未作真实模型语义验收'],unfinished:[],next:'deliver'})):await this.response(options);
     yield {type:'block-start',index:100,blockType:'reasoning'};yield {type:'reasoning-delta',index:100,text:PRIVATE_STREAM_SENTINEL};yield {type:'block-end',index:100,block:{type:'reasoning',text:PRIVATE_STREAM_SENTINEL}};
     for(const chunk of chunks){options.signal?.throwIfAborted();if(chunk.type==='finish'){yield {type:'usage',usage:{inputTokens:Math.ceil(Buffer.byteLength(JSON.stringify(options.messages))/4),outputTokens:Math.ceil(Buffer.byteLength(JSON.stringify(chunks))/4)}};yield {...chunk,replayState:{response:PRIVATE_STREAM_SENTINEL}};}else yield chunk;}}
 }
-export async function openEvaluationRuntime(options:{root:string;foundationFile:string;ledger:EvaluationLedger;attemptId:string;response:EvaluationResponse;create?:boolean;compaction?:Memory.Config['compaction'];
+export async function openEvaluationRuntime(options:{root:string;foundationFile:string;ledger:EvaluationLedger;attemptId:string;response:EvaluationResponse;create?:boolean;compaction?:Memory.Config['compaction'];modelContextWindow?:number;
   extension?:(ctx:Context)=>Omit<ExtensionV3,'protocolVersion'|'agentId'>;policies?:HostConfig['authorityPolicies'];beforeActivate?:(ctx:Context)=>Promise<void>}){
   if(options.ledger.config.mode!=='offline')throw new Error('EVALUATION_OFFLINE_RUNTIME_ONLY');if(options.create===false&&['core/runtime.sqlite','memory/memory.sqlite'].some(file=>!existsSync(join(options.root,file))))throw new Error('EVALUATION_BASELINE_INCOMPLETE');
-  const ctx=new Context(),adapter=new EvaluationScriptedAdapter(options.response);let handle:ReturnType<Core.DafeiyuService['registerExtensionV3']>|undefined;
+  const contextWindow=options.modelContextWindow??65536,ctx=new Context(),adapter=new EvaluationScriptedAdapter(options.response,contextWindow);let handle:ReturnType<Core.DafeiyuService['registerExtensionV3']>|undefined;
   try{await ctx.plugin(LlmRuntime);await ctx.plugin(SessionStore);await ctx.plugin(Projection);await ctx.plugin(Prompt);await ctx.plugin(Tools);await ctx.plugin(AgentRegistry);await ctx.plugin(Persistence,{root:join(options.root,'sessions'),compression:'none'});await ctx.plugin(AgentLoop,{agents:[]});await ctx.plugin(Query,{path:join(options.root,'query.sqlite'),openAt:'never'});ctx.llm.registerAdapter(['local-test'],adapter);
-    installEvaluationBilling(ctx,options.ledger,{provider:'local-test',model:'scripted',contextWindow:65536,maxRequestBytes:1000000},()=>options.attemptId);
+    installEvaluationBilling(ctx,options.ledger,{provider:'local-test',model:'scripted',contextWindow,maxRequestBytes:1000000},()=>options.attemptId);
     await ctx.plugin(Core,{agentId:'dafeiyu',dataDir:join(options.root,'core'),personaFile:options.foundationFile,provider:'local-test',model:'scripted',lifecycleMode:'managed',turnTimeoutMs:30000});await ctx.plugin(Timeline,{agentId:'dafeiyu',execution:true});await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(options.root,'memory'),lifecycleMode:'managed',sourceTracking:true,...(options.compaction?{compaction:options.compaction}:{})});
     const extension=options.extension?.(ctx);ctx.dafeiyu.configureExecution({profileId:'evaluation',createStore:options.create!==false,policies:options.policies??[{id:'case',producers:['evaluation'],actions:[...(extension?.actions?.map(a=>a.id)??[]),...PERSONA_ACTIONS,...EXECUTION_ACTIONS],allowLocalWrite:true}]});if(extension)handle=ctx.dafeiyu.registerExtensionV3({protocolVersion:3,agentId:'dafeiyu',...extension});await options.beforeActivate?.(ctx);
     ctx.dafeiyuMemory.recover();ctx.dafeiyuMemory.activate();await ctx.dafeiyu.recoverExecutions();ctx.dafeiyu.recover();ctx.dafeiyu.activate();let closed=false;

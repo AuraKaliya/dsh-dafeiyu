@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {admitContext,admitNativeContexts,contextManifest,requestCapacity} from '../packages/core/lib/context-plan.js';
+import {admitContext,admitNativeContexts,contextManifest,requestCapacity,inspectRequestCapacity} from '../packages/core/lib/context-plan.js';
+import {Context} from '@deepseek-ai/cordis';
+import {createUserMessage} from '@deepseek-ai/dsh-llm';
 import {ContextCoordinator} from '../packages/core/lib/context.js';
 import {PersonaRuntime} from '../packages/core/lib/persona-runtime.js';
 import {ContextBudgetSchema} from '@dafeiyu/contracts';
@@ -36,6 +38,12 @@ test('native task context shares required admission and counts the serialized en
 test('full capacity includes schemas, tool history and output reserve, measured in bytes',()=>{
   const result=requestCapacity({messages:[{text:'中文'}],tools:[{schema:'x'.repeat(800)}],toolHistory:'x'.repeat(200)},1100,100);
   assert.equal(result.withinBudget,false);assert.equal(result.measurement,'utf8-serialized-bytes');assert.ok(result.categories.tools>800);
+});
+
+test('the declared model window still rejects oversized history below the byte ceiling',async()=>{
+  await assert.rejects(inspectRequestCapacity(new Context(),{provider:'fixture',model:'fixture',maxTokens:8192,
+    messages:[createUserMessage({source:{kind:'user'},content:[{type:'text',text:'x'.repeat(200000)}]})]},1000000,0,
+    {provider:'fixture',id:'fixture',name:'fixture',context:{contextWindow:65536},defaultMaxTokens:8192}),/MODEL_CONTEXT_CAPACITY/);
 });
 test('unified persona preparation cannot silently drop an already qualified selected personality',()=>{
   const runtime=new PersonaRuntime(ContextBudgetSchema.parse({assembly:{mode:'unified'},regions:{'memory:growth':{maxBytes:1000}}})),id=randomUUID();

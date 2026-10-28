@@ -36,7 +36,8 @@ test('delivery verification does not rebuild evidence per streamed fragment and 
   const root=await mkdtemp(join(testTempDir(),'verify-stream-'));let stale=false,checks=0;const answer='{"faithful":true,"issues":[]}';
   const h=await harness(root,()=>{stale=true;const chunks=textReply(answer);return [chunks[0]!,...Array.from({length:2000},()=>({type:'text-delta' as const,index:0,text:' '})),...chunks.slice(2)];});t.after(h.close);
   await assert.rejects(verifyPersonaDelivery(h.ctx,{question:'问题',evidence:[{id:'S1',text:'资料'.repeat(10000)}]},'回答',new AbortController().signal,()=>{checks++;if(stale)throw new Error('SOURCE_STALE');},{maxAnswerChars:4000,maxInputBytes:100000}),/SOURCE_STALE/);
-  assert.equal(checks,2);
+  // Admission, the dispatch after asynchronous model metadata, and completion all recheck.
+  assert.equal(checks,3);
 });
 
 test('verification deadline is independent of a long task deadline',async t=>{
