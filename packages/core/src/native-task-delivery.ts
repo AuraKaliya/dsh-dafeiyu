@@ -75,7 +75,7 @@ export class NativeTaskDelivery {
     }catch{return {status:'not-sent',code:'STATUS_NOT_SENT'};}
   }
   close(){this.unregister();}
-  private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire();let invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
+  private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire(),deadlineAt=performance.now()+this.host.timeoutMs;let invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
     try{let record=this.host.store.nativeDeliveries.get(runId)!;if(terminal.has(record.state))return this.host.store.nativeDeliveries.status(runId);
       const access=await this.host.access(runId),provider=this.host.expression(),channel=this.host.channel(item);
       if(!provider?.ready()||!channel?.capability.deliverTaskResult)throw new Error('DEPENDENCY_UNAVAILABLE');
@@ -115,8 +115,20 @@ export class NativeTaskDelivery {
         const manifest=await media.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaId=manifest.id;const authorized=()=>{guard();mediaAccess!.guard();if(this.host.media()!==media)throw new Error('SOURCE_STALE');media!.validateReply!(mediaAccess!,manifest.id);};authorized();
         result=await this.host.enqueue(item.route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();authorized();};check();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
           return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),sending,check,position=>{check();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));});
-      }else{result=await this.host.enqueue(item.route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();guard();};check();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;return resultSchema.parse(await sendTaskResult(reply,record.anchor,sending,check));});}
-      this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
+      }else{result=await this.host.enqueue(item.route,async()=>{
+        const writeBudget=new AbortController(),sending=AbortSignal.any([signal,writeBudget.signal]),check=()=>{sending.throwIfAborted();guard();};let timer:ReturnType<typeof setTimeout>|undefined,remaining=this.host.sendTimeoutMs,active=false;
+        const begin=()=>{check();if(active||remaining<=0||deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');
+          if(!invoked){this.host.store.nativeDeliveries.sending(runId);this.host.flush();}if(deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');
+          const started=performance.now();timer=setTimeout(()=>writeBudget.abort(new DOMException('Task result write timed out','TimeoutError')),remaining);active=true;invoked=true;let ended=false;
+          return ()=>{if(ended)return;ended=true;if(timer)clearTimeout(timer);timer=undefined;remaining=Math.max(0,remaining-(performance.now()-started));active=false;};};
+        const notified=channel.capability.taskTextDispatch==='write-window-v1';
+        this.host.store.appendExecutionEvent(runId,'native.delivery.preflight',{deferredWriteBudget:notified,writeTimeoutMs:this.host.sendTimeoutMs});this.host.flush();
+        let closeLegacy:(()=>void)|undefined;try{if(!notified)closeLegacy=begin();const outcome=resultSchema.parse(await sendTaskResult(reply,record.anchor,sending,check,notified?begin:undefined));
+          if(!invoked&&outcome.status!=='not-sent'){if(this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;throw new Error('DELIVERY_DISPATCH_NOT_NOTIFIED');}return outcome;
+        }finally{closeLegacy?.();if(timer)clearTimeout(timer);}
+      });}
+      if(!invoked&&result.status==='not-sent'&&this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.notSentBeforeDispatch(runId,result.code);
+      else this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
     }catch(error){const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
     }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');}catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
@@ -126,14 +138,14 @@ export class NativeTaskDelivery {
   }
   private async feedback(item:PendingMessage,runId:string){
     if(this.host.signal.aborted||!this.host.accepting())return;
-    const row=this.host.store.nativeDeliveries.get(runId),channel=this.host.channel(item);if(!row||!channel||row.error==='SOURCE_STALE')return;
+    const row=this.host.store.nativeDeliveries.get(runId),channel=this.host.channel(item);if(!row||!channel||row.error==='SOURCE_STALE')return;const sendAttempted=this.host.store.nativeDeliveries.sendAttempted(runId);
     const signal=AbortSignal.any([this.host.signal,channel.signal,AbortSignal.timeout(30000)]);
     const guard=()=>{signal.throwIfAborted();const description=this.host.describe(runId);if(!description||description.item.id!==item.id||this.host.channel(item)?.identity!==channel.identity||this.host.store.nativeDeliveries.get(runId)?.version!==row.version)throw new Error('SOURCE_STALE');};
     try{guard();const persona=this.host.persona(item,row.id,signal,guard),message=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,row.id,persona.text,persona.items,
       {target:row.anchor.target,taskId:row.anchor.taskId,runId,inboundId:item.id,question:'向原会话说明本次任务的实际交付状态及当前限制。',taskState:row.state,
-        evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,sendAttempted:row.state==='not-sent',workPreserved:true,
-          phase:row.state==='not-sent'?'transport':row.error?.startsWith('DELIVERY_VERIFICATION_')||row.error==='DELIVERY_UNFAITHFUL'?'verification':'pre-send',
-          note:row.state==='not-sent'?'发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。':'回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。'})}]},signal,()=>{guard();persona.guard();},32000);
+        evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,sendAttempted,workPreserved:true,
+          phase:sendAttempted?'transport':row.error?.startsWith('DELIVERY_VERIFICATION_')||row.error==='DELIVERY_UNFAITHFUL'?'verification':'pre-send',
+          note:sendAttempted?'发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。':'回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。'})}]},signal,()=>{guard();persona.guard();},32000);
       const receipt=await this.host.enqueue(item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'native-status:'+row.id,conversation:row.anchor.target,sourceMessageId:item.message.id,text:message.text},signal,()=>{guard();persona.guard();});});
       this.host.store.appendExecutionEvent(runId,'native.delivery.feedback',{status:receipt.status});this.host.flush();
     }catch{/* The original delivery state remains authoritative; never resend its rejected body. */}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { z } from 'zod';
+import {setTimeout as delay} from 'node:timers/promises';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { RuntimeStore } from '@dafeiyu/core/runtime-store';
 import { API_VERSION } from '@dafeiyu/contracts';
@@ -27,6 +28,31 @@ test('completed QQ tasks automatically render in a clean persisted DSH persona s
   const calls=h.adapter.requests.length;assert.deepEqual(await h.core.deliverMessageTaskResult(id),status);assert.equal(h.adapter.requests.length,calls);assert.equal(h.platform.sent.length,2);
   const target=h.adapter.requests.find(r=>render(r.sessionId))!;assert.equal(target.tools?.length??0,0);assert.match(JSON.stringify(target),/dafeiyu-task-result/);
   const reader=await h.ctx.sessionPersistence.open(SessionId(String(target.sessionId)),'read');try{const events=(await reader.read()).events;assert.ok(events.some(e=>e.type==='assistant/message'));assert.ok(events.some(e=>e.type==='turn/end'));}finally{await reader.close();}
+});
+
+test('a text task starts its write deadline after preflight while keeping authority checks and a whole receipt',async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true,deliveryTimeoutMs:500});t.after(h.close);const original=h.ctx.dafeiyuQQ.deliverTaskResult.bind(h.ctx.dafeiyuQQ);let prepared=false;
+  h.ctx.dafeiyuQQ.deliverTaskResult=async(...args)=>{assert.equal(typeof args[4],'function');assert.equal(h.core.messageTaskDeliveryStatus(runId(h))?.state,'ready');await delay(800);assert.equal(args[2].aborted,false);prepared=true;return original(...args);};
+  script(h);await h.message('任务：测试准备耗时与写入时限分离',{trigger:true});assert.equal(prepared,true);assert.equal(h.core.messageTaskDeliveryStatus(runId(h))?.state,'sent');assert.equal(h.platform.sent.filter(sent=>sentText(sent)===reply).length,1);
+});
+
+test('a stalled real write still times out as unknown and never replays the task result',async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true,deliveryTimeoutMs:500,oneBotTimeoutMs:2000});t.after(h.close);script(h);h.platform.afterSend=async()=>{if(h.platform.sent.some(sent=>sentText(sent)===reply))await delay(900);};
+  await h.message('任务：测试真正写入之后的时限',{trigger:true});const id=runId(h);assert.equal(h.core.messageTaskDeliveryStatus(id)?.state,'uncertain');const count=h.platform.sent.filter(sent=>sentText(sent)===reply).length;assert.equal(count,1);await h.core.deliverMessageTaskResult(id);assert.equal(h.platform.sent.filter(sent=>sentText(sent)===reply).length,count);
+});
+
+test('identity preparation between text parts does not consume the cumulative network-write budget',async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true,deliveryTimeoutMs:500,oneBotTimeoutMs:2000});t.after(h.close);const first='WRITE_WINDOW_PART_ONE',second='WRITE_WINDOW_PART_TWO';let delayed=false;
+  script(h,{text:JSON.stringify({qq_messages:[{type:'text',text:first},{type:'text',text:second}]})});
+  h.platform.beforeVerify=async()=>{if(!delayed&&h.platform.sent.some(sent=>sentText(sent)===first)){delayed=true;await delay(800);}};
+  await h.message('任务：用两条消息发送虚构内容',{trigger:true});assert.equal(delayed,true);assert.equal(h.core.messageTaskDeliveryStatus(runId(h))?.state,'sent');assert.equal(h.platform.sent.filter(sent=>sentText(sent)===first).length,1);assert.equal(h.platform.sent.filter(sent=>sentText(sent)===second).length,1);
+});
+
+test('source recall during text preflight stays definitely unsent instead of becoming an unknown write',async t=>{
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true,deliveryTimeoutMs:500});t.after(h.close);script(h);const original=h.ctx.dafeiyuQQ.deliverTaskResult.bind(h.ctx.dafeiyuQQ);
+  h.ctx.dafeiyuQQ.deliverTaskResult=async(...args)=>{const source=h.core.journal.list()[0]!.message.id;h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:Number(source)});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);return original(...args);};
+  await h.message('任务：检查发送前撤回',{trigger:true});const id=runId(h);assert.equal(h.core.messageTaskDeliveryStatus(id)?.state,'not-sent');assert.ok(!h.platform.sent.some(sent=>sentText(sent)===reply));
+  const db=new DatabaseSync(join(h.root,'core/runtime.sqlite'),{readOnly:true});try{assert.equal(db.prepare("SELECT count(*) AS n FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')='native.delivery.sending'").get(id)?.n,0);}finally{db.close();}
 });
 
 test('assistant revocation cancels a native task started by that group and prevents automatic result delivery',{timeout:15000},async t=>{

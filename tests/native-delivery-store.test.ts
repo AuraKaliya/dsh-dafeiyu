@@ -31,6 +31,12 @@ test('unapproved candidates can be replaced before sealing, but never after appr
   }finally{store.close();}
 });
 
+test('pre-dispatch rejection retains the approved text without inventing a send attempt',async()=>{
+  const store=new RuntimeStore(await file(),identity,{create:true});try{const {run,anchor,ref}=setup(store);store.nativeDeliveries.create(anchor);store.nativeDeliveries.start(run.id,{packetId:randomUUID(),sourceStamp:digest,foundationHash:digest,personaHash:digest,modelHash:digest});store.nativeDeliveries.rendered(run.id,ref);store.nativeDeliveries.approve(run.id,body);
+    store.nativeDeliveries.notSentBeforeDispatch(run.id,'DELIVERY_BUDGET_EXHAUSTED');assert.equal(store.nativeDeliveries.get(run.id)?.state,'not-sent');assert.equal(store.nativeDeliveries.sendAttempted(run.id),false);assert.equal(store.nativeDeliveries.get(run.id)?.receipt,null);
+  }finally{store.close();}
+});
+
 test('runtime v2 migration is explicit and preserves every old Run before adding an empty native delivery table',async()=>{
   const path=await file(),store=new RuntimeStore(path,identity,{create:true}),{run}=setup(store);store.close();const old=new DatabaseSync(path);old.exec('DROP TABLE native_deliveries;PRAGMA user_version=2;');const before=old.prepare('SELECT * FROM runs').all();old.close();const bytes=await readFile(path);
   assert.throws(()=>new RuntimeStore(path,identity),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(path),bytes);const upgraded=new RuntimeStore(path,identity,{migrate:true});try{assert.equal(upgraded.get(run.id).state,'completed');assert.deepEqual(upgraded.nativeDeliveries.list(),[]);}finally{upgraded.close();}

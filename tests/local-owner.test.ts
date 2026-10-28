@@ -4,13 +4,15 @@ import {mkdirSync,writeFileSync,readFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
+import {setTimeout as delay} from 'node:timers/promises';
 import {attachLocalOwnerControl} from '../packages/plugin/lib/local-owner.js';
 import {InstallationSettingsSchema} from '../packages/plugin/lib/settings.js';
 import {qqCapabilityFixture,bot,owner} from './qq-capabilities-fixture.js';
 import {call,textReply} from './harness.js';
 
 test('explicit local owner delegation keeps its real origin and delivers a verified persona result once to the fixed QQ owner',async t=>{
-  const h=await qqCapabilityFixture({tasks:true,extraPolicies:[{id:'conversation-local-owner-tasks',producers:['local-owner-tasks'],actions:['local_owner_task_submit'],allowLocalWrite:true},{id:'local-owner-task',producers:['local-owner-tasks'],actions:[],allowLocalWrite:true}]});t.after(h.close);
+  const h=await qqCapabilityFixture({tasks:true,deliveryTimeoutMs:500,extraPolicies:[{id:'conversation-local-owner-tasks',producers:['local-owner-tasks'],actions:['local_owner_task_submit'],allowLocalWrite:true},{id:'local-owner-task',producers:['local-owner-tasks'],actions:[],allowLocalWrite:true}]});t.after(h.close);
+  const original=h.ctx.dafeiyuQQ.deliverLocalOwner.bind(h.ctx.dafeiyuQQ);h.ctx.dafeiyuQQ.deliverLocalOwner=async(...args)=>{if(args[0].taskResult){assert.equal(typeof args[3],'function');await delay(800);assert.equal(args[1].aborted,false);}return original(...args);};
   const settings=InstallationSettingsSchema.parse({schemaVersion:1,localOwnerControl:true,dataDir:h.root,model:{model:'scripted',credentialStore:'unused'},qq:{botId:bot,ownerId:owner,tokenFile:'unused',httpURL:'http://127.0.0.1:1',wsURL:'ws://127.0.0.1:1'}});
   let chat=0;h.setResponse(request=>{const id=String(request.sessionId);if(id.startsWith('memory-expression-verify-delivery'))return textReply('{"faithful":true,"issues":[]}');if(id.startsWith('dafeiyu-delivery-v3'))return textReply('这是本地主人委托的虚构结果。');if(id.startsWith('dafeiyu-task-')){assert.match(JSON.stringify(request.messages),/taskAccepted/);assert.match(JSON.stringify(request.messages),/after-persona-render-and-verification/);return textReply('虚构任务完成');}return ++chat===1?call('local_owner_task_submit',{requestId:'accept'}):textReply('已受理本机委托。');});
   const dir=join(h.root,'local-owner-control'),id=randomUUID(),badId=randomUUID();mkdirSync(dir);const request={schemaVersion:1,id,issuedAt:new Date().toISOString(),botId:bot,ownerId:owner,text:'写一句明确标注为虚构的结果。'};

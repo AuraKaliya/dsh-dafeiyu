@@ -39,7 +39,7 @@ export class ScriptedModel extends LlmAdapter {
     for (const chunk of await (String(options.sessionId).startsWith('dafeiyu-assessment-')?this.assessmentResponse(options):this.response(options))) { options.signal?.throwIfAborted(); yield chunk; }
   }
 }
-export async function harness(root: string, response: Response = () => textReply('测试回复'), personaFile = resolve('profiles/persona.test.md'), timeout = 5000, reasoningEffort?: string,context?:Core.Config['context'],lifecycleMode:Core.Config['lifecycleMode']='legacy') {
+export async function harness(root: string, response: Response = () => textReply('测试回复'), personaFile = resolve('profiles/persona.test.md'), timeout = 5000, reasoningEffort?: string,context?:Core.Config['context'],lifecycleMode:Core.Config['lifecycleMode']='legacy',deliveryTimeoutMs?:number) {
   const ctx = new Context();
   const adapter = new ScriptedModel(response);
   try {
@@ -53,7 +53,7 @@ export async function harness(root: string, response: Response = () => textReply
     await ctx.plugin(AgentLoop, { agents: [] });
     const adapterRegistration = ctx.llm.registerAdapter(['local-test'], adapter);
     const coreFiber = await ctx.plugin(Core, { agentId: 'dafeiyu', dataDir: root, personaFile,
-      provider: 'local-test', model: 'scripted', turnTimeoutMs: timeout, lifecycleMode, ...(reasoningEffort ? { reasoningEffort } : {}),...(context?{context}:{}) });
+      provider: 'local-test', model: 'scripted', turnTimeoutMs: timeout, lifecycleMode, ...(reasoningEffort ? { reasoningEffort } : {}),...(context?{context}:{}),...(deliveryTimeoutMs?{deliveryTimeoutMs}:{}) });
     const simulatorFiber = await ctx.plugin(Simulator, { agentId: 'dafeiyu', account: 'local' });
     const core = ctx.dafeiyu;
     const simulator = ctx.dafeiyuSimulator;

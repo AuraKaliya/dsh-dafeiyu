@@ -154,7 +154,7 @@ export class QqChannel extends Service {
           processingSignal: message => this.processingSignal(message),
           description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
-          deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority)=>this.deliverTaskResult(reply,anchor,signal,authority) }] });
+          taskTextDispatch:'write-window-v1',deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority,writeWindow)=>this.deliverTaskResult(reply,anchor,signal,authority,writeWindow) }] });
       this.batches=this.store.batches(this.config.messageBatch,{current:message=>{try{this.processingSignal(message).throwIfAborted();return true;}catch{return false;}},submit:message=>{const receipt=this.handle.ingest(message);if(!receipt.duplicate)this.counters.accepted++;},failed:()=>{this.error='BATCH_SUBMISSION_FAILED';}});
       if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing),readHistory:(scene,signal)=>this.readHistory(scene,signal),readForward:(scene,messageId,index,signal)=>this.readForward(scene,messageId,index,signal)});
@@ -347,7 +347,7 @@ export class QqChannel extends Service {
       const media=this.media?.remember(scene,messageId,sender,{forward:proof.hash,node:node.index,parts:selected},selected,1000+(index*20+node.index)*1000);
       return {...node,kinds:[...new Set(parts.map(p=>p.type))],...(media?.attachments.length?{media:media.attachments}:{})};});return {...result,messages};}
   /** Program-only local delegation transport. The source remains local-owner, never a forged QQ inbound. */
-  deliverLocalOwner(reply:Reply,signal:AbortSignal,authority?:()=>void):Promise<DeliveryResult>{
+  deliverLocalOwner(reply:Reply,signal:AbortSignal,authority?:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>{
     if(typeof authority!=='function'||reply.media)return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
     const check=async(value:Reply,workSignal:AbortSignal)=>{workSignal.throwIfAborted();authority();
       if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');
@@ -364,14 +364,14 @@ export class QqChannel extends Service {
       confirmed:(value,text,receipt)=>{const target={channel:'qq',account:this.config.botId,kind:'private' as const,id:this.config.ownerId};this.store.remember(this.cacheRoute(target),receipt,this.config.botId,value.taskResult?'[本地主人委托的任务结果已交付；正文须经任务来源核验。]':text,{occurredAt:new Date().toISOString(),unsupported:value.taskResult?['task-result-body-withheld']:[]});}});
     const guarded=()=>{authority();const scene=reply.conversation,source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},reply.sourceMessageId);
       if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='local'||scene.id!==reply.sourceMessageId||!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('TARGET_NOT_ALLOWED');};
-    const work=check(reply,signal).then(()=>this.localOwnerTransport!.deliver(reply,signal,guarded)).catch(()=>({status:'not-sent' as const,code:'LOCAL_OWNER_DELIVERY_REJECTED'}));
+    const work=check(reply,signal).then(()=>this.localOwnerTransport!.deliver(reply,signal,guarded,writeWindow)).catch(()=>({status:'not-sent' as const,code:'LOCAL_OWNER_DELIVERY_REJECTED'}));
     this.sending.add(work);void work.finally(()=>this.sending.delete(work));return work;
   }
-  deliver(reply: Reply, signal: AbortSignal, authority?:()=>void): Promise<DeliveryResult> {
+  deliver(reply: Reply, signal: AbortSignal, authority?:()=>void,writeWindow?:()=>()=>void): Promise<DeliveryResult> {
     if(this.stopped)return Promise.resolve({status:'not-sent',code:'CHANNEL_OFFLINE'});
     if(reply.media||this.store.mediaDelivery.progress(reply.id))return Promise.resolve({status:'not-sent',code:'MEDIA_DELIVERY_AUTHORITY_REQUIRED'});
     if(reply.taskResult&&typeof authority!=='function')return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
-    const lease=this.tailLease(reply,signal),task = this.transport.deliver(reply,lease.signal,authority);
+    const lease=this.tailLease(reply,signal),task = this.transport.deliver(reply,lease.signal,authority,writeWindow);
     this.sending.add(task);
     void task.finally(() => {this.sending.delete(task);lease.release();}).catch(() => {});
     return task;
@@ -381,9 +381,9 @@ export class QqChannel extends Service {
     const lease=this.tailLease(reply,signal),work=this.mediaTransport.deliver(reply,lease.signal,guarded,bytes);this.sending.add(work);void work.finally(()=>{this.sending.delete(work);lease.release();}).catch(()=>{});return work;
   }
   private tailLease(reply:Reply,signal:AbortSignal){let lease=this.tails.get(reply.id);if(!lease){const source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,reply.conversation)},reply.sourceMessageId);lease={route:this.cacheRoute(reply.conversation),sender:source?.message.sender.id??this.config.ownerId,controller:new AbortController()};this.tails.set(reply.id,lease);}const captured=lease;return {signal:AbortSignal.any([signal,this.controller.signal,lease.controller.signal]),release:()=>{if(this.tails.get(reply.id)===captured)this.tails.delete(reply.id);}};}
-  deliverTaskResult(reply:Reply,raw:TaskResultAnchor,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>{const anchor=TaskResultAnchorSchema.parse(raw);
+  deliverTaskResult(reply:Reply,raw:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>{const anchor=TaskResultAnchorSchema.parse(raw);
     if(typeof authority!=='function'||conversationKey(this.config.agentId,anchor.target)!==conversationKey(this.config.agentId,reply.conversation))return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
-    return this.deliver({...reply,taskResult:anchor},signal,authority);}
+    return this.deliver({...reply,taskResult:anchor},signal,authority,writeWindow);}
   deliveryStatus(replyId:string){if(!this.stopped)return this.store.mediaDelivery.progress(replyId)??this.store.delivery.progress(replyId);
     const db=new DatabaseSync(resolve(this.config.dataDir,'qq.sqlite'),{readOnly:true});try{return new QqMediaDeliveryLedger(db).progress(replyId)??new QqDeliveryLedger(db).progress(replyId);}finally{db.close();}}
   private async checkDelivery(reply: Reply, signal: AbortSignal): Promise<void> {

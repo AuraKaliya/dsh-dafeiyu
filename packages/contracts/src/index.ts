@@ -108,6 +108,8 @@ export interface ChannelCapability {
   readonly taskDelivery?:'simulated';
   /** Opt-in for persistent reply source rebinding and checks before every transport part. */
   readonly deliveryValidation?:'per-segment';
+  /** Text task transport enters a write window after each preflight and closes it when the request settles. */
+  readonly taskTextDispatch?:'write-window-v1';
   readonly mediaDelivery?:'parts-v1';
   /** Transport-owned access lease for queued/running work; revocation cancels the turn. */
   processingSignal?(message: InboundMessage): AbortSignal;
@@ -115,7 +117,7 @@ export interface ChannelCapability {
   deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
   deliverMedia?(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(mediaPosition:number)=>Promise<Uint8Array>):Promise<DeliveryResult>;
   /** Separate from the legacy simulated-task contract; caller supplies a verified task-result anchor. */
-  deliverTaskResult?(reply:Reply,anchor:TaskResultAnchor,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>;
+  deliverTaskResult?(reply:Reply,anchor:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>;
 }
 export interface ActionContext {
   readonly operationId: string;

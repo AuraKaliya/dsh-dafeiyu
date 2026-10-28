@@ -435,7 +435,7 @@ export class DafeiyuService extends Service {
       if(extension.channels?.length){
         const channels=extension.channels.map(channel=>({channel:channel.channel,account:channel.account,deliver:channel.deliver.bind(channel),
           ...(channel.processingSignal?{processingSignal:channel.processingSignal.bind(channel)}:{}),
-          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{}),...(channel.mediaDelivery?{mediaDelivery:channel.mediaDelivery}:{}),...(channel.deliverMedia?{deliverMedia:channel.deliverMedia.bind(channel)}:{})}));
+          ...(channel.description?{description:channel.description}:{}),...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),...(channel.taskTextDispatch?{taskTextDispatch:channel.taskTextDispatch}:{}),...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{}),...(channel.mediaDelivery?{mediaDelivery:channel.mediaDelivery}:{}),...(channel.deliverMedia?{deliverMedia:channel.deliverMedia.bind(channel)}:{})}));
         bridge={active:true,controller:new AbortController(),extension:{apiVersion:2,id:extension.id,version:extension.version,agentId:extension.agentId,channels,
           ...(extension.lifecycleReady?{lifecycleReady:extension.lifecycleReady.bind(extension)}:{})}};
         this.extensions.set(extension.id,bridge);
@@ -547,6 +547,7 @@ export class DafeiyuService extends Service {
       if(c.taskDelivery!==undefined&&c.taskDelivery!=='simulated')throw new Error('Task delivery requires simulated capability');
       if(c.deliveryValidation!==undefined&&c.deliveryValidation!=='per-segment')throw new Error('Invalid delivery validation contract');
       if(c.deliverTaskResult!==undefined&&typeof c.deliverTaskResult!=='function')throw new Error('Invalid task result delivery contract');
+      if(c.taskTextDispatch!==undefined&&(c.taskTextDispatch!=='write-window-v1'||c.deliveryValidation!=='per-segment'||typeof c.deliverTaskResult!=='function'))throw new Error('Invalid task dispatch contract');
       if(c.mediaDelivery!==undefined&&(c.mediaDelivery!=='parts-v1'||c.deliveryValidation!=='per-segment'||typeof c.deliverMedia!=='function')||c.deliverMedia!==undefined&&c.mediaDelivery!=='parts-v1')throw new Error('Invalid media delivery contract');
       const key = JSON.stringify([c.channel, c.account]);
       if (!c.channel || !c.account || channelKeys.has(key)) throw new Error('Duplicate or invalid channel/account');
@@ -573,6 +574,7 @@ export class DafeiyuService extends Service {
         ...(channel.processingSignal?{processingSignal:channel.processingSignal.bind(channel)}:{}),
         ...(channel.taskDelivery?{taskDelivery:channel.taskDelivery}:{}),
         ...(channel.deliveryValidation?{deliveryValidation:channel.deliveryValidation}:{}),
+        ...(channel.taskTextDispatch?{taskTextDispatch:channel.taskTextDispatch}:{}),
         ...(channel.deliverTaskResult?{deliverTaskResult:channel.deliverTaskResult.bind(channel)}:{}),
         ...(channel.mediaDelivery?{mediaDelivery:channel.mediaDelivery}:{}),...(channel.deliverMedia?{deliverMedia:channel.deliverMedia.bind(channel)}:{}),
         ...(channel.description ? { description: channel.description } : {}),

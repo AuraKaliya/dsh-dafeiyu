@@ -107,6 +107,7 @@ export class CapabilityRegistryV3 {
       if(channel.taskDelivery!==undefined&&channel.taskDelivery!=='simulated')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.deliveryValidation!==undefined&&channel.deliveryValidation!=='per-segment')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.deliverTaskResult!==undefined&&typeof channel.deliverTaskResult!=='function')throw new Error('INVALID_DELIVERY_CONTRACT');
+      if(channel.taskTextDispatch!==undefined&&(channel.taskTextDispatch!=='write-window-v1'||channel.deliveryValidation!=='per-segment'||typeof channel.deliverTaskResult!=='function'))throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.mediaDelivery!==undefined&&(channel.mediaDelivery!=='parts-v1'||channel.deliveryValidation!=='per-segment'||typeof channel.deliverMedia!=='function')||channel.deliverMedia!==undefined&&channel.mediaDelivery!=='parts-v1')throw new Error('INVALID_DELIVERY_CONTRACT');
       const key = JSON.stringify([channel.channel, channel.account]);
       if (!channel.channel || !channel.account || typeof channel.deliver !== 'function' || channels.has(key)) throw new Error('DUPLICATE_OR_INVALID_CHANNEL');
