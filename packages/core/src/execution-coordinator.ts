@@ -1,3 +1,4 @@
+import {admitNativeContexts,contextManifest} from './context-plan.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ExecutionRequestSchema,ResumeRunSchema,WakeRequestSchema,RunControlSchema,ProducerSchema,taskScopeKey,HostConfigSchema,TaskUpdateSchema,redactJson,RunOriginSchema,MotivationSchema,ContextItemSchema,ContinuityCheckpointSchema,messageMainText,messageParts } from '@dafeiyu/contracts';
@@ -554,11 +555,13 @@ export class ExecutionCoordinator {
         this.d.store.checkpoint(id,{kind:'run-start',intentVersion:task.epoch});this.flushEvents();
         const view=Object.freeze({runId:id,taskId:task.id,scope:Object.freeze({...run.definition.scope}),origin:Object.freeze({...run.definition.origin}),signal});
         const operationalCapabilities={source:'current-native-tool-schemas',refreshed:'each-model-step',hostCatalogConfigured:actions.some(action=>action.owner==='dsh-tools')};
-        const contexts:NativeContext[]=runPersona.items.map(item=>({owner:'memory',region:'growth',item}));let contextBytes=Buffer.byteLength(JSON.stringify(contexts),'utf8'),omitted=0;
-        const add=(owner:string,region:string,item:unknown)=>{const parsed=ContextItemSchema.parse(item),bytes=Buffer.byteLength(JSON.stringify(parsed),'utf8');if(Date.parse(parsed.expiresAt)<=Date.now()||contextBytes+bytes>this.d.context.maxBytes){omitted++;return;}contextBytes+=bytes;contexts.push({owner,region,item:parsed});};
+        const contexts:NativeContext[]=runPersona.items.map(item=>({owner:'memory',region:'growth',item}));let omitted=0;
+        const add=(owner:string,region:string,item:unknown)=>{const parsed=ContextItemSchema.parse(item);if(Date.parse(parsed.expiresAt)<=Date.now()){omitted++;return;}contexts.push({owner,region,item:parsed});};
         for(const item of memory?.prepareContext(access)??[])add('memory','execution',item);
         for(const contributor of contributors){const prepared=await Promise.race([contributor.context.prepare(view),new Promise<never>((_resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('CONTEXT_PREPARE_TIMEOUT')),this.d.context.prepareTimeoutMs);timer.unref();})]);guard();
           for(const item of prepared)if(contributor.context.validate(view,item))add(contributor.owner,contributor.context.id,item);else omitted++;}
+        const admitted=admitNativeContexts(contexts,this.d.context.maxBytes);contexts.splice(0,contexts.length,...admitted.contexts);omitted+=admitted.packet.decisions.reduce((sum,row)=>sum+row.invalid+row.overBudget,0);
+        this.d.store.bindInput(id,'context-plan',z.json().parse(contextManifest('exploration',admitted.packet)));
         evidence.setContexts(contexts);
         const trigger=saved.messageSource?this.validateMessageSource(saved.messageSource).item:null;
         const wake=this.wakeOrigins(run)[0],wakeProvider=wake?this.wakes.get(wake.producerId):undefined;

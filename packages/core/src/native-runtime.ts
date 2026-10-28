@@ -1,3 +1,4 @@
+import {requestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle,AgentOptions } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
@@ -26,7 +27,7 @@ export class NativeRuntime {
       if(!owned){yield* next();return;}await yieldEventLoop();const frame=owned.frame;if(!frame)throw new Error('RUN_NOT_RUNNING');
       owned.lastRequest=options;owned.compaction.guard(options,true);frame.evidence?.expose(owned.compaction.exposedDependencies());
       const guard=()=>{frame.view.signal.throwIfAborted();frame.guard();owned.compaction.guard(options);};guard();
-      if(requestBytes(options)+frame.outputReserveBytes>frame.requestMaxBytes)throw new Error('CAPACITY_EXCEEDED');
+      if(!requestCapacity(options,frame.requestMaxBytes,frame.outputReserveBytes).withinBudget)throw new Error('CAPACITY_EXCEEDED');
       for await(const chunk of visibleStream(next())){frame.view.signal.throwIfAborted();yield chunk;}guard();
     });
   }

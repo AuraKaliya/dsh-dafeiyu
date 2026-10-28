@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {ContextBudgetSchema} from './context.js';
 import { FeatureSchema, ExtensionIdSchema } from './execution.js';
 import { ConversationSchema } from './conversation.js';
 import { ExternalActionPoliciesSchema } from './external-execution.js';
@@ -18,12 +19,7 @@ export const HostConfigSchema = z.strictObject({
     turnTimeoutMs: z.number().int().min(50).max(3600000).default(600000),phaseTimeouts:PhaseTimeoutsSchema, shutdownGraceMs: z.number().int().min(50).max(300000).default(30000) }).prefault({}),
   persona: z.strictObject({ fixedFile: path, kind: z.enum(['test', 'formal']),
     growthRegion: z.strictObject({ maxBytes: z.number().int().min(0).max(32000).default(4000), priority: z.number().int().min(0).max(1000).default(400) }).prefault({}) }),
-  context: z.strictObject({ maxBytes: z.number().int().min(0).max(256000).default(16000),
-    requestMaxBytes: z.number().int().min(1000).max(2000000).default(1000000), prepareTimeoutMs: z.number().int().min(50).max(30000).default(5000),
-    outputReserveBytes: z.number().int().min(0).max(256000).default(16000),
-    regions: z.record(z.string().min(1).max(160), z.strictObject({ maxBytes: z.number().int().min(0).max(128000).default(4000),
-      priority: z.number().int().min(0).max(1000).default(100), required: z.boolean().default(false) })).default({}),
-    compactionInputTokens: z.number().int().min(2048).max(1000000).optional() }).prefault({}),
+  context: ContextBudgetSchema.extend({compactionInputTokens:z.number().int().min(2048).max(1000000).optional()}).prefault({}),
   authorityPolicies: z.array(z.strictObject({ id: ExtensionIdSchema, producers: z.array(ExtensionIdSchema).min(1).max(64),
     actions: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).max(128), allowLocalWrite: z.boolean().default(false),
     externalActions: ExternalActionPoliciesSchema.optional(),

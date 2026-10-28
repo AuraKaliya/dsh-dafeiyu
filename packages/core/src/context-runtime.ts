@@ -1,3 +1,4 @@
+import {requestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
@@ -137,10 +138,10 @@ export class ContextRuntime {
       this.retired+=this.retire(packet.text);this.repairs++;this.retryPending=true;return false;
     }
     if(carriers.length!==(packet.text?1:0)||carriers.some(s=>s.text!==packet.text))throw new Error('Controlled context snapshot mismatch');
-    const requestBytes=bytes({messages:options.messages,tools:options.tools??[],toolHistory:options.toolHistory??null});
-    if(requestBytes+this.coordinator.config.outputReserveBytes>this.coordinator.config.requestMaxBytes)
+    const capacity=requestCapacity(options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes),requestBytes=capacity.bytes;
+    if(!capacity.withinBudget)
       throw new Error('Context request budget exceeded');
-    if(audit){this.coordinator.audit(this.item,packet,this.retired,this.nativeNames,requestBytes);this.retired=0;}
+    if(audit){this.coordinator.audit(this.item,packet,this.retired,this.nativeNames,requestBytes,capacity);this.retired=0;}
     return true;
   }
 }

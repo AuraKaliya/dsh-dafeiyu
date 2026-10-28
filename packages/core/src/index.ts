@@ -64,7 +64,7 @@ const ConfigSchema = z.strictObject({
   turnTimeoutMs: z.number().int().min(50).max(3_600_000).default(600_000),
   deliveryTimeoutMs: z.number().int().min(50).max(60_000).default(30_000),
   phaseTimeouts:PhaseTimeoutsSchema,
-  context:contextConfigSchema.default({maxBytes:16000,requestMaxBytes:1000000,outputReserveBytes:16000,prepareTimeoutMs:5000,regions:{}}),
+  context:contextConfigSchema.prefault({}),
 });
 export type Config = z.input<typeof ConfigSchema>;
 interface Registered { extension: Extension; controller: AbortController; active: boolean }
