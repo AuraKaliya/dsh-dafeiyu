@@ -5,7 +5,7 @@ export const EXPERIENCE_TABLES=['experience_items','experience_revisions','exper
 
 export function migrateExperience(db:DatabaseSync):void {
   const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if(version===11||version===12){for(const table of EXPERIENCE_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+  if(version===11||version===12||version===13){for(const table of EXPERIENCE_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==10)throw new Error('Unsupported experience database');
   db.exec(`
     CREATE TABLE experience_items(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,version INTEGER NOT NULL,state TEXT NOT NULL);

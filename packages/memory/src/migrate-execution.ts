@@ -6,7 +6,7 @@ export const EXECUTION_MEMORY_TABLES = ['execution_scopes','execution_sources','
 /** Additive v7 migration. No old body, boundary, request fingerprint or tombstone is rewritten. */
 export function migrateExecutionMemory(db: DatabaseSync): void {
   const version=Number(db.prepare('PRAGMA user_version').get()?.user_version);
-if(version===7||version===8||version===9||version===10||version===11||version===12){for(const table of EXECUTION_MEMORY_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
+if(version===7||version===8||version===9||version===10||version===11||version===12||version===13){for(const table of EXECUTION_MEMORY_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();return;}
   if(version!==6)throw new Error('Unsupported execution memory schema');
   db.exec(`
     CREATE TABLE execution_scopes(scope_key TEXT PRIMARY KEY,agent_id TEXT NOT NULL,task_id TEXT NOT NULL REFERENCES task_workspaces(id),body TEXT NOT NULL,fingerprint TEXT NOT NULL,UNIQUE(agent_id,task_id));

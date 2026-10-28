@@ -74,6 +74,23 @@ declare module '@deepseek-ai/cordis' { interface Context { dafeiyu: DafeiyuServi
 export class DafeiyuService extends Service {
   private expressionPreferences:{read:NonNullable<MemoryGrowthProvider['expressionPreferences']>}|undefined;
   private nativeTaskDelivery:NativeTaskDelivery|undefined;
+  /** Program-only provenance checks for Growth views; these methods return no source body. */
+  captureRecentStateSources(context:ExecutionContextV3,owner:string):readonly SourceDependency[]{
+    const access=this.personaAccess(context,owner,'local-write'),run=this.runStore?.get(context.runId);if(!run)throw new Error('SOURCE_STALE');access.guard();
+    if(context.scope.kind==='task'){const input=this.runStore!.readInput(run.id,'native-program');z.object({inputHash:z.string()}).parse(input);
+      return [{kind:'execution-input',agentId:context.agentId,route:context.scope.scopeKey,runId:run.id,hash:runtimeHash(input)}];}
+    if(run.definition.origin.kind!=='message')throw new Error('MESSAGE_REQUIRED');const item=this.journal.get(run.definition.origin.inboundId),binding=this.compactionBinding();
+    const sources=binding?.provider.sources?.inbound({agentId:context.agentId,route:context.scope.route,traceId:item.id},item.message.id)??[];
+    if(!sources.length||sources.some(source=>source.kind==='unavailable'))throw new Error('SOURCE_STALE');return sources;
+  }
+  recentStateSourcesCurrent(runId:string,sources:readonly SourceDependency[]):boolean{
+    try{const run=this.runStore?.get(runId);if(!run||!sources.length||sources.some(source=>source.agentId!==this.config.agentId))return false;
+      if(run.definition.scope.kind==='task')return this.executions?.recentStateSourcesCurrent(runId,sources)??false;
+      if(run.definition.origin.kind!=='message')return false;const item=this.journal.get(run.definition.origin.inboundId),binding=this.compactionBinding();
+      const scope={agentId:this.config.agentId,route:run.definition.scope.route,traceId:item.id,sessionId:item.sessionId};
+      return !!binding?.provider.sources&&sources.every(source=>binding.provider.sources!.validate(scope,source));
+    }catch{return false;}
+  }
   phaseTimeouts(){return this.config.phaseTimeouts;}
   registerHarnessSection(name:string){return this.runtime.registerHarnessSection(name);}
   contextAssembly(){return this.config.context.assembly;}
@@ -126,7 +143,7 @@ export class DafeiyuService extends Service {
   ownsMediaReplyAccess(access:MediaReplyAccess){return this.mediaReplyAccesses.has(access);}
   private targetPersona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void){const foundation=this.persona(),scope={kind:'conversation' as const,agentId:this.config.agentId,route:item.route};
     const access:PersonaAccess={view:{runId:id,taskId:null,scope,origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},signal},producer:'core-target-persona',operationId:id,startedEventId:null,intentVersion:0,motivation:{kind:'conversation-invitation',basis:[`task-result:${item.id}`]},inputs:[],admittedSources:[],guard};
-    const target=this.personas.prepareTarget(access),provider=this.expressionPreferences,expression=provider?.read(item.message.conversation)??[],expressionHash=runtimeHash(expression);return {text:foundation.text,foundationHash:foundation.version,stamp:runtimeHash([target.stamp,expressionHash]),items:[...target.items,...expression],guard:()=>{if(this.persona().version!==foundation.version||this.expressionPreferences!==provider||runtimeHash(provider?.read(item.message.conversation)??[])!==expressionHash)throw new Error('SOURCE_STALE');target.guard();}};}
+    const target=this.personas.prepareTarget(access),provider=this.expressionPreferences,expression=provider?.read(item.message.conversation,item.message.mainText??'')??[],expressionHash=runtimeHash(expression);return {text:foundation.text,foundationHash:foundation.version,stamp:runtimeHash([target.stamp,expressionHash]),items:[...target.items,...expression],guard:()=>{if(this.persona().version!==foundation.version||this.expressionPreferences!==provider||expression.some(before=>!(provider?.read(item.message.conversation,item.message.mainText??'')??[]).some(current=>runtimeHash(current)===runtimeHash(before))))throw new Error('SOURCE_STALE');target.guard();}};}
   private async prepareNativeMediaReplyAccess(facts:ReturnType<ExecutionCoordinator['mediaReplyFacts']>,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>{
     const native=await this.executions!.nativeResultAccess(facts.run.id),row=this.runStore!.nativeDeliveries.get(facts.run.id),provider=this.nativeExpressionPort;
     if(!row?.material||!row.renderRef||!provider?.ready()||!native.media||row.material.mediaStamp!==native.media.sourceStamp||!['ready','sending'].includes(row.state)||reply.id!=='native-delivery:'+row.id||!reply.taskResult||runtimeHash(reply.taskResult)!==runtimeHash(row.anchor)||runtimeHash(native.anchor)!==runtimeHash(row.anchor)||runtimeHash(reply.conversation)!==runtimeHash(row.anchor.target))throw new Error('DELIVERY_BINDING_CONFLICT');

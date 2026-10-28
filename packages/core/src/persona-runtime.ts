@@ -33,7 +33,7 @@ export class PersonaRuntime {
   get ready(){return !this.provider||this.provider.ready();}
   prepareTarget(access:PersonaAccess){access.guard();const provider=this.provider;if(provider&&!provider.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const prepared=provider?.prepare(access),entries:PreparedPersonaEntry[]=[];
     const limit=Math.min(this.config.maxBytes,this.config.regions['memory:growth']?.maxBytes??4000);
-    for(const entry of prepared?.entries??[]){if(!provider?.validate(access,entry))continue;const candidate=structuredClone(entry);ContextItemSchema.parse(candidate.item);entries.push(candidate);if(Buffer.byteLength(JSON.stringify(entries.map(value=>value.item)))>limit)entries.pop();}
+    for(const entry of prepared?.entries??[]){if(!provider?.validate(access,entry))continue;const candidate=structuredClone(entry);ContextItemSchema.parse(candidate.item);entries.push(candidate);if(Buffer.byteLength(JSON.stringify(entries.map(value=>value.item)))>limit){if(this.config.assembly.mode==='unified')throw new Error('PERSONA_CONTEXT_CAPACITY');entries.pop();}}
     const stamp=runtimeHash({scope:access.view.scope,selection:prepared?.selectionVersion??0,entries:entries.map(entry=>({candidate:entry.candidate,contentRef:entry.contentRef,dependencies:entry.dependencies}))});
     return {items:entries.map(entry=>entry.item),stamp,guard:()=>{access.guard();if(this.provider!==provider||provider&&!provider.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const current=provider?.prepare(access);
       const identity=(entry:PreparedPersonaEntry)=>runtimeHash({candidate:entry.candidate,contentRef:entry.contentRef,dependencies:entry.dependencies});
@@ -46,13 +46,13 @@ export class PersonaRuntime {
     const size=(items:readonly ContextItem[])=>Buffer.byteLength(JSON.stringify({owner:'memory',region:'growth',kind:'working-state',items}),'utf8');
     for(const entry of prepared?.entries??[]){const item=ContextItemSchema.parse(entry.item),candidate=structuredClone({...entry,item});
       if(!provider?.validate(access,candidate))continue;admitted.push(candidate);
-      if(size(admitted.map(value=>value.item))>limit)admitted.pop();
+      if(size(admitted.map(value=>value.item))>limit){if(this.config.assembly.mode==='unified')throw new Error('PERSONA_CONTEXT_CAPACITY');admitted.pop();}
     }
     for(const entry of prepared?.trialEntries??[]){if(!provider?.trialAdmitted||!provider.completeTrial)continue;
       const candidate=structuredClone({...entry,item:ContextItemSchema.parse(entry.item)});if(candidate.projection!=='trial'||candidate.maturity!=='tentative')throw new Error('PERSONA_TRIAL_PROJECTION_INVALID');
       if(Date.parse(candidate.item.expiresAt)<=Date.now())continue;
       if(candidate.trialSelection.agentId!==run.definition.scope.agentId||candidate.trialSelection.scopeKey!==(run.definition.scope.kind==='task'?run.definition.scope.scopeKey:run.definition.scope.route))continue;
-      if(!provider.validate(access,candidate))continue;trials.push(candidate);if(size([...admitted,...trials].map(value=>value.item))>limit)trials.pop();}
+      if(!provider.validate(access,candidate))continue;trials.push(candidate);if(size([...admitted,...trials].map(value=>value.item))>limit){if(this.config.assembly.mode==='unified')throw new Error('PERSONA_CONTEXT_CAPACITY');trials.pop();}}
     let omitted=(prepared?.omitted??0)+(prepared?.entries.length??0)-admitted.length,omittedTrials=(prepared?.omittedTrials??0)+(prepared?.trialEntries?.length??0)-trials.length;
     const hasTrials=!!(prepared?.trialSelectionVersion||prepared?.trialEntries?.length||omittedTrials);
     let notice:ContextItem|undefined=omitted||omittedTrials?ContextItemSchema.parse({id:'persona:availability',version:String(prepared?.selectionVersion??0),text:hasTrials?'本轮有选中成长或试行资料未能核验或未装入预算，未提供对应正文；未装入的试行不构成实际使用。不要补造内容，也不要据此断言过去从未形成过相关认识。':'本轮有选中成长资料未能核验或未装入预算，未提供对应正文；不要补造内容，也不要据此断言过去从未形成过相关认识。',

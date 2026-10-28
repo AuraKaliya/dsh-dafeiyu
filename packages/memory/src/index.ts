@@ -1,3 +1,4 @@
+import {AutomaticRecall} from './automatic-recall.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
@@ -59,6 +60,7 @@ export class MemoryService extends Service {
   private readonly retrieval: MemoryRetrieval | null;
   private readonly analysis: MemoryAnalysis | null;
   private readonly working:WorkingMemory|null;
+  private readonly automaticRecall:AutomaticRecall;
   private readonly feedbackArchive:ToolFeedbackArchive|null;
   private readonly tasks:TaskWorkspace;
   private readonly expression:TaskExpression;
@@ -82,6 +84,7 @@ export class MemoryService extends Service {
     this.tasks=this.store.taskWorkspace((scope,ref,hash)=>ctx.dafeiyuTimeline.checkArchivedSource(scope,ref,hash),(scope,a,b)=>ctx.dafeiyuTimeline.sameArchivedSource(scope,a,b));
     try { this.retrieval = this.config.retrieval ? new MemoryRetrieval(this.store, this.config.dataDir, this.config.retrieval, dependencies) : null; }
     catch (error) { this.store.close(); throw error; }
+    this.automaticRecall=new AutomaticRecall(ctx,this.store,this.retrieval);
     try { this.analysis=this.config.analysis?new MemoryAnalysis(ctx,this.store,this.config.dataDir,this.config.analysis,this.config.lifecycleMode==='managed',()=>ctx.dafeiyu.accepting&&this.gate.active):null; }
     catch(error){this.retrieval?.close();this.store.close();throw error;}
     try{this.working=this.config.context?new WorkingMemory(ctx,this.store,this.retrieval,this.config.dataDir,(c,refs)=>this.evidence(c,refs),!!this.config.compaction):null;}
@@ -136,7 +139,7 @@ export class MemoryService extends Service {
         memoryObservationProvider:{submit:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.submit(authority,input);return {...receipt,auditPending:this.flush()};},
           open:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');return this.store.observations.open(authority,input);},
           change:(authority,input)=>{if(this.closed)throw new Error('Memory unavailable');const receipt=this.store.observations.change(authority,input);return {...receipt,auditPending:this.flush()};}},
-        agentId: this.config.agentId, actions: this.actions(),contexts:[...(this.working?.contributors()??[]),...(this.config.lifecycleMode==='managed'?[{id:'qq-expression',kind:'working-state' as const,
+        agentId: this.config.agentId, actions: this.actions(),contexts:[{id:'recent-state',kind:'working-state',prepare:async request=>this.growth?.recent.prepare(request)??[],validate:(request,item)=>this.growth?.recent.validate(request,item)??false},this.automaticRecall.contributor(),...(this.working?.contributors()??[]),...(this.config.lifecycleMode==='managed'?[{id:'qq-expression',kind:'working-state' as const,
           prepare:async(request:import('@dafeiyu/contracts').ContextRequest)=>{ctx.dafeiyu.scopeForContext(request);return this.growth?.qqExpression.prepare(request.conversation)??[];},
           validate:(request:import('@dafeiyu/contracts').ContextRequest,item:import('@dafeiyu/contracts').ContextItem)=>{ctx.dafeiyu.scopeForContext(request);return this.growth?.qqExpression.prepare(request.conversation).some(current=>JSON.stringify(current)===JSON.stringify(item))??false;}},{id:'growth',kind:'working-state' as const,
           prepare:async(request:import('@dafeiyu/contracts').ContextRequest)=>ctx.dafeiyu.personaContext(request),
@@ -319,7 +322,7 @@ export class MemoryService extends Service {
   selectContext(context:ActionContext,raw:unknown){this.scope(context);try{return this.working?.select(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   async retrieveContext(context:ActionContext,raw:unknown){this.scope(context);try{return await this.working?.retrieve(context,raw)??{status:'not_configured'};}catch(e){this.scope(context);return this.failure(e);}}
   clearContext(context:ActionContext,raw:unknown){this.scope(context);try{return this.working?.clear(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
-  contextStatus(context:ActionContext){this.scope(context);return this.working?.status(context)??{status:'not_configured'};}
+  contextStatus(context:ActionContext){const scope=this.scope(context);return {...(this.working?.status(context)??{status:'not_configured'}),automaticRecall:this.automaticRecall.status(scope)};}
   feedbackOpen(context:ActionContext,raw:unknown,deleted=false){this.scope(context);try{return this.feedbackArchive?.open(context,raw,deleted)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   feedbackList(context:ActionContext,raw:unknown){this.scope(context);try{return this.feedbackArchive?.list(context,raw)??{status:'not_configured'};}catch(e){return this.failure(e);}}
   feedbackDelete(context:ActionContext,raw:unknown){this.scope(context);try{return this.feedbackArchive?.change(context,raw,true)??{status:'not_configured'};}catch(e){return this.failure(e);}}

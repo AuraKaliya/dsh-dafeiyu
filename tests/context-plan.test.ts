@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {admitContext,admitNativeContexts,contextManifest,requestCapacity} from '../packages/core/lib/context-plan.js';
 import {ContextCoordinator} from '../packages/core/lib/context.js';
+import {PersonaRuntime} from '../packages/core/lib/persona-runtime.js';
+import {ContextBudgetSchema} from '@dafeiyu/contracts';
+import type {PersonaAccess,PreparedPersonaEntry} from '@dafeiyu/contracts';
 import type {ContextGroup} from '../packages/core/lib/context-plan.js';
 import {memoryFixture} from './memory-fixture.js';
 import {textReply} from './harness.js';
@@ -30,6 +33,13 @@ test('native task context shares required admission and counts the serialized en
 test('full capacity includes schemas, tool history and output reserve, measured in bytes',()=>{
   const result=requestCapacity({messages:[{text:'中文'}],tools:[{schema:'x'.repeat(800)}],toolHistory:'x'.repeat(200)},1100,100);
   assert.equal(result.withinBudget,false);assert.equal(result.measurement,'utf8-serialized-bytes');assert.ok(result.categories.tools>800);
+});
+test('unified persona preparation cannot silently drop an already qualified selected personality',()=>{
+  const runtime=new PersonaRuntime(ContextBudgetSchema.parse({assembly:{mode:'unified'},regions:{'memory:growth':{maxBytes:1000}}})),id=randomUUID();
+  const entry:PreparedPersonaEntry={candidate:{id,version:1},contentRef:{kind:'memory',id,agentId:'fixture',scopeKey:'scope',version:1,revision:1,contentHash:'a'.repeat(64)},dependencies:[],item:item('qualified',1400)};
+  runtime.bind({ready:()=>true,prepare:()=>({stageRevision:1,selectionVersion:1,entries:[entry],omitted:0}),validate:()=>true});
+  const access:PersonaAccess={view:{runId:randomUUID(),taskId:null,scope:{kind:'conversation',agentId:'fixture',route:'scope'},origin:{kind:'message',inboundId:randomUUID(),conversation:{channel:'fixture',account:'local',kind:'group',id:'scope'}},signal:new AbortController().signal},producer:'fixture',operationId:randomUUID(),startedEventId:null,intentVersion:0,motivation:{kind:'unknown',basis:[]},inputs:[],admittedSources:[],guard:()=>{}};
+  assert.throws(()=>runtime.prepareTarget(access),/PERSONA_CONTEXT_CAPACITY/);
 });
 test('unified preparation applies one deadline across optional contributors',async t=>{
   const h=await memoryFixture(undefined,{context:{}},undefined,{assembly:{mode:'unified',deadlineMs:60}});t.after(h.close);

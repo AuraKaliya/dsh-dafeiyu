@@ -225,7 +225,7 @@ export interface PersonaTrialAuthority {readonly guard:()=>void}
 export interface MemoryGrowthProvider {
   ready():boolean;
   /** Durable channel expression preferences, separately scoped from adopted personality traits. */
-  expressionPreferences?(conversation:import('./conversation.js').Conversation):readonly import('./context.js').ContextItem[];
+  expressionPreferences?(conversation:import('./conversation.js').Conversation,query?:string):readonly import('./context.js').ContextItem[];
   prepare(access:PersonaAccess):PreparedPersona;
   validate(access:PersonaAccess,entry:PreparedPersonaEntry):boolean;
   validateHistoricalTrial?(access:PersonaAccess,dependency:Extract<SourceDependency,{kind:'context'}>):boolean;

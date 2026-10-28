@@ -20,7 +20,7 @@ const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const metadataSchema=z.strictObject({schemaVersion:z.literal(1),instanceId:z.uuid(),profileId:z.string(),agentId:z.string(),createdAt:z.iso.datetime(),identityHash:z.string().length(64),
   biliOwner:z.strictObject({accountUid:z.string(),ownerUid:z.string(),since:z.iso.datetime()}).nullable()});
 export type InstallationMetadata=z.infer<typeof metadataSchema>;
-const growthActions=['dafeiyu_qq_expression_save','dafeiyu_qq_expression_status','dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_trial_select','dafeiyu_persona_adoption_review','dafeiyu_persona_publish','dafeiyu_persona_select','dafeiyu_persona_withdraw','dafeiyu_persona_status'];
+const growthActions=['dafeiyu_recent_state_save','dafeiyu_recent_state_status','dafeiyu_recent_state_publish','dafeiyu_qq_expression_save','dafeiyu_qq_expression_status','dafeiyu_persona_propose','dafeiyu_persona_review','dafeiyu_persona_trial_select','dafeiyu_persona_adoption_review','dafeiyu_persona_publish','dafeiyu_persona_select','dafeiyu_persona_withdraw','dafeiyu_persona_status'];
 const taskActions=['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_source_open','dafeiyu_execution_contribute','dafeiyu_execution_select','dafeiyu_execution_source_state','dafeiyu_execution_contribution_state'];
 const maintenanceActions=['dafeiyu_memory_maintenance_request','dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_experience_read','dafeiyu_experience_review','dafeiyu_memory_persona_candidate'];
 const mediaActions=['dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_read','dafeiyu_media_select'];

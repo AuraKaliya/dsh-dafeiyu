@@ -1,3 +1,4 @@
+import {backgroundContributor} from './context-background.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
@@ -148,6 +149,7 @@ export class QqChannel extends Service {
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
       this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', apiVersion: API_VERSION, agentId: this.config.agentId,
+        contexts:[backgroundContributor(ctx,{store:this.store,allowed:scene=>this.allowed(scene),accepts:(scene,time,generation)=>scene.kind==='group'&&this.groups.accepts(scene.id,time)&&generation===this.groups.generation(scene.id)})],
         channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',deliveryProgress:id=>{const p=this.deliveryStatus(id);if(!p)return null;const segments='segments'in p?p.segments:p.parts;return {confirmed:p.confirmed,pending:p.pending,unknown:p.unknown,canResume:p.unknown===0&&p.pending>0&&segments.some(s=>s.state==='pending'&&s.code==='DELIVERY_INTERRUPTED_BY_MESSAGE')};},
           processingSignal: message => this.processingSignal(message),
           description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),

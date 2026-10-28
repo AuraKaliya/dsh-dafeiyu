@@ -37,7 +37,7 @@ export class MemorySourcePolicy implements SourcePolicy {
   }
   context(scope:CompactionScope,region:string,item:ContextItem):SourceDependency[]{
     try{
-      if(region==='task-workspace'||region==='growth')return [{...scoped(scope),kind:'context',owner:'memory',region,id:item.id,version:item.version,hash:digest(JSON.stringify([item.text,item.sources]))}];
+      if(region==='task-workspace'||region==='growth'||region==='recent-state')return [{...scoped(scope),kind:'context',owner:'memory',region,id:item.id,version:item.version,hash:digest(JSON.stringify([item.text,item.sources]))}];
       const result:SourceDependency[]=[];
       if(region==='working'){
         const work=this.working?.sourceItem(scope,item.id);

@@ -191,3 +191,5 @@ export interface PendingMessage {
   readonly sessionId: string;
   readonly reply: Reply | null;
 }
+
+export * from './recent-state.js';

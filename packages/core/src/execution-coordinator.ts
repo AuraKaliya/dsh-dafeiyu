@@ -133,6 +133,14 @@ export class ExecutionCoordinator {
     if(!run)throw new Error('SCOPE_DENIED');return run;}
   private messageIntent(run:StoredRun){const task=this.repository().readState(this.d.agentId,run.definition.taskId!);if(task.epoch!==run.definition.intentVersion)return null;
     return this.d.memory()?.intent(this.d.personas.access(run,this.inputsFor(run),this.d.signal,()=>{if(this.repository().readState(this.d.agentId,task.id).epoch!==task.epoch)throw new Error('TASK_NOT_ACTIVE');}))??null;}
+  recentStateSourcesCurrent(runId:string,sources:readonly SourceDependency[]):boolean{
+    try{const run=this.d.store.get(runId);if(run.definition.scope.kind!=='task')return false;const task=this.repository().readState(this.d.agentId,run.definition.taskId!);
+      if(task.epoch!==run.definition.intentVersion||task.status!=='active')return false;this.validateMessageAncestors(run);
+      const guard=()=>{if(this.repository().readState(this.d.agentId,task.id).epoch!==task.epoch)throw new Error('SOURCE_STALE');};
+      const access=this.d.personas.access(run,this.inputsFor(run),this.d.signal,guard),request=this.d.store.request(run.requestKey);
+      const evidence=new ExecutionEvidence(run,this.d.store,this.d.memory,this.d.personas,this.d.registry,this.repository(),this.policy(request.producer,run.definition.policyId).sourceRules,access,anchor=>this.activityAnchorStatus(anchor).state==='valid',sourceRun=>this.wakeOrigins(sourceRun).some(origin=>!!this.wakes.get(origin.producerId)?.sourceAnchor));return evidence.validate(sources);
+    }catch{return false;}
+  }
   async nativeResultAccess(id:string):Promise<NativeExpressionAccess>{const run=this.d.store.get(z.uuid().parse(id));if(run.definition.scope.kind!=='task'||!['completed','waiting'].includes(run.state)||run.state==='completed'&&!run.result)throw new Error('RESULT_UNAVAILABLE');
     const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;if(!source)throw new Error('MESSAGE_REQUIRED');this.validateMessageSource(source);
     const inputs=this.inputsFor(run),inputHash=runtimeHash(inputs),task=this.repository().readState(this.d.agentId,run.definition.taskId!),proof=z.array(SourceDependencySchema).parse(this.d.store.readInput(run.id,'result-sources'));

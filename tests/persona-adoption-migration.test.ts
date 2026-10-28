@@ -49,12 +49,12 @@ async function v11Fixture(){
   }finally{db.close();}
 }
 
-test('v11 to v12 preserves every legacy row and hash without inventing trial or adoption proofs',async()=>{
+test('v11 through current schema preserves every legacy row and hash without inventing trial or adoption proofs',async()=>{
   const f=await v11Fixture();assert.equal(inspectStorage(f.file,'memory').version,11);
   for(let attempt=0;attempt<2;attempt++)new MemoryStore(f.file).close();
   const db=new DatabaseSync(f.file,{readOnly:true});try{
     assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);
-    assert.equal(MEMORY_SCHEMA_VERSION,12);assert.deepEqual(snapshot(db,f.names),f.before);
+    assert.equal(MEMORY_SCHEMA_VERSION,13);assert.deepEqual(snapshot(db,f.names),f.before);
     assert.deepEqual(db.prepare('SELECT * FROM memory_schema_migrations WHERE version<=11 ORDER BY version').all(),f.migrationRows);
     assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=12').get()?.n,1);
     for(const table of PERSONA_ADOPTION_TABLES)assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n,0);
@@ -77,7 +77,7 @@ test('an interrupted additive migration rolls back new tables and retries withou
     assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=12').get()?.n,0);
     assert.equal(db.prepare('SELECT blocker FROM persona_trial_outcomes').get()?.blocker,'retain');db.exec('DROP TABLE persona_trial_outcomes');
   }finally{db.close();}
-  new MemoryStore(f.file).close();assert.equal(inspectStorage(f.file,'memory').version,12);
+  new MemoryStore(f.file).close();assert.equal(inspectStorage(f.file,'memory').version,MEMORY_SCHEMA_VERSION);
 });
 
 /** Deliberately bypasses domain APIs to exercise only physical foreign keys, history retention and backup. */
@@ -139,6 +139,6 @@ test('host migration plans and SQLite backups include all new proof tables and t
   const destination=join(f.root,'proof-backup.sqlite');db=new DatabaseSync(file,{readOnly:true});
   try{await backup(db,destination);const copied=new DatabaseSync(destination,{readOnly:true});try{
     assert.deepEqual(snapshot(copied,PERSONA_ADOPTION_TABLES),snapshot(db,PERSONA_ADOPTION_TABLES));
-    assert.equal(copied.prepare('PRAGMA user_version').get()?.user_version,12);
+    assert.equal(copied.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);
   }finally{copied.close();}}finally{db.close();}
 });

@@ -26,6 +26,9 @@ export function dropExperienceFixtureSchema(db:DatabaseSync):void {
 }
 /** Synthetic fixture downgrade only: never use this to revert an active profile. */
 export function dropPersonaAdoptionFixtureSchema(db:DatabaseSync):void {
+  // Later tables must also be removed when constructing an authentic pre-v12 fixture.
+  for(const table of ['recent_state_publications','recent_state_requests','recent_state_revisions','recent_self_states'])db.exec(`DROP TABLE IF EXISTS ${table}`);
+  db.prepare('DELETE FROM memory_schema_migrations WHERE version=13').run();
   for(const table of [...PERSONA_ADOPTION_TABLES].reverse())db.exec(`DROP TABLE IF EXISTS ${table}`);
   db.prepare('DELETE FROM memory_schema_migrations WHERE version=12').run();
 }
