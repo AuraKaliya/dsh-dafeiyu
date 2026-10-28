@@ -33,15 +33,10 @@ test('conversation capabilities reject foreign resources and cloned or expired i
   assert.throws(()=>h.core.authorizeCapabilityResource(h.captured(),'fixture-observer',capabilityScene),/SCOPE_DENIED/);
 });
 
-test('without actual source tracking a cached identifier cannot claim model exposure or create a memory',async t=>{
-  const h=await capabilityFixture(false);t.after(h.close);script(h,'summary');await h.chat();assert.equal(h.receipts.length,0);assert.equal(memoryRows(h.root).memories.length,0);
-  assert.match(JSON.stringify(h.adapter.requests),/OBSERVATION_NOT_EXPOSED/);
-});
-
 test('native resource use keeps its real Task origin and creates only task-internal memory',async t=>{
   const h=await capabilityFixture();t.after(h.close);script(h,'summary');const port=h.core.executionProducer('fixture-native'),run=port.submitTask({requestId:'native-one',title:'虚构观察',goal:'读取获准虚构资料并选择摘要',policyId:'native'});
   await h.core.whenIdle();assert.equal(port.status(run.run).state,'completed');assert.equal(h.core.journal.list().length,0);assert.equal(h.receipts.length,1);
-  const row=memoryRows(h.root).memories[0]!;assert.ok(row);const boundary=JSON.parse(String(row.boundary));assert.equal(boundary.schemaVersion,2);assert.equal(boundary.externalExpression.kind,'none');assert.equal(boundary.task.id,run.task.id);
+  const row=memoryRows(h.root).memories[0]!;assert.ok(row);const boundary=JSON.parse(String(row.boundary));assert.equal(boundary.schemaVersion,1);assert.equal(boundary.externalExpression.kind,'none');assert.equal(boundary.task.id,run.task.id);
   assert.equal(h.captured().origin.kind,'native');assert.equal(h.captured().scope.kind,'task');
 });
 

@@ -63,7 +63,7 @@ export async function qqCapabilityFixture({tasks=false,extraTaskActions=[],extra
   await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});
   const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),});
   h.core.configureExecution({profileId:'qq-capability-fixture',createStore:true,policies:[...extraPolicies,
-    {id:'conversation',producers:['channel-qq',...extraConversationProducers],actions:[...QQ.QQ_ACTIONS,...(stickers?QQ.QQ_STICKER_ACTIONS:[]),...(tasks?QQ.QQ_TASK_ACTIONS:[]),...(media?[...QQ.QQ_MEDIA_ACTIONS,...Media.MEDIA_ACTIONS]:[]),...extraConversationActions],allowLocalWrite:true},
+    {id:'conversation',producers:['channel-qq',...extraConversationProducers],actions:[...["dafeiyu_memory_record","dafeiyu_memory_revise","dafeiyu_memory_delete","dafeiyu_memory_restore","dafeiyu_memory_search","dafeiyu_memory_open","dafeiyu_memory_deleted_search","dafeiyu_memory_deleted_open","dafeiyu_timeline_search","dafeiyu_source_open"],...QQ.QQ_ACTIONS,...(stickers?QQ.QQ_STICKER_ACTIONS:[]),...(tasks?QQ.QQ_TASK_ACTIONS:[]),...(media?[...QQ.QQ_MEDIA_ACTIONS,...Media.MEDIA_ACTIONS]:[]),...extraConversationActions],allowLocalWrite:true},
     {id:'native',producers:['fixture-native'],actions:[...QQ.QQ_ACTIONS,...(media?[...QQ.QQ_MEDIA_ACTIONS,...Media.MEDIA_ACTIONS]:[])],allowLocalWrite:true,resources:[scene]},
     ...(tasks?[{id:'qq-task',producers:['qq-tasks'],externalActions:extraExternalActions,actions:[...QQ.QQ_ACTIONS,'dafeiyu_task_intent','dafeiyu_task_object',...extraTaskActions],allowLocalWrite:true,resources:[{...scene,id:otherGroup},...extraTaskResources]}]:[]),
   ]});

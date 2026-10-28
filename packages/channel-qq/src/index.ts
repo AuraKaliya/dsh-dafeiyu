@@ -1,3 +1,4 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import {backgroundContributor} from './context-background.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
@@ -147,13 +148,13 @@ export class QqChannel extends Service {
       this.groups = new GroupDirectory({ account: this.config.botId, allowed: this.config.groupIds, config: this.config.groupSync, store: this.store,
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
-      this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: '0.3.0', protocolVersion:4, agentId: this.config.agentId,
+      this.handle = registration = ctx.dafeiyu.registerExtension({ id: 'channel-qq', version: RELEASE_VERSION, protocolVersion:API_VERSION, agentId: this.config.agentId,
         conversationContexts:[backgroundContributor(ctx,{store:this.store,allowed:scene=>this.allowed(scene),accepts:(scene,time,generation)=>scene.kind==='group'&&this.groups.accepts(scene.id,time)&&generation===this.groups.generation(scene.id)})],
         channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',deliveryProgress:id=>{const p=this.deliveryStatus(id);if(!p)return null;const segments='segments'in p?p.segments:p.parts;return {confirmed:p.confirmed,pending:p.pending,unknown:p.unknown,canResume:p.unknown===0&&p.pending>0&&segments.some(s=>s.state==='pending'&&s.code==='DELIVERY_INTERRUPTED_BY_MESSAGE')};},
           processingSignal: message => this.processingSignal(message),
           description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
-          taskTextDispatch:'write-window-v1',deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority,writeWindow)=>this.deliverTaskResult(reply,anchor,signal,authority,writeWindow) }] });
+          deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority,writeWindow)=>this.deliverTaskResult(reply,anchor,signal,authority,writeWindow) }] });
       this.batches=this.store.batches(this.config.messageBatch,{current:message=>{try{this.processingSignal(message).throwIfAborted();return true;}catch{return false;}},submit:message=>{const receipt=this.handle.ingest(message);if(!receipt.duplicate)this.counters.accepted++;},failed:()=>{this.error='BATCH_SUBMISSION_FAILED';}});
       if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing),readHistory:(scene,signal)=>this.readHistory(scene,signal),readForward:(scene,messageId,index,signal)=>this.readForward(scene,messageId,index,signal)});
@@ -380,8 +381,8 @@ export class QqChannel extends Service {
     const lease=this.tailLease(reply,signal),work=this.mediaTransport.deliver(reply,lease.signal,guarded,bytes);this.sending.add(work);void work.finally(()=>{this.sending.delete(work);lease.release();}).catch(()=>{});return work;
   }
   private tailLease(reply:Reply,signal:AbortSignal){let lease=this.tails.get(reply.id);if(!lease){const source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,reply.conversation)},reply.sourceMessageId);lease={route:this.cacheRoute(reply.conversation),sender:source?.message.sender.id??this.config.ownerId,controller:new AbortController()};this.tails.set(reply.id,lease);}const captured=lease;return {signal:AbortSignal.any([signal,this.controller.signal,lease.controller.signal]),release:()=>{if(this.tails.get(reply.id)===captured)this.tails.delete(reply.id);}};}
-  deliverTaskResult(reply:Reply,raw:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>{const anchor=TaskResultAnchorSchema.parse(raw);
-    if(typeof authority!=='function'||conversationKey(this.config.agentId,anchor.target)!==conversationKey(this.config.agentId,reply.conversation))return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
+  deliverTaskResult(reply:Reply,raw:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow:()=>()=>void):Promise<DeliveryResult>{const anchor=TaskResultAnchorSchema.parse(raw);
+    if(typeof authority!=='function'||typeof writeWindow!=='function'||conversationKey(this.config.agentId,anchor.target)!==conversationKey(this.config.agentId,reply.conversation))return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});
     return this.deliver({...reply,taskResult:anchor},signal,authority,writeWindow);}
   deliveryStatus(replyId:string){if(!this.stopped)return this.store.mediaDelivery.progress(replyId)??this.store.delivery.progress(replyId);
     const db=new DatabaseSync(resolve(this.config.dataDir,'qq.sqlite'),{readOnly:true});try{return new QqMediaDeliveryLedger(db).progress(replyId)??new QqDeliveryLedger(db).progress(replyId);}finally{db.close();}}
@@ -398,7 +399,6 @@ export class QqChannel extends Service {
     if(this.ctx.dafeiyu.journal.messageRecalled({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},reply.sourceMessageId))throw new Error('SOURCE_STALE');
     const route = this.cacheRoute(conversation);
     this.store.replyQuote(quoteKey(reply),route);
-    // A pending legacy reply already has an authoritative core inbound. Use its old cache only as a quote ID, never as new browse text.
     const bound=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},reply.sourceMessageId);
     if (conversation.kind === 'group') {
       const access = this.store.cache.groupAccess(route, reply.sourceMessageId);
@@ -408,7 +408,7 @@ export class QqChannel extends Service {
       } catch { throw new Error('SOURCE_STALE'); }
     }
     if(reply.taskResult){if(!bound||bound.id!==reply.taskResult.inboundId||conversationKey(this.config.agentId,reply.taskResult.target)!==conversationKey(this.config.agentId,conversation)||Date.parse(reply.taskResult.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');return;}
-    const source = this.store.find(route, reply.sourceMessageId)??(bound&&!this.store.cache.known(route,reply.sourceMessageId)?this.store.find(JSON.stringify([conversation.kind,conversation.id]),reply.sourceMessageId):null);
+    const source = this.store.find(route, reply.sourceMessageId);
     if (!source) throw new Error('SOURCE_MESSAGE_NOT_FOUND');
   }
   private async sendSegment(reply:Reply,text:string,signal:AbortSignal):Promise<string>{
@@ -440,3 +440,5 @@ export class QqChannel extends Service {
   }
 }
 export async function apply(ctx: Context, config: Config): Promise<void> { const channel = new QqChannel(ctx, config);  }
+
+export * from './storage-status.js';

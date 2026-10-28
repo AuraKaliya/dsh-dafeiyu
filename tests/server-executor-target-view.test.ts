@@ -22,7 +22,7 @@ async function fixture(options:{mixedPrivate?:boolean;opaqueContext?:boolean}={}
     ctx.dafeiyu.registerExtension({protocolVersion:4,id:'executor-fixture',version:'1',agentId:'dafeiyu',requires:['memory.capability-observation.v1'],resourceProofs:{
       current:input=>valid&&!!proof&&digest(input)===digest(proof),epoch:()=>valid?'fixture-current':'fixture-revoked',publicView:()=>false,
       targetView:(input,actual,target,scope)=>permission&&valid&&!!bound&&!!proof&&digest(scope)===digest(bound)&&digest(input)===digest(proof)&&actual===JSON.stringify(view)&&digest(target)===digest(privateTarget)?{kind:'inference',stamp:digest({revision,proof,target,scope,actual})}:null},
-      actions:[{id:'fixture_execution_result',version:'1',description:'读取只授予指定目标的虚构执行器结果',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'read',requiresTask:true,execute:async(_input,context)=>{
+      actions:[{id:'fixture_execution_result',version:'1',description:'读取只授予指定目标的虚构执行器结果',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'read',scope:'task',execute:async(_input,context)=>{
         try{bound=context.scope;proof={provider:'executor-fixture',scene:localScene,key:'fictional-receipt',version:1,hash:digest(view),roots:['executor-fixture:receipt'],detail:{scope:context.scope}};
         const observation=ctx.dafeiyu.recordCapabilityObservation(context,'executor-fixture',{requestId:'observed-result',proof,text:JSON.stringify(view),occurredAt:new Date().toISOString(),coverage:['只提供模型自述；无独立业务核验'],counts:{received:1,processed:1}},{inheritExecutionHistory:true});
         const {id,scopeKey,version,contentHash}=observation.source;
@@ -36,7 +36,7 @@ async function fixture(options:{mixedPrivate?:boolean;opaqueContext?:boolean}={}
 
 test('a recipient-bound inference reaches a fresh persona session without becoming public or admitting opaque task text',async t=>{
   const h=await fixture();t.after(h.close);await h.message('任务：给我整理虚构执行器结果',{trigger:true,target:privateTarget});h.assertObserved();const id=runId(h);
-  const packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.resultIncluded,false);assert.equal(packet.evidence.length,2);assert.equal(packet.evidence[0]!.kind,'inference');assert.match(packet.evidence[0]!.text,/RECIPIENT_ONLY_SELF_REPORT/);
+  const packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.resultIncluded,false);assert.equal(packet.evidence.filter(item=>item.id!=='CONTEXT').length,2);assert.equal(packet.evidence[0]!.kind,'inference');assert.match(packet.evidence[0]!.text,/RECIPIENT_ONLY_SELF_REPORT/);
   assert.equal(packet.evidence[1]!.kind,'reported');assert.equal(JSON.parse(packet.evidence[1]!.text).kind,'result-workflow');
   assert.equal(h.core.capabilityPublicView(h.proof(),JSON.stringify(view)),false);assert.equal(h.core.capabilityTargetView(h.proof(),JSON.stringify(view),scene,h.scope()),null);
   assert.equal(h.core.capabilityTargetView(h.proof(),JSON.stringify(view),privateTarget,{...h.scope(),agentId:'other'}),null);

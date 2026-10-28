@@ -15,7 +15,6 @@ export const SourceDependencySchema=z.discriminatedUnion('kind',[
   z.strictObject({...scopeFields,kind:z.literal('inbound'),id:z.string(),hash:z.string(),fence:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('timeline'),ref:z.string(),hash:z.string(),fence:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('working'),id:z.string(),taskId:z.string(),revision:z.number().int().positive(),hash:z.string()}),
-  z.strictObject({...scopeFields,kind:z.literal('feedback'),id:z.string(),version:z.number().int().positive(),hash:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('context'),owner:z.string(),region:z.string(),id:z.string(),version:z.string(),hash:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('ephemeral'),traceId:z.string()}),
   z.strictObject({...scopeFields,kind:z.literal('unavailable'),reason:z.string()}),

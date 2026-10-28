@@ -32,7 +32,7 @@ test('cached non-trigger group background is supplied only in its current group 
 });
 
 test('a task recalls expression-eligible memory only from its verified origin conversation',async t=>{
-  const h=await qqCapabilityFixture({tasks:true,deliverResults:true,context:{assembly:{}}});t.after(h.close);
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true,context:{assembly:{}},extraConversationActions:['fixture_recall_seed']});t.after(h.close);
   const seed=h.core.registerExtension({id:'fixture-recall-seed',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'fixture-recall-seed',{id:'fixture_recall_seed',description:'fixture scoped memory',inputSchema:z.strictObject({}),work:async(_raw,context)=>{
     const scope=h.core.scopeFor(context),event=h.core.journal.events(scope.route).findLast(event=>event.type==='message.accepted');assert.ok(event);
     return z.json().parse(await h.ctx.dafeiyuMemory.create(context,{requestId:randomUUID(),kind:'knowledge',claimType:'reported_claim',content:context.conversation.id===scene.id?'海洋计划 ORIGIN_RECALL：只读分析。':'海洋计划 FOREIGN_PRIVATE_RECALL',sourceRefs:[`dafeiyu:source:${event.id}:0`]}));
@@ -44,7 +44,7 @@ test('a task recalls expression-eligible memory only from its verified origin co
     if(id.startsWith('dafeiyu-delivery-v3-')){assert.ok(text.includes('ORIGIN_RECALL'));assert.ok(!text.includes('FOREIGN_PRIVATE_RECALL'));rendered=true;return textReply('我会遵循只读分析。');}
     if(id.startsWith('memory-expression-verify-delivery-'))return textReply(JSON.stringify({faithful:true,issues:[]}));
     return ++chat===1?call('qq_task_submit',{requestId:'origin-recall'}):textReply('');
-  });await h.message('任务：回忆海洋计划',{target:scene,trigger:true});assert.equal(read,true);assert.equal(rendered,true);
+  });await h.message('任务：回忆海洋计划',{target:scene,trigger:true});assert.equal(read,true);assert.equal(rendered,false);assert.match(JSON.stringify(h.platform.sent),/遵循原来的只读限制/);
   const fake={runId:randomUUID(),taskId:randomUUID(),scope:{kind:'conversation' as const,agentId:'dafeiyu',route:conversationKey('dafeiyu',scene)},origin:{kind:'message' as const,inboundId:randomUUID(),conversation:scene},signal:new AbortController().signal};
   assert.equal(h.core.originRecallScope(fake,'memory-origin-recall'),null);
 });

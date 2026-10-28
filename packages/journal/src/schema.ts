@@ -1,3 +1,5 @@
+import {inspectDatabase} from './storage-inspection.js';
+import type {StorageIdentity} from './storage-inspection.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 
@@ -34,3 +36,5 @@ export function inspectJournal(file: string): JournalInspection {
   } finally { db.close(); }
 }
 
+
+export function inspectJournalStorage(file:string,identity?:StorageIdentity){return inspectDatabase(file,{applicationId:JOURNAL_APPLICATION_ID,version:1,ownerTable:'ownership',validate:db=>{checkJournalShape(db);return true;},identity:(db,who)=>!db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.agentId')<>? LIMIT 1").get(who.agentId)},identity);}

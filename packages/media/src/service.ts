@@ -1,3 +1,6 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
+import {API_VERSION} from '@dafeiyu/contracts';
+import {pendingMediaEvents} from './storage-status.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
@@ -38,6 +41,8 @@ type Prepared={input:DecoderInput;access:MediaAccess;source:StoredMediaSource;pa
 declare module '@deepseek-ai/cordis' {interface Context {dafeiyuMedia:MediaService}}
 
 export class MediaService extends Service implements MediaPort {
+  pendingEvents(){return pendingMediaEvents(this.config.dataDir);}
+
   readonly config:z.output<typeof mediaConfigSchema>;
   readonly store:MediaStore;
   readonly files:MediaFiles;
@@ -68,7 +73,7 @@ export class MediaService extends Service implements MediaPort {
     this.replySpeech=this.config.tts?new ReplySpeech(ctx,this.store,this.files,this.config.tts,testBackends?.ttsWorker):undefined;
     if(this.replySpeech)this.providers.set('media',{id:'media',describe:key=>this.replySpeech!.describe(key),open:async()=>{throw new Error('MEDIA_REPLY_OUTPUT_PRIVATE');}});
     this.replies=new MediaReplies({ctx,store:this.store,files:this.files,ready:()=>this.ready(),prepareAsset:(c,a,as,key,owner)=>this.prepareReplyAsset(c,a,as,key,owner),sourceCurrent:source=>this.sourceCurrent(source),...(this.replySpeech?{speech:this.replySpeech}:{})});
-    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'media',version:'0.1.0',agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['media.processing.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
+    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'media',version:RELEASE_VERSION,agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['media.processing.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
       resourceProofs:{current:proof=>this.ready()&&(proof.key.startsWith('reply-text:')?this.replySpeech?.current(proof)===true:this.store.validateExposure(proof,source=>this.sourceCurrent(source))),epoch:scope=>this.ready()?mediaHash([this.store.epoch(),[...this.providers.keys()],ctx.dafeiyu.capabilityResourceEpochWithout('media',scope)]):'closed'}});
       this.unbind=ctx.dafeiyu.bindMedia(this);
     }catch(error){this.images.close();this.store.close();throw error;}
@@ -210,7 +215,7 @@ export class MediaService extends Service implements MediaPort {
       {...make(MEDIA_ACTIONS[4],MediaReplyDraftInputSchema,true,(i,c)=>this.prepareReply(c,i)),description:'准备当前Run的回复媒体草案，尚未发送。expectedVersion首次0，之后用currentVersion；parts为空取消。图片／语音会归一化，as:file保留原字节；final-voice仅在配置TTS时将核心批准的最终正文合成语音，不传自由文本。目标和正文由核心确定。'},
       {...make(MEDIA_ACTIONS[5],z.strictObject({}),false,(_i,c)=>this.replies.status(c)),description:'查看当前Run的媒体草案版本、选中数量和冻结状态，不读取其它任务。'}];}
   flush(){if(this.gate.state==='closed')return;this.store.drain((raw,id)=>{const row=z.object({scope:ExecutionScopeSchema,origin:RunOriginSchema,runId:z.uuid(),operationId:z.string(),causedBy:z.string().nullable(),type:z.string(),at:z.string(),data:z.record(z.string(),z.json())}).parse(raw),scope=row.scope;
-    const event={agentId:scope.agentId,route:scope.kind==='task'?scope.scopeKey:scope.route,traceId:scope.kind==='task'?row.runId:row.origin.kind==='message'?row.origin.inboundId:row.runId,operationId:row.operationId,causedBy:row.causedBy,type:row.type,plugin:'media',pluginVersion:'0.1.0',occurredAt:row.at,sources:[],data:{...row.data,origin:row.origin}};
+    const event={agentId:scope.agentId,route:scope.kind==='task'?scope.scopeKey:scope.route,traceId:scope.kind==='task'?row.runId:row.origin.kind==='message'?row.origin.inboundId:row.runId,operationId:row.operationId,causedBy:row.causedBy,type:row.type,plugin:'media',pluginVersion:RELEASE_VERSION,occurredAt:row.at,sources:[],data:{...row.data,origin:row.origin}};
     if(scope.kind==='task')this.ctx.dafeiyu.journal.appendExecutionOnce({...event,taskId:scope.taskId,runId:row.runId},id);else this.ctx.dafeiyu.journal.appendOnce(event,id);
   });}
   reconcile(read:(manifest:ReplyMediaManifest)=>'sent'|'unknown'|'blocked'|'pending'|'conflict'){const counts={settled:0,pending:0,conflicts:0};for(const entry of this.store.replies.exports()){

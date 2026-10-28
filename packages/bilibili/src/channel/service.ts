@@ -38,9 +38,9 @@ export class BiliOwnerChannel extends Service {
     this.identityHash=BiliOwnerHashSchema.parse(ports.transport.identityHash);this.epoch=z.number().int().positive().parse(ports.lease.epoch);this.now=ports.now??Date.now;ports.lease.guard();ports.transport.guard();
     this.store=new BiliOwnerStore(join(this.config.dataDir,'bili-owner.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId,accountUid:this.config.settings.accountUid,ownerUid:this.config.settings.ownerUid},this.config.createStore);
     try{this.root=realpathSync(this.config.dataDir);}catch(error){this.store.close();throw error;}
-    try{this.handle=ctx.dafeiyu.registerExtension({id:BILI_OWNER_EXTENSION,version:BILI_OWNER_VERSION,protocolVersion:4,agentId:this.config.agentId,lifecycleReady:()=>!this.closed&&(this.gate.active||this.gate.state==='quiescing'),
+    try{this.handle=ctx.dafeiyu.registerExtension({id:BILI_OWNER_EXTENSION,version:BILI_OWNER_VERSION,protocolVersion:API_VERSION,agentId:this.config.agentId,lifecycleReady:()=>!this.closed&&(this.gate.active||this.gate.state==='quiescing'),
       channels:[{channel:'bilibili',account:this.config.settings.accountUid,deliveryValidation:'per-segment',description:'当前为B站独立账号与配置的唯一主人的私聊；仅文字，每条最多1000个Unicode字符。不提供平台发布、QQ主人或服务器执行权限。视频探索使用本渠道只读Task，结果由原人格会话整理。',
-        deliver:(reply,signal,authority)=>this.deliver(reply,signal,authority),deliverTaskResult:(reply,anchor,signal,authority)=>this.deliverTaskResult(reply,anchor,signal,authority)}]});}
+        deliver:(reply,signal,authority)=>this.deliver(reply,signal,authority),deliverTaskResult:(reply,anchor,signal,authority,writeWindow)=>this.deliverTaskResult(reply,anchor,signal,authority,writeWindow)}]});}
     catch(error){this.store.close();throw error;}
     try{if(this.config.settings.tasks.enabled)this.tasks=new BiliOwnerTasks(ctx,{accountUid:this.config.settings.accountUid,ownerUid:this.config.settings.ownerUid,agentId:this.config.agentId,policyId:this.config.settings.tasks.policyId,version:'bili-owner-v1:'+biliOwnerHash({settings:this.config.settings,transport:this.identityHash,epoch:this.epoch}),
       deliverResults:this.config.settings.tasks.deliverResults,explorationResources:this.config.settings.tasks.explorationResources},()=>this.sourceReady(),()=>this.gate.active&&!this.held&&this.verified&&this.sourceReady());}
@@ -91,20 +91,21 @@ export class BiliOwnerChannel extends Service {
     const scope={agentId:this.config.agentId,route:conversationKey(this.config.agentId,biliOwnerScene(this.config.settings))},bound=this.ctx.dafeiyu.journal.messageFor(scope,plan.sourceMessageId);
     if(!bound||bound.id!==source.coreInboundId||bound.extensionId!==BILI_OWNER_EXTENSION||biliOwnerHash(bound.message)!==biliOwnerHash(this.incoming(source))||this.ctx.dafeiyu.journal.messageRecalled(scope,plan.sourceMessageId))throw new Error('SOURCE_STALE');
     if(plan.anchor&&(plan.anchor.inboundId!==bound.id||biliOwnerHash(plan.anchor.target)!==biliOwnerHash(biliOwnerScene(this.config.settings))||Date.parse(plan.anchor.expiresAt)<=this.now()))throw new Error('SOURCE_STALE');}
-  private deliverTaskResult(reply:Reply,raw:TaskResultAnchor,signal:AbortSignal,authority:()=>void){const anchor=TaskResultAnchorSchema.parse(raw);
-    if(typeof authority!=='function'||biliOwnerHash(anchor.target)!==biliOwnerHash(biliOwnerScene(this.config.settings))||biliOwnerHash(reply.conversation)!==biliOwnerHash(biliOwnerScene(this.config.settings)))return Promise.resolve<DeliveryResult>({status:'not-sent',code:'BILI_OWNER_TARGET_DENIED'});
-    return this.deliver({...reply,taskResult:anchor},signal,authority);}
-  private deliver(reply:Reply,signal:AbortSignal,authority?:()=>void):Promise<DeliveryResult>{
+  private deliverTaskResult(reply:Reply,raw:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow:()=>()=>void){const anchor=TaskResultAnchorSchema.parse(raw);
+    if(typeof authority!=='function'||typeof writeWindow!=='function'||biliOwnerHash(anchor.target)!==biliOwnerHash(biliOwnerScene(this.config.settings))||biliOwnerHash(reply.conversation)!==biliOwnerHash(biliOwnerScene(this.config.settings)))return Promise.resolve<DeliveryResult>({status:'not-sent',code:'BILI_OWNER_TARGET_DENIED'});
+    return this.deliver({...reply,taskResult:anchor},signal,authority,writeWindow);}
+  private deliver(reply:Reply,signal:AbortSignal,authority?:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>{
     if(!this.gate.active||!this.verified||this.closed)return Promise.resolve({status:'not-sent',code:'BILI_OWNER_CHANNEL_OFFLINE'});
     if(typeof authority!=='function'||reply.media)return Promise.resolve({status:'not-sent',code:reply.media?'BILI_OWNER_TEXT_ONLY':'BILI_OWNER_AUTHORITY_REQUIRED'});
     let value:BiliOwnerDelivery;try{this.guard();authority();value=this.store.prepareReply(reply,this.now());this.checkSource(value.plan);}catch(error){return Promise.resolve({status:'not-sent',code:biliOwnerCode(error,'BILI_OWNER_DELIVERY_INVALID')});}
     if(value.state!=='prepared')return Promise.resolve(result(value));const existing=this.sending.get(reply.id);if(existing)return existing;
-    const work=this.send(value,AbortSignal.any([signal,this.controller.signal]),authority).finally(()=>this.sending.delete(reply.id));this.sending.set(reply.id,work);return work;
+    const work=this.send(value,AbortSignal.any([signal,this.controller.signal]),authority,writeWindow).finally(()=>this.sending.delete(reply.id));this.sending.set(reply.id,work);return work;
   }
-  private async send(value:BiliOwnerDelivery,signal:AbortSignal,authority:()=>void):Promise<DeliveryResult>{let invoked=false;
+  private async send(value:BiliOwnerDelivery,signal:AbortSignal,authority:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>{let invoked=false;
     const guard=()=>{this.guard();signal.throwIfAborted();authority();this.checkSource(value.plan);};
-    try{guard();await this.verify(signal);guard();this.store.begin(value.plan.replyId,this.now());guard();invoked=true;
-      const response=BiliOwnerSendResultSchema.parse(await this.ports.transport.sendOwnerText({requestId:value.plan.requestId,text:value.plan.text,wireHash:value.plan.wireHash},signal,guard));
+    try{guard();await this.verify(signal);guard();this.store.begin(value.plan.replyId,this.now());guard();
+      const finishWrite=writeWindow?.();let response:z.infer<typeof BiliOwnerSendResultSchema>;
+      try{invoked=true;response=BiliOwnerSendResultSchema.parse(await this.ports.transport.sendOwnerText({requestId:value.plan.requestId,text:value.plan.text,wireHash:value.plan.wireHash},signal,guard));}finally{finishWrite?.();}
       if(response.status==='sent'){if(response.accountUid!==this.config.settings.accountUid||response.ownerUid!==this.config.settings.ownerUid||response.requestId!==value.plan.requestId||response.wireHash!==value.plan.wireHash)throw new Error('BILI_OWNER_RECEIPT_MISMATCH');this.store.confirm(value.plan.replyId,response.receiptId,this.now());}
       else if(response.status==='not-dispatched')this.store.notDispatched(value.plan.replyId,response.code,this.now());else this.store.unknown(value.plan.replyId,response.code,this.now());
     }catch(error){const latest=this.store.delivery(value.plan.replyId)!;if(latest.state==='sending'){if(invoked)this.store.unknown(value.plan.replyId,biliOwnerCode(error,'BILI_OWNER_DELIVERY_UNKNOWN'),this.now());else this.store.notDispatched(value.plan.replyId,biliOwnerCode(error,'BILI_OWNER_PRECHECK_FAILED'),this.now());}

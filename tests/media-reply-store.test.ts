@@ -32,10 +32,3 @@ test('freezing requires corresponding real leases and stays fixed through restar
     const file=join(f.directory,'media.sqlite');f.close();closed=true;const reopened=new MediaStore(file,{agentId:'fixture',profileId:'fixture'});try{assert.deepEqual(reopened.replies.exported(manifest.replyId)?.manifest,manifest);reopened.replies.settle(manifest.replyId,'unknown');assert.equal(reopened.replies.exported(manifest.replyId)?.state,'unknown');assert.throws(()=>reopened.replies.settle(manifest.replyId,'sent'),/STATE_CONFLICT/);}finally{reopened.close();}
   }finally{if(!closed)f.close();}
 });
-
-test('media v1 upgrade is explicit and preserves existing assets, hashes and source revisions',async()=>{
-  const f=await draftFixture(),file=join(f.directory,'media.sqlite');f.close();const db=new DatabaseSync(file);
-  const before=db.prepare('SELECT * FROM media_asset_revisions').all();db.exec('DROP TABLE media_reply_exports;DROP TABLE media_reply_heads;DROP TABLE media_reply_drafts;PRAGMA user_version=1;');db.close();const bytes=await readFile(file);
-  assert.throws(()=>new MediaStore(file,{agentId:'fixture',profileId:'fixture'}),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(file),bytes);
-  const migrated=new MediaStore(file,{agentId:'fixture',profileId:'fixture'},false,true);assert.deepEqual(migrated.replies.counts(),{drafts:0,exports:0});migrated.close();const after=new DatabaseSync(file);try{assert.deepEqual(after.prepare('SELECT * FROM media_asset_revisions').all(),before);assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,2);}finally{after.close();}
-});

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { outputContract } from './task-assessment.js';
+import { outputContract } from './task-review.js';
 
 const part=z.discriminatedUnion('type',[
   z.strictObject({type:z.literal('text'),text:z.string().min(1).max(32000).refine(text=>text.trim().length>0)}),

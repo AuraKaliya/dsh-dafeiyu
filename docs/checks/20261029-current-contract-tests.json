@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "release": "0.24.0",
+  "apiVersion": 4,
+  "command": "npm test",
+  "runId": "131d205a-be3b-4477-a09a-93da04ba391a",
+  "startedAt": "2026-10-28T19:29:39.069Z",
+  "finishedAt": "2026-10-28T19:37:40.384Z",
+  "passed": true,
+  "completed": true,
+  "counts": {
+    "tests": 1070,
+    "passed": 1067,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 3,
+    "todo": 0
+  },
+  "skipped": [
+    "selected local formal backends actually decode speech, run ASR and sound events, and parse a document",
+    "explicit real verifier accepts supported wording and rejects a changed visible fact",
+    "a publishable package installs with pnpm without private workspaces and runs the same cold-start/restart checks"
+  ],
+  "packages": {
+    "@dafeiyu/activity": "0.24.0",
+    "@dafeiyu/bilibili": "0.24.0",
+    "@dafeiyu/qq": "0.24.0",
+    "@dafeiyu/channel-simulator": "0.24.0",
+    "@dafeiyu/contracts": "0.24.0",
+    "@dafeiyu/core": "0.24.0",
+    "@dafeiyu/host": "0.24.0",
+    "@dafeiyu/journal": "0.24.0",
+    "@dafeiyu/media": "0.24.0",
+    "@dafeiyu/memory": "0.24.0",
+    "dsh-dafeiyu": "0.24.0",
+    "@dafeiyu/server-bootstrap": "0.24.0",
+    "@dafeiyu/server-executor": "0.24.0",
+    "@dafeiyu/server-runtime": "0.24.0",
+    "@dafeiyu/timeline": "0.24.0"
+  },
+  "checks": {
+    "build": true,
+    "testTypes": true,
+    "toolingTypes": true,
+    "dependencyGraph": true,
+    "diffWhitespace": true
+  },
+  "realModel": false,
+  "realPlatform": false,
+  "serverAccess": false,
+  "batches": [
+    {
+      "files": [
+        "build-tests/activity-authority.test.js",
+        "build-tests/activity-scheduler.test.js",
+        "build-tests/activity-store.test.js",
+        "build-tests/agent-flow.test.js",
+        "build-tests/autobiography.test.js",
+        "build-tests/b05-source-contract.test.js",
+        "build-tests/bili-browser.test.js",
+        "build-tests/bili-capabilities.test.js",
+        "build-tests/bili-diagnostics.test.js",
+        "build-tests/bili-foundation.test.js",
+        "build-tests/bili-interest-delivery.test.js",
+        "build-tests/bili-media.test.js"
+      ],
+      "runId": "150c0c4f-4d66-4b68-811f-40ba074e64f4",
+      "counts": {
+        "tests": 83,
+        "failed": 0,
+        "passed": 83,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 83,
+        "suites": 0
+      },
+      "durationMs": 42741.1408,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/bili-owner-channel-store.test.js",
+        "build-tests/bili-owner-channel.test.js",
+        "build-tests/bili-owner-production.test.js",
+        "build-tests/bili-task-boundary.test.js",
+        "build-tests/bili-timed-text.test.js",
+        "build-tests/capability-observation.test.js",
+        "build-tests/capability-resume.test.js",
+        "build-tests/compaction.test.js",
+        "build-tests/composition.test.js",
+        "build-tests/context-handoff.test.js",
+        "build-tests/context-plan.test.js",
+        "build-tests/context-recall.test.js"
+      ],
+      "runId": "1764c947-16b5-4d16-966b-9f54acc8e309",
+      "counts": {
+        "tests": 105,
+        "failed": 0,
+        "passed": 105,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 105,
+        "suites": 0
+      },
+      "durationMs": 24826.8142,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/context.test.js",
+        "build-tests/conversation-recovery.test.js",
+        "build-tests/core.test.js",
+        "build-tests/current-api.test.js",
+        "build-tests/current-storage.test.js",
+        "build-tests/current-task-delivery.test.js",
+        "build-tests/dsh-bridge-cancellation.test.js",
+        "build-tests/dsh-bridge.test.js",
+        "build-tests/execution-boundaries.test.js",
+        "build-tests/execution-memory-continuity.test.js",
+        "build-tests/execution-recovery.test.js",
+        "build-tests/execution.test.js"
+      ],
+      "runId": "fe42a65c-4749-433d-895d-057ef0f3f769",
+      "counts": {
+        "tests": 96,
+        "failed": 0,
+        "passed": 96,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 96,
+        "suites": 0
+      },
+      "durationMs": 31928.3521,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/executor-policy.test.js",
+        "build-tests/experience-lifecycle.test.js",
+        "build-tests/fragments.test.js",
+        "build-tests/harness-capabilities.test.js",
+        "build-tests/hash-stability.test.js",
+        "build-tests/host-activity-flow.test.js",
+        "build-tests/host-bili-flow.test.js",
+        "build-tests/host-bili-owner-configuration.test.js",
+        "build-tests/host-bili-owner-runtime.test.js",
+        "build-tests/host-bili-owner-storage.test.js",
+        "build-tests/host-bili-storage.test.js",
+        "build-tests/host-cli.test.js"
+      ],
+      "runId": "1e158b6b-c006-47a4-a1ab-963c9d7f938a",
+      "counts": {
+        "tests": 65,
+        "failed": 0,
+        "passed": 65,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 65,
+        "suites": 0
+      },
+      "durationMs": 30376.9829,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/host-executor-configuration.test.js",
+        "build-tests/host-executor-runtime.test.js",
+        "build-tests/host-executor-storage.test.js",
+        "build-tests/host-inline-model.test.js",
+        "build-tests/host-media-runtime.test.js",
+        "build-tests/host-media-storage.test.js",
+        "build-tests/host-memory-flow.test.js",
+        "build-tests/host-model-admission.test.js",
+        "build-tests/host-profile.test.js",
+        "build-tests/host-runtime.test.js",
+        "build-tests/installation.test.js",
+        "build-tests/lifecycle.test.js"
+      ],
+      "runId": "293746cf-5f5b-49b2-9e54-44830989434c",
+      "counts": {
+        "tests": 85,
+        "failed": 0,
+        "passed": 85,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 85,
+        "suites": 0
+      },
+      "durationMs": 31425.9711,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/local-owner.test.js",
+        "build-tests/media-analysis-cancel.test.js",
+        "build-tests/media-audio-service.test.js",
+        "build-tests/media-audio.test.js",
+        "build-tests/media-authority.test.js",
+        "build-tests/media-decoder.test.js",
+        "build-tests/media-documents.test.js",
+        "build-tests/media-files.test.js",
+        "build-tests/media-local-backends.test.js",
+        "build-tests/media-process.test.js",
+        "build-tests/media-reply-authority.test.js",
+        "build-tests/media-reply-pipeline.test.js"
+      ],
+      "runId": "0772924f-aa96-4ba9-9f7e-3a1081572a87",
+      "counts": {
+        "tests": 34,
+        "failed": 0,
+        "passed": 33,
+        "cancelled": 0,
+        "skipped": 1,
+        "todo": 0,
+        "topLevel": 34,
+        "suites": 0
+      },
+      "durationMs": 12044.3926,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/media-reply-store.test.js",
+        "build-tests/media-reply-tts.test.js",
+        "build-tests/media-store.test.js",
+        "build-tests/media-vision.test.js",
+        "build-tests/media-voice.test.js",
+        "build-tests/memory-analysis.test.js",
+        "build-tests/memory-boundary.test.js",
+        "build-tests/memory-experience.test.js",
+        "build-tests/memory-maintenance.test.js",
+        "build-tests/memory-retrieval-service.test.js",
+        "build-tests/memory-retrieval.test.js",
+        "build-tests/memory-store.test.js"
+      ],
+      "runId": "4bbd73b6-67d5-4a78-9ce1-fbc46efbd0ee",
+      "counts": {
+        "tests": 114,
+        "failed": 0,
+        "passed": 114,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 114,
+        "suites": 0
+      },
+      "durationMs": 34239.8389,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/memory.test.js",
+        "build-tests/native-delivery-store.test.js",
+        "build-tests/native-evidence.test.js",
+        "build-tests/native-media-expression.test.js",
+        "build-tests/native-summary-provenance.test.js",
+        "build-tests/native-task-data.test.js",
+        "build-tests/observation.test.js",
+        "build-tests/onebot-diagnostics.test.js",
+        "build-tests/phase-stream.test.js",
+        "build-tests/phase1-probes.test.js",
+        "build-tests/plugin-integration.test.js",
+        "build-tests/plugin-startup.test.js"
+      ],
+      "runId": "edd59feb-25fe-4186-8617-bcd63bb3b27d",
+      "counts": {
+        "tests": 65,
+        "failed": 0,
+        "passed": 65,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 65,
+        "suites": 0
+      },
+      "durationMs": 34200.8806,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/process-results.test.js",
+        "build-tests/provenance.test.js",
+        "build-tests/qq-cache.test.js",
+        "build-tests/qq-capabilities.test.js",
+        "build-tests/qq-delivery-ledger.test.js",
+        "build-tests/qq-delivery.test.js",
+        "build-tests/qq-dsh-tools.test.js",
+        "build-tests/qq-expression.test.js",
+        "build-tests/qq-group-packet.test.js",
+        "build-tests/qq-groups.test.js",
+        "build-tests/qq-history.test.js",
+        "build-tests/qq-media-delivery-ledger.test.js"
+      ],
+      "runId": "877363a4-3076-4224-a642-8c6500844f41",
+      "counts": {
+        "tests": 101,
+        "failed": 0,
+        "passed": 101,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 101,
+        "suites": 0
+      },
+      "durationMs": 22041.2188,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/qq-media-delivery.test.js",
+        "build-tests/qq-media-ingress.test.js",
+        "build-tests/qq-media-source.test.js",
+        "build-tests/qq-message-batch.test.js",
+        "build-tests/qq-phase2-flow.test.js",
+        "build-tests/qq-record-conversion.test.js",
+        "build-tests/qq-reply-delay.test.js",
+        "build-tests/qq-sticker-task.test.js",
+        "build-tests/qq-stickers.test.js",
+        "build-tests/qq-storage.test.js",
+        "build-tests/qq-task-acceptance.test.js",
+        "build-tests/qq-task-control.test.js"
+      ],
+      "runId": "e7cb3210-2d01-4456-974e-148f00f15d0a",
+      "counts": {
+        "tests": 67,
+        "failed": 0,
+        "passed": 67,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 67,
+        "suites": 0
+      },
+      "durationMs": 53378.3789,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/qq-task-delivery.test.js",
+        "build-tests/qq-task-expression.test.js",
+        "build-tests/qq-task-recovery.test.js",
+        "build-tests/qq-voice-task.test.js",
+        "build-tests/qq-wakeup.test.js",
+        "build-tests/qq.test.js",
+        "build-tests/recent-state.test.js",
+        "build-tests/recovery.test.js",
+        "build-tests/runtime-store.test.js",
+        "build-tests/semantic.test.js",
+        "build-tests/server-executor-headless-credentials.test.js",
+        "build-tests/server-executor-headless.test.js"
+      ],
+      "runId": "2aae3b38-2084-4550-8749-85a3c18a9465",
+      "counts": {
+        "tests": 115,
+        "failed": 0,
+        "passed": 115,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 115,
+        "suites": 0
+      },
+      "durationMs": 85170.9624,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/server-executor-runner.test.js",
+        "build-tests/server-executor-service.test.js",
+        "build-tests/server-executor-store.test.js",
+        "build-tests/server-executor-target-view.test.js",
+        "build-tests/server-executor-transport.test.js",
+        "build-tests/server-executor-windows.test.js",
+        "build-tests/server-launch-config.test.js",
+        "build-tests/server-launch-state.test.js",
+        "build-tests/server-production-factory.test.js",
+        "build-tests/server-runtime-budget.test.js",
+        "build-tests/server-runtime-memory-budget.test.js",
+        "build-tests/server-runtime-model-admission.test.js"
+      ],
+      "runId": "bb3b9464-1a86-4fd2-8b4a-0d736eef7e4a",
+      "counts": {
+        "tests": 90,
+        "failed": 0,
+        "passed": 90,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "topLevel": 90,
+        "suites": 0
+      },
+      "durationMs": 16094.534,
+      "cleanupBlocked": 0
+    },
+    {
+      "files": [
+        "build-tests/server-standing-authority.test.js",
+        "build-tests/task-review.test.js",
+        "build-tests/timeline-query.test.js",
+        "build-tests/timeline.test.js",
+        "build-tests/tool-receipt-view.test.js",
+        "build-tests/verifier-real-acceptance.test.js",
+        "tests/tooling/public-release.test.ts",
+        "tests/tooling/test-storage.test.ts"
+      ],
+      "runId": "ddaa8e47-0d78-49f8-a65a-4fda86ca3c72",
+      "counts": {
+        "tests": 50,
+        "failed": 0,
+        "passed": 48,
+        "cancelled": 0,
+        "skipped": 2,
+        "todo": 0,
+        "topLevel": 50,
+        "suites": 0
+      },
+      "durationMs": 19095.8771,
+      "cleanupBlocked": 0
+    }
+  ]
+}

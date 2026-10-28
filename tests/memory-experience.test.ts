@@ -4,18 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { MemoryStore, MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { experienceFixture } from './memory-experience-fixture.js';
-import { dropExperienceFixtureSchema } from './legacy-execution-fixture.js';
-
-test('v10 migration preserves old rows and remains idempotent; a failed additive migration rolls back',async()=>{
-  const h=await experienceFixture(),file=h.file;
-  const before=h.db.prepare('SELECT * FROM task_workspaces').all();h.close();
-  let db=new DatabaseSync(file);dropExperienceFixtureSchema(db);db.exec('PRAGMA user_version=10; CREATE TABLE experience_items(blocker TEXT)');db.close();
-  assert.throws(()=>new MemoryStore(file),/already exists/);db=new DatabaseSync(file);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,10);
-  assert.deepEqual(db.prepare('SELECT * FROM task_workspaces').all(),before);db.exec('DROP TABLE experience_items');db.close();
-  for(let i=0;i<2;i++){const memory=new MemoryStore(file);memory.close();}
-  db=new DatabaseSync(file);try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.deepEqual(db.prepare('SELECT * FROM task_workspaces').all(),before);
-    assert.equal(db.prepare('SELECT count(*) AS n FROM experience_items').get()?.n,0);assert.equal(db.prepare('SELECT count(*) AS n FROM memory_schema_migrations WHERE version=11').get()?.n,1);}finally{db.close();}
-});
 
 test('requests deduplicate exact intent and retain all admitted input roots; unexposed sources are rejected',async()=>{
   const h=await experienceFixture();try{
@@ -66,15 +54,5 @@ test('relations stay suggestions, same-entity stays held and self edges are reje
     assert.throws(()=>h.store.commit(h.access,id,[],[{kind:'supports',from:h.a,to:h.a,reason:'自我证明'}]),/INVALID_RELATION/);
     h.store.commit(h.access,id,[],[{kind:'same-entity',from:h.a,to:h.b,reason:'仅同名，不足以核验身份'}]);
     assert.equal((h.store.relations(h.access,id)[0] as {state:string}).state,'held');
-  }finally{h.close();}
-});
-
-test('task lifecycle requests survive replay and recovery without recursive maintenance',async()=>{
-  const h=await experienceFixture();try{const id=h.store.recordLifecycle(h.event,[h.a]);assert.ok(id);assert.equal(h.store.recordLifecycle(h.event,[h.a]),id);
-    assert.throws(()=>h.store.recordLifecycle({...h.event,goal:'篡改'}),/IDEMPOTENCY_CONFLICT/);
-    assert.equal(h.store.status(h.access,id)[0]?.state,'waiting-scheduler');assert.equal(h.store.snapshot(h.access,id).input.event?.operations[0]?.status,'failed');
-    assert.equal(h.store.recordLifecycle({...h.event,id:randomUUID(),motivation:{kind:'maintenance',basis:[]}}),null);
-    assert.equal(h.store.recordLifecycle({...h.event,id:randomUUID(),type:'run.running'}),null);
-    h.store.begin(h.access,id);assert.equal(h.store.recover(),1);assert.equal(h.store.snapshot(h.access,id).error,'PROCESS_INTERRUPTED');assert.throws(()=>h.store.begin(h.access,id),/STATE_CONFLICT/);
   }finally{h.close();}
 });

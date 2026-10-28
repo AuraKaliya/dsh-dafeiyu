@@ -16,7 +16,7 @@ export interface TaskExecutionFrame {
   refreshContexts?():Promise<void>;
   contextPlan?():Json;
   contextAudit?(data:Record<string,Json>):void;
-  assessmentTimeoutMs?:number;
+  reviewTimeoutMs?:number;
   mode:'task';sessionId:string;view:ExecutionView;persona:PersonaSnapshot;goal:string;inputs:readonly ExecutionInput[];
   actions:readonly NativeAction[];guard:()=>void;requestMaxBytes:number;outputReserveBytes:number;
   personaItems?:readonly ContextItem[];

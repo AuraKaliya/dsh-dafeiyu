@@ -47,8 +47,8 @@ test('the declared model window still rejects oversized history below the byte c
 });
 test('unified persona preparation cannot silently drop an already qualified selected personality',()=>{
   const runtime=new PersonaRuntime(ContextBudgetSchema.parse({assembly:{},regions:{'memory:growth':{maxBytes:1000}}})),id=randomUUID();
-  const entry:PreparedPersonaEntry={candidate:{id,version:1},contentRef:{kind:'memory',id,agentId:'fixture',scopeKey:'scope',version:1,revision:1,contentHash:'a'.repeat(64)},dependencies:[],item:item('qualified',1400)};
-  runtime.bind({ready:()=>true,prepare:()=>({stageRevision:1,selectionVersion:1,entries:[entry],omitted:0}),validate:()=>true});
+  const entry:PreparedPersonaEntry={memory:{id,version:1},contentRef:{kind:'memory',id,agentId:'fixture',scopeKey:'scope',version:1,revision:1,contentHash:'a'.repeat(64)},dependencies:[],item:item('qualified',1400)};
+  runtime.bind({ready:()=>true,read:()=>null,validateHistorical:()=>false,prepare:()=>({stageRevision:1,selectionVersion:1,entries:[entry],omitted:0}),validate:()=>true});
   const access:PersonaAccess={view:{runId:randomUUID(),taskId:null,scope:{kind:'conversation',agentId:'fixture',route:'scope'},origin:{kind:'message',inboundId:randomUUID(),conversation:{channel:'fixture',account:'local',kind:'group',id:'scope'}},signal:new AbortController().signal},producer:'fixture',operationId:randomUUID(),startedEventId:null,intentVersion:0,motivation:{kind:'unknown',basis:[]},inputs:[],admittedSources:[],guard:()=>{}};
   assert.throws(()=>runtime.prepareTarget(access),/PERSONA_CONTEXT_CAPACITY/);
 });

@@ -28,11 +28,10 @@ import * as QQ from '@dafeiyu/qq';
 import { openBiliOwnerChannel,BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_TASK_ACTIONS } from '@dafeiyu/bilibili/channel';
 import type { BiliOwnerChannel,BiliOwnerPorts } from '@dafeiyu/bilibili/channel';
 import * as Simulator from '@dafeiyu/channel-simulator';
-import { ExecutionRequestSchema,TaskAssessmentSchema } from '@dafeiyu/contracts';
+import { ExecutionRequestSchema,TaskReviewSchema } from '@dafeiyu/contracts';
 import { readFileSync,existsSync,writeFileSync,renameSync } from 'node:fs';
 import { join,resolve } from 'node:path';
 import { randomUUID,createHash } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
 import { parseDocument } from 'yaml';
 import { z } from 'zod';
 import { loadHostConfig,assertPaths,pluginConfig } from './configuration.js';
@@ -77,7 +76,7 @@ class FixedModel extends LlmAdapter {
   constructor(private readonly response:string){super();}
   override async resolveModel(provider:string,model:string):Promise<LlmResolvedModelInfo>{return {provider,id:model,name:model,systemPromptUpdate:'in-history',toolUpdate:'in-history',reasoning:{efforts:[{id:ReasoningEffortId('max'),name:'Max'}]}};}
   override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk>{options.signal?.throwIfAborted();
-    const text=String(options.sessionId).startsWith('dafeiyu-assessment-')?JSON.stringify(TaskAssessmentSchema.parse({goalStatus:'uncertain',summary:'离线脚本模型的固定阶段评价，仅验证程序流程。',evidenceIds:[],limitations:['未作真实模型质量验收'],unfinished:[],next:'deliver'})):this.response;
+    const text=String(options.sessionId).startsWith('dafeiyu-review-')?JSON.stringify(TaskReviewSchema.parse({goalStatus:'uncertain',summary:'离线脚本模型的固定阶段评价，仅验证程序流程。',evidenceIds:[],limitations:['未作真实模型质量验收'],unfinished:[],next:'deliver'})):this.response;
     yield {type:'block-start',index:0,blockType:'text'};yield {type:'text-delta',index:0,text};yield {type:'block-end',index:0,block:{type:'text',text}};yield {type:'finish',reason:{kind:'stop'}};}
 }
 const stableCode=(error:unknown,fallback='HOST_FAILED')=>error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:fallback;
@@ -186,25 +185,14 @@ export class ManagedHost {
     this.phase=this.health.some(p=>p.state==='degraded')?'degraded':'ready';}
   private biliHealth(){if(this.biliValue){const held=this.biliValue.health.diagnosticRequired,blocked=held||(this.biliValue.health.backoffUntil??0)>Date.now();this.plugin('bilibili',blocked?'degraded':'ready',held?'HOST_BILI_DIAGNOSTIC_REQUIRED':blocked?'HOST_BILI_BACKOFF':null);}}
   /** Missing optional IO must not turn retained private work into stale-source failures during global recovery. */
-  private biliOwnerPendingWork():boolean{
-    if(this.core.journal.list(['accepted','processing','reply-ready','sending']).some(item=>item.extensionId==='channel-bili-owner'))return true;
-    const db=new DatabaseSync(join(this.config.paths.core,'runtime.sqlite'),{readOnly:true});
-    try{return !!db.prepare("SELECT 1 FROM runs r JOIN execution_requests q ON q.id=r.request_key LEFT JOIN native_deliveries d ON d.run_id=r.id WHERE q.producer='bili-owner-tasks' AND (r.state IN ('accepted','queued','running','cancelling') OR d.state IN ('accepted','rendering','verifying','ready','sending') OR (r.state IN ('completed','waiting') AND d.id IS NULL AND ?=1)) LIMIT 1").get(pluginConfig(this.config,'channel-bili-owner')?.tasks.deliverResults?1:0);}
-    finally{db.close();}
-  }
+  private biliOwnerPendingWork(){return this.core.pendingChannelWork('channel-bili-owner','bili-owner-tasks',pluginConfig(this.config,'channel-bili-owner')?.tasks.deliverResults===true);}
   private biliOwnerHealth(){if(!this.biliOwnerValue)return;const status=this.biliOwnerValue.getStatus(),unknown=(status.counts.deliveries.unknown??0);
     const code=!status.bindingReady?'HOST_BILI_OWNER_HANDOVER_REQUIRED':status.bindingFault??(!status.verified?'HOST_BILI_OWNER_UNAVAILABLE':status.error??(unknown?'HOST_BILI_OWNER_UNCERTAIN':status.backoffUntil>Date.now()?'HOST_BILI_OWNER_BACKOFF':null));
     this.plugin('channel-bili-owner',code?'degraded':'ready',code);}
   private executorHealth(){if(this.executorValue){const unknown=(this.executorValue.health.counts.unknown??0)>0;this.plugin('server-executor',unknown?'degraded':'ready',unknown?'HOST_EXECUTOR_UNCERTAIN':null);}}
   private qqHealth(){const status=this.qqValue?.getStatus().groupSync;if(!status)return;
     if(status.enabled&&(status.state!=='current'||status.error))this.plugin('channel-qq','degraded',status.error??'GROUP_SYNC_UNAVAILABLE');else this.plugin('channel-qq','ready');}
-  private outbox(){let count=0;for(const [file,tables] of [[join(this.config.paths.core,'runtime.sqlite'),['runtime_outbox']],
-    [join(this.config.paths.memory,'memory.sqlite'),['outbox','execution_memory_outbox']],[join(this.config.paths.memory,'analysis.sqlite'),['audit_outbox']],
-    [join(this.config.paths.memory,'working.sqlite'),['outbox']],[join(this.config.paths.memory,'feedback.sqlite'),['outbox']]] as const){
-    if(!existsSync(file))continue;const db=new DatabaseSync(file,{readOnly:true});try{for(const table of tables)if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))count+=Number(db.prepare(`SELECT count(*) AS n FROM ${table} WHERE delivered=0`).get()?.n);}finally{db.close();}}
-    const activityFile=join(this.config.paths.core,'activity.sqlite');if(existsSync(activityFile)){const db=new DatabaseSync(activityFile,{readOnly:true});try{count+=Number(db.prepare('SELECT count(*) AS n FROM activity_outbox WHERE acknowledged=0').get()?.n);}finally{db.close();}}
-    const biliFile=join(this.config.paths.core,'bilibili.sqlite');if(existsSync(biliFile)){const db=new DatabaseSync(biliFile,{readOnly:true});try{count+=Number(db.prepare('SELECT count(*) AS n FROM bili_outbox WHERE delivered=0').get()?.n);}finally{db.close();}}
-    const mediaFile=join(this.config.paths.core,'media.sqlite');if(existsSync(mediaFile)){const db=new DatabaseSync(mediaFile,{readOnly:true});try{count+=Number(db.prepare('SELECT count(*) AS n FROM media_outbox WHERE delivered=0').get()?.n);}finally{db.close();}}return count;}
+  private outbox(){return (this.coreValue?.pendingEvents()??0)+(this.memoryValue?.pendingEvents()??0)+(this.activityValue?.pendingEvents()??0)+(this.mediaValue?.pendingEvents()??0)+(this.biliValue?.pendingEvents()??0);}
   snapshot():HostSnapshot{const core=this.coreValue?.getStatus(),qq=this.qqValue?.getStatus();return {schemaVersion:1,profileId:this.config.config.profileId,agentId:this.config.config.agent.id,instanceId:this.instanceId,pid:process.pid,at:new Date().toISOString(),configHash:this.config.hash,foundationHash:this.config.foundation.hash,
       phase:this.phase,mode:this.mode,accepting:['ready','degraded'].includes(this.phase)&&!!this.coreValue?.accepting,error:this.error,plugins:this.health.map(p=>({...p})),features:this.coreValue?.capabilityManifest().features??[],
       services:{memory:this.memoryValue?.runtimeHealth()??null,activity:this.activityValue?.health??null,media:this.mediaValue?.health??null,bilibili:this.biliValue?.health??null,...(this.executorValue?{executor:this.executorValue.health}:{}),...(this.biliOwnerValue?{biliOwner:this.biliOwnerValue.getStatus()}:{}),taskDelivery:core?.nativeDelivery??null,qq:qq?{state:qq.state,groupSync:qq.groupSync.state,groupError:qq.groupSync.error,effectiveGroups:qq.groupSync.effectiveIds.length,lastGroupSync:qq.groupSync.lastSuccessAt,capabilities:qq.capabilities.registered,tasks:{enabled:qq.tasks.enabled,registered:qq.tasks.registered,deliverResults:qq.tasks.deliverResults},delivery:qq.delivery}:null},

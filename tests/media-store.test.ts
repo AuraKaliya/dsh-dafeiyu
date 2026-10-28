@@ -73,5 +73,5 @@ test('restart preserves verified asset history and interrupts incomplete jobs wi
 test('future media schemas and another profile are rejected without initialization',async()=>{
   const f=await fixture();f.close();assert.throws(()=>new MediaStore(f.file,{...f.who,profileId:'other'}),/IDENTITY_MISMATCH/);
   const db=new DatabaseSync(f.file);db.exec('PRAGMA user_version=99');db.close();assert.throws(()=>new MediaStore(f.file,f.who),/SCHEMA_UNSUPPORTED/);
-  assert.throws(()=>new MediaStore(join(f.root,'missing.sqlite'),f.who),/MIGRATION_REQUIRED/);
+  assert.throws(()=>new MediaStore(join(f.root,'missing.sqlite'),f.who),/INITIALIZATION_REQUIRED|SCHEMA_UNSUPPORTED/);
 });

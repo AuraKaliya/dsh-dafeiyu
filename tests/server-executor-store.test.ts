@@ -24,7 +24,7 @@ const unknown=()=>ExecutorTerminalSchema.parse({state:'unknown',effects:'unknown
 
 test('executor storage requires explicit initialization, exact identity and supported schema',async()=>{
   const root=await mkdtemp(join(testTempDir(),'executor-init-')),file=join(root,'executor.sqlite'),identity={agentId:'fixture',profileId:'fixture'};
-  assert.throws(()=>new ExecutorStore(file,identity),/MIGRATION_REQUIRED/);assert.equal(existsSync(file),false);
+  assert.throws(()=>new ExecutorStore(file,identity),/INITIALIZATION_REQUIRED|SCHEMA_UNSUPPORTED/);assert.equal(existsSync(file),false);
   const store=new ExecutorStore(file,identity,true);store.close();const reopened=new ExecutorStore(file,identity);assert.equal(reopened.unresolved(),0);reopened.close();
   assert.throws(()=>new ExecutorStore(file,{...identity,agentId:'other'}),/IDENTITY_MISMATCH/);
   const db=new DatabaseSync(file);try{assert.equal(db.prepare('PRAGMA application_id').get()?.application_id,EXECUTOR_APPLICATION_ID);assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,EXECUTOR_SCHEMA_VERSION);

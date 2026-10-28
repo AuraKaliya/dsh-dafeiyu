@@ -1,7 +1,8 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import { z } from 'zod';
 import type { MemoryBoundaryPolicy } from '@dafeiyu/contracts';
 
-export const MEMORY_VERSION = '0.15.0';
+export const MEMORY_VERSION = RELEASE_VERSION;
 
 export const kindSchema = z.enum(['experience', 'knowledge', 'preference', 'procedure']);
 export const claimSchema = z.enum(['observation', 'self_report', 'reported_claim', 'inference']);

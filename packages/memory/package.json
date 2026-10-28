@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/memory",
-  "version": "0.15.0",
+  "version": "0.24.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -32,10 +32,10 @@
     }
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.15.0",
-    "@dafeiyu/core": "0.15.0",
-    "@dafeiyu/journal": "0.4.0",
-    "@dafeiyu/timeline": "0.8.0",
+    "@dafeiyu/contracts": "0.24.0",
+    "@dafeiyu/core": "0.24.0",
+    "@dafeiyu/journal": "0.24.0",
+    "@dafeiyu/timeline": "0.24.0",
     "zod": "4.4.3"
   },
   "peerDependencies": {

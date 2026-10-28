@@ -15,7 +15,7 @@ const rules='依据程序提供的当前能力与实际结果选择方法。工�
 export class HarnessRuntime {
   private readonly sections=new Map<string,number>();
   private readonly standardSections=new Set(['harness:identity','deployment:persona-prefix','deployment:persona-suffix','tools:ptc-only','tools:sdk',
-    'dafeiyu-persona','dafeiyu-execution-rules','dafeiyu-compaction-rules','dafeiyu-harness-principles']);
+    'dafeiyu-persona','dafeiyu-memory-habit','dafeiyu-execution-rules','dafeiyu-compaction-rules','dafeiyu-harness-principles']);
   constructor(private readonly configured:()=>Json=()=>null){}
   /** Program-only registration for trusted deployment guidance; never accepted through a tool. */
   allowSection(name:string):()=>void {if(!/^[a-z][a-z0-9:._-]{0,159}$/.test(name))throw new Error('INVALID_HARNESS_SECTION');

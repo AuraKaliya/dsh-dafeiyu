@@ -25,16 +25,16 @@ export class PersonaRuntime {
   constructor(private readonly config:z.output<typeof contextConfigSchema>){}
   bind(provider:MemoryGrowthProvider){
     if(this.provider)throw new Error('DUPLICATE_PROVIDER');
-    const bound={ready:provider.ready.bind(provider),prepare:provider.prepare.bind(provider),validate:provider.validate.bind(provider)};
+    const bound={ready:provider.ready.bind(provider),prepare:provider.prepare.bind(provider),validate:provider.validate.bind(provider),read:provider.read.bind(provider),validateHistorical:provider.validateHistorical.bind(provider)};
     this.provider=bound;return ()=>{if(this.provider===bound)this.provider=undefined;};
   }
   get configured(){return !!this.provider;}
-  get ready(){return !this.provider||this.provider.ready();}
+  get ready(){return !!this.provider&&this.provider.ready();}
   private select(access:PersonaAccess){
-    access.guard();const provider=this.provider;if(provider&&!provider.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
-    const prepared=provider?.prepare(access),entries:PreparedPersonaEntry[]=[];
+    access.guard();const provider=this.provider;if(!provider?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
+    const prepared=provider.prepare(access),entries:PreparedPersonaEntry[]=[];
     const limit=Math.min(this.config.maxBytes,this.config.regions['memory:growth']?.maxBytes??4000);
-    for(const entry of prepared?.entries??[]){
+    for(const entry of prepared.entries){
       if(!provider?.validate(access,entry))throw new Error('SOURCE_STALE');
       entries.push({...structuredClone(entry),item:ContextItemSchema.parse(entry.item)});
       if(Buffer.byteLength(JSON.stringify({owner:'memory',region:'growth',kind:'working-state',items:entries.map(value=>value.item)}))>limit)throw new Error('PERSONA_CONTEXT_CAPACITY');
@@ -52,9 +52,9 @@ export class PersonaRuntime {
     guard();if(this.active.has(run.id))throw new Error('RUN_ALREADY_PREPARED');
     const selected=this.select(this.access(run,inputs,signal,guard));
     const manifest=PersonaManifestSchema.parse({...foundationManifest(run,foundation,model),
-      stageRevision:selected.prepared?.stageRevision??0,selectionVersion:selected.prepared?.selectionVersion??0,
-      stageStatus:selected.entries.length?'selected':selected.provider?'empty':'not-configured',
-      omittedCandidates:selected.prepared?.omitted??0,entries:selected.entries.map(identity),
+      stageRevision:selected.prepared.stageRevision,selectionVersion:selected.prepared.selectionVersion,
+      stageStatus:selected.entries.length?'selected':'empty',
+      omittedCandidates:selected.prepared.omitted,entries:selected.entries.map(identity),
       policyVersion:runtimeHash({source:'memory',projection:'explicit-self-understanding'})});
     const result:RunPersona={manifest,items:selected.entries.map(entry=>entry.item),projectionKey:runtimeHash({foundation:foundation.version,entries:manifest.entries}),
       guard:selected.guard,dispose:()=>{if(this.active.get(run.id)===result)this.active.delete(run.id);}};
@@ -67,14 +67,13 @@ export class PersonaRuntime {
   }
   historical(access:PersonaAccess,dependency:Extract<SourceDependency,{kind:'context'}>){
     const provider=this.provider;if(!provider?.ready())return false;
-    const entry=provider.prepare(access).entries.find(entry=>entry.item.id===dependency.id&&entry.item.version===dependency.version&&digestSource(JSON.stringify([entry.item.text,entry.item.sources]))===dependency.hash);
-    return !!entry&&provider.validate(access,entry);
+    return provider.validateHistorical(access,dependency);
   }
   current(runId:string){return this.active.get(runId);}
   validateStored(run:StoredRun,manifest:PersonaManifest,inputs:readonly ExecutionInput[],signal:AbortSignal,guard:()=>void){
     guard();if(!manifest.entries.length)return;const provider=this.provider;if(!provider?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
-    const access=this.access(run,inputs,signal,guard),prepared=provider.prepare(access);
-    for(const stored of manifest.entries){const entry=prepared.entries.find(value=>runtimeHash(identity(value))===runtimeHash(stored));
-      if(!entry||!provider.validate(access,entry))throw new Error('SOURCE_STALE');}
+    const access=this.access(run,inputs,signal,guard);
+    for(const stored of manifest.entries){const entry=provider.read(access,stored.contentRef);
+      if(!entry||runtimeHash(identity(entry))!==runtimeHash(stored)||!provider.validate(access,entry))throw new Error('SOURCE_STALE');}
   }
 }

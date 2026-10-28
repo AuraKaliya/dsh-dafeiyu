@@ -1,27 +1,122 @@
 {
   "schemaVersion": 1,
   "profileId": "qq-local-development",
-  "agent": {"id": "dafeiyu"},
-  "paths": {"core": "../.runtime/qq-local-development/core", "memory": "../.runtime/qq-local-development/memory", "sessions": "../.runtime/qq-local-development/sessions", "query": "../.runtime/qq-local-development/query.sqlite", "channels": {"channel-qq": "../.runtime/qq-local-development/qq"}},
-  "modelRoutes": {"chat": {"provider": "local-test", "model": "scripted"}},
-  "persona": {"fixedFile": "./persona.test.md", "kind": "test"},
+  "agent": {
+    "id": "dafeiyu"
+  },
+  "paths": {
+    "core": "../.runtime/qq-local-development/core",
+    "memory": "../.runtime/qq-local-development/memory",
+    "sessions": "../.runtime/qq-local-development/sessions",
+    "query": "../.runtime/qq-local-development/query.sqlite",
+    "channels": {
+      "qq": "../.runtime/qq-local-development/qq"
+    }
+  },
+  "modelRoutes": {
+    "chat": {
+      "provider": "local-test",
+      "model": "scripted"
+    }
+  },
+  "persona": {
+    "fixedFile": "./persona.test.md",
+    "kind": "test"
+  },
   "plugins": [
-    {"id": "model-scripted", "required": true},
-    {"id": "timeline", "required": true, "config": {"execution": true}},
-    {"id": "memory", "required": true, "config": {"sourceTracking": true}},
-    {"id": "channel-qq", "required": true, "config": {
-      "botId": "12345678", "ownerId": "87654321", "groupIds": ["11223344"],
-      "naturalNames": ["大肥鱼", "蓝色大肥鱼"],
-      "capabilities": {"enabled": true},
-      "tasks": {"enabled": true, "policyId": "qq-task", "deliverResults": true},
-      "groupSync": {"enabled": true, "mode": "allowlist", "intervalMs": 30000, "maxStaleMs": 120000},
-      "httpURL": "http://127.0.0.1:13000/", "wsURL": "ws://127.0.0.1:13001/",
-      "tokenFile": "../.runtime/qq-local-development/onebot.token"
-    }}
+    {
+      "id": "model-scripted",
+      "required": true
+    },
+    {
+      "id": "timeline",
+      "required": true,
+      "config": {
+        "execution": true
+      }
+    },
+    {
+      "id": "memory-growth",
+      "required": true,
+      "config": {}
+    },
+    {
+      "id": "qq",
+      "required": true,
+      "config": {
+        "botId": "12345678",
+        "ownerId": "87654321",
+        "groupIds": [
+          "11223344"
+        ],
+        "naturalNames": [
+          "大肥鱼",
+          "蓝色大肥鱼"
+        ],
+        "capabilities": {
+          "enabled": true
+        },
+        "tasks": {
+          "enabled": true,
+          "policyId": "qq-task",
+          "deliverResults": true
+        },
+        "groupSync": {
+          "enabled": true,
+          "mode": "allowlist",
+          "intervalMs": 30000,
+          "maxStaleMs": 120000
+        },
+        "httpURL": "http://127.0.0.1:13000/",
+        "wsURL": "ws://127.0.0.1:13001/",
+        "tokenFile": "../.runtime/qq-local-development/onebot.token"
+      }
+    }
   ],
   "authorityPolicies": [
-    {"id": "local-task", "producers": ["host-cli"], "actions": ["dafeiyu_task_intent"], "allowLocalWrite": false},
-    {"id": "conversation", "producers": ["channel-qq"], "actions": ["qq_groups", "qq_browse", "qq_observe_select", "qq_task_submit", "qq_task_status", "qq_task_control"], "allowLocalWrite": true},
-    {"id": "qq-task", "producers": ["qq-tasks"], "actions": ["qq_groups", "qq_browse", "qq_observe_select", "dafeiyu_task_intent", "dafeiyu_task_object", "dafeiyu_execution_source_open", "dafeiyu_execution_contribute", "dafeiyu_execution_select"], "allowLocalWrite": true, "resources": [], "sourceRules": []}
+    {
+      "id": "local-task",
+      "producers": [
+        "host-cli"
+      ],
+      "actions": [
+        "dafeiyu_task_intent"
+      ],
+      "allowLocalWrite": false
+    },
+    {
+      "id": "conversation",
+      "producers": [
+        "channel-qq"
+      ],
+      "actions": [
+        "qq_groups",
+        "qq_browse",
+        "qq_observe_select",
+        "qq_task_submit",
+        "qq_task_status",
+        "qq_task_control"
+      ],
+      "allowLocalWrite": true
+    },
+    {
+      "id": "qq-task",
+      "producers": [
+        "qq-tasks"
+      ],
+      "actions": [
+        "qq_groups",
+        "qq_browse",
+        "qq_observe_select",
+        "dafeiyu_task_intent",
+        "dafeiyu_task_object",
+        "dafeiyu_execution_source_open",
+        "dafeiyu_execution_contribute",
+        "dafeiyu_execution_select"
+      ],
+      "allowLocalWrite": true,
+      "resources": [],
+      "sourceRules": []
+    }
   ]
 }

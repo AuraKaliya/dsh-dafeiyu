@@ -1,11 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { redactContent,redactJson,FeedbackMetaSchema,PersonaSourceRefSchema,ActionOutcomeSchema,messageDisplayText } from '@dafeiyu/contracts';
+import { redactContent,redactJson,ExecutionToolReceiptSchema,PersonaSourceRefSchema,ActionOutcomeSchema,messageDisplayText } from '@dafeiyu/contracts';
 import type { SourceDependency,SourcePolicy,CompactionScope,ContextItem } from '@dafeiyu/contracts';
 import type { MemoryStore } from './store.js';
 import type { WorkingMemory } from './working.js';
-import type { ToolFeedbackArchive } from './feedback.js';
 import { memoryRefPattern,sourceVersionSchema,sourceFenceSchema } from './types.js';
 
 const digest=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -13,8 +12,7 @@ const memoryView=z.object({id:z.string(),revision:z.number(),version:z.number(),
 const scoped=(scope:CompactionScope)=>({agentId:scope.agentId,route:scope.route});
 /** Checks authoritative stores, never a model-authored citation or an index's cached state. */
 export class MemorySourcePolicy implements SourcePolicy {
-  constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly working:WorkingMemory|null,
-    private readonly feedback:ToolFeedbackArchive|null,private readonly epoch:(scope:CompactionScope)=>string){}
+  constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly working:WorkingMemory|null){}
   private missing(scope:CompactionScope):SourceDependency[]{return [{...scoped(scope),kind:'unavailable',reason:'source-unavailable'}];}
   private match(scope:CompactionScope,sourceRef:string){return (ref:string)=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,sourceRef,ref);}
   private inboundMatch(scope:CompactionScope,id:string){return (ref:string)=>this.ctx.dafeiyuTimeline.matchesInboundSource(scope,ref,id);}
@@ -79,16 +77,7 @@ export class MemorySourcePolicy implements SourcePolicy {
       }
       if(['dafeiyu_memory_reflect','dafeiyu_memory_self_update','dafeiyu_memory_self_withdraw','qq_groups','qq_observe_select','dafeiyu_media_select','dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_reply','dafeiyu_media_reply_status','qq_sticker_collect','qq_sticker_use','qq_sticker_manage'].includes(name))return [];
       if(name==='dafeiyu_source_open'||name.includes('_deleted_')||name==='dafeiyu_memory_analysis_open'
-        ||name==='dafeiyu_tool_feedback_open'||/deleted_lookup_only|historical_evidence_only/.test(text))return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];
-      const feedback=z.object({dafeiyuFeedback:FeedbackMetaSchema}).safeParse(meta);
-      if(feedback.success){
-        const witness=feedback.data.dafeiyuFeedback.witness;
-        if(witness.view!=='brief'||witness.mode!=='normal')return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];
-        const record=this.feedback?.sourceRecord(scope,witness.id);if(!record||record.version!==witness.version||record.archive.hash!==witness.hash)return this.missing(scope);
-        return [{...scoped(scope),kind:'feedback',id:witness.id,version:witness.version,hash:witness.hash},
-          ...record.archive.dependencies.flatMap(source=>source.evidence.kind==='memory'?this.roots(scope,source.evidence.id,source.evidence.revision)
-            :[this.timeline(scope,source.evidence.ref,source.evidence.contentHash)])];
-      }
+        ||/deleted_lookup_only|historical_evidence_only/.test(text))return [{...scoped(scope),kind:'ephemeral',traceId:scope.traceId}];
       if(['dafeiyu_memory_open','dafeiyu_memory_search','dafeiyu_memory_recall'].includes(name)){
         const result=z.object({item:memoryView.optional(),items:z.array(memoryView).optional()}).parse(data);
         const refs=result.item?[result.item]:result.items??[];
@@ -105,18 +94,21 @@ export class MemorySourcePolicy implements SourcePolicy {
         'dafeiyu_memory_working_set','dafeiyu_memory_context_select','dafeiyu_memory_context_retrieve','dafeiyu_memory_context_clear',
         'dafeiyu_memory_context_status','dafeiyu_memory_analyze','dafeiyu_memory_analysis_status','dafeiyu_memory_analysis_cancel',
         'dafeiyu_tool_feedback_delete','dafeiyu_tool_feedback_restore'].includes(name))return [];
-      return [{...scoped(scope),kind:'unavailable' as const,reason:'untracked-tool-source'}];
+      const receipt=z.object({dafeiyuExecution:ExecutionToolReceiptSchema}).safeParse(meta);
+      if(receipt.success){const r=receipt.data.dafeiyuExecution,dependency:Extract<SourceDependency,{kind:'execution-operation'}>={...scoped(scope),kind:'execution-operation',runId:r.runId,operationId:r.operationId,hash:r.outcomeHash,inputHash:r.inputHash};
+        if(this.ctx.dafeiyu.operationDependencyCurrent(scope,dependency))return [dependency];}
+      return this.missing(scope);
     }catch{return this.missing(scope);}
   }
   validate(scope:CompactionScope,dep:SourceDependency):boolean {
     if(dep.agentId!==scope.agentId||dep.route!==scope.route)return false;
     try{switch(dep.kind){
+      case 'execution-operation':return this.ctx.dafeiyu.operationDependencyCurrent(scope,dep);
       case 'capability':return this.ctx.dafeiyu.capabilityObservationCurrent(scope,dep.ref);
       case 'memory':{const item=this.memory.read(scope,dep.id,'normal',dep.revision);return !!item&&item.version===dep.version&&item.contentHash===dep.hash;}
       case 'inbound':{const text=this.message(scope,dep.id),match=this.inboundMatch(scope,dep.id);return text!==null&&digest(text)===dep.hash&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
       case 'timeline':{const match=this.match(scope,dep.ref);return this.ctx.dafeiyuTimeline.checkArchivedSource(scope,dep.ref,dep.hash)&&!this.memory.suppressedEvidence(scope,dep.hash,match)&&this.memory.sourceFence(scope,dep.hash,match)===dep.fence;}
       case 'working':{const item=this.working?.sourceItem(scope,dep.id);return !!item&&item.taskId===dep.taskId&&item.revision===dep.revision&&item.hash===dep.hash;}
-      case 'feedback':{const item=this.feedback?.sourceRecord(scope,dep.id);return !!item&&item.version===dep.version&&item.archive.hash===dep.hash;}
       case 'ephemeral':return dep.traceId===scope.traceId;
       default:return false;
     }}catch{return false;}

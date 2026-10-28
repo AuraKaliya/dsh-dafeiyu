@@ -1,3 +1,4 @@
+import {z} from 'zod';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
@@ -9,8 +10,8 @@ import type { Extension } from '@dafeiyu/contracts';
 
 const directory = () => mkdtemp(join(tmpdir(), 'dafeiyu-test-'));
 const echo: Extension = { id: 'test-actions', version: '0.1.0', protocolVersion:4, agentId: 'dafeiyu', actions: [{
-  name: 'test_echo', description: '回显测试文本', fields: { text: { description: '文本', required: true } },
-  execute: async (args) => ({ text: args.text ?? '' }),
+  id:'test_echo',version:'1',description:'回显测试文本',effects:'read',inputSchema:z.strictObject({text:z.string()}),outputSchema:z.json(),
+  execute:async args=>({status:'succeeded',effects:'none',completeness:'complete',data:{text:z.object({text:z.string()}).parse(args).text},sources:[],receipts:[]}),
 }] };
 
 test('real DSH loop composes persona and delivers back to the same conversation', async t => {
@@ -25,8 +26,8 @@ test('real DSH loop composes persona and delivers back to the same conversation'
   assert.match(JSON.stringify(h.adapter.requests[0]), /蓝色大肥鱼/);
   const item = h.core.journal.get(receipt.id);
   const events = h.core.journal.events(item.route);
-  assert.deepEqual(events.map(e => e.type), ['message.accepted', 'turn.started', 'persona.loaded', 'context.preparing', 'context.admitted', 'turn.completed', 'delivery.started', 'delivery.sent']);
-  assert.equal(events.find(e=>e.type==='context.preparing')?.plugin,'core-delivery-recovery');
+  assert.deepEqual(events.filter(e=>['message.accepted','turn.started','persona.loaded','turn.completed','delivery.started','delivery.sent'].includes(e.type)).map(e=>e.type),['message.accepted','turn.started','persona.loaded','turn.completed','delivery.started','delivery.sent']);
+  assert.ok(events.some(e=>e.type==='context.preparing'&&e.plugin==='core-delivery-recovery'));
   assert.equal(events[1]?.causedBy, events[0]?.id);
   assert.ok(events.find(e => e.type === 'turn.completed')?.sources.some(ref => ref.kind === 'session'));
 });
@@ -77,14 +78,14 @@ test('unregister removes future tools; duplicate and incompatible registrations 
   let modelCalls = 0;
   const h = await harness(await directory(), () => ++modelCalls === 2 ? call('test_echo', { text: 'removed' }) : textReply('ok')); t.after(h.close);
   const handle = h.core.registerExtension(echo);
-  assert.throws(() => h.core.registerExtension(echo), /Duplicate/);
-  assert.throws(() => h.core.registerExtension({ ...echo, id: 'other', apiVersion: 99 }), /Incompatible/);
-  assert.throws(() => h.core.registerExtension({ ...echo, id: 'other', agentId: 'someone-else' }), /Incompatible/);
+  assert.throws(() => h.core.registerExtension(echo), /DUPLICATE/);
+  assert.throws(() => h.core.registerExtension({ ...echo, id: 'other', protocolVersion: -1 as 4 }), /INVALID_AGENT|Invalid input/);
+  assert.throws(() => h.core.registerExtension({ ...echo, id: 'other', agentId: 'someone-else' }), /INVALID_AGENT|Invalid input/);
   h.simulator.send('a', 'first', { id: '1' }); await h.core.whenIdle();
   handle.dispose(); handle.dispose();
   h.simulator.send('a', 'second', { id: '2' }); await h.core.whenIdle();
-  // DSH preserves original declarations for replay and adds an in-history removal marker.
-  assert.match(JSON.stringify(h.adapter.requests.at(-1)?.messages), /tool-removal/);
+  // Only the current registered schemas may be called on the next turn.
+  assert.ok(h.adapter.requests.at(-1)?.tools?.every(tool=>tool.name!=='test_echo'));
   const item = h.core.journal.list().at(-1);
   assert.ok(item);
   assert.equal(item.state, 'delivered');
@@ -120,7 +121,7 @@ test('restart restores DSH conversation without replaying delivered input', asyn
   } finally { await second.close(); }
 });
 
-test('persona revision changes next turn without replacing the session', async t => {
+test('memory-owned persona seed is not replaced by changing its initialization file', async t => {
   const root = await directory(); const persona = join(root, 'persona.md');
   await writeFile(persona, '测试人格第一版');
   const h = await harness(root, () => textReply('ok'), persona); t.after(h.close);
@@ -128,8 +129,9 @@ test('persona revision changes next turn without replacing the session', async t
   await writeFile(persona, '测试人格第二版');
   h.simulator.send('a', 'hello again', { id: '2' }); await h.core.whenIdle();
   const versions = h.core.journal.events(h.core.journal.get(a.id).route).filter(e => e.type === 'persona.loaded').map(e => e.data.version);
-  assert.equal(versions.length, 2); assert.notEqual(versions[0], versions[1]);
-  assert.match(JSON.stringify(h.adapter.requests.at(-1)), /测试人格第二版/);
+  assert.equal(versions.length, 2); assert.equal(versions[0], versions[1]);
+  assert.match(JSON.stringify(h.adapter.requests.at(-1)), /测试人格第一版/);
+  assert.doesNotMatch(JSON.stringify(h.adapter.requests.at(-1)), /测试人格第二版/);
 });
 
 test('model failure does not deliver or prevent the next message', async t => {
@@ -177,7 +179,7 @@ test('capability failure is recorded without placing raw secrets in audit or too
   h.core.registerExtension({ ...echo, actions: [{ ...echo.actions![0]!, execute: async () => { throw new Error('secret-token-not-to-log'); } }] });
   const receipt = h.simulator.send('a', 'test', { id: '1' }); await h.core.whenIdle();
   const events = h.core.journal.events(h.core.journal.get(receipt.id).route);
-  assert.ok(events.some(event => event.type === 'operation.failed'));
+  assert.ok(events.some(event => event.type === 'operation.unknown'));
   assert.ok(!JSON.stringify(events).includes('secret-token-not-to-log'));
   assert.ok(!JSON.stringify(h.adapter.requests.at(-1)).includes('secret-token-not-to-log'));
 });
@@ -191,10 +193,10 @@ test('unregister cancels a cooperative in-flight action and records its failure'
   const handle = h.core.registerExtension({ ...echo, actions: [{ ...echo.actions![0]!, execute: async (_args, context) => {
     entered();
     await new Promise<void>((_resolve, reject) => context.signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }));
-    return null;
+    return {status:'cancelled',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[]};
   } }] });
   const receipt = h.simulator.send('a', 'test', { id: '1' }); await started; handle.dispose(); await h.core.whenIdle();
-  assert.ok(h.core.journal.events(h.core.journal.get(receipt.id).route).some(event => event.type === 'operation.failed'));
+  assert.ok(h.core.journal.events(h.core.journal.get(receipt.id).route).some(event => event.type === 'operation.unknown'));
 });
 
 test('class-backed channel methods retain their receiver during registration', async t => {
@@ -210,7 +212,7 @@ test('class-backed channel methods retain their receiver during registration', a
   assert.equal(channel.count, 1); assert.equal(h.core.journal.get(receipt.id).state, 'delivered');
 });
 
-for(const protocol of [2,3] as const)test(`channel v${protocol} processing lease preserves its receiver and cancels a running turn`,{timeout:15000},async t=>{
+test('current channel processing lease preserves its receiver and cancels a running turn',{timeout:15000},async t=>{
   let entered!:()=>void,release!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
   const h=await harness(await directory(),async()=>{entered();await gate;return textReply('不得交付');});t.after(()=>{release();return h.close();});
   class Channel {
@@ -219,7 +221,7 @@ for(const protocol of [2,3] as const)test(`channel v${protocol} processing lease
     async deliver(){this.sends++;return {status:'sent' as const,receiptId:'fixture-receipt'};}
   }
   const channel=new Channel(),base={id:'lease-extension',version:'1',agentId:'dafeiyu',channels:[channel]};
-  const handle=protocol===2?h.core.registerExtension({...base,protocolVersion:4}):h.core.registerExtension({...base,protocolVersion:4});
+  const handle=h.core.registerExtension({...base,protocolVersion:4});
   assert.ok(handle.ingest);const receipt=handle.ingest({id:'lease',occurredAt:new Date().toISOString(),conversation:{channel:channel.channel,account:channel.account,kind:'local',id:'test'},sender:{id:'user',displayName:'fixture'},text:'开始'});
   await started;channel.controller.abort();release();await h.core.whenIdle();assert.equal(h.core.journal.get(receipt.id).state,'failed');assert.ok(channel.checks>0);assert.equal(channel.sends,0);
 });

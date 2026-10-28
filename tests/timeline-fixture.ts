@@ -11,15 +11,14 @@ import { harness, call, textReply } from './harness.js';
 import type { Response } from './harness.js';
 import type { Config as CoreConfig } from '@dafeiyu/core';
 
-export async function timelineFixture(existingRoot?: string,context?:CoreConfig['context']) {
+export async function timelineFixture(existingRoot?: string,context?:CoreConfig['context'],memoryOptions:Omit<import('@dafeiyu/memory').Config,'agentId'|'dataDir'>={},dependencies?:import('@dafeiyu/memory/retrieval-profile').RetrievalDependencies) {
   const root=existingRoot??await mkdtemp(join(tmpdir(),'dafeiyu-timeline-'));
   let response:Response=()=>textReply('正常回复');
   let analysisResponse:Response=()=>textReply(JSON.stringify({schemaVersion:1,overview:'没有候选',gaps:[],claims:[]}));
   let expressionResponse:Response=request=>textReply(JSON.stringify(String(request.sessionId).includes('-verify-')?{faithful:true,issues:[]}:{answer:'依据虚构资料，下雨出行应携带雨伞。',citations:['S1'],insufficient:false}));
   let compactionResponse:Response=()=>textReply(JSON.stringify({fragments:[{kind:'note',text:'旧阶段已完成虚构材料整理。具体来源见归档，未确认的部分保持未知。'}]}));
-  const h=await harness(root,options=>String(options.sessionId).startsWith('memory-expression-')?expressionResponse(options):/^(memory-compaction-|memory-semantic-)/.test(String(options.sessionId))?compactionResponse(options):String(options.sessionId).startsWith('memory-analysis-')?analysisResponse(options):response(options),undefined,5000,undefined,context);
-  const queryFiber=await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});
-  const timelineFiber=await h.ctx.plugin(Timeline,{agentId:'dafeiyu',maxPageChars:2000});
+  const h=await harness(root,options=>String(options.sessionId).startsWith('memory-expression-')?expressionResponse(options):/^(memory-compaction-|memory-semantic-)/.test(String(options.sessionId))?compactionResponse(options):String(options.sessionId).startsWith('memory-analysis-')?analysisResponse(options):response(options),undefined,5000,undefined,context,false,undefined,memoryOptions,dependencies);
+  const queryFiber=h.queryFiber!,timelineFiber=h.timelineFiber!;
   const timeline=h.ctx.dafeiyuTimeline;
   let id=0;
   return {...h,root,timeline,timelineFiber,

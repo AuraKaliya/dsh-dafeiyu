@@ -6,7 +6,6 @@ export * from './conversation.js';
 export * from './redaction.js';
 export * from './history.js';
 export * from './context.js';
-export * from './feedback.js';
 export * from './compaction.js';
 export * from './semantic.js';
 export * from './memory-boundary.js';
@@ -32,17 +31,16 @@ export * from './media-delivery.js';
 export * from './dsh-tools.js';
 export * from './bili-browser.js';
 export * from './qq-expression.js';
-export * from './task-assessment.js';
+export * from './task-review.js';
 export * from './experience.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { MemoryObservationProvider,ObservationReceipt } from './observation.js';
 import type { CompactionProvider } from './compaction.js';
 import type { ContextContributor } from './context.js';
-import type { FeedbackProvider } from './feedback.js';
 import type { TaskResultAnchor } from './native-expression.js';
 import type { ReplyMediaManifest } from './media-delivery.js';
 
-export const API_VERSION = 4 as const;
+export {API_VERSION,RELEASE_VERSION} from './protocol.js';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 const id = z.string().min(1).max(160);
 export const MessagePartSchema = z.strictObject({
@@ -82,8 +80,8 @@ export function conversationKey(agentId: string, c: Conversation): string {
 export interface PersonaSnapshot { readonly text: string; readonly version: string }
 export interface SourceRef {
   readonly kind: 'message' | 'session' | 'event'; readonly id: string; readonly seq?: number;
-  /** Explicit origin on new evidence. Legacy references inherit their anchor's route. */
-  readonly route?: string;
+  /** Every reference carries its exact origin. */
+  readonly route: string;
 }
 export interface Reply {
   readonly id: string;
@@ -106,15 +104,14 @@ export interface ChannelCapability {
   /** Opt-in for persistent reply source rebinding and checks before every transport part. */
   readonly deliveryValidation?:'per-segment';
   /** Text task transport enters a write window after each preflight and closes it when the request settles. */
-  readonly taskTextDispatch?:'write-window-v1';
   readonly mediaDelivery?:'parts-v1';
   /** Transport-owned access lease for queued/running work; revocation cancels the turn. */
   processingSignal?(message: InboundMessage): AbortSignal;
   /** Throwing means unknown delivery, not confirmed failure. Must respect cancellation. */
   deliver(reply: Reply, signal: AbortSignal, authority?: () => void): Promise<DeliveryResult>;
   deliverMedia?(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(mediaPosition:number)=>Promise<Uint8Array>):Promise<DeliveryResult>;
-  /** Separate from the legacy simulated-task contract; caller supplies a verified task-result anchor. */
-  deliverTaskResult?(reply:Reply,anchor:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>;
+  /** Deliver a current task result under its verified anchor and write budget. */
+  deliverTaskResult?(reply:Reply,anchor:TaskResultAnchor,signal:AbortSignal,authority:()=>void,writeWindow:()=>()=>void):Promise<DeliveryResult>;
 }
 export interface ConversationAccess {
   readonly operationId: string;

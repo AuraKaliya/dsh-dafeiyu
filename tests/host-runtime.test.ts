@@ -12,7 +12,7 @@ for(const [scenario,name] of [
   ['required','a missing required channel prevents admission and releases only acquired resources'],
   ['policy','unknown configured action policies fail before any model invocation'],
   ['fault','recovery failure is reported and partial runtime assembly is closed safely'],
-  ['minimal','a minimal Host keeps chat available without claiming task or persona providers'],
+  ['minimal','a minimal Host retains memory while denying unconfigured task authority'],
   ['drain','graceful drain preserves providers until an already running result has been read'],
   ['cancel','drain timeout cooperatively cancels the model and preserves an interrupted Run'],
   ['qq','loopback QQ fixture buffers ingress until Host readiness and preserves a real simulated receipt'],

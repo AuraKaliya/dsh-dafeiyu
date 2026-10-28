@@ -1,3 +1,4 @@
+import {API_VERSION} from '@dafeiyu/contracts';
 import { z } from 'zod';
 import { ReadProgressSchema } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
@@ -18,7 +19,7 @@ export class QqMedia {
   private readonly unregister:()=>void;
   private readonly controller=new AbortController();
   constructor(private readonly ctx:Context,private readonly host:Host){
-    const reader=new QqMediaReader(host.settings);this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:QQ_MEDIA_PROVIDER,agentId:host.agentId,version:'1',requires:['media.assets.v1','execution.resource-scope.v1'],provides:['qq.media.v1'],lifecycleReady:()=>!this.controller.signal.aborted,
+    const reader=new QqMediaReader(host.settings);this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:QQ_MEDIA_PROVIDER,agentId:host.agentId,version:'1',requires:['media.assets.v1','execution.resource-scope.v1'],provides:['qq.media.v1'],lifecycleReady:()=>!this.controller.signal.aborted,
       resourceProofs:{current:p=>this.current(p),epoch:()=>JSON.stringify([this.controller.signal.aborted,host.store.media.epoch(),host.sourceEpoch()])},actions:[{id:QQ_MEDIA_ACTIONS[0],version:'1',description:'列出本会话实际接收消息的媒体引用，默认本轮合并的全部原消息；元信息不表示已经看过。阅读和选择记忆使用dafeiyu_media_read/select。',inputSchema:listSchema,outputSchema:z.json(),effects:'read',execute:async(input,context)=>{
         try{const data=z.json().parse(this.list(context,input)),observed=z.object({observation:z.object({source:PersonaSourceRefSchema})}).safeParse(data),source=observed.success?observed.data.observation.source:null;
           return {status:'succeeded',effects:'none',completeness:'partial',data,sources:source?[{id:source.id,scopeKey:source.scopeKey,version:source.version,contentHash:source.contentHash}]:[],receipts:[]};}catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'QQ_MEDIA_UNAVAILABLE'};}}}]});

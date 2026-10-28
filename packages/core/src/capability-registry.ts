@@ -4,10 +4,9 @@ import type { Conversation,ExecutionScope,ResourceTargetView } from '@dafeiyu/co
 import type { ActionCapability, Extension, ExtensionHandle, ExecutionContext, ActionOutcome, Json, TaskContextContributor, ResourceProof, ResourceProofProvider, TimelineScope } from '@dafeiyu/contracts';
 import { toolParameters } from './tool-schema.js';
 
-interface ReservedNames { ids: readonly string[]; actions: readonly string[]; channels: readonly string[] }
 export interface BoundAction {
   readonly id: string; readonly owner: string; readonly version: string;readonly pluginVersion:string; readonly description: string;
-  readonly input: Record<string, unknown>; readonly effects: ActionCapability['effects']; readonly requiresTask: boolean;
+  readonly input: Record<string, unknown>; readonly effects: ActionCapability['effects']; readonly scope:'conversation'|'task'|'any';
   readonly parameters:ReturnType<typeof toolParameters>;
   readonly active: () => boolean;
   readonly signal:AbortSignal;
@@ -19,9 +18,9 @@ interface Entry {
   actions: readonly BoundAction[]; channels: readonly string[]; contexts: readonly TaskContextContributor[]; ready: () => boolean;
   resourceProofs?: ResourceProofProvider;
 }
-const allowedExtensionKeys = new Set(['protocolVersion', 'id', 'version', 'agentId', 'provides', 'requires', 'actions', 'channels', 'contexts', 'lifecycleReady', 'resourceProofs','conversationContexts','compactionProvider','feedbackProvider','memoryObservationProvider']);
+const allowedExtensionKeys = new Set(['protocolVersion', 'id', 'version', 'agentId', 'provides', 'requires', 'actions', 'channels', 'contexts', 'lifecycleReady', 'resourceProofs','conversationContexts','compactionProvider','memoryObservationProvider']);
 const actionMetaSchema = z.strictObject({ id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), version: z.string().min(1).max(80),
-  description: z.string().min(1).max(4000), effects: z.enum(['read', 'local-write', 'external-write']), requiresTask: z.boolean().default(false) });
+  description: z.string().min(1).max(4000), effects: z.enum(['read', 'local-write', 'external-write']), scope:z.enum(['conversation','task','any']).default('any') });
 
 function assertStrictSchema(value: unknown): void {
   if (!value || typeof value !== 'object') return;
@@ -60,13 +59,13 @@ export class CapabilityRegistry {
     dependencyOrder([...this.entries.values()].filter(entry => entry.active).map(entry => entry.metadata), available);
     if ([...this.entries.values()].some(entry => entry.active && !entry.ready())) throw new Error('DEPENDENCY_UNAVAILABLE');
   }
-  register(agentId: string, extension: Extension, reserved: ReservedNames): {dispose():void} {
+  register(agentId: string, extension: Extension): {dispose():void} {
     if (Object.keys(extension).some(key => !allowedExtensionKeys.has(key))) throw new Error('INVALID_EXTENSION_FIELD');
     const metadata = ExtensionMetadataSchema.parse({ protocolVersion: extension.protocolVersion, id: extension.id, version: extension.version,
       agentId: extension.agentId, provides: extension.provides ?? [], requires: extension.requires ?? [] });
-    if (metadata.agentId !== agentId) throw new Error('INCOMPATIBLE_AGENT');
-    if (this.entries.has(metadata.id) || reserved.ids.includes(metadata.id)) throw new Error('DUPLICATE_EXTENSION');
-    const names = new Set([...reserved.actions, ...this.actionNames()]), channels = new Set([...reserved.channels, ...this.channelKeys()]);
+    if (metadata.agentId !== agentId) throw new Error('INVALID_AGENT');
+    if (this.entries.has(metadata.id)) throw new Error('DUPLICATE_EXTENSION');
+    const names = new Set(this.actionNames()), channels = new Set(this.channelKeys());
     if(extension.lifecycleReady!==undefined&&typeof extension.lifecycleReady!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
     const entry: Entry = { metadata, active: true, controller:new AbortController(),actions: [], channels: [], contexts: [], ready: extension.lifecycleReady?.bind(extension) ?? (() => true) };
     if(extension.resourceProofs){if(typeof extension.resourceProofs.current!=='function'||typeof extension.resourceProofs.epoch!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
@@ -75,7 +74,8 @@ export class CapabilityRegistry {
       entry.resourceProofs=Object.freeze({current:extension.resourceProofs.current.bind(extension.resourceProofs),epoch:extension.resourceProofs.epoch.bind(extension.resourceProofs),...(extension.resourceProofs.publicView?{publicView:extension.resourceProofs.publicView.bind(extension.resourceProofs)}:{}),...(extension.resourceProofs.targetView?{targetView:extension.resourceProofs.targetView.bind(extension.resourceProofs)}:{})});}
     const bound: BoundAction[] = [];
     for (const action of extension.actions ?? []) {
-      const meta = actionMetaSchema.parse({ id: action.id, version: action.version, description: action.description, effects: action.effects, requiresTask: action.requiresTask ?? false });
+      if(Object.keys(action).some(key=>!['id','version','description','inputSchema','outputSchema','effects','scope','execute'].includes(key)))throw new Error('INVALID_ACTION_CONTRACT');
+      const meta = actionMetaSchema.parse({ id: action.id, version: action.version, description: action.description, effects: action.effects, scope: action.scope ?? 'any' });
       if (names.has(meta.id)) throw new Error('DUPLICATE_ACTION'); names.add(meta.id);
       if (!(action.inputSchema instanceof z.ZodType) || !(action.outputSchema instanceof z.ZodType) || typeof action.execute !== 'function') throw new Error('INVALID_ACTION_CONTRACT');
       const input = structuredClone(z.toJSONSchema(action.inputSchema, { io: 'input' }));
@@ -89,7 +89,7 @@ export class CapabilityRegistry {
         execute: async (raw: unknown, context: ExecutionContext):Promise<ActionOutcome> => {
           if (!entry.active || !entry.ready()) throw new Error('CAPABILITY_UNAVAILABLE');
           context.signal.throwIfAborted();
-          if (meta.requiresTask && !context.taskId) throw new Error('TASK_REQUIRED');
+          if(meta.scope!=='any'&&meta.scope!==context.scope.kind)throw new Error('SCOPE_DENIED');
           const parsed=validateInput(raw);
           const result = ActionOutcomeSchema.parse(await execute(parsed, context));
           result.receipts=result.receipts.filter(receipt=>!redactJson(receipt).redacted);
@@ -106,7 +106,6 @@ export class CapabilityRegistry {
       if(channel.processingSignal!==undefined&&typeof channel.processingSignal!=='function')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.deliveryValidation!==undefined&&channel.deliveryValidation!=='per-segment')throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.deliverTaskResult!==undefined&&typeof channel.deliverTaskResult!=='function')throw new Error('INVALID_DELIVERY_CONTRACT');
-      if(channel.taskTextDispatch!==undefined&&(channel.taskTextDispatch!=='write-window-v1'||channel.deliveryValidation!=='per-segment'||typeof channel.deliverTaskResult!=='function'))throw new Error('INVALID_DELIVERY_CONTRACT');
       if(channel.mediaDelivery!==undefined&&(channel.mediaDelivery!=='parts-v1'||channel.deliveryValidation!=='per-segment'||typeof channel.deliverMedia!=='function')||channel.deliverMedia!==undefined&&channel.mediaDelivery!=='parts-v1')throw new Error('INVALID_DELIVERY_CONTRACT');
       const key = JSON.stringify([channel.channel, channel.account]);
       if (!channel.channel || !channel.account || typeof channel.deliver !== 'function' || channels.has(key)) throw new Error('DUPLICATE_OR_INVALID_CHANNEL');

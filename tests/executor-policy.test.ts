@@ -25,7 +25,7 @@ const native=(session:unknown)=>String(session).startsWith('dafeiyu-task-');
 type Policy=HostConfig['authorityPolicies'][number];
 
 /** Real Core/Memory/DSH with a fictional QQ ingress; no process, network, credentials or paid model. */
-async function fixture(options:{externalActions?:ExternalActionPolicy[]|null;allowLocalWrite?:boolean;requiresTask?:boolean;extensionId?:string;
+async function fixture(options:{externalActions?:ExternalActionPolicy[]|null;allowLocalWrite?:boolean;scope?:'task'|'any';extensionId?:string;
   execute?:(context:ExecutionContext)=>Promise<ActionOutcome>|ActionOutcome;directory?:string;create?:boolean}={}){
   const directory=options.directory??await mkdtemp(join(testTempDir(),'executor-policy-'));let response:Response=()=>textReply('虚构完成');
   const adapter=new ScriptedModel(request=>response(request)),host=await probeHost(directory,adapter),ctx=host.ctx;
@@ -36,11 +36,11 @@ async function fixture(options:{externalActions?:ExternalActionPolicy[]|null;all
     await ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(directory,'memory'),});
     const core=ctx.dafeiyu,extensionId=options.extensionId??owner;
     const extension=core.registerExtension({protocolVersion:4,id:extensionId,version:'1',agentId:'dafeiyu',actions:[
-      {id:actionId,version:'1',description:'本机虚构外部能力，无实际外部效果',requiresTask:options.requiresTask??true,effects:'external-write',inputSchema:z.strictObject({}),outputSchema:z.json(),
+      {id:actionId,version:'1',description:'本机虚构外部能力，无实际外部效果',scope:options.scope??'task',effects:'external-write',inputSchema:z.strictObject({}),outputSchema:z.json(),
         execute:async(_raw,c)=>{invocations++;return options.execute?await options.execute(c):completed();}},
-      {id:'fixture_anchor',version:'1',description:'取得真实持久活动锚点',requiresTask:true,effects:'local-write',inputSchema:z.strictObject({}),outputSchema:z.json(),
+      {id:'fixture_anchor',version:'1',description:'取得真实持久活动锚点',scope:'task',effects:'local-write',inputSchema:z.strictObject({}),outputSchema:z.json(),
         execute:async(_raw,c)=>{anchor=core.captureActivityAnchor(c,extensionId);return {...completed(),data:{anchor}};}},
-      {id:'fixture_read',version:'1',description:'只读能力不能取得外部授权',requiresTask:true,effects:'read',inputSchema:z.strictObject({}),outputSchema:z.json(),
+      {id:'fixture_read',version:'1',description:'只读能力不能取得外部授权',scope:'task',effects:'read',inputSchema:z.strictObject({}),outputSchema:z.json(),
         execute:async(_raw,c)=>{assert.throws(()=>core.authorizeExternalTask(c,extensionId),/SCOPE_DENIED/);return {...completed(),effects:'none'};}},
     ]});
     const policy:Policy={id:'test-policy',producers:['local-test','fixture-tasks','wake-test'],actions:[actionId,'fixture_anchor','fixture_read','dafeiyu_task_object','dafeiyu_task_intent'],
@@ -83,9 +83,9 @@ test('external policy omission preserves historical shape and hash; exact triple
   assert.throws(()=>schema.parse([{...old,allowExternalWrite:true}]));
 });
 
-test('external actions stay hidden without an exact name, owner and version or without requiresTask',async()=>{
+test('external actions stay hidden without an exact name, owner and version or without explicit task scope',async()=>{
   for(const options of [{externalActions:null},{externalActions:[]},{externalActions:[{...allowed,extensionId:'another'}]},
-    {externalActions:[{...allowed,actionId:'another_action'}]},{externalActions:[{...allowed,actionVersion:'2'}]},{requiresTask:false}]){
+    {externalActions:[{...allowed,actionId:'another_action'}]},{externalActions:[{...allowed,actionVersion:'2'}]},{scope:'any' as const}]){
     const h=await fixture(options);try{ownerTurn(h,request=>{assert.equal(request.tools?.some(tool=>tool.name===actionId),false);return textReply('没有获准外部工具');});
       await h.core.whenIdle();assert.equal(h.invocations,0);assert.equal(h.ownerPort.status(h.ownerPort.restoreRun(h.submission.runId)).state,'completed');
     }finally{await h.close();}

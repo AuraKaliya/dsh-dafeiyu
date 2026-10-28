@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { ExperienceRevisionSchema,ExperienceReviewSchema,ExperienceRelationSchema,MaintenanceRequestInputSchema,
-  MaintenanceSnapshotSchema,MaintenanceStateSchema,MaintenanceLifecycleSchema,MaintenanceSchedulingItemSchema,PersonaSourceRefSchema,redactJson } from '@dafeiyu/contracts';
-import type { PersonaAccess,PersonaSourceRef,ExperienceRevision,MaintenanceSnapshot,MaintenanceLifecycle,MaintenanceState } from '@dafeiyu/contracts';
+  MaintenanceSnapshotSchema,MaintenanceStateSchema,MaintenanceSchedulingItemSchema,PersonaSourceRefSchema,redactJson } from '@dafeiyu/contracts';
+import type { PersonaAccess,PersonaSourceRef,ExperienceRevision,MaintenanceSnapshot,MaintenanceState } from '@dafeiyu/contracts';
 import type { PersonaResolver } from './material.js';
 import { personaDigest,personaScope,uniqueSources,sourceKey } from './persona-digest.js';
 
@@ -52,42 +52,13 @@ export class ExperienceStore {
       const sources=uniqueSources([...input.sources,...exposed,...targetInputs]),history=[...(access.historyDependencies??[])];
       const now=new Date().toISOString(),id=randomUUID();
       const snapshot=MaintenanceSnapshotSchema.parse({schemaVersion:1,id,scope,taskEpoch:access.intentVersion,runId:access.view.runId,requestId:input.requestId,
-        goal,reason:input.reason,motivation:access.motivation,sources,history,targets:input.targets,event:null,
+        goal,reason:input.reason,motivation:access.motivation,sources,history,targets:input.targets,
         watermark:personaDigest({sources,history,targets:input.targets,epoch:access.intentVersion}),createdAt:now,expiresAt:new Date(Date.now()+7*86400000).toISOString()});
       if(redactJson(z.json().parse(snapshot)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');this.validate(access,snapshot);
       this.insert(snapshot,access.producer,fingerprint,'ready');this.audit(access,'memory.maintenance.requested',{id,watermark:snapshot.watermark});
       (access.commitGuard??access.guard)();return id;
     });
   }
-  /** Program-only: durable core event identity; no model-facing authority fields. */
-  recordLifecycle(raw:MaintenanceLifecycle,sources?:readonly PersonaSourceRef[]):string|null {
-    const event=MaintenanceLifecycleSchema.parse(raw);if(event.scope.kind!=='task')throw new Error('TASK_REQUIRED');
-    const fingerprint=personaDigest(event);
-    return this.transaction(()=>{
-      const old=this.db.prepare('SELECT body_hash FROM maintenance_events WHERE id=?').get(event.id);
-      if(old){if(old.body_hash!==fingerprint)throw new Error('IDEMPOTENCY_CONFLICT');return this.eventRequest(event.id);}
-      this.db.prepare('INSERT INTO maintenance_events VALUES(?,?,?,?,?)').run(event.id,event.scope.agentId,personaScope(event.scope),JSON.stringify(event),fingerprint);
-      if(event.type==='run.running'||event.motivation.kind==='maintenance'||event.origin.kind==='maintenance')return null;
-      const selected=sources?{refs:[...sources],omitted:0}:this.selectedFor(event),now=new Date().toISOString(),id=randomUUID(),refs=uniqueSources(selected.refs);
-      const snapshot=MaintenanceSnapshotSchema.parse({schemaVersion:1,id,scope:event.scope,taskEpoch:event.taskEpoch,runId:event.runId,requestId:event.id,
-        goal:event.goal,reason:event.type,motivation:event.motivation,sources:refs,history:[],targets:[],event,omittedSources:selected.omitted,
-        watermark:personaDigest({event:event.id,sources:refs}),createdAt:now,expiresAt:new Date(Date.now()+7*86400000).toISOString()});
-      return this.insert(snapshot,'core-lifecycle',fingerprint,'waiting-scheduler');
-    });
-  }
-  private selectedFor(event:MaintenanceLifecycle){
-    // Only explicitly retained memory created in this Run; unselected capability payloads remain absent.
-    const rows=this.db.prepare("SELECT count(*) OVER() AS total,i.id,i.version,i.head,r.body FROM memory_items i JOIN memory_revisions r ON r.id=i.id AND r.revision=i.head JOIN memory_events e ON e.id=r.event_id WHERE i.agent_id=? AND i.route=? AND i.deleted=0 AND json_extract(e.body,'$.traceId')=? ORDER BY i.ordinal LIMIT 33")
-      .all(event.scope.agentId,personaScope(event.scope),event.runId);
-    if(rows.length>32)return {refs:[],omitted:Number(rows[0]!.total)}; // Do not silently call a truncated set complete.
-    const selected=this.db.prepare("SELECT json_extract(body,'$.data.version') AS version FROM execution_memory_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')='execution.evidence.selected' AND json_extract(body,'$.at')<=? ORDER BY rowid DESC LIMIT 1").get(event.runId,event.at);
-    const receipt=selected?this.db.prepare("SELECT receipt FROM execution_memory_requests WHERE scope_key=? AND json_extract(receipt,'$.kind')='execution-selection' AND json_extract(receipt,'$.version')=? LIMIT 1").get(personaScope(event.scope),selected.version!):null;
-    const entries=receipt?z.object({entries:z.array(PersonaSourceRefSchema).max(16)}).parse(JSON.parse(String(receipt.receipt))).entries:[];
-    const refs=uniqueSources([...(event.assessmentSource?[event.assessmentSource]:[]),...entries,...rows.map(row=>PersonaSourceRefSchema.parse({kind:'memory',agentId:event.scope.agentId,scopeKey:personaScope(event.scope),id:row.id,version:row.version,revision:row.head,
-      contentHash:z.object({contentHash:z.string()}).parse(JSON.parse(String(row.body))).contentHash}))]);
-    return refs.length>32?{refs:[],omitted:refs.length}:{refs,omitted:0};
-  }
-  private eventRequest(id:string):string|null {const row=this.db.prepare("SELECT id FROM maintenance_requests WHERE producer='core-lifecycle' AND request_id=?").get(id);return row?String(row.id):null;}
   snapshot(access:PersonaAccess,id:string){
     this.task(access);const row=this.db.prepare('SELECT body,state,version,result,error FROM maintenance_requests WHERE id=? AND agent_id=? AND scope_key=?')
       .get(z.uuid().parse(id),access.view.scope.agentId,personaScope(access.view.scope));if(!row)throw new Error('SCOPE_DENIED');
@@ -186,31 +157,8 @@ export class ExperienceStore {
   counts(){const rows=this.db.prepare('SELECT state,count(*) AS n FROM maintenance_requests GROUP BY state').all();return Object.fromEntries(rows.map(r=>[String(r.state),Number(r.n)]));}
   schedulingItem(id:string){const row=this.db.prepare('SELECT body,state,version FROM maintenance_requests WHERE id=?').get(z.uuid().parse(id));if(!row)return null;
     const body=MaintenanceSnapshotSchema.parse(JSON.parse(String(row.body)));return MaintenanceSchedulingItemSchema.parse({id:body.id,scope:body.scope,taskEpoch:body.taskEpoch,runId:body.runId,
-      watermark:body.watermark,expiresAt:body.expiresAt,state:row.state,version:row.version,reason:body.event?.type??'explicit-request',retainedSources:body.sources.length,omittedSources:body.omittedSources??0});}
-  settleMetadata(id:string){return this.transaction(()=>{
-    const row=this.db.prepare('SELECT body,state FROM maintenance_requests WHERE id=?').get(id);if(!row)return false;const input=MaintenanceSnapshotSchema.parse(JSON.parse(String(row.body)));
-    if(input.sources.length||input.omittedSources||!input.event||!['ready','waiting-scheduler'].includes(String(row.state)))return false;
-    const result={experienceIds:[],experienceBasis:[],persona:[],summaryRef:null,dependencies:[],model:null,policy:'experience-e-v1',metadataOnly:true};
-    this.db.prepare("UPDATE maintenance_requests SET state='completed',version=version+1,result=?,updated_at=? WHERE id=?").run(JSON.stringify(result),new Date().toISOString(),id);
-    this.db.prepare('INSERT INTO maintenance_watermarks VALUES(?,?,?,?)').run(input.scope.agentId,personaScope(input.scope),id,input.watermark);
-    const eventId=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(eventId,JSON.stringify({id:eventId,type:'memory.maintenance.metadata-settled',scope:input.scope,runId:input.runId,origin:input.event.origin,
-      operationId:input.runId,causedBy:input.event.id,producer:'memory-maintenance',at:new Date().toISOString(),data:{id,inference:false}}));return true;
-  });}
+      watermark:body.watermark,expiresAt:body.expiresAt,state:row.state,version:row.version,reason:'explicit-request',retainedSources:body.sources.length});}
   pendingScheduling(agentId:string,after:number,limit:number){z.number().int().nonnegative().parse(after);z.number().int().min(1).max(100).parse(limit);
-    const rows=this.db.prepare("SELECT rowid,id FROM maintenance_requests WHERE agent_id=? AND rowid>? AND state IN ('waiting-scheduler','ready') AND json_extract(body,'$.motivation.kind')<>'maintenance' ORDER BY rowid LIMIT ?")
+    const rows=this.db.prepare("SELECT rowid,id FROM maintenance_requests WHERE agent_id=? AND rowid>? AND state IN ('ready') AND json_extract(body,'$.motivation.kind')<>'maintenance' ORDER BY rowid LIMIT ?")
       .all(agentId,after,limit);return {items:rows.flatMap(row=>{const item=this.schedulingItem(String(row.id));return item?[item]:[];}),next:rows.length===limit?Number(rows.at(-1)!.rowid):null};}
-  coalesceScheduling(id:string){return this.transaction(()=>{
-    const row=this.db.prepare('SELECT body,state FROM maintenance_requests WHERE id=?').get(z.uuid().parse(id));if(!row)return null;
-    const input=MaintenanceSnapshotSchema.parse(JSON.parse(String(row.body)));
-    if(!['waiting-scheduler','ready'].includes(String(row.state))||input.event?.type!=='evidence.changed')return this.schedulingItem(id);
-    const candidates=this.db.prepare("SELECT body FROM maintenance_requests WHERE agent_id=? AND scope_key=? AND json_extract(body,'$.runId')=? AND json_extract(body,'$.event.type') IN ('run.completed','run.waiting','run.failed','run.cancelled','run.interrupted') AND state IN ('waiting-scheduler','ready','running','completed') ORDER BY rowid DESC LIMIT 8")
-      .all(input.scope.agentId,personaScope(input.scope),input.runId);
-    for(const candidate of candidates){const target=MaintenanceSnapshotSchema.parse(JSON.parse(String(candidate.body)));
-      if(target.taskEpoch!==input.taskEpoch||target.goal!==input.goal||input.sources.some(ref=>!target.sources.some(other=>sourceKey(ref)===sourceKey(other))))continue;
-      this.db.prepare("UPDATE maintenance_requests SET state='cancelled',version=version+1,error='COALESCED_REQUEST',result=?,updated_at=? WHERE id=?")
-        .run(JSON.stringify({coalescedInto:target.id}),new Date().toISOString(),id);
-      const eventId=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(eventId,JSON.stringify({id:eventId,type:'memory.maintenance.coalesced',scope:input.scope,runId:input.runId,origin:input.event.origin,
-        operationId:input.runId,causedBy:input.event.id,producer:'memory-maintenance',at:new Date().toISOString(),data:{id,coalescedInto:target.id}}));return this.schedulingItem(target.id);
-    }return this.schedulingItem(id);
-  });}
 }

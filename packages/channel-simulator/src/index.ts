@@ -1,3 +1,5 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
+import {API_VERSION} from '@dafeiyu/contracts';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type { DeliveryResult, ExtensionHandle, InboundMessage, Reply } from '@dafeiyu/contracts';
@@ -16,7 +18,7 @@ export class Simulator extends Service {
   readonly handle: ExtensionHandle;
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'dafeiyuSimulator');
-    this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-simulator', version: '0.4.0', protocolVersion:4, agentId: config.agentId,
+    this.handle = ctx.dafeiyu.registerExtension({ id: 'channel-simulator', version: RELEASE_VERSION, protocolVersion:API_VERSION, agentId: config.agentId,
       channels: [{ channel: 'simulator', account: config.account, deliver: async (reply, signal) => {
         signal.throwIfAborted();
         const existing = this.receipts.get(reply.id);

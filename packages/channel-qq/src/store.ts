@@ -28,7 +28,7 @@ export class QqStore {
   constructor(file: string, options: { cache?: QqCacheOptions;stickers?:z.input<typeof QqStickersConfigSchema> } = {}) {
     mkdirSync(dirname(file), { recursive: true }); this.db = new DatabaseSync(file);
     try {
-      // Refuse unknown/legacy stores before changing their persistent journal mode.
+      // Validate the current storage structure before changing journal mode.
       const current = inspectQqSchema(this.db);
       if (!current.fresh && !current.supported) throw new Error('QQ_STORAGE_UNSUPPORTED');
       this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');

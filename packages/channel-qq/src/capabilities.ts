@@ -1,3 +1,4 @@
+import {API_VERSION} from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -25,7 +26,7 @@ export class QqCapabilities {
   private readonly observed = new Map<string, { owner: string; source: PersonaSourceRef; scene: Conversation }>();
   private closed = false;
   constructor(private readonly ctx: Context, private readonly host: Host) {
-    this.handle = ctx.dafeiyu.registerExtension({ protocolVersion:4, id: 'qq-capabilities', version: '1', agentId: host.agentId,
+    this.handle = ctx.dafeiyu.registerExtension({ protocolVersion:API_VERSION, id: 'qq-capabilities', version: '1', agentId: host.agentId,
       requires: ['memory.capability-observation.v1', 'execution.resource-scope.v1'], provides: ['qq.browse.v1'], lifecycleReady: () => !this.closed,
       resourceProofs: { current: proof => this.current(proof), epoch: scope => this.epoch(scope) }, actions: this.actions() });
   }

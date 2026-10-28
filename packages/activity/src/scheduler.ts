@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { ContextItemSchema } from '@dafeiyu/contracts';
-import type { ContextItem,ExecutionView,MaintenanceLifecycle,MemoryMaintenanceSchedulingPort,RunOrigin,TaskState,ActivityDomainEvent } from '@dafeiyu/contracts';
+import type { ContextItem,ExecutionView,ExecutionLifecycle,MemoryMaintenanceSchedulingPort,RunOrigin,TaskState,ActivityDomainEvent } from '@dafeiyu/contracts';
 import { ActivityStore,activityHash } from './store.js';
 import type { StoredOccurrence,StoredSchedule } from './store.js';
 type Producer=ReturnType<Context['dafeiyu']['executionProducer']>;
@@ -47,7 +47,7 @@ export class ActivityScheduler {
         const item=original.maintenanceId?this.memory?.inspect(original.maintenanceId):null;
         if(!item||item.scope.kind!=='task'||item.scope.taskId!==task.id||item.taskEpoch!==task.epoch)return false;
         // Completion during this Run is legitimate; a new wake cannot reuse it.
-        if(occurrence.startedAt===null&&!['waiting-scheduler','ready'].includes(item.state))return false;
+        if(occurrence.startedAt===null&&!['ready'].includes(item.state))return false;
       }return true;
     }catch{return false;}
   }
@@ -73,7 +73,7 @@ export class ActivityScheduler {
     // History keeps the immutable occurrence, while live wake authorization separately checks cancellation.
     return !!plan.anchor&&this.ctx.dafeiyu.activityAnchorStatus(plan.anchor).state==='valid'&&this.contextFor(occurrence).some(value=>activityHash(value)===activityHash(item));
   }catch{return false;}}
-  private receive(event:MaintenanceLifecycle){
+  private receive(event:ExecutionLifecycle){
     if(this.closed)return;
     let occurrence:StoredOccurrence|null=null;
     if(event.origin.kind==='wake'&&event.origin.producerId==='activity')occurrence=this.store.occurrence(event.origin.occurrenceId);
@@ -95,11 +95,11 @@ export class ActivityScheduler {
   notify(event:ActivityDomainEvent){return this.store.event(event);}
   private importMemory(now:number){if(!this.store.config.maintenance||!this.memory?.ready())return;
     const page=this.memory.pending(this.memoryCursor,32);this.memoryCursor=page.next??0;
-    for(const original of page.items){const item=this.memory.coalesce(original.id);if(!item||!['waiting-scheduler','ready'].includes(item.state)||item.scope.kind!=='task')continue;
+    for(const original of page.items){const item=this.memory.inspect(original.id);if(!item||!['ready'].includes(item.state)||item.scope.kind!=='task')continue;
       if(this.store.maintenancePlan(item.id))continue;
-      const anchor=this.ctx.dafeiyu.createMaintenanceAnchor(item.runId,item.scope.taskId,item.taskEpoch),source=this.ctx.dafeiyu.activityAnchorStatus(anchor);
+      const anchor=this.ctx.dafeiyu.createMaintenanceAnchor(item.runId,item.scope.taskId,item.taskEpoch);if(!anchor)continue;
+      const source=this.ctx.dafeiyu.activityAnchorStatus(anchor);
       if(source.state==='pending')continue;
-      if(source.state==='valid'&&Date.parse(item.expiresAt)>now&&item.retainedSources===0&&item.omittedSources===0&&this.memory.settleMetadata(item.id))continue;
       const plan=this.store.create({schemaVersion:1,requestId:`maintenance:${item.id}`,agentId:this.store.identity.agentId,owner:item.scope,purpose:'maintenance',goal:`按当前授权整理记忆请求 ${item.id}，保留反证和未知，不重演原任务。`,basis:[],anchor,maintenanceId:item.id,
         policyId:this.store.config.maintenancePolicy,configHash:this.configHash,trigger:{kind:'once',at:new Date(now+this.store.config.minIntervalMs).toISOString()},missed:'coalesce',timeZone:this.store.config.timeZone,quiet:this.store.config.quiet,state:'active'},now);
       this.store.bindTask(plan.id,1,item.scope.taskId,item.taskEpoch);
@@ -174,7 +174,7 @@ export class ActivityScheduler {
       for(const id of this.store.due(now)){const plan=this.store.get(id),source=this.source(plan);if(source.state==='pending')continue;
         if(source.state==='stale'){this.store.block(id,source.code??'SOURCE_STALE',now);this.retireOwnedTask(plan);continue;}
         if(plan.body.purpose==='maintenance'){const item=plan.body.maintenanceId?this.memory?.inspect(plan.body.maintenanceId):null;
-          if(!item||!['waiting-scheduler','ready'].includes(item.state)){this.store.block(id,'MAINTENANCE_NO_LONGER_PENDING',now);continue;}}
+          if(!item||!['ready'].includes(item.state)){this.store.block(id,'MAINTENANCE_NO_LONGER_PENDING',now);continue;}}
         this.ensureTask(plan);this.store.issue(id,now);
       }this.dispatch(now);
     }).catch(error=>{this.failure=safeCode(error);this.stop();}).finally(()=>{if(this.pending===work)this.pending=undefined;});this.pending=work;return work;

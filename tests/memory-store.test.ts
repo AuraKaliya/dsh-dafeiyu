@@ -9,7 +9,7 @@ import { MemoryStore } from '@dafeiyu/memory/store';
 import { Journal } from '@dafeiyu/journal';
 import type { OperationScope } from '@dafeiyu/contracts';
 
-const scope = (route = 'a', agentId = 'fish'): OperationScope => ({ agentId, route, traceId: randomUUID(), operationId: randomUUID(), startedEventId: randomUUID() });
+const scope = (route = 'a', agentId = 'fish'): OperationScope => ({ agentId, route:JSON.stringify([agentId,'simulator','fixture','local',route]), traceId: randomUUID(), operationId: randomUUID(), startedEventId: randomUUID() });
 const value = (content = '虚构项目代号青羽842') => ({ kind: 'knowledge' as const, claimType: 'self_report' as const, content,
   sources: [{ kind: 'timeline' as const, ref: `dafeiyu:event:${randomUUID()}`, contentHash: 'a'.repeat(64) }] });
 async function fixture() { const root = await mkdtemp(join(tmpdir(), 'dafeiyu-memory-store-')); return { root, file: join(root, 'memory.sqlite') }; }
@@ -146,6 +146,6 @@ test('two connections cannot overwrite a version already committed by another wr
 
 test('unsupported and unrelated databases are refused without reinitialization',async()=>{
   const {file}=await fixture();const db=new DatabaseSync(file);db.exec('CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES(\'preserve\'); PRAGMA user_version=1;');db.close();
-  assert.throws(()=>new MemoryStore(file),/Unsupported/);
+  assert.throws(()=>new MemoryStore(file),/INVALID_STORAGE/);
   const check=new DatabaseSync(file);try{assert.equal(check.prepare('SELECT value FROM unrelated').get()?.value,'preserve');}finally{check.close();}
 });

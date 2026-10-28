@@ -1,3 +1,4 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import {createStorageSchema} from './storage-schema.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
@@ -171,7 +172,7 @@ export class Journal {
     const row = this.db.prepare(`SELECT seq,body FROM events WHERE ${this.scopePredicate()} AND id=?`).get(scope.route, scope.agentId, scope.route, id);
     return row ? this.eventRow(row) : null;
   }
-  issueAnalysisGrant(scope: import('@dafeiyu/contracts').OperationScope,pluginVersion='0.3.0'): string {
+  issueAnalysisGrant(scope: import('@dafeiyu/contracts').OperationScope,pluginVersion=RELEASE_VERSION): string {
     return this.transaction(() => {
       const id = randomUUID(), operationId = randomUUID();
       const event = this.append({ agentId:scope.agentId,route:scope.route,traceId:scope.traceId,operationId,
@@ -193,10 +194,10 @@ export class Journal {
     const body = z.object({ schemaVersion: z.literal(1), id: z.string(), agentId: z.string(), route: z.string(), traceId: z.string(),
       operationId: z.string(), causedBy: z.string().nullable(), type: z.string(), plugin: z.string(), pluginVersion: z.string(),
       occurredAt: z.string(), recordedAt: z.string(), visibility: z.object({ kind: z.literal('conversation'), route: z.string() }),
-      sources: z.array(z.object({ kind: z.enum(['message','session','event']), id: z.string(), seq: z.number().int().nonnegative().optional(), route: z.string().optional() })),
+      sources: z.array(z.object({ kind: z.enum(['message','session','event']), id: z.string(), seq: z.number().int().nonnegative().optional(), route: z.string().min(1) })),
       data: z.record(z.string(), z.json()) }).parse(JSON.parse(text(row.body)));
     return { ...body, sources: body.sources.map(source => ({ kind: source.kind, id: source.id,
-      ...(source.seq === undefined ? {} : { seq: source.seq }), ...(source.route === undefined ? {} : { route: source.route }) })), seq: z.number().int().positive().parse(Number(row.seq)) };
+      ...(source.seq === undefined ? {} : { seq: source.seq }), route: source.route })), seq: z.number().int().positive().parse(Number(row.seq)) };
   }
   sessionFor(scope: TimelineScope): string | null {
     // The caller's route is derived by the core; never accept a session ID as authority.
@@ -275,3 +276,7 @@ export function eventFor(agentId: string, item: PendingMessage, type: string, pl
   return { agentId, route: item.route, traceId: item.id, operationId, causedBy, type, plugin, pluginVersion,
     occurredAt: new Date().toISOString(), data, sources };
 }
+
+export * from './storage-inspection.js';
+
+export {inspectJournalStorage} from './schema.js';

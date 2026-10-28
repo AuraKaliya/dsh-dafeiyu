@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type {} from '@deepseek-ai/dsh-token-meter';
 import { randomUUID } from 'node:crypto';
 import { appendPluginRecord,SessionSeq } from '@deepseek-ai/dsh-session';
 import { CompactionId,compactCheckpointSource } from '@deepseek-ai/dsh-compaction';
@@ -39,7 +40,7 @@ export async function seedCheckpoint(h:CompositionHarness,text:string,fragments:
   session.append('compaction/summary',{compactionId:id,summary:[{type:'text',text:body}],shadowedRange:{start:seqs[0]!,end:seqs.at(-1)!},shadowedSeqs:seqs,
     shadowedTokenCount:meter.measure(session).nodes.filter(n=>selected.has(n.seq)).reduce((n,v)=>n+v.heuristicTokens,0),provider:'local-test',model:'scripted'});
   session.append('user/message',createUserMessage({source:compactCheckpointSource(id),content:[{type:'text',text:body}]}),
-    {surfaceOp:{op:'replace',startSeq:seqs[0]!,endSeq:seqs.at(-1)!},sourceEventSeqs:[...seqs,manifestSeq,viewSeq]});
+    {surfaceOp:{op:'replace',startSeq:seqs[0]!,endSeq:seqs.at(-1)!},sourceEventSeqs:[...new Set([...seqs,...session.surface.nodes.filter(seq=>seq>=seqs[0]!&&seq<=seqs.at(-1)!),manifestSeq,viewSeq])]});
   session.append('compaction/end',{compactionId:id,turn:null});
   const ref=summaryReference(manifestSeq,manifest),view=resolveFragmentView(session,ref,memory.scope);assert.ok(view);
   return {memory,view,ref};

@@ -11,14 +11,12 @@ const root=await mkdtemp(join(testTempDir(),'host-memory-flow-')),file=join(root
 process.env.DSH_HOME=join(root,'data/core/dsh-home');
 const {ManagedHost,loadHostConfig,initializeProfile,readHostStatus,owners}=await import('@dafeiyu/host');
 const {ScriptedModel,call,textReply}=await import('./harness.js');
-const actions=['fixture_observation','dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_experience_read','dafeiyu_experience_review','dafeiyu_memory_persona_candidate','dafeiyu_execution_source_state'];
+const actions=['fixture_observation','dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_experience_read','dafeiyu_experience_review','dafeiyu_memory_maintenance_request','dafeiyu_execution_source_state'];
 const config={schemaVersion:1,profileId:'memory-e4-fixture',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},
   modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},runtime:{turnTimeoutMs:30000,shutdownGraceMs:2000},diagnostics:{snapshotIntervalMs:100},
-  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{maintenance:{}}}],
+  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:"memory-growth",required:true,config:{maintenance:{}}}],
   authorityPolicies:[{id:'local',producers:['host-cli'],actions,allowLocalWrite:true}]};
 await writeFile(join(root,'persona.md'),'这是虚构的本地测试底色。保持好奇和独立判断，爱世界，不假定真实经历。');
-await writeFile(file,JSON.stringify({...config,plugins:config.plugins.map(p=>p.id==='memory'?{...p,config:{maintenance:{}}}:p)}));
-assert.throws(()=>loadHostConfig(file),/HOST_MAINTENANCE_SOURCE_TRACKING_REQUIRED/);
 await writeFile(file,JSON.stringify(config));const prepared=loadHostConfig(file);initializeProfile(prepared,coordination);
 const read=(sql:string)=>{const db=new DatabaseSync(join(prepared.paths.memory,'memory.sqlite'),{readOnly:true});try{return db.prepare(sql).all();}finally{db.close();}};
 const sentinel='PRIVATE_EXPERIENCE_SENTINEL_虚构观测：蓝色气球向东移动。';
@@ -29,7 +27,7 @@ const adapter=new ScriptedModel(options=>{
     experiences:[{content:{observation:'气球向东',action:'本地虚构观察',outcome:'仅记录移动方向',interpretation:'不能据此判断长期风向',conditions:['本次虚构窗口'],unknowns:['之后的方向']},
       supports:[{sourceId:'S1',quote:sentinel}],counters:[],target:null}],relations:[],persona:[]}));}
   step++;
-  if(stage==='collect')return step===1?call('fixture_observation',{}):textReply('观察和选择完成');
+  if(stage==='collect')return step===1?call('fixture_observation',{}):step===2?call('dafeiyu_memory_maintenance_request',{requestId:'explicit-maintenance',sources:[],reason:'我想核对刚才保留的观察及其限制'}):textReply('观察和选择完成');
   if(stage==='maintain'){
     if(step===1)return call('dafeiyu_memory_maintenance_status',{});
     if(step===2)return call('dafeiyu_memory_consolidate',{id});
@@ -51,10 +49,10 @@ let host=await ManagedHost.start(prepared,options);
 try{
   assert.ok(host.snapshot().features.includes('memory.maintenance.v1'));
   const first=await host.run({requestId:'collect',title:'虚构探索',goal:'记录并保留虚构观察',policyId:'local'});assert.equal(first.state,'completed');
-  id=String(read('SELECT id FROM maintenance_requests')[0]!.id);assert.equal(read('SELECT state FROM maintenance_requests')[0]?.state,'waiting-scheduler');assert.equal(analysisCalls,0);
+  id=String(read('SELECT id FROM maintenance_requests')[0]!.id);assert.equal(read('SELECT state FROM maintenance_requests')[0]?.state,'ready');assert.equal(analysisCalls,0);
   const port=host.core.executionProducer('host-cli',{motivation:{kind:'maintenance',basis:['explicit-local-check']}}),task=port.openTask(first.taskId);
   stage='maintain';step=0;const run=port.submitTask({requestId:'maintain',taskId:task.id,expectedVersion:1,policyId:'local'},task);await host.core.whenIdle();assert.equal(port.status(run.run).state,'completed');
-  assert.equal(analysisCalls,1);assert.equal(read('SELECT * FROM experience_revisions').length,1);assert.equal(read('SELECT * FROM maintenance_requests').length,1);assert.equal(read('SELECT * FROM persona_profiles').length,0);
+  assert.equal(analysisCalls,1);assert.equal(read('SELECT * FROM experience_revisions').length,1);assert.equal(read('SELECT * FROM maintenance_requests').length,1);assert.equal(read('SELECT * FROM memory_self').length,0);
   host.publish();const live=readHostStatus(prepared,coordination).snapshot!;assert.equal(live.services.memory?.maintenance?.requests.completed,1);assert.equal(live.services.memory?.maintenance?.scheduler,'not-configured');assert.ok(!JSON.stringify(live).includes(sentinel));
   await host.close();assert.equal(readHostStatus(prepared,coordination).snapshot?.services.memory?.maintenance?.state,'closed');assert.equal(owners(coordination).length,0);
   const calls=modelCalls;host=await ManagedHost.start(prepared,options);assert.equal(modelCalls,calls);assert.equal(host.snapshot().services.memory?.maintenance.requests.completed,1);

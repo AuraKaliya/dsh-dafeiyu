@@ -7,4 +7,4 @@ export * from './runtime.js';
 export * from './status.js';
 export { bindDshTools } from './dsh-tools.js';
 
-export { normalizeHostPlugins,BilibiliAssemblySchema } from './plugin-assembly.js';
+export { assembleHostPlugins,BilibiliAssemblySchema } from './plugin-assembly.js';

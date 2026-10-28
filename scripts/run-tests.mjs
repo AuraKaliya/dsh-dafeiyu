@@ -41,9 +41,12 @@ try {
     ...(await readdir(join(repository, 'tests', 'tooling'))).filter(name => name.endsWith('.test.ts')).map(name => 'tests/tooling/' + name)].sort();
   const requested = process.argv.slice(2), files = requested.length ? requested : available;
   if (!files.length || files.some(file => !available.includes(file))) throw new Error('TEST_FILE_NOT_ALLOWED');
-  await execute('build', ['node_modules/typescript/bin/tsc', '-b']);
+  await execute('build', ['scripts/build.mjs']);
   if(requested.length){
-    const sources=files.filter(file=>file.startsWith('build-tests/')).map(file=>resolve(repository,'tests',basename(file).replace(/\.js$/,'.ts')));
+    // Child-process fixtures are loaded by path rather than TypeScript imports. Compile
+    // them too so targeted runs can never execute an obsolete generated fixture.
+    const fixtures=(await readdir(join(repository,'tests'))).filter(name=>name.endsWith('.ts')&&!name.endsWith('.test.ts'));
+    const sources=[...fixtures.map(name=>resolve(repository,'tests',name)),...files.filter(file=>file.startsWith('build-tests/')).map(file=>resolve(repository,'tests',basename(file).replace(/\.js$/,'.ts')))];
     if(sources.length){const config=join(run.root,'test-types.json');
       await writeFile(config,JSON.stringify({extends:resolve(repository,'tests/tsconfig.json'),compilerOptions:{rootDir:resolve(repository,'tests'),outDir:resolve(repository,'build-tests')},include:[],files:sources}));
       await execute('test-types',['node_modules/typescript/bin/tsc','-p',config]);}
@@ -75,6 +78,8 @@ try {
     const old = await Promise.all((await readdir(reports)).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).map(async name => ({ name, time: (await stat(join(reports, name))).mtimeMs })));
     for (const entry of old.sort((a, b) => b.time - a.time).slice(20)) await removeTree(join(reports, entry.name), reports);
     console.log(JSON.stringify({ runId: run.id, passed: !stopped && !cleanup.blocked.length, tests: summary?.counts ?? null, cleanup, report: join(reports, run.id + '.json') }));
+    if(process.send)await new Promise(resolve=>process.send({type:'test-report',report},()=>resolve()));
   } else console.error(stopped ?? 'TEST_RUN_FAILED');
   await unlock();
+  if(process.connected)process.disconnect();
 }

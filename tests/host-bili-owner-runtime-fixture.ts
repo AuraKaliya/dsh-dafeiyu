@@ -16,9 +16,9 @@ const {biliOwnerBackend,incomingBili,fixtureHash}=await import('./bili-owner-cha
 const {ScriptedModel,textReply,call}=await import('./harness.js');
 const {outcomes}=await import('./qq-capabilities-fixture.js');
 const recovery=scenario==='optional-recovery',task=scenario==='task'||scenario==='optional'||recovery,backend=biliOwnerBackend(),identity:BiliOwnerIdentity={agentId:'dafeiyu',profileId:'bili-owner-host-fixture',accountUid:BILI_OWNER_ACCOUNT,ownerUid:BILI_OWNER_UID};
-const plugins:{id:string;required:boolean;config:Record<string,unknown>}[]=[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{}},
-  ...(task?[{id:'media',required:true,config:{ffmpeg:process.execPath,ffprobe:process.execPath}},{id:'bilibili',required:true,config:{minIntervalMs:100}}]:[]),
-  {id:'channel-bili-owner',required:scenario!=='optional'&&!recovery,config:{accountUid:'10000001',ownerUid:'10000002',tasks:{enabled:task,deliverResults:!recovery}}},...(scenario==='optional'?[{id:'channel-simulator',required:true,config:{account:'fixture'}}]:[])];
+const plugins:{id:string;required:boolean;config:Record<string,unknown>}[]=[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:"memory-growth",required:true,config:{}},
+  ...(task?[{id:'media',required:true,config:{ffmpeg:process.execPath,ffprobe:process.execPath}}]:[]),
+  {id:'bilibili',required:scenario!=='optional'&&!recovery,config:{...(task?{capabilities:{minIntervalMs:100}}:{}),channel:{accountUid:'10000001',ownerUid:'10000002',tasks:{enabled:task,deliverResults:!recovery}}}},...(scenario==='optional'?[{id:'channel-simulator',required:true,config:{account:'fixture'}}]:[])];
 const config={schemaVersion:1,profileId:identity.profileId,agent:{id:identity.agentId},paths:{core:'data/core',memory:'data/memory',sessions:'data/sessions',query:'data/query.sqlite'},modelRoutes:{chat:{provider:'local-test',model:'scripted'}},
   persona:{fixedFile:'persona.md',kind:'test'},runtime:{turnTimeoutMs:10000,shutdownGraceMs:3000,...(recovery?{maxConcurrentRuns:1}:{})},diagnostics:{snapshotIntervalMs:recovery?60000:100},plugins,
   authorityPolicies:[{id:'local',producers:['host-cli'],actions:[],allowLocalWrite:false},

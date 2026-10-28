@@ -14,7 +14,7 @@ import type { Response } from './harness.js';
 import { testTempDir } from './test-temp.js';
 
 type H=Awaited<ReturnType<typeof executionHarness>>;
-const memoryActions=['dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_execution_select'];
+const memoryActions=['dafeiyu_memory_maintenance_request','dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result','dafeiyu_execution_select'];
 const request={requestId:'plan',title:'虚构探索安排',goal:'决定一次自主探索',policyId:'test-policy'};
 async function fixture(response:Response,options:{settings?:z.input<typeof ActivityConfigSchema>;extension?:Omit<Extension,'protocolVersion'|'agentId'>;directory?:string;now?:number;maxConcurrentRuns?:number;turnTimeoutMs?:number;context?:NonNullable<Parameters<typeof executionHarness>[4]>['context']}={}){
   const directory=options.directory??await mkdtemp(join(testTempDir(),'activity-scheduler-')),dataDir=join(directory,'activity'),settings={explorationPolicy:'test-policy',maintenancePolicy:'test-policy',...options.settings};
@@ -32,7 +32,7 @@ test('a due plan runs through real DSH without QQ, and may pause its future sche
     step++;if(phase==='plan')return step===1?call('dafeiyu_activity_plan',planInput(f.now()+60000)):textReply('计划已保存');
     assert.match(JSON.stringify(options.messages),/activity-occurrence/);return step===1?call('dafeiyu_activity_update',{id,requestId:'rest',expectedVersion:1,state:'paused'}):textReply('我决定先休息，下次再探索');
   });
-  try{f.h.port.submitTask(request);await f.h.core.whenIdle();id=String(read(f.directory,'SELECT id FROM activity_schedules')[0]!.id);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,2);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-assessment-')).length,1);
+  try{f.h.port.submitTask(request);await f.h.core.whenIdle();id=String(read(f.directory,'SELECT id FROM activity_schedules')[0]!.id);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,2);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-review-')).length,0);
     f.start();await f.tick();assert.equal(read(f.directory,'SELECT * FROM activity_occurrences').length,0);phase='explore';step=0;f.advance(60000);await f.tick();await f.h.core.whenIdle();
     const occurrence=read(f.directory,'SELECT state FROM activity_occurrences')[0];assert.equal(occurrence?.state,'completed');assert.equal(f.activity.store.get(id).status,'paused');assert.equal(f.h.core.journal.list().length,0);
     const count=f.h.adapter.requests.length;f.advance(3600000);await f.tick();await f.h.core.whenIdle();assert.equal(f.h.adapter.requests.length,count);assert.equal(f.activity.health.error,null);
@@ -49,14 +49,14 @@ test('a lost acknowledgement cannot reject an accepted Run and restart never rep
   finally{await f.close();}
 });
 
-test('task completion with selected evidence is scheduled for maintenance while redundant selection requests coalesce',async()=>{
+test('explicit maintenance requests are idempotent and scheduled after task completion',async()=>{
   let f:Awaited<ReturnType<typeof fixture>>,step=0,maintenance=false,maintenanceId='',source:PersonaSourceRef|undefined;const text='虚构气球在观察窗口内向东移动';
   const extension={id:'fixture',version:'1',actions:[{id:'fixture_observe',version:'1',description:'fictional observation',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
     execute:async(_i:unknown,c:ExecutionContext)=>{source=f.h.memory.growth!.recordObservation(c,{requestId:'source',text,kind:'primary',resource:'fixture:balloon',occurredAt:new Date().toISOString(),coverage:['fictional-window'],completeness:'partial'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'partial' as const,data:z.json().parse(source),sources:[],receipts:[]};}}]};
   f=await fixture(options=>{
     if(JSON.stringify(options).includes('独立经历分析器'))return textReply(JSON.stringify({schemaVersion:1,summary:'一次有界观察',gaps:['未知未来'],experiences:[{content:{observation:'气球向东',action:'虚构观察',outcome:'窗口内向东',interpretation:'不能推断永久方向',conditions:['本次窗口'],unknowns:['未来方向']},supports:[{sourceId:'S1',quote:text}],counters:[],target:null}],relations:[],persona:[]}));
-    step++;if(!maintenance)return step===1?call('fixture_observe',{}):step===2?call('dafeiyu_execution_select',{requestId:'select',expectedVersion:0,entries:[source],reason:'选择观察'}):textReply('观察结束');
-    const id=maintenanceId||=String(read(f.directory,"SELECT id FROM maintenance_requests WHERE state='waiting-scheduler' ORDER BY rowid DESC LIMIT 1",'memory')[0]?.id);
+    step++;if(!maintenance)return step===1?call('fixture_observe',{}):step===2?call('dafeiyu_execution_select',{requestId:'select',expectedVersion:0,entries:[source],reason:'选择观察'}):step<=4?call('dafeiyu_memory_maintenance_request',{requestId:'explicit',sources:[],reason:'整理明确选择的观察'}):textReply('观察结束');
+    const id=maintenanceId||=String(read(f.directory,"SELECT id FROM maintenance_requests WHERE state='ready' ORDER BY rowid DESC LIMIT 1",'memory')[0]?.id);
     const program=options.messages.flatMap(message=>message.role==='user'?message.content.filter(block=>block.type==='text').map(block=>{try{return JSON.parse(block.text);}catch{return null;}}):[]).find(value=>value?.work?.kind==='memory-maintenance');
     assert.ok(program);assert.equal(program.work.requestId,id);assert.notEqual(program.goal,request.goal);assert.equal(program.work.backgroundTaskGoal,request.goal);
     assert.deepEqual(program.work.toolArguments.dafeiyu_memory_consolidate,{id});
@@ -65,8 +65,8 @@ test('task completion with selected evidence is scheduled for maintenance while 
   // Includes an independent analysis turn and durable source sealing. This checks state,
   // not a 10-second latency guarantee while other regression workers contend for IO.
   },{extension,settings:{maintenance:true},turnTimeoutMs:30000});
-  try{f.h.port.submitTask(request);await f.h.core.whenIdle();assert.equal(read(f.directory,'SELECT * FROM maintenance_requests','memory').length,2);f.start();await f.tick();
-    assert.equal(read(f.directory,"SELECT count(*) AS n FROM maintenance_requests WHERE error='COALESCED_REQUEST'",'memory')[0]?.n,1);assert.equal(read(f.directory,'SELECT * FROM activity_schedules').length,1);
+  try{f.h.port.submitTask(request);await f.h.core.whenIdle();assert.equal(read(f.directory,'SELECT * FROM maintenance_requests','memory').length,1);f.start();await f.tick();
+    assert.equal(read(f.directory,'SELECT * FROM activity_schedules').length,1);
     maintenance=true;step=0;f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.equal(f.activity.health.error,null);
     assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'completed');
     assert.equal(read(f.directory,'SELECT * FROM experience_items','memory').length,1);assert.equal(read(f.directory,"SELECT state FROM maintenance_requests WHERE error IS NULL",'memory')[0]?.state,'completed');
@@ -76,8 +76,8 @@ test('task completion with selected evidence is scheduled for maintenance while 
 
 test('metadata-only task events settle without an auxiliary model or another Core Run',async()=>{
   const f=await fixture(()=>textReply('没有选择可保存内容'),{settings:{maintenance:true}});
-  try{f.h.port.submitTask(request);await f.h.core.whenIdle();f.start();await f.tick();assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-assessment-')).length,1);assert.equal(read(f.directory,'SELECT * FROM activity_schedules').length,0);
-    assert.equal(read(f.directory,'SELECT state FROM maintenance_requests','memory')[0]?.state,'completed');assert.equal(read(f.directory,'SELECT * FROM experience_items','memory').length,0);}
+  try{f.h.port.submitTask(request);await f.h.core.whenIdle();f.start();await f.tick();assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(f.h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-review-')).length,0);assert.equal(read(f.directory,'SELECT * FROM activity_schedules').length,0);
+    assert.equal(read(f.directory,'SELECT * FROM maintenance_requests','memory').length,0);assert.equal(read(f.directory,'SELECT * FROM experience_items','memory').length,0);}
   finally{await f.close();}
 });
 
@@ -158,7 +158,7 @@ test('maintenance cannot reintroduce a revoked planning source through its deriv
   const extension={id:'fixture',version:'1',actions:[{id:'fixture_save',version:'1',description:'selected fictional content',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write' as const,
     execute:async(_i:unknown,c:ExecutionContext)=>{const source=f.h.memory.growth!.recordObservation(c,{requestId:'source',text:'虚构观察，保留来源',kind:'primary',resource:'fixture:scope',occurredAt:new Date().toISOString(),coverage:['test'],completeness:'partial'},'fixture');
       const saved=f.h.memory.growth!.contribute(c,{requestId:'save',source:source.id,version:source.version,mode:'original',reason:'选择保存'},'fixture');return {status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:z.json().parse(saved),sources:[],receipts:[]};}}]};
-  f=await fixture(()=>++step===1?mode==='plan'?call('dafeiyu_activity_plan',planInput(f.now()+60000)):call('fixture_save',{}):textReply('测试步骤结束'),{extension,settings:{maintenance:true},context:{maxBytes:0}});
+  f=await fixture(()=>++step===1?mode==='plan'?call('dafeiyu_activity_plan',planInput(f.now()+60000)):call('fixture_save',{}):mode==='explore'&&step===2?call('dafeiyu_memory_maintenance_request',{requestId:'explicit',sources:[],reason:'整理这次观察'}):textReply('测试步骤结束'),{extension,settings:{maintenance:true},context:{maxBytes:0}});
   try{const parent=f.h.port.submitTask(request);await f.h.core.whenIdle();mode='explore';step=0;f.start();f.advance(60000);await f.tick();await f.h.core.whenIdle();
     assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'completed');
     f.h.port.updateTask(parent.task,{requestId:'revoke-parent',expectedVersion:1,status:'paused'});const calls=f.h.adapter.requests.length;
@@ -170,10 +170,9 @@ test('maintenance cannot reintroduce a revoked planning source through its deriv
 
 test('a capability loading wait keeps the original activity authority without an independent resume',async()=>{
   let f:Awaited<ReturnType<typeof fixture>>,phase='plan',step=0;
-  f=await fixture(()=>phase==='plan'&&++step===1?call('dafeiyu_activity_plan',planInput(f.now()+60000)):textReply('已保存当前阶段'));
-  f.h.adapter.assessmentResponse=()=>textReply(JSON.stringify({goalStatus:'partial',summary:'等待需要的能力加载。',evidenceIds:[],limitations:[],unfinished:[],requiredCapabilities:['fixture_future_tool'],next:phase==='plan'?'deliver':'capability-change'}));
+  f=await fixture(()=>++step===1?phase==='plan'?call('dafeiyu_activity_plan',planInput(f.now()+60000)):call('dafeiyu_task_outcome',{next:'wait',reason:'等待能力加载',requiredCapabilities:['fixture_future_tool']}):textReply('已保存当前阶段'));
   try{f.h.port.submitTask(request);await f.h.core.whenIdle();const id=String(read(f.directory,'SELECT id FROM activity_schedules')[0]!.id);
-    phase='explore';f.start();f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'waiting');
+    phase='explore';step=0;f.start();f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.equal(read(f.directory,'SELECT state FROM activity_occurrences')[0]?.state,'waiting');
     const calls=f.h.adapter.requests.length;f.advance(60000);await f.tick();await f.h.core.whenIdle();assert.notEqual(f.activity.store.get(id).status,'blocked');assert.equal(f.h.adapter.requests.length,calls);assert.equal(f.activity.health.error,null);
   }finally{await f.close();}
 });

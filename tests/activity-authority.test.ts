@@ -53,7 +53,7 @@ test('task creation is idempotent and does not start a model until a Run is expl
   const h=await executionHarness(await root());try{const task=h.port.createTask({requestId:'deferred',title:'计划中的任务',goal:'未来才探索'});assert.equal(h.adapter.requests.length,0);
     assert.equal(h.port.createTask({requestId:'deferred',title:'计划中的任务',goal:'未来才探索'}).id,task.id);
     assert.throws(()=>h.port.createTask({requestId:'deferred',title:'计划中的任务',goal:'不同目标'}));assert.equal(h.port.taskState(task).status,'active');
-    const run=h.port.submitTask({requestId:'start',taskId:task.id,expectedVersion:1,policyId:'test-policy'},task);await h.core.whenIdle();assert.equal(h.port.status(run.run).state,'completed');assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-assessment-')).length,1);
+    const run=h.port.submitTask({requestId:'start',taskId:task.id,expectedVersion:1,policyId:'test-policy'},task);await h.core.whenIdle();assert.equal(h.port.status(run.run).state,'completed');assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('dafeiyu-review-')).length,0);
   }finally{await h.close();}
 });
 

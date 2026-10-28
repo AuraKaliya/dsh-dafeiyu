@@ -3,16 +3,16 @@ import {ContextBudgetSchema} from './context.js';
 import { FeatureSchema, ExtensionIdSchema } from './execution.js';
 import { ConversationSchema } from './conversation.js';
 import { ExternalActionPoliciesSchema } from './external-execution.js';
-import { PhaseTimeoutsSchema } from './task-assessment.js';
+import { PhaseTimeoutsSchema } from './task-review.js';
 
 const path = z.string().trim().min(1).max(4096);
 const route = z.strictObject({ provider: z.string().min(1).max(120), model: z.string().min(1).max(160), reasoningEffort: z.string().min(1).max(40).optional() });
 export const HostConfigSchema = z.strictObject({
   schemaVersion: z.literal(1), profileId: ExtensionIdSchema,
   agent: z.strictObject({ id: z.string().min(1).max(100) }),
-  paths: z.strictObject({ core: path, memory: path, sessions: path, query: path, channels: z.record(ExtensionIdSchema, path).default({}) }),
+  paths: z.strictObject({ core: path, memory: path, sessions: path, query: path, channels: z.strictObject({qq:path.optional()}).prefault({}) }),
   modelRoutes: z.strictObject({ chat: route, probes: z.partialRecord(z.enum(['vision', 'asr', 'audio-events']), route).optional() }),
-  plugins: z.array(z.strictObject({ id: ExtensionIdSchema, enabled: z.boolean().default(true), required: z.boolean().default(false),
+  plugins: z.array(z.strictObject({ id: z.enum(['model-deepseek','model-scripted','timeline','memory-growth','qq','bilibili','activity','media','server-executor','channel-simulator']), enabled: z.boolean().default(true), required: z.boolean().default(false),
     requires: z.array(FeatureSchema).max(64).default([]), config: z.record(z.string(), z.json()).default({}) })).max(64),
   runtime: z.strictObject({ maxConcurrentRuns: z.number().int().min(1).max(16).default(2), maxConcurrentPerTask: z.literal(1).default(1),
     maxConcurrentPerSession: z.literal(1).default(1), maxPendingRuns: z.number().int().min(1).max(1000).default(100),

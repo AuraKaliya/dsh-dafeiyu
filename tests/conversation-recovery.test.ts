@@ -14,7 +14,7 @@ import type {CompactionProvider} from '@dafeiyu/contracts';
 const failed=():StreamChunk[]=>[{type:'finish',reason:{kind:'error',failure:{code:'FIXTURE_FAILURE',message:'PRIVATE_PROVIDER_DETAIL'}}}];
 function input(options:GenerateOptions):Record<string,unknown>{const m=options.messages.findLast(m=>m.role==='user'&&m.source?.kind==='user');return JSON.parse(m?.content.filter(c=>c.type==='text').map(c=>c.text).join('')??'{}') as Record<string,unknown>;}
 test('a failed QQ turn reports a persona status once, preserving failure and earlier operation receipts',async t=>{
-  const h=await qqCapabilityFixture();t.after(h.close);let calls=0,recoveries=0,writes=0;
+  const h=await qqCapabilityFixture({extraConversationActions:['fixture_write']});t.after(h.close);let calls=0,recoveries=0,writes=0;
   h.core.registerExtension({id:'recovery-fixture',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'recovery-fixture',{id:'fixture_write',description:'本机虚构写入',inputSchema:z.strictObject({}),work:async()=>({saved:++writes})})]});
   h.setResponse(options=>{if(String(options.sessionId).startsWith('dafeiyu-recovery-')){recoveries++;assert.equal(options.tools?.length??0,0);assert.doesNotMatch(JSON.stringify(input(options)),/PRIVATE_PROVIDER_DETAIL/);return textReply(JSON.stringify({next:'wait',message:'刚才的记录已经保存，后续回答没有完成；我保留了进度。'}));}return ++calls===1?call('fixture_write',{}):failed();});
   await h.message('请处理这件事',{trigger:true,id:'9401'});const item=h.core.journal.list()[0]!;assert.equal(item.state,'failed');assert.equal(writes,1);assert.equal(recoveries,1);assert.equal(h.platform.sent.length,1);
@@ -37,9 +37,9 @@ for(const choice of ['resume','supersede','wait'] as const)test(`new message ent
 });
 test('source rejection records the exact dependency and phase without copying its text',async t=>{
   const h=await provenanceFixture();t.after(h.close);const item=await h.run('测试来源诊断');let valid=true;
-  const provider:CompactionProvider={policy:{inputTokens:100000,thresholdRatio:0.8,targetRatio:0.6,minGrowthTokens:0,minSavingsTokens:1,cooldownMs:0,retainTurns:1,maxSourceBytes:10000,maxSummaryChars:1000},basis:()=>({epoch:'stable',taskId:null,versions:{}}),summarize:async()=>'',sources:{inbound:()=>[],context:()=>[],tool:()=>[],validate:()=>true}};
+  const provider:CompactionProvider={policy:{inputTokens:100000,thresholdRatio:0.8,targetRatio:0.6,minGrowthTokens:0,minSavingsTokens:1,cooldownMs:0,retainTurns:1,maxSourceBytes:10000,maxSummaryChars:1000},basis:()=>({epoch:'stable',taskId:null,versions:{}}),summarizeFragments:async()=>[],sources:{inbound:()=>[],context:()=>[],tool:()=>[],validate:()=>true}};
   const tracker=new SourceTracker('dafeiyu',()=>({owner:'memory',version:'1',provider}),{sourceItems:()=>[{owner:'fixture',region:'pending',item:{id:'precise-source',version:'1',text:'PRIVATE_DIAGNOSTIC_BODY',sources:[{ref:'fixture:status',version:'1',hash:'fixture'}],expiresAt:'9999-12-31T23:59:59.999Z'}}],nativeDependencies:()=>[],validateHistorical:()=>valid,explainHistorical:()=> 'context-version-changed'});
-  tracker.begin(conversationHistory(item),h.session(),0);tracker.admit(h.adapter.requests.at(-1)!,()=>undefined);valid=false;assert.throws(()=>tracker.guard(),/SOURCE_VALIDATION_FAILED/);
+  tracker.begin(conversationHistory(item),h.session(),0);tracker.admit(h.adapter.requests.at(-1)!);valid=false;assert.throws(()=>tracker.guard(),/SOURCE_VALIDATION_FAILED/);
   const record=h.session().snapshotEvents().map(pluginRecordOf).findLast(r=>r?.type==='plugin:dafeiyu/source-invalid');assert.equal(record?.type,'plugin:dafeiyu/source-invalid');if(record?.type!=='plugin:dafeiyu/source-invalid')throw new Error('Missing diagnosis');
   const diagnostic=z.object({reason:z.string(),phase:z.string(),dependency:z.object({kind:z.string()}),dependencyHash:z.string()}).parse(record.data);assert.equal(diagnostic.reason,'context-version-changed');assert.equal(diagnostic.phase,'stream');assert.equal(diagnostic.dependency.kind,'context');assert.equal(diagnostic.dependencyHash.length,64);assert.doesNotMatch(JSON.stringify(record.data),/PRIVATE_DIAGNOSTIC_BODY/);
 });

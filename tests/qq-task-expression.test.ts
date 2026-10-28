@@ -7,7 +7,6 @@ import { MemoryStore,MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { inspectStorage } from '@dafeiyu/host';
 import { qqCapabilityFixture,scene,otherGroup,lastPage,bot,group,until,outcomes } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
-import { dropExperienceFixtureSchema } from './legacy-execution-fixture.js';
 type Fixture=Awaited<ReturnType<typeof qqCapabilityFixture>>;
 const native=(r:{sessionId?:unknown})=>String(r.sessionId).startsWith('dafeiyu-task-');
 function rows(h:Fixture){const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{return db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE q.producer='qq-tasks' ORDER BY r.rowid").all().map(row=>String(row.id));}finally{db.close();}}
@@ -44,8 +43,8 @@ test('a plugin copying a valid public observation cannot mark its other output f
 });
 
 test('a plain task result is a derived material and can be explicitly withdrawn without automatic regeneration',async t=>{
-  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const id=await task(h,'plain'),packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.evidence.filter(evidence=>evidence.kind==='inference').length,2);
-  const facts=packet.evidence.filter(evidence=>evidence.kind==='reported');assert.equal(facts.length,1);assert.equal(JSON.parse(facts[0]!.text).kind,'result-workflow');assert.doesNotMatch(facts[0]!.text,/EXECUTOR_REPORT_SENTINEL/);
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const id=await task(h,'plain'),packet=await h.core.prepareMessageTaskExpression(id);assert.equal(packet.evidence.filter(evidence=>evidence.kind==='inference').length,1);
+  const facts=packet.evidence.filter(evidence=>evidence.kind==='reported'&&evidence.id!=='CONTEXT');assert.equal(facts.length,1);assert.equal(JSON.parse(facts[0]!.text).kind,'result-workflow');assert.doesNotMatch(facts[0]!.text,/EXECUTOR_REPORT_SENTINEL/);
   await h.core.withdrawMessageTaskExpression(id,packet.id,1);await assert.rejects(()=>h.core.prepareMessageTaskExpression(id),/UNAVAILABLE/);
 });
 
@@ -74,12 +73,6 @@ test('deleting then restoring target memory cannot revive an older native expres
   const id=await task(h),packet=await h.core.prepareMessageTaskExpression(id);
   for(const action of ['delete','restore'] as const){step=0;h.setResponse(()=>++step===1?call(`dafeiyu_memory_${action}`,{requestId:action,id:memoryId,expectedVersion:action==='delete'?'1':'2',reason:'虚构来源状态变更'}):textReply('按回执处理'));await h.message('变更记忆状态',{trigger:true});
     await assert.rejects(()=>h.core.openMessageTaskExpression(id,packet.id),/SOURCE_STALE|NO_PUBLIC_MATERIAL/);}
-});
-
-test('memory v9 upgrades preserve existing task, intent and observation rows and start with no native expression packets',async()=>{
-  const h=await qqCapabilityFixture({tasks:true});await h.message('迁移用虚构来源');await task(h);await h.close();const path=join(h.root,'memory','memory.sqlite'),db=new DatabaseSync(path);
-  const tables=['task_workspaces','task_intent_events','capability_observations'],before=tables.map(table=>db.prepare(`SELECT * FROM ${table}`).all());dropExperienceFixtureSchema(db);db.exec('DROP TABLE native_expression_packets;DELETE FROM memory_schema_migrations WHERE version=10;PRAGMA user_version=9;');db.close();
-  assert.equal(inspectStorage(path,'memory').version,9);new MemoryStore(path).close();const after=new DatabaseSync(path,{readOnly:true});try{assert.deepEqual(tables.map(table=>after.prepare(`SELECT * FROM ${table}`).all()),before);assert.equal(after.prepare('SELECT count(*) AS n FROM native_expression_packets').get()?.n,0);assert.equal(after.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);}finally{after.close();}
 });
 
 test('native expression creation rolls back its material if its audit cannot be persisted',async t=>{

@@ -45,7 +45,7 @@ test('a visible event cannot launder another conversation session, message or ca
   const h=await timelineFixture();t.after(h.close);const a=await h.seed('a'),b=await h.seed('b','private-only');
   const foreign=h.core.journal.events(b.route).find(e=>e.type==='message.accepted')!;
   const forged=h.core.journal.append({...eventFor('dafeiyu',a,'fixture','test','1','fake',foreign.id),sources:[
-    {kind:'session',id:b.sessionId,seq:1},{kind:'event',id:foreign.id},{kind:'message',id:b.message.id},
+    {kind:'session',id:b.sessionId,seq:1,route:b.route},{kind:'event',id:foreign.id,route:b.route},{kind:'message',id:b.message.id,route:b.route},
   ]});
   const event=await h.probe('a',context=>h.timeline.open(context,{ref:ref(forged)}));
   assert.equal(event.status,'ok');if(event.status==='ok'){assert.ok(!event.text.includes(b.sessionId));assert.ok(!event.text.includes(foreign.id));assert.match(event.text,/"causedBy": null/);}
@@ -67,12 +67,12 @@ test('source results omit model reasoning, tool-private data and system prompts'
   const completed=h.core.journal.events(item.route).find(e=>e.traceId===item.id&&e.type==='turn.completed')!;
   const session=h.ctx.agents.get(SessionId(item.sessionId))!.session;
   const assistant=session.snapshotEvents().find(e=>e.type==='assistant/message')!;
-  assert.match(JSON.stringify(assistant),/INTERNAL_REASONING_SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(assistant),/INTERNAL_REASONING_SENTINEL/);
   const index=completed.sources.findIndex(s=>s.seq===assistant.seq);
   const opened=await h.probe('a',context=>h.timeline.open(context,{ref:source(completed,index)}));
-  assert.equal(opened.status,'ok');if(opened.status==='ok'){assert.match(opened.text,/可见的最终回复/);assert.ok(!opened.text.includes('INTERNAL_REASONING_SENTINEL'));assert.equal(opened.omittedBlocks,1);}
+  assert.equal(opened.status,'ok');if(opened.status==='ok'){assert.match(opened.text,/可见的最终回复/);assert.ok(!opened.text.includes('INTERNAL_REASONING_SENTINEL'));assert.equal(opened.omittedBlocks,0);}
   const system=session.snapshotEvents().find(e=>e.type==='system/message')!;
-  const record=h.core.journal.append({...eventFor('dafeiyu',item,'fixture','test','1'),sources:[{kind:'session',id:item.sessionId,seq:system.seq}]});
+  const record=h.core.journal.append({...eventFor('dafeiyu',item,'fixture','test','1'),sources:[{kind:'session',id:item.sessionId,seq:system.seq,route:item.route}]});
   assert.deepEqual(await h.probe('a',context=>h.timeline.open(context,{ref:source(record,0)})),{status:'not_exported'});
 });
 
@@ -85,7 +85,7 @@ test('opening tool evidence never reruns the tool and masks credential-shaped ou
   const target=h.ctx.agents.get(SessionId(item.sessionId))!.session.snapshotEvents().find(e=>e.type==='tool/result')!;
   const index=completed.sources.findIndex(s=>s.seq===target.seq);
   const opened=await h.probe('a',context=>h.timeline.open(context,{ref:source(completed,index)}));
-  assert.equal(opened.status,'ok');if(opened.status==='ok'){assert.match(opened.text,/测试结果/);assert.ok(!opened.text.includes('MOCK_SECRET_SENTINEL'));assert.equal(opened.redacted,true);}
+  assert.equal(opened.status,'ok');if(opened.status==='ok'){assert.match(opened.text,/PRIVATE_CONTENT_OMITTED/);assert.ok(!opened.text.includes('MOCK_SECRET_SENTINEL'));assert.equal(opened.redacted,false);}
   assert.equal(executions,1);
 });
 
@@ -110,17 +110,17 @@ test('original DSH source remains readable after surface replacement without rep
   await h.ctx.sessions.flush(session);
   const surface=await h.ctx.sessionQuery.readSurface(session.id);
   assert.ok(!JSON.stringify(surface.events).includes('压缩前原文_SENTINEL'));
-  const index=completed.sources.findIndex(s=>s.seq===original.seq);
-  const opened=await h.probe('a',context=>h.timeline.open(context,{ref:source(completed,index)}));
-  assert.equal(opened.status,'ok');if(opened.status==='ok')assert.match(opened.text,/压缩前原文_SENTINEL/);
+  const reader=await h.ctx.sessionPersistence.open(SessionId(item.sessionId),'read');
+  try{const saved=(await reader.read(original.seq,1)).events[0];assert.equal(saved?.type,'user/message');assert.match(JSON.stringify(saved),/压缩前原文_SENTINEL/);}finally{await reader.close();}
+
 });
 
 test('forged and expired action contexts cannot obtain a history scope',async t=>{
   const h=await timelineFixture();t.after(h.close);let captured:ConversationAccess|undefined;
   await h.probe('a',context=>{captured=context;return h.timeline.search(context,{limit:1});});
-  assert.ok(captured);assert.throws(()=>h.timeline.search(captured!,{}),/No active/);
+  assert.ok(captured);assert.throws(()=>h.timeline.search(captured!,{}),/SCOPE_DENIED/);
   const fake:ConversationAccess={operationId:'fake',conversation:{channel:'simulator',account:'local',kind:'local',id:'a'},sourceMessageId:'x',signal:new AbortController().signal};
-  assert.throws(()=>h.timeline.search(fake,{}),/No active/);
+  assert.throws(()=>h.timeline.search(fake,{}),/SCOPE_DENIED/);
 });
 
 test('failed turns retain source references and their failure outcome is queryable',async t=>{
@@ -162,15 +162,15 @@ test('model arguments cannot override the conversation scope',async t=>{
   assert.ok(!JSON.stringify(h.adapter.requests.at(-1)).includes('PRIVATE_SCOPE_SENTINEL'));
 });
 
-test('native source-open tool handles string pagination arguments and returns evidence content',async t=>{
+test('native source-open tool handles typed pagination arguments and returns evidence content',async t=>{
   const h=await timelineFixture();t.after(h.close);const item=await h.seed('a','来源原文_NATIVE_OPEN');
   const accepted=h.core.journal.events(item.route).find(e=>e.type==='message.accepted')!;
-  let calls=0;h.setResponse(()=>++calls===1?call('dafeiyu_source_open',{ref:source(accepted,0),offset:'0',limit:'1000'}):textReply('已回查'));
+  let calls=0;h.setResponse(()=>++calls===1?call('dafeiyu_source_open',{ref:source(accepted,0),offset:0,limit:1000}):textReply('已回查'));
   h.simulator.send('a','打开来源',{id:'native-open'});await h.core.whenIdle();
   const result=h.ctx.agents.get(SessionId(item.sessionId))!.session.snapshotEvents().findLast(e=>e.type==='tool/result');
   assert.ok(result&&result.type==='tool/result');
   const text=result.data.message.content.filter(block=>block.type==='text').map(block=>block.text).join('');
-  const body=JSON.parse(text);assert.equal(body.status,'ok');assert.equal(body.kind,'normalized-inbound');assert.match(body.text,/来源原文_NATIVE_OPEN/);
+  const outcome=JSON.parse(text);assert.equal(outcome.status,'succeeded');const body=outcome.data;assert.equal(body.status,'ok');assert.equal(body.kind,'normalized-inbound');assert.match(body.text,/来源原文_NATIVE_OPEN/);
 });
 
 test('missing source events and file-like references never fall back to filesystem reads',async t=>{
@@ -183,7 +183,7 @@ test('missing source events and file-like references never fall back to filesyst
 test('unloading timeline revokes direct calls even from another currently active action',async t=>{
   const h=await timelineFixture();t.after(h.close);const instance=h.timeline;
   await h.timelineFiber.dispose();
-  await assert.rejects(h.probe('a',context=>instance.search(context,{})),/unregistered/);
+  await assert.rejects(h.probe('a',context=>instance.search(context,{})),/DEPENDENCY_UNAVAILABLE/);
 });
 
 test('pagination continues across separate core-issued action contexts',async t=>{

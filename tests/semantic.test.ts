@@ -17,6 +17,7 @@ import { appendPluginRecord } from '@deepseek-ai/dsh-session';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { renderFragmentView } from '../packages/core/lib/summary-fragments.js';
 import { digestSource } from '../packages/core/lib/source-records.js';
+import { priceRetirement } from '../packages/core/lib/compaction-runtime.js';
 
 test('qualifiers retain source offsets, polarity, scope, attribution, time, quantities and correction verbatim',()=>{
   const text='小周说只是猜测。仅限测试群。未验收，不能发布。若获确认再发。更正为蓝帆731。上限30元，截至2026-11-01。';
@@ -94,7 +95,7 @@ test('rewriting one source group preserves unrelated history and other plugin ar
   const combined=compose(h,[h.a.view,b.view]),plan=h.plan(combined);assert.ok(plan);
   const view=commitSummaryRewrite(h.ctx,h.session(),plan,acceptedResult(plan.request),h.validate),ref=summaryReference(view.manifestSeq,view.manifest);
   h.ctx.systemPrompt.context({name:'semantic-native',order:1,required:true,text:'NATIVE_KEEP'});
-  const ext=h.core.registerExtension({id:'semantic-other',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{id:'status',kind:'operational-fact',
+  const ext=h.core.registerExtension({id:'semantic-other',version:'1',protocolVersion:4,agentId:'dafeiyu',conversationContexts:[{id:'status',kind:'operational-fact',
     prepare:async()=>[{id:'status',version:'1',text:'OTHER_PLUGIN_KEEP',expiresAt:new Date(Date.now()+600000).toISOString(),sources:[{ref:'fictional:other',version:'1',hash:'test'}]}],validate:()=>true}]});t.after(()=>ext.dispose());
   h.mutate(h.a.memory,'delete',1);await h.run('继续');const after=resolveFragmentView(h.session(),ref,h.scope);assert.ok(after);assert.match(after.text,/B_ONLY/);assert.ok(!after.text.includes('青羽842'));
   assert.match(h.visible(),/NATIVE_KEEP/);assert.match(h.visible(),/OTHER_PLUGIN_KEEP/);
@@ -115,7 +116,7 @@ test('rebuild of an invalid mixed group reads only independent valid originals, 
   const a=await h.remember('A_SECRET_DELETED：只属于虚构A，尚未确认。');
   const mixed=await seedCheckpoint(h,'B_SURVIVING_RAW：仅在测试环境使用，尚未验收。',[{kind:'note',text:'MIXED_PROSE_NEVER_READ：A_SECRET_DELETED 与 B_SURVIVING_RAW 的混合摘要。'}],null,1);
   h.mutate(a,'delete',1);await h.run('失效后继续');const parent=resolveFragmentView(h.session(),mixed.ref,a.scope);assert.ok(parent);assert.equal(parent.view.active.length,0);
-  const policy=new MemorySourcePolicy(h.ctx,h.store,null,null,()=> 'test'),scope={...a.scope};
+  const policy=new MemorySourcePolicy(h.ctx,h.store,null),scope={...a.scope};
   const validate=(deps:readonly SourceDependency[])=>deps.every(d=>d.kind==='context'||policy.validate(scope,d));
   const plan=prepareSummaryRewrite(h.session(),scope,mixed.ref,'G1','rebuild',{owner:'memory',version:'test',protectedTaskId:null,maxChars:1000,maxBytes:65536,maxConsecutive:2},validate);assert.ok(plan);
   assert.equal(plan.request.sources.length,1);assert.deepEqual(plan.request.parents,[]);assert.ok(!JSON.stringify(plan.request).includes('A_SECRET_DELETED'));assert.ok(!JSON.stringify(plan.request).includes('MIXED_PROSE_NEVER_READ'));
@@ -125,7 +126,10 @@ test('rebuild of an invalid mixed group reads only independent valid originals, 
   await h.run('重建后');assert.match(h.visible(),/B_SURVIVING_RAW/);h.mutate(a,'restore',2);await h.run('恢复A后');assert.ok(!h.visible().includes('A_SECRET_DELETED'));
 });
 test('a fully withdrawn valid group cannot be resurrected through the rebuild entry',async t=>{
-  const h=await semanticFixture();t.after(h.close);await h.memoryFiber.dispose();await h.run('插件退出');
+  const h=await semanticFixture();t.after(h.close);const session=h.session(),previous=h.a.view;
+  const text=renderFragmentView(previous.manifestSeq,previous.manifest,[]),seq=appendPluginRecord(session,'plugin:dafeiyu/summary-view',{schemaVersion:1,manifestSeq:previous.manifestSeq,revision:previous.view.revision+1,previousViewSeq:previous.viewSeq,previousCheckpointSeq:previous.checkpoint.seq,active:[],contentHash:digestSource(text)});
+  priceRetirement(h.ctx,session,[previous.checkpoint.seq]);
+  session.append('user/message',createUserMessage({source:{kind:'dafeiyu-summary-view',compactionId:previous.manifest.compactionId},content:[{type:'text',text}]}),{surfaceOp:{op:'replace',startSeq:previous.checkpoint.seq,endSeq:previous.checkpoint.seq},sourceEventSeqs:[previous.checkpoint.seq,previous.manifestSeq,seq]});
   const view=resolveFragmentView(h.session(),h.a.ref,h.scope);assert.ok(view);assert.equal(view.view.active.length,0);
   assert.equal(h.plan(view,'rebuild'),null);
 });

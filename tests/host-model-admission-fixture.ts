@@ -14,7 +14,7 @@ const {ScriptedModel,textReply}=await import('./harness.js');
 const {z}=await import('zod');
 const config={schemaVersion:1,profileId:'model-admission-fixture',agent:{id:'dafeiyu'},paths:{core:'./core',memory:'./memory',sessions:'./sessions',query:'./query.sqlite',channels:{}},
   persona:{fixedFile:'./persona.md',kind:'test'},modelRoutes:{chat:{provider:'local-test',model:'scripted'}},runtime:{turnTimeoutMs:3000,shutdownGraceMs:500},
-  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{}}],
+  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:"memory-growth",required:true,config:{}}],
   authorityPolicies:[{id:'local',producers:['host-cli'],actions:[],allowLocalWrite:false}]};
 assert.throws(()=>HostConfigSchema.parse({...config,installModelAdmission:'./arbitrary-plugin.js'}));
 await writeFile(join(root,'persona.md'),'虚构底色，仅检查模型入口与真实本机生命周期。');await writeFile(file,JSON.stringify(config));
@@ -37,11 +37,11 @@ try{
   }else{
     host=await Host.start(prepared,options);assert.equal(installed,true);assert.equal(guards,0);
     const task=await host.run({requestId:'guard-task',title:'虚构任务',goal:'检查安装时机',policyId:'local'});
-    assert.equal(task.state,scenario==='denied'?'failed':'completed');assert.equal(guards,scenario==='denied'?1:2);assert.equal(modelCalls,scenario==='denied'?0:1);
+    assert.equal(task.state,scenario==='denied'?'failed':'completed');assert.equal(guards,1);assert.equal(modelCalls,scenario==='denied'?0:1);
     analysis=new AnalysisRuntime(host.ctx,join(root,'independent-analysis'));
     const work=analysis.structured({id:'guard-analysis',model:{provider:'local-test',model:'scripted'},instructions:'只返回虚构JSON',input:{purpose:'fixture'},parse:value=>z.strictObject({value:z.literal('independent-analysis')}).parse(value)},new AbortController().signal);
     if(scenario==='denied')await assert.rejects(work);else assert.deepEqual(await work,{value:'independent-analysis'});
-    assert.equal(guards,scenario==='denied'?2:3);assert.equal(modelCalls,scenario==='denied'?0:2);assert.ok(sessions.some(id=>id.startsWith('memory-analysis-')));assert.ok(sessions.some(id=>id.startsWith('dafeiyu-task-')));
+    assert.equal(guards,2);assert.equal(modelCalls,scenario==='denied'?0:2);assert.ok(sessions.some(id=>id.startsWith('memory-analysis-')));assert.ok(sessions.some(id=>id.startsWith('dafeiyu-task-')));
   }
 }finally{await analysis?.close();await host?.close();}
 assert.equal(disposed,true);assert.equal(owners(coordination).length,0);

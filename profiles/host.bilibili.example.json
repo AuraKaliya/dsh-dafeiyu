@@ -10,7 +10,7 @@
     "sessions": "../.runtime/bilibili-local-development/sessions",
     "query": "../.runtime/bilibili-local-development/query.sqlite",
     "channels": {
-      "channel-qq": "../.runtime/bilibili-local-development/qq"
+      "qq": "../.runtime/bilibili-local-development/qq"
     }
   },
   "modelRoutes": {
@@ -36,10 +36,9 @@
       }
     },
     {
-      "id": "memory",
+      "id": "memory-growth",
       "required": true,
       "config": {
-        "sourceTracking": true,
         "maintenance": {}
       }
     },
@@ -83,10 +82,12 @@
       "id": "bilibili",
       "required": true,
       "config": {
-        "minIntervalMs": 1000,
-        "backoffMs": 900000,
-        "maxPages": 4096,
-        "topics": []
+        "capabilities": {
+          "minIntervalMs": 1000,
+          "backoffMs": 900000,
+          "maxPages": 4096,
+          "topics": []
+        }
       }
     },
     {
@@ -98,7 +99,7 @@
       }
     },
     {
-      "id": "channel-qq",
+      "id": "qq",
       "required": false,
       "config": {
         "botId": "12345678",
@@ -270,8 +271,12 @@
         "dafeiyu_memory_maintenance_result",
         "dafeiyu_experience_read",
         "dafeiyu_experience_review",
-        "dafeiyu_memory_persona_candidate",
-        "dafeiyu_persona_status"
+        "dafeiyu_memory_reflect",
+        "dafeiyu_memory_pending",
+        "dafeiyu_memory_experience",
+        "dafeiyu_memory_self_status",
+        "dafeiyu_memory_self_update",
+        "dafeiyu_memory_self_withdraw"
       ],
       "allowLocalWrite": true,
       "resources": [

@@ -1,19 +1,118 @@
 {
   "schemaVersion": 1,
   "profileId": "activity-local-development",
-  "agent": {"id": "dafeiyu"},
-  "paths": {"core": "../.runtime/activity-local-development/core", "memory": "../.runtime/activity-local-development/memory", "sessions": "../.runtime/activity-local-development/sessions", "query": "../.runtime/activity-local-development/query.sqlite"},
-  "modelRoutes": {"chat": {"provider": "local-test", "model": "scripted"}},
-  "persona": {"fixedFile": "./persona.test.md", "kind": "test"},
+  "agent": {
+    "id": "dafeiyu"
+  },
+  "paths": {
+    "core": "../.runtime/activity-local-development/core",
+    "memory": "../.runtime/activity-local-development/memory",
+    "sessions": "../.runtime/activity-local-development/sessions",
+    "query": "../.runtime/activity-local-development/query.sqlite"
+  },
+  "modelRoutes": {
+    "chat": {
+      "provider": "local-test",
+      "model": "scripted"
+    }
+  },
+  "persona": {
+    "fixedFile": "./persona.test.md",
+    "kind": "test"
+  },
   "plugins": [
-    {"id": "model-scripted", "required": true},
-    {"id": "timeline", "required": true, "config": {"execution": true}},
-    {"id": "memory", "required": true, "config": {"sourceTracking": true, "maintenance": {}}},
-    {"id": "activity", "required": true, "config": {"maintenance": true, "timeZone": "Asia/Shanghai", "tickMs": 5000, "minIntervalMs": 60000, "maxActiveMs": 300000, "dailyActiveMs": 3600000, "quiet": []}}
+    {
+      "id": "model-scripted",
+      "required": true
+    },
+    {
+      "id": "timeline",
+      "required": true,
+      "config": {
+        "execution": true
+      }
+    },
+    {
+      "id": "memory-growth",
+      "required": true,
+      "config": {
+        "maintenance": {}
+      }
+    },
+    {
+      "id": "activity",
+      "required": true,
+      "config": {
+        "maintenance": true,
+        "timeZone": "Asia/Shanghai",
+        "tickMs": 5000,
+        "minIntervalMs": 60000,
+        "maxActiveMs": 300000,
+        "dailyActiveMs": 3600000,
+        "quiet": []
+      }
+    }
   ],
   "authorityPolicies": [
-    {"id": "local-task", "producers": ["host-cli"], "actions": ["dafeiyu_task_intent", "dafeiyu_activity_plan", "dafeiyu_activity_update", "dafeiyu_activity_status"], "allowLocalWrite": true},
-    {"id": "activity-explore", "producers": ["activity"], "actions": ["dafeiyu_activity_plan", "dafeiyu_activity_update", "dafeiyu_activity_status", "dafeiyu_task_intent", "dafeiyu_task_object", "dafeiyu_execution_source_open", "dafeiyu_execution_contribute", "dafeiyu_execution_select", "dafeiyu_persona_status", "dafeiyu_persona_propose"], "allowLocalWrite": true, "resources": [], "sourceRules": []},
-    {"id": "activity-maintenance", "producers": ["activity"], "actions": ["dafeiyu_memory_maintenance_status", "dafeiyu_memory_consolidate", "dafeiyu_memory_maintenance_result", "dafeiyu_experience_read", "dafeiyu_experience_review", "dafeiyu_memory_persona_candidate", "dafeiyu_persona_status"], "allowLocalWrite": true, "resources": [], "sourceRules": []}
+    {
+      "id": "local-task",
+      "producers": [
+        "host-cli"
+      ],
+      "actions": [
+        "dafeiyu_task_intent",
+        "dafeiyu_activity_plan",
+        "dafeiyu_activity_update",
+        "dafeiyu_activity_status"
+      ],
+      "allowLocalWrite": true
+    },
+    {
+      "id": "activity-explore",
+      "producers": [
+        "activity"
+      ],
+      "actions": [
+        "dafeiyu_activity_plan",
+        "dafeiyu_activity_update",
+        "dafeiyu_activity_status",
+        "dafeiyu_task_intent",
+        "dafeiyu_task_object",
+        "dafeiyu_execution_source_open",
+        "dafeiyu_execution_contribute",
+        "dafeiyu_execution_select",
+        "dafeiyu_memory_reflect",
+        "dafeiyu_memory_pending",
+        "dafeiyu_memory_experience",
+        "dafeiyu_memory_self_status",
+        "dafeiyu_memory_self_update",
+        "dafeiyu_memory_self_withdraw"
+      ],
+      "allowLocalWrite": true,
+      "resources": [],
+      "sourceRules": []
+    },
+    {
+      "id": "activity-maintenance",
+      "producers": [
+        "activity"
+      ],
+      "actions": [
+        "dafeiyu_memory_maintenance_status",
+        "dafeiyu_memory_consolidate",
+        "dafeiyu_memory_maintenance_result",
+        "dafeiyu_experience_read",
+        "dafeiyu_experience_review",
+        "dafeiyu_memory_reflect",
+        "dafeiyu_memory_pending",
+        "dafeiyu_memory_experience",
+        "dafeiyu_memory_self_status",
+        "dafeiyu_memory_self_update",
+        "dafeiyu_memory_self_withdraw"
+      ],
+      "allowLocalWrite": true,
+      "resources": [],
+      "sourceRules": []
+    }
   ]
 }

@@ -33,8 +33,8 @@ test('v3 channel-only extensions use the existing reply ledger and revoke their 
   try{const spec:Extension={protocolVersion:4,id:'v3-channel',version:'1',agentId:'dafeiyu',channels:[{channel:'fixture-v3',account:'local',deliveryValidation:'per-segment',deliver:async(reply,_signal,authority)=>{assert.equal(typeof authority,'function');authority!();sent.push(reply.text);return {status:'sent',receiptId:'fixture-receipt'};}}]};
     const handle=h.core.registerExtension(spec);assert.ok(handle.ingest);const input=MessageSchema.parse({id:'one',occurredAt:new Date().toISOString(),conversation:{channel:'fixture-v3',account:'local',kind:'local',id:'room'},sender:{id:'fictional-user',displayName:'虚构用户'},text:'执行普通聊天'});
     const accepted=handle.ingest(input);await h.core.whenIdle();assert.equal(h.core.journal.get(accepted.id).state,'delivered');assert.equal(sent.length,1);assert.equal(h.core.getStatus().extensions.filter(id=>id==='v3-channel').length,1);
-    assert.throws(()=>handle.ingest!({...input,id:'two',conversation:{...input.conversation,account:'foreign'}}),/SCOPE_DENIED/);
-    handle.dispose();const replacement=h.core.registerExtension(spec);assert.throws(()=>handle.ingest!({...input,id:'two'}),/CAPABILITY_UNAVAILABLE/);replacement.dispose();
+    assert.throws(()=>handle.ingest!({...input,id:'two',conversation:{...input.conversation,account:'foreign'}}),/does not own/);
+    handle.dispose();const replacement=h.core.registerExtension(spec);assert.throws(()=>handle.ingest!({...input,id:'two'}),/unregistered/);replacement.dispose();
   }finally{await h.close();}
 });
 
@@ -61,7 +61,7 @@ test('lost execution outbox acknowledgement is repaired with one event identity 
   const directory=await root();let h=await executionHarness(directory);const original=RuntimeStore.prototype.acknowledgeEvent;
   try{RuntimeStore.prototype.acknowledgeEvent=function(){throw new Error('FIXTURE_ACK_LOST');};assert.throws(()=>h.port.submitTask(request),/FIXTURE_ACK_LOST/);}
   finally{RuntimeStore.prototype.acknowledgeEvent=original;await h.close();}
-  h=await executionHarness(directory,undefined,undefined,false);try{await h.core.whenIdle();const accepted=h.port.submitTask(request);const events=h.core.journal.executionEvents('dafeiyu',accepted.task.id);assert.equal(events.filter(event=>event.type==='run.accepted').length,1);assert.equal(h.port.status(accepted.run).state,'completed');assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-assessment-')).length,1);}finally{await h.close();}
+  h=await executionHarness(directory,undefined,undefined,false);try{await h.core.whenIdle();const accepted=h.port.submitTask(request);const events=h.core.journal.executionEvents('dafeiyu',accepted.task.id);assert.equal(events.filter(event=>event.type==='run.accepted').length,1);assert.equal(h.port.status(accepted.run).state,'completed');assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-review-')).length,0);}finally{await h.close();}
 });
 
 test('restored result content is verified and a later task epoch cannot read the old result as current',async()=>{

@@ -13,7 +13,7 @@ type H=Awaited<ReturnType<typeof executionHarness>>;
 const root=()=>mkdtemp(join(tmpdir(),'dafeiyu-execution-memory-'));
 const request={requestId:'first',title:'虚构内部观察',goal:'核对虚构材料，保留条件和未决项，不向聊天发送',policyId:'test-policy'};
 const observation={requestId:'observe',occurredAt:'2026-10-24T00:00:00.000Z',text:'蓝灯🦈尚未确认，必须保留反证。',kind:'primary',completeness:'partial',resource:'fixture:blue-lamp',coverage:['文字片段0—20；没有音频、画面'],dependencies:[]};
-function fixture(execute:(c:ExecutionContext)=>unknown,effects:'read'|'local-write'='local-write'):Omit<Extension,'agentId'|'protocolVersion'>{return {id:'fixture',version:'plugin-7',actions:[{id:'fixture_observe',version:'action-3',description:'仅本机虚构文字观察',inputSchema:z.strictObject({}),outputSchema:z.json(),effects,requiresTask:true,execute:async(_input,c)=>({status:'succeeded',effects:effects==='read'?'none':'confirmed',completeness:'partial',data:z.json().parse(execute(c)),sources:[],receipts:[]})}]};}
+function fixture(execute:(c:ExecutionContext)=>unknown,effects:'read'|'local-write'='local-write'):Omit<Extension,'agentId'|'protocolVersion'>{return {id:'fixture',version:'plugin-7',actions:[{id:'fixture_observe',version:'action-3',description:'仅本机虚构文字观察',inputSchema:z.strictObject({}),outputSchema:z.json(),effects,scope:'task',execute:async(_input,c)=>({status:'succeeded',effects:effects==='read'?'none':'confirmed',completeness:'partial',data:z.json().parse(execute(c)),sources:[],receipts:[]})}]};}
 function rows(directory:string,sql:string,dbName='memory'){const db=new DatabaseSync(join(directory,dbName,dbName==='core'?'runtime.sqlite':'memory.sqlite'),{readOnly:true});try{return db.prepare(sql).all();}finally{db.close();}}
 async function archive(directory:string):Promise<string>{let text='';for(const file of await readdir(directory,{withFileTypes:true})){const path=join(directory,file.name);if(file.isDirectory())text+=await archive(path);else if(file.name.endsWith('.jsonl'))text+=await readFile(path,'utf8');}return text;}
 function sql(directory:string,statement:string,dbName='memory'){const db=new DatabaseSync(join(directory,dbName,dbName==='core'?'runtime.sqlite':'memory.sqlite'));try{db.exec(statement);}finally{db.close();}}
@@ -29,7 +29,7 @@ test('native observations, Unicode excerpts and inferred contributions retain ta
     p.selectEvidence(c,{requestId:'select',expectedVersion:0,entries:[summary.source],reason:'供后续任务核对'},'fixture');return {ref,excerpt,summary};}));
   try{const accepted=h.port.submitTask(request);await h.core.whenIdle();const status=h.port.status(accepted.run);assert.equal(status.state,'completed');
     const bodies=rows(directory,'SELECT body FROM memory_revisions').map(row=>JSON.parse(String(row.body)));assert.equal(bodies.length,2);assert.equal(bodies[0].content,'蓝灯🦈');assert.equal(bodies[1].claimType,'inference');
-    const bounds=rows(directory,'SELECT body FROM memory_boundaries').map(row=>JSON.parse(String(row.body)));assert.ok(bounds.every(b=>b.schemaVersion===2&&b.internalUse.kind==='task'&&b.externalExpression.kind==='none'));
+    const bounds=rows(directory,'SELECT body FROM memory_boundaries').map(row=>JSON.parse(String(row.body)));assert.ok(bounds.every(b=>b.schemaVersion===1&&b.internalUse.kind==='task'&&b.externalExpression.kind==='none'));
     const events=h.core.journal.executionEvents('dafeiyu',accepted.task.id);assert.equal(events.filter(e=>e.type==='execution.observation.recorded').length,1);assert.equal(events.filter(e=>e.type==='memory.created').length,2);
     const versions=rows(directory,"SELECT body FROM run_inputs WHERE input_id LIKE 'operation-version:%'",'core').map(row=>JSON.parse(String(row.body)));assert.deepEqual(versions[0],{schemaVersion:1,pluginVersion:'plugin-7',actionVersion:'action-3'});
     assert.equal(rows(directory,'SELECT * FROM continuity_checkpoints').length,1);assert.equal(rows(directory,'SELECT * FROM task_execution_results').length,1);
@@ -141,9 +141,11 @@ test('a tool-heavy native run keeps recent pairs and reopen references for old r
         sources:[{id:source.id,scopeKey:source.scopeKey,version:source.version,contentHash:source.contentHash}],receipts:[]};
     },
   }]};
-  h=await executionHarness(directory,opts=>opts.purpose==='compaction'?textReply(JSON.stringify({summary:'虚构旧记录'})):
+  h=await executionHarness(directory,opts=>opts.purpose==='compaction'?textReply(JSON.stringify({fragments:[{kind:'note',text:'虚构记录'}]})):
     ++step<=12?call('fixture_read',{index:step}):textReply('已检查所有虚构材料，历史回执可按引用回查。'),spec,true,
-    {executionActions:true,compaction:{inputTokens:2048,minGrowthTokens:0,minSavingsTokens:64,cooldownMs:0}});
+    // This verifies twelve persisted tool pairs and their bounded views, not a
+    // ten-second latency target under parallel filesystem regression load.
+    {executionActions:true,turnTimeoutMs:30000,compaction:{inputTokens:2048,minGrowthTokens:0,minSavingsTokens:64,cooldownMs:0}});
   try{
     const accepted=h.port.submitTask(request);await h.core.whenIdle();const status=h.port.status(accepted.run);
     assert.equal(status.state,'completed');assert.equal(calls,12);assert.equal(status.operations.length,12);

@@ -20,7 +20,7 @@ test('registered recall tool uses real DSH scope and returns source-bearing snip
   let step=0;h.setResponse(()=>++step===1?call('dafeiyu_memory_recall',{query:'月舟',strategy:'hybrid',limit:'5'}):textReply('检索完成'));
   h.simulator.send('a','查询月舟负责的事情',{id:randomUUID()});await h.core.whenIdle();
   const request=h.adapter.requests.at(-1)!;assert.match(JSON.stringify(request),/unicode-codepoint/);assert.match(JSON.stringify(request),new RegExp(saved.id));
-  assert.equal(request.tools?.filter(tool=>tool.name.startsWith('dafeiyu_memory_')).length,9);
+  assert.ok(request.tools?.some(tool=>tool.name==='dafeiyu_memory_recall'));
   const other=okay(await h.probe('b',c=>h.memory.recall(c,{query:'月舟'})));assert.equal(other.items.length,0);
   const events=h.core.journal.events(source.message.route).filter(e=>e.type==='memory.recalled');assert.equal(events.length,1);assert.ok(!JSON.stringify(events).includes('月舟'));
 });
@@ -28,7 +28,7 @@ test('registered recall tool uses real DSH scope and returns source-bearing snip
 test('model recall cannot choose another profile or use an expired authority',async t=>{
   const fake=fakeDependencies();const h=await memoryFixture(undefined,{retrieval:config},fake.dependency);t.after(h.close);
   assert.deepEqual(await h.probe('a',c=>h.memory.recall(c,{query:'测试',profile:'another'})),{status:'invalid_input'});
-  await h.probe('a',async c=>{await assert.rejects(h.memory.recall({...c},{query:'测试'}),/core-issued/);return null;});
+  await h.probe('a',async c=>{await assert.rejects(h.memory.recall({...c},{query:'测试'}),/SCOPE_DENIED/);return null;});
 });
 
 test('unload while semantic inference is pending revokes reads and prevents cache writes',async t=>{

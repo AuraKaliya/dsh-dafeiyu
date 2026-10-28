@@ -1,3 +1,4 @@
+import {conversationActions} from './conversation-actions.js';
 import { Context } from '@deepseek-ai/cordis';
 import AgentRegistry from '@deepseek-ai/dsh-agent';
 import AgentLoop from '@deepseek-ai/dsh-agent-loop';
@@ -10,6 +11,10 @@ import LlmRuntime, { LlmAdapter, ToolCallId, ReasoningEffortId } from '@deepseek
 import type { GenerateOptions, StreamChunk, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
 import * as Core from '@dafeiyu/core';
 import * as Simulator from '@dafeiyu/channel-simulator';
+import Query from '@deepseek-ai/dsh-session-query-sqlite';
+import * as Timeline from '@dafeiyu/timeline';
+import * as Memory from '@dafeiyu/memory';
+import type {RetrievalDependencies} from '@dafeiyu/memory/retrieval-profile';
 import { resolve } from 'node:path';
 
 export type Response = (request: GenerateOptions) => StreamChunk[] | Promise<StreamChunk[]>;
@@ -27,8 +32,6 @@ export function call(name: string, args: object): StreamChunk[] {
 }
 export class ScriptedModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = [];
-  /** Explicit fixture for the new program-owned phase; this is not a real semantic evaluation. */
-  assessmentResponse:Response=()=>textReply(JSON.stringify({goalStatus:'uncertain',summary:'脚本模型的固定阶段评价，仅验证程序流程。',evidenceIds:[],limitations:['未作真实模型质量验收'],unfinished:[],next:'deliver'}));
   constructor(private readonly response: Response) { super(); }
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     return { provider, id: model, name: model, systemPromptUpdate: 'in-history', toolUpdate: 'in-history',
@@ -36,10 +39,10 @@ export class ScriptedModel extends LlmAdapter {
   }
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options);
-    for (const chunk of await (String(options.sessionId).startsWith('dafeiyu-assessment-')?this.assessmentResponse(options):this.response(options))) { options.signal?.throwIfAborted(); yield chunk; }
+    for (const chunk of await this.response(options)) { options.signal?.throwIfAborted(); yield chunk; }
   }
 }
-export async function harness(root: string, response: Response = () => textReply('测试回复'), personaFile = resolve('profiles/persona.test.md'), timeout = 5000, reasoningEffort?: string,context?:Core.Config['context'],deferActivation=false,deliveryTimeoutMs?:number) {
+export async function harness(root: string, response: Response = () => textReply('测试回复'), personaFile = resolve('profiles/persona.test.md'), timeout = 5000, reasoningEffort?: string,context?:Core.Config['context'],deferActivation=false,deliveryTimeoutMs?:number,memoryOptions:Omit<Memory.Config,'agentId'|'dataDir'>={},dependencies?:RetrievalDependencies) {
   const ctx = new Context();
   const adapter = new ScriptedModel(response);
   try {
@@ -57,7 +60,16 @@ export async function harness(root: string, response: Response = () => textReply
     const simulatorFiber = await ctx.plugin(Simulator, { agentId: 'dafeiyu', account: 'local' });
     const core = ctx.dafeiyu;
     const simulator = ctx.dafeiyuSimulator;
-    return { ctx, adapter, adapterRegistration, core, simulator, coreFiber, simulatorFiber,
-      close: async () => { await simulatorFiber.dispose(); await coreFiber.dispose(); await ctx.fiber.dispose(); } };
+    let queryFiber:Awaited<ReturnType<Context['plugin']>>|undefined,timelineFiber:Awaited<ReturnType<Context['plugin']>>|undefined,memoryFiber:Awaited<ReturnType<Context['plugin']>>|undefined;
+    if(!deferActivation){
+      queryFiber=await ctx.plugin(Query,{path:resolve(root,'query.sqlite'),openAt:'never'});
+      timelineFiber=await ctx.plugin(Timeline,{agentId:'dafeiyu',maxPageChars:2000});
+      const config={agentId:'dafeiyu',dataDir:root,...memoryOptions};
+      memoryFiber=dependencies?await ctx.plugin({name:'fixture-memory',inject:Memory.inject,apply:(scope:Context)=>{new Memory.MemoryService(scope,config,dependencies);}}):await ctx.plugin(Memory,config);
+      core.configureExecution({profileId:'fixture',createStore:true,policies:[{id:'conversation',producers:['channel-simulator','fictional-observer'],actions:[...conversationActions],allowLocalWrite:true}]});
+      ctx.dafeiyuMemory.recover();ctx.dafeiyuMemory.activate();await core.recoverExecutions();core.recover();core.activate();
+    }
+    return { ctx, adapter, adapterRegistration, core, simulator, coreFiber, simulatorFiber,queryFiber,timelineFiber,memoryFiber,
+      close: async () => { await simulatorFiber.dispose();await memoryFiber?.dispose();await timelineFiber?.dispose();await queryFiber?.dispose();await coreFiber.dispose(); await ctx.fiber.dispose(); } };
   } catch (error) { await ctx.fiber.dispose(); throw error; }
 }

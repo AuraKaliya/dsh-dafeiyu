@@ -1,3 +1,4 @@
+import {foundationManifest} from '../packages/core/lib/persona-manifest.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -16,7 +17,7 @@ const outcome={status:'succeeded' as const,effects:'confirmed' as const,complete
 function accepted(store:RuntimeStore){const taskId=randomUUID(),requestId=randomUUID(),request=store.prepareRequest('native-fixture',requestId,{goal:'虚构目标'});store.bindTask(request.id,taskId);
   return store.acceptRun(request.id,{taskId,origin:{kind:'native',producerId:'native-fixture',requestId},scope:{kind:'task',agentId:'fish',taskId,scopeKey:taskScopeKey('fish',taskId)},intentVersion:1,policyId:'fixture'});}
 function start(store:RuntimeStore){const run=accepted(store),queued=store.transition(run.id,run.version,'queued'),sessionId=store.session('fixture:'+run.definition.taskId);
-  return store.start(run.id,queued.version,{sessionId,personaVersion:'a'.repeat(64),model:{provider:'local-test',model:'scripted'},registryVersion:'b'.repeat(64),authorityVersion:'c'.repeat(64),inputs:[]});}
+  return store.start(run.id,queued.version,{sessionId,personaVersion:'a'.repeat(64),model:{provider:'local-test',model:'scripted'},registryVersion:'b'.repeat(64),authorityVersion:'c'.repeat(64),inputs:[]},foundationManifest(run,{text:'fixture memory',version:'a'.repeat(64),fileIdentity:'a'.repeat(64)},{provider:'local-test',model:'scripted'}));}
 
 test('runtime requires explicit initialization and rejects a different identity or live owner',async()=>{
   const file=await path();assert.throws(()=>new RuntimeStore(file,identity),/INITIALIZATION_REQUIRED/);assert.equal(existsSync(file),false);

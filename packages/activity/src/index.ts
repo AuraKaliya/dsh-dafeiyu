@@ -9,3 +9,5 @@ import type { Context } from '@deepseek-ai/cordis';
 export const name='dafeiyu-activity';
 export const inject=['dafeiyu'];
 export function apply(ctx:Context,config:Config){new ActivityService(ctx,config);}
+
+export * from './storage-status.js';

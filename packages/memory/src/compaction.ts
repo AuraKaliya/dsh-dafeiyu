@@ -38,9 +38,6 @@ export class MemoryCompaction implements CompactionProvider {
   readonly policy: z.output<typeof compactionConfigSchema>&{enabled?:boolean};
   constructor(private readonly ctx: Context, config: z.input<typeof compactionConfigSchema>,
     readonly basis: CompactionProvider['basis'],readonly sources:SourcePolicy,trackingOnly=false) { this.policy = {...compactionConfigSchema.parse(config),...(trackingOnly?{enabled:false}:{})}; }
-  async summarize(scope: CompactionScope, sources: readonly CompactionSource[], signal: AbortSignal,checkSources?:()=>void): Promise<string> {
-    return (await this.generate(scope,sources,signal,checkSources,this.policy.maxSummaryChars)).map(f=>f.text).join('\n');
-  }
   async summarizeFragments(scope:CompactionScope,sources:readonly CompactionSource[],signal:AbortSignal,checkSources:()=>void,maxChars:number,maxFragments=this.policy.maxFragments,targetChars=maxChars){
     return this.generate(scope,sources,signal,checkSources,maxChars,Math.min(maxFragments,this.policy.maxFragments),Math.min(targetChars,maxChars));
   }
@@ -76,9 +73,8 @@ export class MemoryCompaction implements CompactionProvider {
     if(checkSources)checkSources();
     if (!completed || (!checkSources&&before !== this.basis(scope).epoch)) throw new Error('Compaction did not complete');
     // Old summarizers may return one conservative fragment. No model-authored dependency fields are accepted.
-    const parsed=z.union([z.strictObject({fragments:z.array(SummaryFragmentSchema).min(1).max(maxFragments)}),
-      z.strictObject({summary:z.string().trim().min(1).max(maxChars)})]).parse(JSON.parse(text));
-    const fragments=('fragments' in parsed?parsed.fragments:[{kind:'note' as const,text:parsed.summary}]).map(f=>({...f,text:redactContent(f.text).value}));
+    const parsed=z.strictObject({fragments:z.array(SummaryFragmentSchema).min(1).max(maxFragments)}).parse(JSON.parse(text));
+    const fragments=parsed.fragments.map(f=>({...f,text:redactContent(f.text).value}));
     if(fragments.reduce((sum,f)=>sum+Array.from(f.text).length,0)>maxChars)throw new Error('Fragment text budget exceeded');
     return fragments;
   }

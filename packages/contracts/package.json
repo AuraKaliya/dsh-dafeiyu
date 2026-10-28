@@ -1,5 +1,5 @@
 {
-  "version": "0.15.0",
+  "version": "0.24.0",
   "private": true,
   "types": "./lib/index.d.ts",
   "name": "@dafeiyu/contracts",
@@ -11,10 +11,6 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
-    },
-    "./v3": {
-      "types": "./lib/v3.d.ts",
-      "default": "./lib/v3.js"
     }
   },
   "main": "./lib/index.js"

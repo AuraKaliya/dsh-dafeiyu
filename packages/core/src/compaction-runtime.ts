@@ -23,7 +23,7 @@ import { prepareSummaryRewrite,generateSummaryRewrite,buildRewriteManifest,commi
 export interface CompactionBinding { owner: string; version: string; provider: CompactionProvider }
 export type CompactionAudit = (item:HistoryFrame,data:Record<string,import('@dafeiyu/contracts').Json>,seqs:number[])=>void;
 const turnSchema=z.strictObject({traceId:z.string(),route:z.string(),owner:z.string(),version:z.string(),epoch:z.string(),taskId:z.string().nullable(),
-  versions:z.record(z.string(),z.number().int().nonnegative()),seqs:z.array(z.number().int().nonnegative()),complete:z.boolean(),ephemeral:z.boolean(),precision:z.literal('sources-v1').optional()});
+  versions:z.record(z.string(),z.number().int().nonnegative()),seqs:z.array(z.number().int().nonnegative()),complete:z.boolean(),ephemeral:z.boolean(),precision:z.literal('sources-v1')});
 type Turn=z.infer<typeof turnSchema>;
 type Check={ status: string; pressure: number; target: number; saved: number; at: number; policy: string };
 declare module '@deepseek-ai/dsh-session' { interface PluginRecordMap {
@@ -106,19 +106,17 @@ export class CompactionRuntime {
       || e.type === 'tool/result' && e.data.turn === (turn?.type === 'turn/start' ? turn.data.turn : -1));
     // Tool-bearing turns stay outside semantic summarization in M5B. Explicit archive/history
     // lookups are single-turn evidence: retire their entire derived turn on the next input.
-    const ephemeral = events.some(e=>e.type==='tool/call'&&['dafeiyu_source_open','dafeiyu_memory_deleted_open','dafeiyu_tool_feedback_deleted_open',
-      'dafeiyu_tool_feedback_open'].includes(e.data.name)) || selected.some(e => e.type === 'tool/result' && JSON.stringify(e.data.message.content).match(/deleted_lookup_only|historical_evidence_only|"view"\s*:\s*"page"|\\"view\\"\s*:\s*\\"page\\"/));
+    const ephemeral = events.some(e=>e.type==='tool/call'&&['dafeiyu_source_open','dafeiyu_memory_deleted_open'].includes(e.data.name)) || selected.some(e => e.type === 'tool/result' && JSON.stringify(e.data.message.content).match(/deleted_lookup_only|historical_evidence_only|"view"\s*:\s*"page"|\\"view\\"\s*:\s*\\"page\\"/));
     appendPluginRecord(this.agent.session,'plugin:dafeiyu/turn-seal', { traceId: this.item.id, route: this.item.route, owner: binding.owner, version: binding.version,
       epoch: basis.epoch, taskId: basis.taskId,versions:{...basis.versions}, seqs: selected.map(e => e.seq), ephemeral,
-      ...(binding.provider.sources?{precision:'sources-v1' as const}:{}),
+      precision:'sources-v1',
       complete: ended?.type === 'turn/end' && ended.data.reason.kind === 'completed'
-        && this.binding()?.provider === binding.provider && (!!binding.provider.sources||binding.provider.basis(this.scope()).epoch === basis.epoch) });
+        && this.binding()?.provider === binding.provider });
   }
   end(): void { this.provenance.end();this.initial = undefined; this.item = undefined; this.admitted = undefined;this.pendingInput=undefined; }
-  private valid(turn: Turn): boolean {
-    const binding = this.binding();
-    return !!binding && turn.complete && !turn.ephemeral && turn.route === this.item?.route && turn.owner === binding.owner
-      && turn.seqs.every(seq=>{const record=this.provenance.get(seq);return !!record&&this.provenance.valid(record);});
+  private valid(turn:Turn):boolean {
+    const binding=this.binding();return !!binding&&turn.complete&&!turn.ephemeral&&turn.route===this.item?.route&&turn.owner===binding.owner&&
+      turn.seqs.every(seq=>{const record=this.provenance.get(seq);return !!record&&this.provenance.valid(record);});
   }
   private capsuleValid(text: string): boolean {
     try {
@@ -133,9 +131,7 @@ export class CompactionRuntime {
     const session = this.agent.session, events = readCompactionEvents(session), bySeq = new Map(events.map(e => [Number(e.seq), e]));
     const invalid = this.provenance.invalid();
     for (const event of events) if (event.type === 'plugin:dafeiyu/turn-seal') {
-      if(event.data.precision==='sources-v1'){
-        if(!event.data.complete||event.data.ephemeral)for(const seq of event.data.seqs)if(bySeq.get(seq)?.type!=='user/message')invalid.add(seq);
-      }else if(!this.valid(event.data))for (const seq of event.data.seqs) invalid.add(seq);
+      if(!event.data.complete||event.data.ephemeral)for(const seq of event.data.seqs)if(bySeq.get(seq)?.type!=='user/message')invalid.add(seq);
     }
     // An interrupted process may have flushed a turn but not its seal. Do not infer it succeeded.
     for (const event of events) if (event.type === 'plugin:dafeiyu/turn-open' && event.data.traceId !== this.item.id
@@ -442,11 +438,6 @@ export class CompactionRuntime {
     this.admitted=epoch;
     this.checkedSeq=this.agent.session.seq;
     const events=readCompactionEvents(this.agent.session),visibleIds=new Set(options.messages.map(m=>m.id));
-    for(const event of events)if(event.type==='plugin:dafeiyu/turn-seal'&&event.data.precision!=='sources-v1'&&!this.valid(event.data))for(const seq of event.data.seqs){
-      const source=events[seq];
-      const message=source?.type==='user/message'?source.data:source?.type==='assistant/message'||source?.type==='tool/result'?source.data.message:undefined;
-      if(message&&visibleIds.has(message.id))throw new Error('Historical basis changed after assembly');
-    }
     for (const message of options.messages) if (message.role === 'user' && (message.source?.kind === 'compact-checkpoint'||message.source?.kind==='dafeiyu-summary-view')) {
       const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
       if (text.includes('"kind":"dafeiyu-incremental-summary"') && !this.capsuleValid(text)) throw new Error('Invalid summary checkpoint');
@@ -454,7 +445,13 @@ export class CompactionRuntime {
   }
   validateDependencies(dependencies:readonly SourceDependency[]):boolean{return this.provenance.validate(dependencies);}
   exposedDependencies():readonly SourceDependency[]{return this.provenance.exposed();}
-  sourceCurrent(seq:number):boolean{const record=this.provenance.get(seq);return record?this.provenance.valid(record):true;}
+  sourceCurrent(seq:number):boolean{
+    const record=this.provenance.get(seq);if(record)return this.provenance.valid(record);
+    const event=this.agent?.session.snapshotEvents()[seq];
+    if(event?.type==='user/message'&&(event.data.source.kind==='compact-checkpoint'||event.data.source.kind==='dafeiyu-summary-view'))
+      return this.fragmentViewCurrent(event.data.source.compactionId,event.data.content.filter(block=>block.type==='text').map(block=>block.text).join('\n'));
+    return false;
+  }
   expectInput(message:UserMessage):void{this.pendingInput=message;this.provenance.expectInput(message.id);}
   fragmentViewCurrent(id:string,text:string):boolean {
     try{const capsule=fragmentCapsuleSchema.parse(JSON.parse(text)),view=this.agent&&resolveFragmentView(this.agent.session,capsule.ref,this.scope());

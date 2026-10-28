@@ -8,7 +8,7 @@ export const biliOwnerConsumerPipe=(identity:import('./types.js').BiliOwnerAccou
 const leases=new WeakMap<object,PinnedBiliOwnerProductionBinding>();
 export function assertBiliOwnerProductionLease(lease:BiliOwnerConsumerLease,binding:PinnedBiliOwnerProductionBinding){if(leases.get(lease)!==binding)throw new Error('BILI_OWNER_PRODUCTION_LEASE_REQUIRED');lease.guard();}
 
-/** The fixed OS pipe excludes this implementation across profiles, not legacy consumers which do not acquire it. */
+/** A fixed OS pipe coordinates every participating profile on this machine. */
 export async function acquireBiliOwnerConsumerLease(binding:PinnedBiliOwnerProductionBinding):Promise<BiliOwnerConsumerLease>{
   assertPinnedBiliOwnerProductionBinding(binding);if(process.platform!=='win32')throw new Error('BILI_OWNER_WINDOWS_REQUIRED');let closed=false,alive=false,releasing:Promise<void>|undefined;
   const server=createServer(socket=>socket.destroy());server.on('error',()=>{alive=false;});

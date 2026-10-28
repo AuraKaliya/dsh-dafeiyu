@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/qq",
-  "version": "0.3.0",
+  "version": "0.24.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -20,10 +20,11 @@
     }
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.15.0",
-    "@dafeiyu/core": "0.15.0",
+    "@dafeiyu/contracts": "0.24.0",
+    "@dafeiyu/core": "0.24.0",
     "ws": "8.22.0",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@dafeiyu/journal": "0.24.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5"

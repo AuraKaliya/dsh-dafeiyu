@@ -41,24 +41,18 @@ async function fixture(options:{reply?:()=>Promise<MaintenanceAnalysis>|Maintena
 test('native consolidation uses isolated DSH, keeps counters and motivation, and does not adopt personality',async()=>{
   let report:unknown;const f=await fixture({after:(h,c,id)=>{report=h.memory.maintenance!.inspect(c,id,'fixture');return report;}});
   try{f.h.ctx.systemPrompt.section({name:'foreign',order:0,text:'UNRELATED_PROMPT_SENTINEL'});const run=await f.run();assert.equal(run.status.state,'completed');
-    const result=z.object({experienceIds:z.array(z.uuid()),persona:z.array(z.object({eligible:z.boolean(),holdReason:z.string().nullable()}))}).parse(report);
-    assert.equal(result.experienceIds.length,1);assert.equal(result.persona[0]?.eligible,false);assert.equal(result.persona[0]?.holdReason,'TASK_MOTIVATION_NOT_PREFERENCE');
+    const result=z.object({experienceIds:z.array(z.uuid()),persona:z.array(z.object({kind:z.string(),contentRef:z.object({id:z.uuid()})}))}).parse(report);
+    assert.equal(result.experienceIds.length,1);assert.equal(result.persona[0]?.kind,'interest');
     const row=JSON.parse(String(dbRead(f.root,'SELECT body FROM experience_revisions')[0]!.body));assert.equal(row.counters.length,1);assert.equal(row.motivation.kind,'explicit-task');assert.equal(row.state,'proposed');
-    assert.equal(dbRead(f.root,'SELECT * FROM persona_profiles').length,0);
+    assert.equal(dbRead(f.root,'SELECT * FROM memory_self').length,0);
     const request=f.h.adapter.requests.find(r=>JSON.stringify(r).includes('独立经历分析器'))!;assert.ok(request);assert.ok(!JSON.stringify(request).includes('UNRELATED_PROMPT_SENTINEL'));
     assert.ok((await readdir(join(f.root,'memory/maintenance-sessions'))).length>0);assert.equal(dbRead(f.root,'SELECT * FROM maintenance_watermarks').length,1);
   }finally{await f.h.close();}
 });
 
-test('a self-exploration suggestion can be explicitly proposed, but remains unadopted',async()=>{
-  const f=await fixture({motivation:'self-exploration',after:(h,c,id)=>h.memory.maintenance!.propose(c,{id,index:0,requestId:'choose'},'fixture')});
-  try{const run=await f.run();assert.equal(run.status.state,'completed');assert.equal(dbRead(f.root,'SELECT state FROM persona_candidates')[0]?.state,'proposed');assert.equal(dbRead(f.root,'SELECT * FROM persona_profiles').length,0);}
-  finally{await f.h.close();}
-});
-
 test('fabricated citation fails the entire analysis without committing experience or candidate',async()=>{
   const f=await fixture({reply:()=>{const value=analysis();value.experiences[0]!.supports[0]!.quote='根本不存在的原文';return value;}});
-  try{await f.run();assert.equal(dbRead(f.root,'SELECT * FROM experience_items').length,0);assert.equal(dbRead(f.root,'SELECT * FROM persona_candidates').length,0);
+  try{await f.run();assert.equal(dbRead(f.root,'SELECT * FROM experience_items').length,0);assert.equal(dbRead(f.root,'SELECT * FROM memory_self').length,0);
     assert.equal(dbRead(f.root,'SELECT error FROM maintenance_requests')[0]?.error,'INVALID_EVIDENCE');assert.equal(dbRead(f.root,'SELECT * FROM maintenance_watermarks').length,0);}
   finally{await f.h.close();}
 });

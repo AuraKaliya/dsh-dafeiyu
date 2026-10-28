@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 const source = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.enum(['message', 'event']), id: z.string().min(1).max(300), route: z.string().max(2000).optional() }),
-  z.strictObject({ kind: z.literal('session'), id: z.string().min(1).max(300), seq: z.number().int().nonnegative(), route: z.string().max(2000).optional() }),
+  z.strictObject({ kind: z.enum(['message', 'event']), id: z.string().min(1).max(300), route: z.string().min(1).max(2000) }),
+  z.strictObject({ kind: z.literal('session'), id: z.string().min(1).max(300), seq: z.number().int().nonnegative(), route: z.string().min(1).max(2000) }),
   z.strictObject({ kind: z.literal('execution-source'), id: z.string().min(1).max(300), scopeKey: z.string().max(2000), version: z.number().int().positive(), contentHash: z.string().regex(/^[a-f0-9]{64}$/) }),
 ]);
 const fields = {

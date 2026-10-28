@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 
 export const boundaryDigest=(value:MemoryBoundary)=>createHash('sha256').update(JSON.stringify(MemoryBoundarySchema.parse(value))).digest('hex');
 
-/** Decode only the exact canonical route format. Opaque legacy routes stay opaque. */
+/** Decode only the canonical current route format. */
 function scene(scope:TimelineScope,binding:MemoryWriteBinding):MemoryBoundary['sourceScene'] {
   if(binding.conversation){
     if(conversationKey(scope.agentId,binding.conversation)!==scope.route)throw new Error('Memory scene does not match core scope');
@@ -16,7 +16,7 @@ function scene(scope:TimelineScope,binding:MemoryWriteBinding):MemoryBoundary['s
       const conversation=ConversationSchema.parse({channel:parts[1],account:parts[2],kind:parts[3],id:parts[4]});
       if(conversationKey(scope.agentId,conversation)===scope.route)return {kind:'conversation',route:scope.route,conversation,ingressPluginId:binding.ingressPluginId??null};
     }
-  }catch{/* No guesses about channel, people or task membership during migration. */}
+  }catch{/* Invalid data cannot establish channel, person or task membership. */}
   throw new Error('INVALID_SCOPE');
 }
 export function conservativeBoundary(scope:TimelineScope,assignment:MemoryBoundary['assignment'],rawBinding:MemoryWriteBinding={}):MemoryBoundary {

@@ -1,3 +1,5 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
+import {API_VERSION} from '@dafeiyu/contracts';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
@@ -24,7 +26,7 @@ import { loadPinnedHeadlessManifest } from './headless-manifest.js';
 import { WindowsProcessControl,WindowsExecutionProofSchema,WindowsTerminationEvidenceSchema } from './windows-process.js';
 import type { WindowsExecutionProof,WindowsTerminationEvidence } from './windows-process.js';
 
-const OWNER='server-executor',VERSION='0.1.0';
+const OWNER='server-executor',VERSION=RELEASE_VERSION;
 export const SERVER_EXECUTOR_ACTIONS=['dafeiyu_server_execute_owner','dafeiyu_server_execute_autonomous','dafeiyu_server_execution_status','dafeiyu_server_execution_result'] as const;
 const executeInput=z.strictObject({requestId:PersonaRequestIdSchema,instruction:z.string().trim().min(1).max(4000),sources:z.array(z.string().min(1).max(300)).max(8).default([])});
 const statusInput=z.strictObject({jobId:z.uuid()});
@@ -90,7 +92,7 @@ export class ServerExecutorService extends Service {
     if(this.config.createStore)mkdirSync(this.config.dataDir,{recursive:true});this.root=realpathSync(this.config.dataDir);
     check(resolve(this.config.dataDir).toLowerCase()===this.root.toLowerCase()&&statSync(this.root).isDirectory(),'EXECUTOR_STORAGE_CHANGED');
     this.store=new ExecutorStore(join(this.root,'executor.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore);
-    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:OWNER,version:VERSION,agentId:this.config.agentId,
+    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:OWNER,version:VERSION,agentId:this.config.agentId,
       requires:['execution.task.v1','memory.capability-observation.v1'],provides:['server.execution.v1'],lifecycleReady:()=>!this.closed&&(this.gate.active||this.gate.state==='quiescing'),
       actions:this.actions(),resourceProofs:{current:proof=>this.current(proof),epoch:()=>executorHash({config:this.configHash,closed:this.closed}),publicView:()=>false,targetView:(proof,view,target,scope)=>this.targetView(proof,view,target,scope)}});}
     catch(error){this.store.close();throw error;}
@@ -232,7 +234,7 @@ export class ServerExecutorService extends Service {
   status(context:ExecutionContext,raw:unknown):ActionOutcome{const input=statusInput.parse(raw),access=this.access(context),scope=ExecutorTaskScopeSchema.parse(access.view.scope),job=this.store.get(input.jobId,scope);check(job.spec.intentVersion===context.intentVersion,'EXECUTOR_SCOPE_DENIED');
     return job.receipt?.output?this.pageOutcome(context,job,{section:'metadata',offset:0,limit:1000}):this.jobOutcome(job,false);}
   result(context:ExecutionContext,raw:unknown):ActionOutcome{const input=pageInput.parse(raw),access=this.access(context),job=this.store.get(input.jobId,ExecutorTaskScopeSchema.parse(access.view.scope));return this.pageOutcome(context,job,input);}
-  private actions():ActionCapability[]{const make=(id:string,description:string,inputSchema:z.ZodType,external:boolean,execute:(context:ExecutionContext,input:unknown)=>ActionOutcome|Promise<ActionOutcome>):ActionCapability=>({id,description,version:'1',effects:external?'external-write':'read',requiresTask:true,inputSchema,outputSchema:z.json(),
+  private actions():ActionCapability[]{const make=(id:string,description:string,inputSchema:z.ZodType,external:boolean,execute:(context:ExecutionContext,input:unknown)=>ActionOutcome|Promise<ActionOutcome>):ActionCapability=>({id,description,version:'1',effects:external?'external-write':'read',scope:'task',inputSchema,outputSchema:z.json(),
       execute:async(input,context)=>{try{return await execute(context,input);}catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'EXECUTOR_ADAPTER_FAILED';
         const beforeDispatch=['INVALID_INPUT','SOURCE_NOT_EXPOSED','SOURCE_STALE','EXECUTOR_DUPLICATE_SOURCE','HOST_NOT_READY','TASK_REQUIRED','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','EXECUTOR_SCOPE_DENIED',
           'EXECUTOR_AUTHORITY_KIND_DENIED','EXECUTOR_ACTION_DENIED','EXECUTOR_OWNER_MISMATCH','EXTERNAL_TASK_SOURCE_REQUIRED','EXECUTOR_BUDGET_AUTHORITY_MISMATCH','EXECUTOR_INPUT_TOO_LARGE',

@@ -39,7 +39,3 @@ test('non-JSON, server errors, transport failure and media headers retain truthf
     else{await assert.rejects(c.read('discover',{pn:1,ps:1},new AbortController().signal,()=>{}));const a=f.store.diagnostics.recent()[0]!;assert.equal(a.kind,kind==='html'?'response':'network');assert.equal(a.httpStatus,kind==='html'?200:null);assert.doesNotMatch(JSON.stringify(a),/socket error|not JSON/);}
   }finally{f.store.close();}}
 });
-test('explicit v1 migration retains observations and cooldown; wrong identity cannot migrate',async()=>{
-  const f=await fixture();f.store.backoff(Date.now(),10000);const before=f.store.clock;f.store.close();const db=new DatabaseSync(f.file);db.exec('DROP TABLE bili_http_attempts;DROP TABLE bili_http_control;PRAGMA user_version=1');db.close();
-  assert.throws(()=>new BiliStore(f.file,identity),/MIGRATION_REQUIRED/);assert.throws(()=>new BiliStore(f.file,{...identity,agentId:'other'},true),/IDENTITY_MISMATCH/);const migrated=new BiliStore(f.file,identity,true);try{assert.deepEqual(migrated.clock,before);assert.equal(migrated.diagnostics.recent().length,0);}finally{migrated.close();}
-});

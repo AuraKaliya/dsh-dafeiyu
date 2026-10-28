@@ -107,7 +107,7 @@ test('capability plugins without channels use only their own active core-issued 
   const memory=h.store.read({agentId:'dafeiyu',route:observedEvent.route},memoryId!)!;assert.equal(memory.boundary.sourceScene.kind,'conversation');
   if(memory.boundary.sourceScene.kind==='conversation')assert.equal(memory.boundary.sourceScene.ingressPluginId,'channel-simulator');
   assert.match(JSON.stringify(memory.observation),/fictional-explorer/);
-  assert.throws(()=>handle.observeMemory(observationReport({conversation:saved!.conversation}),saved!),/active core-issued/);
+  assert.throws(()=>handle.observeMemory(observationReport({conversation:saved!.conversation}),saved!),/SCOPE_DENIED/);
   await h.probe('a',context=>{assert.throws(()=>handle.observeMemory(observationReport({conversation:context.conversation}),context),/does not belong/);return {checked:true};});
 });
 test('unloading producer or memory provider revokes the interface immediately',async t=>{

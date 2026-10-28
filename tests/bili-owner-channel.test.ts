@@ -109,10 +109,10 @@ test('restart validates old Task sources before online verification and only res
     const port=ctx.dafeiyu.executionProducer('bili-owner-tasks');assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(port.status(port.restoreRun(pending)).state,'accepted');assert.equal(adapter.requests.length,0);
   }});
   try{assert.equal(h.adapter.requests.length,0);assert.equal(tasks(h)[1]!.state,'accepted');h.setResponse(request=>{assert.equal(native(request.sessionId),true);return textReply('RESUMED_BILI_TASK_RESULT');});
-    h.core.activate();await h.core.whenIdle();assert.deepEqual(tasks(h).map(row=>row.state),['completed','completed']);assert.equal(h.adapter.requests.filter(request=>native(request.sessionId)).length,1);assert.equal(h.adapter.requests.filter(request=>String(request.sessionId).startsWith('dafeiyu-assessment-')).length,1);
+    h.core.activate();await h.core.whenIdle();assert.deepEqual(tasks(h).map(row=>row.state),['completed','completed']);assert.equal(h.adapter.requests.filter(request=>native(request.sessionId)).length,1);assert.equal(h.adapter.requests.filter(request=>String(request.sessionId).startsWith('dafeiyu-review-')).length,0);
     const port=h.core.executionProducer('bili-owner-tasks');assert.equal(await port.readResult(port.restoreRun(pending)),'RESUMED_BILI_TASK_RESULT');assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');
     backend.state.beforeVerify=async()=>{throw new Error('BILI_OWNER_NETWORK_UNAVAILABLE');};h.advance();await h.poll();assert.equal(h.channel.getStatus().verified,false);assert.equal(h.channel.getStatus().bindingFault,null);
-    assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(h.adapter.requests.length,2);assert.equal(h.channel.store.source('101')?.state,'accepted');
+    assert.equal(await port.readResult(port.restoreRun(completed)),'STORED_BILI_TASK_RESULT');assert.equal(h.adapter.requests.length,1);assert.equal(h.channel.store.source('101')?.state,'accepted');
   }finally{await h.close();}
 });
 

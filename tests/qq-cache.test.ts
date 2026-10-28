@@ -11,23 +11,6 @@ const route = JSON.stringify(['group', '11223344']), owner = 'core-issued-scope-
 const metadata = { occurredAt: '2026-10-25T00:00:00.000Z', unsupported: [] };
 async function file() { return join(await mkdtemp(join(tmpdir(), 'dafeiyu-qq-cache-')), 'qq.sqlite'); }
 
-test('QQ v2 migration preserves existing cache and receipts without inventing metadata', async () => {
-  const path = await file(), legacy = new DatabaseSync(path);
-  legacy.exec(`CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,route TEXT NOT NULL,id TEXT NOT NULL,sender TEXT NOT NULL,text TEXT NOT NULL,UNIQUE(route,id));
-    CREATE TABLE receipts(reply_id TEXT PRIMARY KEY,platform_id TEXT NOT NULL);
-    CREATE TABLE handled(route TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(route,id));
-    CREATE TABLE qq_group_snapshots(account TEXT PRIMARY KEY,at TEXT NOT NULL,revision INTEGER NOT NULL,groups_json TEXT NOT NULL);
-    PRAGMA user_version=2; PRAGMA application_id=${QQ_APPLICATION_ID};`);
-  legacy.prepare('INSERT INTO messages(route,id,sender,text) VALUES(?,?,?,?)').run(route, '-10', 'old-sender', '旧缓存 token=fictional-legacy-key-123'); legacy.exec("INSERT INTO receipts VALUES('reply','-20')"); legacy.close();
-  const before = await readFile(path); assert.equal(inspectStorage(path, 'qq').version, 2); assert.throws(() => new QqStore(path), /MIGRATION_REQUIRED/); assert.deepEqual(await readFile(path), before);
-  const store = new QqStore(path, { });
-  try {
-    assert.equal(store.receipt('reply'), '-20'); const page = store.cache.browse(route, owner, { requestId: 'old' });
-    assert.equal(page.page.messages[0]?.text, '旧缓存 token=[REDACTED]'); assert.equal(store.find(route, '-10')?.text, '旧缓存 token=[REDACTED]'); assert.equal(page.page.messages[0]?.occurredAt, null); assert.equal(page.page.messages[0]?.legacyMetadata, true); assert.equal(page.page.messages[0]?.cacheTextTruncated, null);
-  } finally { store.close(); }
-  assert.equal(inspectStorage(path, 'qq').version, QQ_SCHEMA_VERSION);
-});
-
 test('QQ cache pagination fixes a receive watermark and repeated requests keep the same page', async () => {
   const store = new QqStore(await file());
   try {

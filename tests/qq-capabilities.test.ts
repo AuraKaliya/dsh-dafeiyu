@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { conversationKey } from '@dafeiyu/contracts';
 import { qqCapabilityFixture,scene,privateScene,bot,group,otherGroup,lastPage,outcomes,until } from './qq-capabilities-fixture.js';
 import { call,textReply } from './harness.js';
-const lastWork=(h:Awaited<ReturnType<typeof qqCapabilityFixture>>)=>h.adapter.requests.findLast(request=>!String(request.sessionId).startsWith('dafeiyu-assessment-'))!;
+const lastWork=(h:Awaited<ReturnType<typeof qqCapabilityFixture>>)=>h.adapter.requests.findLast(request=>!String(request.sessionId).startsWith('dafeiyu-review-'))!;
 
 for(const mode of ['none','original','fragment','summary'] as const)test(`QQ actual page ${mode} selection uses current exposure and retains one decision`,async t=>{
   const h=await qqCapabilityFixture();t.after(h.close);const passive=await h.message('PASSIVE_QQ_SENTINEL：观察到的虚构内容',{media:true});

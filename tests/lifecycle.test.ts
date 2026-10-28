@@ -16,7 +16,7 @@ import * as QQ from '@dafeiyu/qq';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { API_VERSION, MessageSchema, ServiceGate, dependencyOrder, HostConfigSchema, ExecutionScopeSchema, taskScopeKey } from '@dafeiyu/contracts';
 import type { Extension } from '@dafeiyu/contracts';
-import { CapabilityRegistry } from '../packages/core/lib/registry-v3.js';
+import { CapabilityRegistry } from '../packages/core/lib/capability-registry.js';
 import { AnalysisStore } from '../packages/memory/lib/analysis-store.js';
 import type { AnalysisJob } from '../packages/memory/lib/analysis-types.js';
 import { harness, textReply } from './harness.js';
@@ -25,9 +25,12 @@ const rootDirectory = () => mkdtemp(join(tmpdir(), 'dafeiyu-managed-'));
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 const message = () => MessageSchema.parse({ id: 'pending-fixture', occurredAt: '2026-10-24T08:00:00+08:00',
   conversation: { channel: 'simulator', account: 'local', kind: 'local', id: 'fixture' }, sender: { id: 'fictional-user', displayName: '虚构用户' }, text: '本地虚构输入' });
-const managed = (root: string) => harness(root, undefined, undefined, 5000, undefined, undefined, true);
+async function managed(root:string,assemble=true){
+  const h=await harness(root,undefined,undefined,5000,undefined,undefined,true);
+  if(assemble){await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory')});h.core.configureExecution({profileId:'test',policies:[],createStore:true});h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();await h.core.recoverExecutions();}return h;
+}
 const extension = (id = 'fixture-v3'): Extension => ({ protocolVersion:4, id, version: 'fixture', agentId: 'dafeiyu',
-  actions: [{ id: 'v3_fixture_action', version: '1', description: '虚构本地能力', effects: 'read', requiresTask: true,
+  actions: [{ id: 'v3_fixture_action', version: '1', description: '虚构本地能力', effects: 'read', scope:'task',
     inputSchema: z.strictObject({ text: z.string().max(100) }), outputSchema: z.strictObject({ text: z.string() }),
     execute: async input => ({ status: 'succeeded', effects: 'none', completeness: 'complete', data: input, sources: [], receipts: [] }) }] });
 
@@ -62,21 +65,21 @@ test('host config is strict, keeps optional probe routes independent and contain
 
 test('v3 registration snapshots metadata, enforces strict schemas and revokes disposed instances', () => {
   const registry = new CapabilityRegistry(), reserved = { ids: [], actions: [], channels: [] };
-  const spec = extension(), handle = registry.register('dafeiyu', spec, reserved), action = registry.actions()[0]; assert.ok(action);
+  const spec = extension(), handle = registry.register('dafeiyu', spec), action = registry.actions()[0]; assert.ok(action);
   assert.equal(Object.isFrozen(action.input), true); assert.equal(Object.isFrozen(action.input.properties), true);
-  assert.throws(() => registry.register('dafeiyu', extension('other-v3'), reserved), /DUPLICATE_ACTION/);
+  assert.throws(() => registry.register('dafeiyu', extension('other-v3')), /DUPLICATE_ACTION/);
   handle.dispose(); assert.equal(action.active(), false); assert.deepEqual(registry.ids(), []);
   const first = spec.actions?.[0]; assert.ok(first);
-  assert.throws(() => registry.register('dafeiyu', { ...spec, actions: [{ ...first, inputSchema: z.object({ text: z.string() }) }] }, reserved), /V3_SCHEMA_MUST_BE_STRICT/);
+  assert.throws(() => registry.register('dafeiyu', { ...spec, actions: [{ ...first, inputSchema: z.object({ text: z.string() }) }] }), /SCHEMA_MUST_BE_STRICT/);
   assert.deepEqual(registry.ids(), []);
 });
 
-test('core v2 and v3 share names while legacy API_VERSION stays two', async t => {
+test('current registration uses a single namespace and disposed names can be registered again', async t => {
   const h = await managed(await rootDirectory()); t.after(h.close);
-  assert.equal(API_VERSION, 2); const handle = h.core.registerExtension(extension());
-  assert.throws(() => h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu' }), /Duplicate extension/);
-  assert.throws(() => h.core.registerExtension({ id: 'other', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu', actions: [fixtureAction(h.core,'other',{id:'v3_fixture_action',description:'fixture',inputSchema:z.strictObject({}),work:async () => null})] }), /Duplicate or invalid action/);
-  handle.dispose(); const legacy = h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu' }); legacy.dispose();
+  assert.equal(API_VERSION, 4); const handle = h.core.registerExtension(extension());
+  assert.throws(() => h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu' }), /DUPLICATE_EXTENSION/);
+  assert.throws(() => h.core.registerExtension({ id: 'other', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu', actions: [fixtureAction(h.core,'other',{id:'v3_fixture_action',description:'fixture',inputSchema:z.strictObject({}),work:async () => null})] }), /DUPLICATE_ACTION/);
+  handle.dispose(); const replacement = h.core.registerExtension({ id: 'fixture-v3', version: 'fixture', protocolVersion:4, agentId: 'dafeiyu' }); replacement.dispose();
 });
 
 test('managed core rejects ingress without persistence and drains existing accepted message only after activation', async t => {
@@ -91,7 +94,7 @@ test('managed core rejects ingress without persistence and drains existing accep
   h.core.activate(); await h.core.whenIdle(); assert.equal(h.adapter.requests.length, 1);
 });
 
-test('managed construction does not recover interrupted legacy processing until explicit recovery', async t => {
+test('managed construction does not recover interrupted processing until explicit recovery', async t => {
   const root = await rootDirectory(), journal = new Journal(join(root, 'journal.sqlite'));
   const receipt = journal.accept('dafeiyu', 'channel-simulator', 'fixture', message()), item = journal.get(receipt.id);
   journal.transition(item.id, 'accepted', 'processing', eventFor('dafeiyu', item, 'turn.started', 'core', 'fixture')); journal.close();
@@ -110,16 +113,16 @@ test('managed memory recovery and analysis worker wait for their own activation 
     sources: [{ sourceId: 'S1', text: source.text, origin: 'user', authorId: 'fictional', evidence: { kind: 'timeline', ref: 'fictional-source', contentHash: 'a'.repeat(64) } }],
     targets: [], candidates: [], createdAt: at, updatedAt: at, attempts: 1 };
   queue.insert(job); queue.close();
-  const h = await managed(join(root, 'core'));
+  const h = await managed(join(root, 'core'),false);
   const query = await h.ctx.plugin(Query, { path: join(root, 'query.sqlite'), openAt: 'never' });
   const timeline = await h.ctx.plugin(Timeline, { agentId: 'dafeiyu' });
-  const memory = await h.ctx.plugin(Memory, { agentId: 'dafeiyu', dataDir: memoryRoot, analysis: {} });
+  const memory = await h.ctx.plugin(Memory, { agentId: 'dafeiyu', dataDir: memoryRoot, analysis: {} });h.core.configureExecution({profileId:'test',policies:[],createStore:true});
   t.after(async () => { h.core.quiesce(); await h.core.whenIdle(); await memory.dispose(); await timeline.dispose(); await query.dispose(); await h.close(); });
   const readState = () => { const db = new DatabaseSync(join(memoryRoot, 'analysis.sqlite'), { readOnly: true }); try { return db.prepare('SELECT state FROM jobs WHERE id=?').get(id)?.state; } finally { db.close(); } };
-  assert.equal(readState(), 'running'); h.core.recover();
+  assert.equal(readState(), 'running'); assert.throws(()=>h.core.recover(),/EXECUTION_RECOVERY_REQUIRED/);
   assert.throws(() => h.core.activate(), /DEPENDENCY_UNAVAILABLE/);
   h.ctx.dafeiyuMemory.recover(); assert.equal(readState(), 'queued');
-  h.ctx.dafeiyuMemory.activate(); await tick(); assert.equal(readState(), 'queued'); assert.equal(h.adapter.requests.length, 0);
+  h.ctx.dafeiyuMemory.activate();await h.core.recoverExecutions();h.core.recover(); await tick(); assert.equal(readState(), 'queued'); assert.equal(h.adapter.requests.length, 0);
   h.core.activate(); await h.ctx.dafeiyuMemory.whenIdle();
   assert.equal(readState(), 'failed'); // Invalid fictional grant is evaluated only when the worker is allowed to run.
   assert.equal(h.adapter.requests.length, 0);

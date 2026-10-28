@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { readProvenance } from '@dafeiyu/core';
 import { provenanceFixture } from './provenance-fixture.js';
 import { textReply } from './harness.js';
-import { fixtureTool,report,invoke as invokeFeedback,archivePointer } from './feedback-fixture.js';
 import { WorkingStore } from '../packages/memory/lib/working-store.js';
 import { join } from 'node:path';
 import { CompactionId,compactCheckpointSource } from '@deepseek-ai/dsh-compaction';
@@ -18,7 +17,7 @@ declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
 } }
 
 test('current-inbound task acceptance receipts survive unrelated child memory changes without becoming reusable evidence',async t=>{
-  const h=await provenanceFixture();t.after(h.close);let epoch='before';const policy=new MemorySourcePolicy(h.ctx,h.store,null,null,()=>epoch),scope={agentId:'dafeiyu',route:'fixture-route',traceId:'current-inbound'};
+  const h=await provenanceFixture();t.after(h.close);let epoch='before';const policy=new MemorySourcePolicy(h.ctx,h.store,null),scope={agentId:'dafeiyu',route:'fixture-route',traceId:'current-inbound'};
   const text=JSON.stringify({status:'succeeded',effects:'confirmed',completeness:'complete',data:{task:{id:randomUUID()},run:{id:randomUUID()},state:'accepted'},sources:[],receipts:[]});
   for(const name of ['qq_task_submit','qq_explore','local_owner_task_submit']){const refs=policy.tool(scope,name,text,null);assert.ok(refs.length);epoch='after-child-write';assert.ok(refs.every(ref=>policy.validate(scope,ref)));assert.ok(refs.every(ref=>!policy.validate({...scope,traceId:'later-inbound'},ref)));}
 });
@@ -119,7 +118,7 @@ test('fine-grained summary checkpoints keep independent B while withdrawing A an
 
 test('unrelated mutation during auxiliary summary generation does not reject a valid selected span',async t=>{
   const h=await provenanceFixture(undefined,5000);t.after(h.close);const b=await h.remember('B_SOURCE');const unrelated=h.rememberUnseen('UNSEEN_A',b);let changed=false;
-  h.setCompactionResponse(()=>{if(!changed){changed=true;h.store.mutate(b.scope,{action:'delete',id:unrelated.id,expectedVersion:1,requestId:randomUUID(),reason:'无关来源变更'});}return textReply(JSON.stringify({summary:'SUMMARY_SURVIVES_UNRELATED_MUTATION'}));});
+  h.setCompactionResponse(()=>{if(!changed){changed=true;h.store.mutate(b.scope,{action:'delete',id:unrelated.id,expectedVersion:1,requestId:randomUUID(),reason:'无关来源变更'});}return textReply(JSON.stringify({fragments:[{kind:'note',text:'SUMMARY_SURVIVES_UNRELATED_MUTATION'}]}));});
   for(let i=0;i<5;i++)await h.run(`阶段${i}：`+'虚构纸船待检验。'.repeat(250));
   assert.ok(changed);assert.match(h.visible(),/SUMMARY_SURVIVES_UNRELATED_MUTATION/);
 });
@@ -138,15 +137,6 @@ test('working item removal and re-addition cannot reactivate old dependent answe
   await set(0,[item]);await h.run('旧任务','OLD_WORK_ANSWER');await set(1,[]);await set(2,[item]);await h.run('新任务');assert.ok(!h.visible().includes('OLD_WORK_ANSWER'));
 });
 
-test('feedback captures ancestor versions and cannot return to normal visibility merely by restoring a parent',async t=>{
-  const h=await provenanceFixture();t.after(h.close);const p=await h.remember('PARENT_SOURCE'),child=await h.remember('CHILD_SOURCE','a',p.memory);
-  const tool=fixtureTool(h,()=>report('DERIVED_FEEDBACK',{sourceRefs:[child.memory.ref]}));t.after(()=>tool.handle.dispose());
-  const pointer=archivePointer((await invokeFeedback(h,tool.name)).value);
-  h.mutate(p,'delete',1);h.mutate(p,'restore',2);await h.run('继续');
-  const result=await h.probe('a',c=>h.memory.feedbackOpen(c,{ref:pointer.ref,expectedVersion:1}));
-  assert.equal((result as {status:string}).status,'not_found');assert.equal(tool.calls,1);
-});
-
 test('same message identifiers in different conversations cannot cross source or summary visibility',async t=>{
   const h=await provenanceFixture();t.after(h.close);
   h.setResponse(()=>textReply('A_REPLY'));const a=h.simulator.send('a','A_PRIVATE_SOURCE',{id:'same-platform-id'});await h.core.whenIdle();
@@ -163,20 +153,6 @@ test('identical content hashes from distinct source messages do not couple indep
   await h.select([b.memory],2);assert.ok(h.visible().includes('IDENTICAL_FICTIONAL_SOURCE'));
 });
 
-test('alternate refs to the same original source retain deletion and restore fences in work and feedback views',async t=>{
-  const h=await provenanceFixture();t.after(h.close);const a=await h.remember('ALIASED_SOURCE');
-  const anchor=h.core.journal.append({agentId:'dafeiyu',route:a.scope.route,traceId:'fixture-alias',operationId:randomUUID(),causedBy:null,type:'fixture.source-alias',plugin:'fixture',pluginVersion:'1',
-    occurredAt:new Date().toISOString(),sources:[{kind:'message',id:a.evidence.message.message.id,route:a.scope.route}],data:{}});
-  const alias=`dafeiyu:source:${anchor.id}:0`;
-  assert.equal(h.timeline.sameArchivedSource(a.scope,alias,a.evidence.ref),true);
-  await h.invoke('dafeiyu_memory_working_set',{requestId:randomUUID(),expectedVersion:'0',taskId:'alias-task',expiresAt:new Date(Date.now()+600000).toISOString(),
-    items:JSON.stringify([{id:'alias',category:'goal',text:'ALIASED_WORK',sourceRefs:[alias]}])});
-  const tool=fixtureTool(h,()=>report('ALIASED_FEEDBACK',{sourceRefs:[alias]}));t.after(()=>tool.handle.dispose());const pointer=archivePointer((await invokeFeedback(h,tool.name)).value);
-  h.mutate(a,'delete',1);h.mutate(a,'restore',2);await h.run('恢复后继续');
-  const carriers=h.session().deriveMessages().filter(m=>m.role==='user'&&m.source.kind==='runtime-context');assert.ok(!JSON.stringify(carriers).includes('ALIASED_WORK'));
-  const opened=await h.probe('a',c=>h.memory.feedbackOpen(c,{ref:pointer.ref,expectedVersion:1}));assert.equal((opened as {status:string}).status,'not_found');assert.equal(tool.calls,1);
-});
-
 test('legacy working entries without captured source proofs stay archived until explicit refresh',async t=>{
   const h=await provenanceFixture();t.after(h.close);const a=await h.remember('LEGACY_SOURCE');const work=new WorkingStore(join(h.root,'working.sqlite'));
   try{work.write(a.scope,randomUUID(),0,{kind:'working',version:0,taskId:'legacy',expiresAt:new Date(Date.now()+600000).toISOString(),items:[{
@@ -185,24 +161,6 @@ test('legacy working entries without captured source proofs stay archived until 
   await h.run('新任务');assert.ok(!h.visible().includes('UNPROVEN_LEGACY_WORK'));
   await h.invoke('dafeiyu_memory_working_set',{requestId:randomUUID(),expectedVersion:'1',taskId:'legacy',expiresAt:new Date(Date.now()+600000).toISOString(),
     items:JSON.stringify([{id:'legacy',category:'goal',text:'FRESH_VALID_WORK',sourceRefs:[a.memory.ref]}])});assert.match(h.visible(),/FRESH_VALID_WORK/);
-});
-
-test('legacy summary uses its coarse fence without withdrawing independent v2 checkpoints',async t=>{
-  const h=await provenanceFixture(undefined,5000);t.after(h.close);const b=await h.remember('B_SOURCE');
-  for(let i=0;i<6;i++){
-    await h.run(`虚构${i}：`+'蓝色纸船尚未检验。'.repeat(200));
-    h.session().append('user/message',createUserMessage({source:{kind:'provenance-test-barrier'},content:[{type:'text',text:`OTHER_PLUGIN_BARRIER_${i}`}]}),{surfaceOp:'append'});
-  }
-  const session=h.session(),events=session.snapshotEvents();const checkpoints=session.surface.nodes.flatMap(seq=>{const e=events[seq];return e?.type==='user/message'&&e.data.source.kind==='compact-checkpoint'?[e]:[];});assert.ok(checkpoints.length>1);
-  const selected=checkpoints[0]!,text=selected.data.content.find(b=>b.type==='text');assert.ok(text&&text.type==='text');
-  const {dependencies:_deps,...legacy}=checkpointProof(session,selected.data);const body={...legacy,schemaVersion:1,summary:'LEGACY_COARSE_SUMMARY'};const id=CompactionId(randomUUID());
-  session.append('compaction/start',{compactionId:id,turn:null});session.append('compaction/summary',{compactionId:id,summary:[{type:'text',text:JSON.stringify(body)}],
-    shadowedRange:{start:selected.seq,end:selected.seq},shadowedSeqs:[selected.seq],shadowedTokenCount:0,provider:'local-test',model:'scripted'});
-  session.append('user/message',createUserMessage({source:compactCheckpointSource(id),content:[{type:'text',text:JSON.stringify(body)}]}),{surfaceOp:{op:'replace',startSeq:selected.seq,endSeq:selected.seq},sourceEventSeqs:[selected.seq]});
-  session.append('compaction/end',{compactionId:id,turn:null});await h.run('新格式独立输入');assert.match(h.visible(),/LEGACY_COARSE_SUMMARY/);
-  const unseen=h.rememberUnseen('UNSEEN_A',b);h.store.mutate(b.scope,{action:'delete',id:unseen.id,expectedVersion:1,requestId:randomUUID(),reason:'旧版状态变化'});await h.run('继续');
-  assert.ok(!h.visible().includes('LEGACY_COARSE_SUMMARY'));
-  const visible=new Set(session.deriveMessages().map(m=>m.id));assert.ok(checkpoints.slice(1).every(c=>visible.has(c.data.id)));
 });
 
 test('normal memory tools cannot launder a suppressed original source through another memory record',async t=>{

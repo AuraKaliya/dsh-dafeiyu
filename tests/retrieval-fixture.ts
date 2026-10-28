@@ -9,7 +9,7 @@ import { defaultProfile, loadProfile, RetrievalError } from '@dafeiyu/memory/ret
 import type { EmbeddingProfile, RetrievalConfig, RetrievalDependencies, TextChunk } from '@dafeiyu/memory/retrieval-profile';
 
 export function scope(route='a'): OperationScope {
-  return {agentId:'fish',route,traceId:randomUUID(),operationId:randomUUID(),startedEventId:randomUUID()};
+  return {agentId:'fish',route:route.startsWith('[')?route:JSON.stringify(['fish','simulator','fixture','local',route]),traceId:randomUUID(),operationId:randomUUID(),startedEventId:randomUUID()};
 }
 export function content(text: string) {
   return {kind:'knowledge' as const,claimType:'self_report' as const,content:text,

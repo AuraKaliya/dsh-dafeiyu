@@ -1,15 +1,58 @@
 {
   "schemaVersion": 1,
   "profileId": "host-test",
-  "agent": {"id": "dafeiyu"},
-  "paths": {"core": "../.runtime/host-test/core", "memory": "../.runtime/host-test/memory", "sessions": "../.runtime/host-test/sessions", "query": "../.runtime/host-test/query.sqlite"},
-  "modelRoutes": {"chat": {"provider": "local-test", "model": "scripted"}},
-  "persona": {"fixedFile": "./persona.test.md", "kind": "test"},
+  "agent": {
+    "id": "dafeiyu"
+  },
+  "paths": {
+    "core": "../.runtime/host-test/core",
+    "memory": "../.runtime/host-test/memory",
+    "sessions": "../.runtime/host-test/sessions",
+    "query": "../.runtime/host-test/query.sqlite"
+  },
+  "modelRoutes": {
+    "chat": {
+      "provider": "local-test",
+      "model": "scripted"
+    }
+  },
+  "persona": {
+    "fixedFile": "./persona.test.md",
+    "kind": "test"
+  },
   "plugins": [
-    {"id": "model-scripted", "required": true},
-    {"id": "timeline", "required": true, "config": {"execution": true}},
-    {"id": "memory", "required": true},
-    {"id": "channel-simulator", "config": {"account": "host-test"}}
+    {
+      "id": "model-scripted",
+      "required": true
+    },
+    {
+      "id": "timeline",
+      "required": true,
+      "config": {
+        "execution": true
+      }
+    },
+    {
+      "id": "memory-growth",
+      "required": true
+    },
+    {
+      "id": "channel-simulator",
+      "config": {
+        "account": "host-test"
+      }
+    }
   ],
-  "authorityPolicies": [{"id": "local-task", "producers": ["host-cli"], "actions": ["dafeiyu_task_intent"], "allowLocalWrite": false}]
+  "authorityPolicies": [
+    {
+      "id": "local-task",
+      "producers": [
+        "host-cli"
+      ],
+      "actions": [
+        "dafeiyu_task_intent"
+      ],
+      "allowLocalWrite": false
+    }
+  ]
 }

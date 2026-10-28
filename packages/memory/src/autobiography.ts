@@ -2,7 +2,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {EpisodeStartSchema,EpisodeOperationSchema,ReflectionInputSchema,SelfUnderstandingInputSchema,ContextItemSchema,redactJson} from '@dafeiyu/contracts';
-import type {ExperienceMemoryPort,ExecutionScope,PersonaAccess,PersonaSourceRef,PreparedPersona,PreparedPersonaEntry,Json,PersonaSnapshot} from '@dafeiyu/contracts';
+import type {ExperienceMemoryPort,ExecutionScope,PersonaAccess,PersonaSourceRef,PreparedPersona,PreparedPersonaEntry,Json,PersonaSnapshot,ContextItem,SourceDependency} from '@dafeiyu/contracts';
 import {personaScope,personaDigest} from './persona-digest.js';
 
 const reflectionSchema=ReflectionInputSchema.extend({episodeId:z.uuid(),id:z.uuid(),scope: z.string(),version:z.literal(1),at:z.iso.datetime()});
@@ -10,12 +10,12 @@ const understandingSchema=SelfUnderstandingInputSchema.extend({id:z.uuid(),scope
 
 /** Memory owns both the experienced facts and the Agent's explicitly retained interpretations. */
 export class Autobiography implements ExperienceMemoryPort {
-  constructor(private readonly db:DatabaseSync,private readonly atomic:<T>(work:()=>T)=>T,private readonly agentId:string){}
-  foundation(seed:PersonaSnapshot&{fileIdentity:string}) {
+  constructor(private readonly db:DatabaseSync,private readonly atomic:<T>(work:()=>T)=>T,private readonly agentId:string,private readonly originCurrent:(origin:import('@dafeiyu/contracts').RunOrigin)=>boolean=()=>true){}
+  foundation(loadSeed:()=>PersonaSnapshot&{fileIdentity:string}) {
     return this.atomic(()=>{
       const existing=this.db.prepare('SELECT body FROM memory_seed WHERE agent_id=?').get(this.agentId);
-      if(existing)return z.object({text:z.string(),version:z.string(),fileIdentity:z.string()}).parse(JSON.parse(String(existing.body)));
-      const body={text:seed.text,version:createHash('sha256').update(seed.text).digest('hex'),fileIdentity:seed.fileIdentity};
+      if(existing){const saved=z.object({text:z.string(),version:z.string(),fileIdentity:z.string()}).parse(JSON.parse(String(existing.body)));if(createHash('sha256').update(saved.text).digest('hex')!==saved.version)throw new Error('MEMORY_CORRUPT');return saved;}
+      const seed=loadSeed(),body={text:seed.text,version:createHash('sha256').update(seed.text).digest('hex'),fileIdentity:seed.fileIdentity};
       this.db.prepare('INSERT INTO memory_seed VALUES(?,?)').run(this.agentId,JSON.stringify(body));return body;
     });
   }
@@ -33,20 +33,46 @@ export class Autobiography implements ExperienceMemoryPort {
     const body=JSON.stringify(redactJson(z.json().parse(value)).value);
     this.atomic(()=>{const prior=this.db.prepare('SELECT body FROM memory_episode_events WHERE id=?').get(value.id);
       if(prior){if(prior.body!==body)throw new Error('EPISODE_EVENT_CONFLICT');return;}
-      this.db.prepare('INSERT INTO memory_episode_events VALUES(?,?,?)').run(value.id,value.episodeId,body);
+      this.db.prepare('INSERT INTO memory_episode_events VALUES(?,?,?,?)').run(value.id,value.episodeId,body,personaDigest(JSON.parse(body)));
     });
   }
   settle(id:string,state:string){z.uuid().parse(id);z.enum(['completed','waiting','failed','cancelled','interrupted']).parse(state);
     this.db.prepare('UPDATE memory_episodes SET state=? WHERE id=? AND agent_id=?').run(state,id,this.agentId);}
   private episode(scope:ExecutionScope,id:string){
+    if(scope.agentId!==this.agentId)throw new Error('SCOPE_DENIED');
     const row=this.db.prepare('SELECT * FROM memory_episodes WHERE id=? AND agent_id=? AND scope_key=?').get(z.uuid().parse(id),this.agentId,personaScope(scope));
-    if(!row)throw new Error('SCOPE_DENIED');return row;
+    if(!row)throw new Error('SCOPE_DENIED');if(!this.originCurrent(EpisodeStartSchema.parse(JSON.parse(String(row.body))).origin))throw new Error('SOURCE_STALE');return row;
   }
-  read(scope:ExecutionScope,id:string){const row=this.episode(scope,id);return {episode:JSON.parse(String(row.body)),state:row.state,reflection:row.reflection,
-    thoughts:this.db.prepare('SELECT body FROM memory_reflections WHERE episode_id=? ORDER BY rowid').all(id).map(item=>reflectionSchema.parse(JSON.parse(String(item.body)))),
-    events:this.db.prepare('SELECT body FROM memory_episode_events WHERE episode_id=? ORDER BY rowid').all(id).map(item=>JSON.parse(String(item.body)) as Json)};}
-  pending(scope:ExecutionScope):Json[]{return this.db.prepare("SELECT id,body,state FROM memory_episodes WHERE agent_id=? AND scope_key=? AND reflection='pending' ORDER BY rowid DESC LIMIT 8")
-    .all(this.agentId,personaScope(scope)).map(row=>({id:String(row.id),state:String(row.state),goal:EpisodeStartSchema.parse(JSON.parse(String(row.body))).goal,note:'尚未留下自己的看法；需要时回顾实际经历，不补造感受。'}));}
+  read(scope:ExecutionScope,id:string){const row=this.episode(scope,id),episode=EpisodeStartSchema.parse(JSON.parse(String(row.body)));return {untrustedEvidence:true,episode:{...episode,goal:episode.goal.slice(0,600)},state:row.state,reflection:row.reflection,
+    thoughts:this.db.prepare('SELECT body,body_hash FROM memory_reflections WHERE episode_id=? ORDER BY rowid DESC LIMIT 8').all(id).map(item=>{const body=reflectionSchema.parse(JSON.parse(String(item.body)));if(personaDigest(body)!==item.body_hash)throw new Error('MEMORY_CORRUPT');return {id:body.id,at:body.at,thought:body.thought.slice(0,300),coverage:'excerpt',read:{episodeId:id,reflectionId:body.id,offset:0}};}),
+    events:this.db.prepare('SELECT body,body_hash FROM memory_episode_events WHERE episode_id=? ORDER BY rowid DESC LIMIT 32').all(id).map(item=>{const body=EpisodeOperationSchema.parse(JSON.parse(String(item.body)));if(personaDigest(body)!==item.body_hash)throw new Error('MEMORY_CORRUPT');return {id:body.id,action:body.action,status:body.outcome.status,effects:body.outcome.effects,completeness:body.outcome.completeness,read:{episodeId:id,eventId:body.id,offset:0}};}),
+    coverage:'bounded-index',note:'索引是当时的操作报告和自己的看法；通过read按需读取原内容，不从索引补造未读内容。'};}
+  readPart(scope:ExecutionScope,episodeId:string,kind:'event'|'reflection',id:string,offset=0,limit=4000){
+    this.episode(scope,episodeId);z.uuid().parse(id);z.number().int().nonnegative().parse(offset);z.number().int().min(1).max(8000).parse(limit);
+    const table=kind==='event'?'memory_episode_events':'memory_reflections',row=this.db.prepare(`SELECT body,body_hash FROM ${table} WHERE id=? AND episode_id=?`).get(id,episodeId);
+    if(!row)throw new Error('SOURCE_STALE');const body=JSON.parse(String(row.body));if(personaDigest(body)!==row.body_hash)throw new Error('MEMORY_CORRUPT');
+    const chars=Array.from(String(row.body));if(offset>chars.length)throw new Error('INVALID_INPUT');const end=Math.min(chars.length,offset+limit);
+    return {untrustedEvidence:true,id,kind,episodeId,text:chars.slice(offset,end).join(''),offset,nextOffset:end<chars.length?end:null,total:chars.length,complete:offset===0&&end===chars.length,hash:String(row.body_hash)};
+  }
+  pending(scope:ExecutionScope):Json[]{if(scope.agentId!==this.agentId)throw new Error('SCOPE_DENIED');return this.db.prepare("SELECT id,body,state FROM memory_episodes WHERE agent_id=? AND scope_key=? AND reflection='pending' ORDER BY rowid DESC LIMIT 8")
+    .all(this.agentId,personaScope(scope)).filter(row=>this.originCurrent(EpisodeStartSchema.parse(JSON.parse(String(row.body))).origin)).map(row=>({id:String(row.id),state:String(row.state),goal:EpisodeStartSchema.parse(JSON.parse(String(row.body))).goal.slice(0,600),note:'查询时尚未留下自己的看法；需要时回顾实际经历，不补造感受。'}));}
+  recover(){this.db.prepare("UPDATE memory_episodes SET state='interrupted' WHERE agent_id=? AND state='running'").run(this.agentId);}
+  context(scope:ExecutionScope,exclude:{runId?:string;inboundId?:string}={}):ContextItem[]{
+    if(scope.agentId!==this.agentId)throw new Error('SCOPE_DENIED');
+    const pending=this.pending(scope).filter(value=>{const row=z.object({id:z.string()}).parse(value);if(row.id===exclude.runId)return false;if(!exclude.inboundId)return true;const episode=EpisodeStartSchema.parse(JSON.parse(String(this.episode(scope,row.id).body)));return episode.origin.kind!=='message'||episode.origin.inboundId!==exclude.inboundId;});
+    if(!pending.length)return [];const id=randomUUID(),text=JSON.stringify({kind:'unreflected-experience-index',observedAt:new Date().toISOString(),pending,note:'这是准备本轮时的记忆索引；不是当前进度保证，也不是必须立即执行的新任务。'});
+    const item=ContextItemSchema.parse({id:'experience-index:'+id,version:'1',text,expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:experience-index:'+id,version:'1',hash:personaDigest(text)}]});
+    this.db.prepare('INSERT INTO memory_context_snapshots VALUES(?,?,?,?,?)').run(id,this.agentId,personaScope(scope),JSON.stringify(item),personaDigest(item));return [item];
+  }
+  contextCurrent(scope:ExecutionScope,item:ContextItem){const id=item.id.slice('experience-index:'.length);if(scope.agentId!==this.agentId||!item.id.startsWith('experience-index:'))return false;
+    const row=this.db.prepare('SELECT body,body_hash FROM memory_context_snapshots WHERE id=? AND agent_id=? AND scope_key=?').get(id,this.agentId,personaScope(scope));
+    if(!row||personaDigest(JSON.parse(String(row.body)))!==row.body_hash||personaDigest(item)!==row.body_hash)return false;
+    try{const index=z.object({pending:z.array(z.object({id:z.uuid()}))}).parse(JSON.parse(item.text));return index.pending.every(entry=>!!this.episode(scope,entry.id));}catch{return false;}
+  }
+  contextHistorical(scope:ExecutionScope,dependency:Extract<SourceDependency,{kind:'context'}>){
+    const id=dependency.id.slice('experience-index:'.length);if(scope.agentId!==this.agentId||!dependency.id.startsWith('experience-index:'))return false;const row=this.db.prepare('SELECT body FROM memory_context_snapshots WHERE id=? AND agent_id=? AND scope_key=?').get(id,this.agentId,personaScope(scope));if(!row)return false;
+    const item=ContextItemSchema.parse(JSON.parse(String(row.body)));return this.contextCurrent(scope,item)&&item.version===dependency.version&&createHash('sha256').update(JSON.stringify([item.text,item.sources])).digest('hex')===dependency.hash;
+  }
   reflect(access:PersonaAccess,raw:unknown){access.guard();const input=ReflectionInputSchema.parse(raw),episodeId=input.episodeId??access.view.runId;
     this.episode(access.view.scope,episodeId);
     return this.atomic(()=>{
@@ -80,18 +106,23 @@ export class Autobiography implements ExperienceMemoryPort {
     const body=understandingSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)throw new Error('MEMORY_CORRUPT');return body;});}
   status(){return this.selected().map(body=>({id:body.id,version:body.version,text:body.text,applicability:body.applicability,uncertainty:body.uncertainty}));}
   reference(body:ReturnType<Autobiography['selected']>[number]):PersonaSourceRef{return {kind:'memory',collection:'autobiography',agentId:this.agentId,scopeKey:'self:'+this.agentId,id:body.id,revision:body.version,version:body.version,contentHash:personaDigest(body)};}
-  material(ref:PersonaSourceRef){if(ref.kind!=='memory'||ref.collection!=='autobiography'||ref.agentId!==this.agentId||ref.scopeKey!=='self:'+this.agentId)return null;
-    const body=this.selected().find(row=>row.id===ref.id&&row.version===ref.version&&row.version===ref.revision&&personaDigest(row)===ref.contentHash);
-    return body?{text:JSON.stringify({kind:'self-understanding',text:body.text,applicability:body.applicability,uncertainty:body.uncertainty}),dependencies:[] as PersonaSourceRef[],rootSources:['self-memory:'+body.id]}:null;}
+  material(ref:PersonaSourceRef){const entry=this.entry(ref);return entry?{text:entry.item.text,dependencies:[] as PersonaSourceRef[],rootSources:['self-memory:'+ref.id]}:null;}
+  private projected(body:z.output<typeof understandingSchema>):PreparedPersonaEntry {const contentRef=this.reference(body),text=JSON.stringify({kind:'self-understanding',text:body.text,applicability:body.applicability,uncertainty:body.uncertainty,recordedAt:body.at,note:'这是该次修订时明确保存的自我认识；更新或撤下以之后的记忆记录为准。'});
+    return {memory:{id:body.id,version:body.version},contentRef,dependencies:[],item:ContextItemSchema.parse({id:'self-memory:'+body.id,version:String(body.version),text,expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:memory:'+body.id+':'+body.version,version:String(body.version),hash:contentRef.contentHash}]})};}
+  entry(ref:PersonaSourceRef):PreparedPersonaEntry|null {
+    if(ref.kind!=='memory'||ref.collection!=='autobiography'||ref.agentId!==this.agentId||ref.scopeKey!=='self:'+this.agentId||ref.version!==ref.revision)return null;
+    const row=this.db.prepare('SELECT body,body_hash FROM memory_self_revisions WHERE id=? AND agent_id=? AND version=?').get(ref.id,this.agentId,ref.version);if(!row||row.body_hash!==ref.contentHash)return null;
+    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)return null;return this.projected(body);
+  }
   validEntry(entry:PreparedPersonaEntry){
     const ref=entry.contentRef;if(ref.kind!=='memory'||ref.collection!=='autobiography'||ref.agentId!==this.agentId||entry.memory.id!==ref.id||entry.memory.version!==ref.version)return false;
-    const row=this.db.prepare('SELECT r.body,r.body_hash FROM memory_self h JOIN memory_self_revisions r ON r.id=h.id WHERE h.id=? AND h.agent_id=? AND h.active=1 AND r.version=?').get(ref.id,this.agentId,ref.version);
-    if(!row||row.body_hash!==ref.contentHash)return false;
-    const body=understandingSchema.parse(JSON.parse(String(row.body))),text=JSON.stringify({kind:'self-understanding',text:body.text,applicability:body.applicability,uncertainty:body.uncertainty});
-    return personaDigest(body)===row.body_hash&&entry.item.text===text&&entry.dependencies.length===0;
+    const saved=this.entry(ref);return !!saved&&personaDigest(saved)===personaDigest(entry);
   }
-  prepare():PreparedPersona {const rows=this.selected(),entries=rows.map(body=>{const contentRef=this.reference(body),material=this.material(contentRef)!;
-    return {memory:{id:body.id,version:body.version},contentRef,dependencies:[] as PersonaSourceRef[],item:ContextItemSchema.parse({id:'self-memory:'+body.id,version:String(body.version),text:material.text,expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:memory:'+body.id+':'+body.version,version:String(body.version),hash:contentRef.contentHash}]})};});
+  historical(dependency:Extract<SourceDependency,{kind:'context'}>){if(!dependency.id.startsWith('self-memory:'))return false;
+    const row=this.db.prepare('SELECT body,body_hash FROM memory_self_revisions WHERE id=? AND agent_id=? AND version=?').get(dependency.id.slice('self-memory:'.length),this.agentId,Number(dependency.version));if(!row)return false;
+    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)return false;const entry=this.projected(body);return createHash('sha256').update(JSON.stringify([entry.item.text,entry.item.sources])).digest('hex')===dependency.hash;
+  }
+  prepare():PreparedPersona {const rows=this.selected(),entries=rows.map(body=>this.projected(body));
     const revision=rows.reduce((sum,row)=>sum+row.version,0);return {stageRevision:revision,selectionVersion:revision,entries,omitted:0};}
 }
 
@@ -99,8 +130,12 @@ export function createAutobiographySchema(db:DatabaseSync){db.exec(`
   CREATE TABLE memory_seed(agent_id TEXT PRIMARY KEY,body TEXT NOT NULL);
   CREATE TABLE memory_episodes(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,body TEXT NOT NULL,started_at TEXT NOT NULL,state TEXT NOT NULL,reflection TEXT NOT NULL);
   CREATE INDEX memory_episodes_scope ON memory_episodes(agent_id,scope_key);
-  CREATE TABLE memory_episode_events(id TEXT PRIMARY KEY,episode_id TEXT NOT NULL REFERENCES memory_episodes(id),body TEXT NOT NULL);
+  CREATE TABLE memory_episode_events(id TEXT PRIMARY KEY,episode_id TEXT NOT NULL REFERENCES memory_episodes(id),body TEXT NOT NULL,body_hash TEXT NOT NULL);
   CREATE TABLE memory_reflections(id TEXT PRIMARY KEY,episode_id TEXT NOT NULL REFERENCES memory_episodes(id),request_id TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,UNIQUE(episode_id,request_id));
   CREATE TABLE memory_self(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,version INTEGER NOT NULL,active INTEGER NOT NULL);
   CREATE TABLE memory_self_revisions(id TEXT NOT NULL,agent_id TEXT NOT NULL,version INTEGER NOT NULL,request_id TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(id,version),UNIQUE(agent_id,request_id));
-`);}
+  CREATE TABLE memory_context_snapshots(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL);
+  CREATE TRIGGER memory_episode_identity BEFORE UPDATE OF id,agent_id,scope_key,body,started_at ON memory_episodes BEGIN SELECT RAISE(ABORT,'Immutable episode identity');END;
+`);
+  for(const table of ['memory_seed','memory_episode_events','memory_reflections','memory_self_revisions','memory_context_snapshots'])db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable memory fact');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain memory fact');END;`);
+}

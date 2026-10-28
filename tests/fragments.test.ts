@@ -81,7 +81,7 @@ test('removed fragment refs and old full checkpoint exports cannot disclose dele
 test('other plugin regions and native sections survive fragment retirement unchanged',async t=>{
   const h=await fragmentFixture();t.after(h.close);
   h.ctx.systemPrompt.context({name:'native-c2',order:1,required:true,text:'NATIVE_C2_KEEP'});
-  const expires=new Date(Date.now()+600000).toISOString();const extension=h.core.registerExtension({id:'second-c2',version:'1',protocolVersion:4,agentId:'dafeiyu',contexts:[{
+  const expires=new Date(Date.now()+600000).toISOString();const extension=h.core.registerExtension({id:'second-c2',version:'1',protocolVersion:4,agentId:'dafeiyu',conversationContexts:[{
     id:'status',kind:'operational-fact',prepare:async()=>[{id:'status',version:'1',text:'SECOND_C2_KEEP',expiresAt:expires,sources:[{ref:'fictional:status',version:'1',hash:'test'}]}],validate:()=>true,
   }]});t.after(()=>extension.dispose());await h.run('加入其他区域');
   h.mutate(h.a,'delete',1);await h.run('继续');assert.match(h.visible(),/NATIVE_C2_KEEP/);assert.match(h.visible(),/SECOND_C2_KEEP/);assert.match(h.view().text,/B_FACT_KEEP/);
@@ -147,20 +147,19 @@ test('failed persistence stops dispatch after a partial retirement and later rec
 
 test('proof tool responses are one-turn evidence and never automatically accumulate in chat',async t=>{
   const h=await fragmentFixture();t.after(h.close);const b=activeFragments(h.view()).find(f=>f.text.startsWith('B_FACT_KEEP'))!;
-  await h.invoke('dafeiyu_source_open',{ref:`${h.ref}.${b.id}`,limit:'2000'});
+  await h.invoke('dafeiyu_source_open',{ref:`${h.ref}.${b.id}`,limit:2000});
   assert.ok(h.visible().includes('summary-fragments'));
   await h.run('继续正文');assert.ok(!h.visible().includes('summary-fragments'));assert.match(h.view().text,/B_FACT_KEEP/);
 });
 
-test('removing the provider retires every fragment but retains immutable archives and an empty committed view',async t=>{
-  const h=await fragmentFixture();t.after(h.close);await h.memoryFiber.dispose();await h.run('插件退出');
-  assert.deepEqual(h.view().view.active,[]);assert.deepEqual(JSON.parse(h.view().text).fragments,[]);
+test('removing the required memory provider blocks dispatch and preserves immutable archives',async t=>{
+  const h=await fragmentFixture();t.after(h.close);const calls=h.adapter.requests.length;await h.memoryFiber.dispose();await assert.rejects(h.run('插件退出'),/DEPENDENCY_UNAVAILABLE/);assert.equal(h.adapter.requests.length,calls);
   assert.ok(JSON.stringify(h.session().snapshotEvents()).includes('A_FACT_ONLY'));
 });
 
 test('forged action contexts cannot resolve short references',async t=>{
   const h=await fragmentFixture();t.after(h.close);
-  await h.probe('a',context=>{assert.throws(()=>h.core.summaryReference({...context},h.ref),/active core-issued/);return {verified:true};});
+  await h.probe('a',context=>{assert.throws(()=>h.core.summaryReference({...context},h.ref),/SCOPE_DENIED/);return {verified:true};});
 });
 
 test('model-supplied dependency fields cannot manufacture a proof',async t=>{

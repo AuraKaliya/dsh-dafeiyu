@@ -23,7 +23,7 @@ test('recent attention is durable, scoped and never mutates the personality or t
   assert.equal(state.prepare(scope('b'),'海洋',false,3000).length,0);assert.equal(state.prepare(scope('a'),'海洋',false,3000).length,1);
   assert.throws(()=>state.save(owner,{...args,text:'changed'},sources),/IDEMPOTENCY_CONFLICT/);
   memory.close();memory=new MemoryStore(file);assert.equal(memory.recentStateStore(()=>true).prepare(scope('a'),'海洋',false,3000).length,1);
-  const db=new DatabaseSync(file,{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.equal(db.prepare('SELECT count(*) AS n FROM persona_candidates').get()?.n,0);assert.equal(db.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{db.close();}
+  const db=new DatabaseSync(file,{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,MEMORY_SCHEMA_VERSION);assert.equal(db.prepare('SELECT count(*) AS n FROM memory_self').get()?.n,0);assert.equal(db.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,0);}finally{db.close();}
 });
 test('only the exact independently reviewed publication can cross scopes; edits and revocation retire it',async t=>{
   const root=await mkdtemp(join(testTempDir(),'recent-publication-')),memory=new MemoryStore(join(root,'memory.sqlite'));t.after(()=>memory.close());let current=true;
@@ -45,13 +45,4 @@ test('runtime tool retains recent self report without adopting it and rejects an
     if(step===2){const result=outcomes(request).find(outcome=>outcome.status==='succeeded');assert.ok(result);savedId=z.object({id:z.string()}).parse(result.data).id;assert.match(JSON.stringify(request.messages),/recent-self-state/);return call('dafeiyu_recent_state_publish',{requestId:'publish',id:savedId,expectedVersion:1,view:'他人的私人事实不应跨会话。'});}
     assert.ok(outcomes(request).some(outcome=>outcome.errorCode==='PRIVATE_INPUT_REJECTED'));return textReply('fixture');
   });await h.message('说说最近对海洋的关注',{trigger:true});assert.ok(savedId);assert.ok(h.adapter.requests.some(request=>String(request.sessionId).startsWith('recent-state-review-')));
-});
-
-test('schema twelve migration retains existing memory bytes and begins with no invented attention',async t=>{
-  const root=await mkdtemp(join(testTempDir(),'recent-upgrade-')),file=join(root,'memory.sqlite');let memory=new MemoryStore(file);t.after(()=>memory.close());
-  const operation={agentId:'fixture',route:'a',traceId:randomUUID(),operationId:randomUUID(),startedEventId:randomUUID()};
-  const receipt=memory.mutate(operation,{action:'create',requestId:'seed',value:{kind:'knowledge',claimType:'reported_claim',content:'PRESERVE_ORIGINAL_MEMORY',sources:[{kind:'timeline',ref:'fixture:source',contentHash:'a'.repeat(64)}]}});
-  const before=memory.read(operation,receipt.id);memory.close();
-  const db=new DatabaseSync(file);try{db.exec('DROP TABLE recent_state_publications; DROP TABLE recent_state_requests; DROP TABLE recent_state_revisions; DROP TABLE recent_self_states; DELETE FROM memory_schema_migrations WHERE version=13; PRAGMA user_version=12;');}finally{db.close();}
-  memory=new MemoryStore(file);assert.deepEqual(memory.read(operation,receipt.id),before);assert.deepEqual(memory.recentStateStore(()=>true).list(scope('a')),[]);
 });

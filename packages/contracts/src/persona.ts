@@ -32,7 +32,7 @@ export const PersonaEntryRefSchema=z.strictObject({id,version});
 export type PersonaEntryRef=z.infer<typeof PersonaEntryRefSchema>;
 export const PersonaManifestSchema=z.strictObject({schemaVersion:z.literal(1),agentId:z.string(),runId:id,
   foundationHash:hash,foundationIdentity:hash,stageRevision:z.number().int().nonnegative(),selectionVersion:z.number().int().nonnegative(),
-  stageStatus:z.enum(['not-configured','empty','selected','degraded']),omittedCandidates:z.number().int().nonnegative().default(0),
+  stageStatus:z.enum(['empty','selected']),omittedCandidates:z.number().int().nonnegative().default(0),
   entries:z.array(z.strictObject({memory:PersonaEntryRefSchema,contentRef:PersonaSourceRefSchema,dependencies:z.array(PersonaSourceRefSchema).max(64)})).max(64),
   continuityCheckpointId:id.nullable(),policyVersion:hash,modelRouteHash:hash});
 export type PersonaManifest=z.infer<typeof PersonaManifestSchema>;
@@ -74,4 +74,6 @@ export interface MemoryGrowthProvider {
   expressionPreferences?(conversation:import('./conversation.js').Conversation,query?:string):readonly ContextItem[];
   prepare(access:PersonaAccess):PreparedPersona;
   validate(access:PersonaAccess,entry:PreparedPersonaEntry):boolean;
+  read(access:PersonaAccess,ref:PersonaSourceRef):PreparedPersonaEntry|null;
+  validateHistorical(access:PersonaAccess,dependency:Extract<SourceDependency,{kind:'context'}>):boolean;
 }

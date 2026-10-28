@@ -10,5 +10,5 @@ for(const [point,exitCode,state,sends] of [['ready',73,'sent',1],['sending',74,'
   const root=await mkdtemp(join(testTempDir(),'dafeiyu-native-recovery-')),fixture=resolve('build-tests/qq-task-recovery-fixture.js');
   await assert.rejects(()=>execute(process.execPath,[fixture,root,point],{cwd:resolve('.'),timeout:20000,maxBuffer:200000}),error=>error instanceof Error&&'code'in error&&error.code===exitCode);
   const resumed=await execute(process.execPath,[fixture,root,'resume'],{cwd:resolve('.'),timeout:20000,maxBuffer:200000}),report=JSON.parse(resumed.stdout.trim().split('\n').at(-1)!);
-  assert.equal(report.state,state);assert.equal(report.modelCalls,0);assert.equal(report.sends,sends);assert.equal(report.serverAccess,false);
+  assert.equal(report.state,state);assert.equal(report.modelCalls,0,JSON.stringify(report));assert.equal(report.sends,sends);assert.ok(report.otherSends<=1);assert.equal(report.serverAccess,false);
 });

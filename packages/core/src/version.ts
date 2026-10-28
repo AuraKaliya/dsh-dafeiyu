@@ -1,1 +1,2 @@
-export const CORE_VERSION='0.15.0';
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
+export const CORE_VERSION=RELEASE_VERSION;

@@ -62,7 +62,7 @@ async function fixture(options:{directory?:string;create?:boolean;scene?:Convers
     const channel=core.registerExtension({id:'fixture-qq',version:'1',protocolVersion:4,agentId:'dafeiyu',channels:[{channel:'qq',account,deliver:async()=>({status:'sent',receiptId:'never-direct-executor-send'})}]});
     const taskTools=core.registerExtension({protocolVersion:4,id:'fixture-tasks',version:'1',agentId:'dafeiyu',actions:[
       {id:'fixture_submit',version:'1',description:'提交真实虚构主人消息的任务',effects:'local-write',inputSchema:MessageTaskSubmitSchema,outputSchema:z.json(),execute:async(raw,c)=>{submission=core.submitMessageTask(c,'fixture-tasks',raw);return success(z.json().parse(submission));}},
-      {id:'fixture_anchor',version:'1',description:'虚构来源形成真实程序锚点',effects:'local-write',requiresTask:true,inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_raw,c)=>{anchor=core.captureActivityAnchor(c,'fixture-tasks');options.onAnchor?.(anchor);return success(z.json().parse({anchor}));}},
+      {id:'fixture_anchor',version:'1',description:'虚构来源形成真实程序锚点',effects:'local-write',scope:'task',inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_raw,c)=>{anchor=core.captureActivityAnchor(c,'fixture-tasks');options.onAnchor?.(anchor);return success(z.json().parse({anchor}));}},
     ]});
     const unbind=core.bindMessageTasks({id:'fixture-tasks',pluginId:'fixture-tasks',channelExtensionId:'fixture-qq',channel:'qq',account,ownerId,policyId:'test-policy',version:'1',autoDeliver:false,classify:message=>qqTaskDirective(message),active:()=>true});
     ctx.dafeiyuMemory.recover();ctx.dafeiyuMemory.activate();executor.recover();executor.activate();await core.recoverExecutions();core.recover();core.activate();

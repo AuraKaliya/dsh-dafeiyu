@@ -10,8 +10,8 @@ export async function prepareCapturedReplySources(agentId:string,item:PendingMes
   const provider=binding();if(!provider?.provider.sources)throw new Error('DEPENDENCY_UNAVAILABLE');const scope={agentId,route:item.route,traceId:item.id},regions=await contexts.prepare(item,signal);
   const guard=()=>{signal.throwIfAborted();if(binding()?.provider!==provider.provider)throw new Error('SOURCE_STALE');
     for(const dep of dependencies){const valid=dep.agentId===agentId&&dep.route===item.route&&(dep.kind==='context'?regions.some(region=>region.entry.active&&region.entry.owner===dep.owner&&region.entry.contributor.id===dep.region
-      &&region.items.some(value=>value.id===dep.id&&value.version===dep.version&&digestSource(JSON.stringify([value.text,value.sources]))===dep.hash&&Date.parse(value.expiresAt)>Date.now()&&region.entry.contributor.validate(region.request,value)))
-      :provider.provider.sources!.validate(scope,dep));if(!valid)throw new Error('SOURCE_STALE');}
+      &&(region.entry.contributor.validateHistorical?.(region.request,dep)??region.items.some(value=>value.id===dep.id&&value.version===dep.version&&digestSource(JSON.stringify([value.text,value.sources]))===dep.hash&&Date.parse(value.expiresAt)>Date.now()&&region.entry.contributor.validate(region.request,value))))
+      :provider.provider.sources!.validate(scope,dep));if(!valid)throw new Error('SOURCE_STALE',{cause:dep});}
   };try{guard();return {guard,release:()=>contexts.release(regions)};}catch(error){contexts.release(regions);throw error;}
 }
 

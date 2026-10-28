@@ -1,3 +1,4 @@
+import {API_VERSION} from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { MessageInstructionSubmitSchema,MessageExplorationSubmitSchema,MessageTaskStatusSchema,MessageTaskControlSchema,ConversationSchema,messageMainText,messageParts } from '@dafeiyu/contracts';
@@ -22,7 +23,7 @@ export class QqTaskCapabilities {
       &&evidence.origin.provider==='qq-media'&&JSON.stringify(message.conversation)===JSON.stringify(evidence.origin.scene)
       &&messageParts(message).some(part=>z.object({messageId:z.literal(part.id),sender:z.literal(config.ownerId)}).safeParse(evidence.origin.detail).success)
       &&messageParts(message).flatMap(part=>part.media??[]).some(m=>m.kind==='audio'&&m.source.provider===evidence.source.provider&&m.source.key===evidence.source.key)===true&&ctx.dafeiyu.mediaVoiceCurrent(evidence);
-    this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'qq-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1',...(config.voiceDirectives?['media.assets.v1']:[]),...(config.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])],provides:['qq.tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
+    this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'qq-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1',...(config.voiceDirectives?['media.assets.v1']:[]),...(config.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])],provides:['qq.tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
     try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'qq-tasks',pluginId:'qq-tasks',channelExtensionId:'channel-qq',channel:'qq',account:config.botId,ownerId:config.ownerId,policyId:config.policyId,version:'1',autoDeliver:config.deliverResults,...(config.explorationResources?.length?{explorationResources:config.explorationResources}:{}),...(config.expressionPolicy?{expressionPolicy:config.expressionPolicy}:{}),classify:message=>qqTaskDirective(message,config.naturalNames),active:()=>!this.closed,
       ...(config.voiceDirectives?{voice:{version:'qq-record-asr-v1',current,resolve:(context:ExecutionContext,message:InboundMessage,id:string)=>{const result=ctx.dafeiyu.mediaVoiceEvidence(context,'qq-tasks',id);if(!current(message,result.evidence))throw new Error('VOICE_MESSAGE_MISMATCH');return result;}}}:{})});}
     catch(error){this.handle.dispose();throw error;}

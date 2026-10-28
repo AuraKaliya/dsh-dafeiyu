@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 export const QQ_APPLICATION_ID = 0x44465131;
-// v6 adds receive masks and durable activation boundaries to the versioned group JSON.
+// Complete current connector storage identity.
 export const QQ_SCHEMA_VERSION = 8;
 
 const tables = {
@@ -9,7 +9,7 @@ const tables = {
   receipts: 'CREATE TABLE receipts(reply_id TEXT PRIMARY KEY,platform_id TEXT NOT NULL)',
   handled: 'CREATE TABLE handled(route TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(route,id))',
 };
-// The unversioned connector had exactly these definitions. Do not adopt arbitrary databases.
+// Structural validation includes every table definition.
 const normalize = (sql: string) => sql.toLowerCase().replace(/\bif\s+not\s+exists\b/g, '').replace(/[\s;]+/g, '');
 const groupTable = 'CREATE TABLE qq_group_snapshots(account TEXT PRIMARY KEY,at TEXT NOT NULL,revision INTEGER NOT NULL,groups_json TEXT NOT NULL)';
 const quoteTable = 'CREATE TABLE qq_reply_quotes(reply_id TEXT PRIMARY KEY,body TEXT NOT NULL)';
@@ -27,7 +27,7 @@ const deliveryTables = {
   qq_delivery_plans: 'CREATE TABLE qq_delivery_plans(reply_id TEXT PRIMARY KEY,plan_hash TEXT NOT NULL,body TEXT NOT NULL)',
   qq_delivery_segments: 'CREATE TABLE qq_delivery_segments(reply_id TEXT NOT NULL,position INTEGER NOT NULL,state TEXT NOT NULL,receipt TEXT,code TEXT,PRIMARY KEY(reply_id,position))',
 };
-// Versioned JSON bodies let 5E add media delivery protocols without rewriting legacy text rows.
+// Text and media deliveries each retain their current transport receipts.
 const mediaTables = {
   qq_media_sources: 'CREATE TABLE qq_media_sources(id TEXT PRIMARY KEY,route TEXT NOT NULL,message_id TEXT NOT NULL,position INTEGER NOT NULL,version INTEGER NOT NULL,deleted INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,private_body TEXT,updated_at INTEGER NOT NULL,UNIQUE(route,message_id,position))',
   qq_media_drafts: 'CREATE TABLE qq_media_drafts(id TEXT PRIMARY KEY,body TEXT NOT NULL,body_hash TEXT NOT NULL,state TEXT NOT NULL)',
@@ -41,7 +41,7 @@ export interface QqSchemaInspection {
   supported: boolean;
 }
 
-/** Read-only even on a legacy store. Opening a service is deliberately separate from inspection. */
+/** Read-only inspection; service opening is a separate operation. */
 export function inspectQqSchema(db: DatabaseSync): QqSchemaInspection {
   const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
   const applicationId = Number(db.prepare('PRAGMA application_id').get()?.application_id);

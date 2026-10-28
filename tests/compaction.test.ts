@@ -14,7 +14,6 @@ import { textReply } from './harness.js';
 import { call } from './harness.js';
 import { MemoryStore } from '@dafeiyu/memory/store';
 import { join } from 'node:path';
-import { fixtureTool,report,invoke,archivePointer } from './feedback-fixture.js';
 import { CompactionId,compactCheckpointSource } from '@deepseek-ai/dsh-compaction';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { checkpointProof } from './summary-proof.js';
@@ -30,6 +29,7 @@ async function seed(h: H, count = 5, room = 'a') {
   for (let i = 0; i < count; i++) { message = await h.seed(room, original(i)); assert.equal(message.state, 'delivered'); }
   return h.ctx.agents.get(SessionId(message!.sessionId))!;
 }
+async function exposeMemory(h:H,id:string){let step=0;h.setResponse(()=>++step===1?call('dafeiyu_memory_open',{id}):textReply('已读虚构记忆'));h.simulator.send('a','明确读取本次记忆',{id:randomUUID()});await h.core.whenIdle();}
 async function next(h: H, room = 'a', text = 'CURRENT_TASK_KEEP：只继续当前任务') {
   const item = await h.seed(room, text); assert.equal(item.state, 'delivered'); return item;
 }
@@ -84,7 +84,7 @@ test('summary failures keep valid source history, close the DSH bracket and resp
 test('native and second-plugin regions remain verbatim across repeated incremental replacements', async t => {
   const h = await memoryFixture(undefined, { compaction: policy, context: {} }); t.after(h.close);
   h.ctx.systemPrompt.context({ name: 'native-fixture', order: 1, required: true, text: 'NATIVE_UNCHANGED' });
-  const handle = h.core.registerExtension({ id: 'other-region', version: '1', protocolVersion:4, agentId: 'dafeiyu', contexts: [{
+  const handle = h.core.registerExtension({ id: 'other-region', version: '1', protocolVersion:4, agentId: 'dafeiyu', conversationContexts: [{
     id: 'facts', kind: 'operational-fact', prepare: async () => [{ id: 'a', version: '1', text: 'OTHER_PLUGIN_UNCHANGED',
       sources: [{ ref: 'fictional:other', version: '1', hash: 'fictional' }], expiresAt: new Date(Date.now() + 600000).toISOString() }], validate: () => true,
   }] }); t.after(() => handle.dispose());
@@ -98,9 +98,10 @@ test('deletion invalidates summaries and their raw derived turns; restoration ca
   const h = await memoryFixture(undefined, { compaction: policy }); t.after(h.close);
   const evidence = await h.evidence('a');
   const memory = z.object({ id: z.string() }).parse(await h.probe('a', c => h.memory.create(c, { requestId: randomUUID(), kind: 'knowledge', claimType: 'self_report', content: '虚构测试知识', sourceRefs: [evidence.ref] })));
-  h.setCompactionResponse(() => textReply(JSON.stringify({ summary: 'SUMMARY_DELETE_SENTINEL：旧记录的虚构信息。' })));
+  await exposeMemory(h,memory.id);
+  h.setCompactionResponse(() => textReply(JSON.stringify({fragments:[{kind:'note',text:'SUMMARY_DELETE_SENTINEL：旧记录的虚构信息。'}]})));
   const agent = await seed(h, 6); assert.match(visible(lastChat(h)), /SUMMARY_DELETE_SENTINEL/);
-  const dependent=agent.session.deriveMessages().filter(m=>m.role==='user'&&m.source.kind==='compact-checkpoint'&&checkpointProof(agent.session,m).dependencies.some(d=>d.kind==='legacy')).map(m=>m.id);
+  const dependent=agent.session.deriveMessages().filter(m=>m.role==='user'&&(m.source.kind==='compact-checkpoint'||m.source.kind==='dafeiyu-summary-view')&&checkpointProof(agent.session,m).dependencies.some(d=>d.kind==='memory'&&d.id===memory.id)).map(m=>m.id);
   assert.ok(dependent.length);
   await h.probe('a', c => h.memory.delete(c, { requestId: randomUUID(), id: memory.id, expectedVersion: 1, reason: '测试删除' }));
   await next(h); assert.ok(!lastChat(h).messages.some(m=>m.id!==undefined&&dependent.includes(m.id)));
@@ -124,28 +125,28 @@ test('source version changes during summarization reject the result and retire i
   const memory=z.object({id:z.string()}).parse(await h.probe('a',c=>h.memory.create(c,{requestId:randomUUID(),kind:'knowledge',claimType:'self_report',content:'虚构依赖',sourceRefs:[e.ref]})));
   let changed=false;
   h.setCompactionResponse(request=>{
-    if(changed)return textReply(JSON.stringify({summary:'FRESH_VALID_SUMMARY'}));
+    if(changed)return textReply(JSON.stringify({fragments:[{kind:'note',text:'FRESH_VALID_SUMMARY'}]}));
     const input=request.messages.at(-1)?.content.find(b=>b.type==='text');
-    if(!input||input.type!=='text'||!JSON.parse(input.text).sources.some((s:{role:string})=>s.role==='assistant'))return textReply(JSON.stringify({summary:'VALID_INDEPENDENT_SUMMARY'}));
+    if(!input||input.type!=='text'||!JSON.parse(input.text).sources.some((s:{role:string})=>s.role==='assistant'))return textReply(JSON.stringify({fragments:[{kind:'note',text:'VALID_INDEPENDENT_SUMMARY'}]}));
     if(!changed){changed=true;const store=new MemoryStore(join(h.root,'memory.sqlite'));try{
       store.mutate({agentId:'dafeiyu',route:e.message.route,traceId:'fictional-race',operationId:'fictional-race',startedEventId:randomUUID()},
         {action:'delete',id:memory.id,expectedVersion:1,requestId:randomUUID(),reason:'虚构并发删除'});
     }finally{store.close();}}
-    return textReply(JSON.stringify({summary:'REJECTED_STALE_SUMMARY'}));
+    return textReply(JSON.stringify({fragments:[{kind:'note',text:'REJECTED_STALE_SUMMARY'}]}));
   });
   await seed(h,6);await next(h);
   assert.ok(changed);assert.ok(!visible(lastChat(h)).includes('REJECTED_STALE_SUMMARY'));
   assert.ok(!h.adapter.requests.filter(r=>r.purpose!=='compaction').some(r=>visible(r).includes('REJECTED_STALE_SUMMARY')));
 });
 
-test('restart replays committed replacements once and missing provider withdraws summaries without changing native regions',async()=>{
+test('restart replays committed replacements once and disabling compression preserves valid source tracking',async()=>{
   let h=await memoryFixture(undefined,{compaction:policy});const root=h.root;
   await seed(h);const before=compactCalls(h).length;assert.ok(before>0);await h.close();
   h=await memoryFixture(root,{compaction:{...policy,inputTokens:100000}});
   try{await next(h);assert.match(visible(lastChat(h)),/dafeiyu-incremental-summary/);assert.equal(compactCalls(h).length,0);}finally{await h.close();}
   h=await memoryFixture(root);
   try{h.ctx.systemPrompt.context({name:'surviving-native',order:1,required:true,text:'SURVIVING_NATIVE'});await next(h);
-    assert.ok(lastChat(h).messages.filter(m=>m.role==='user'&&m.source?.kind==='compact-checkpoint').every(m=>m.content.every(b=>b.type!=='text'||JSON.parse(b.text).fragments?.length===0)));assert.match(visible(lastChat(h)),/SURVIVING_NATIVE/);
+    assert.match(visible(lastChat(h)),/dafeiyu-incremental-summary/);assert.equal(compactCalls(h).length,0);assert.match(visible(lastChat(h)),/SURVIVING_NATIVE/);
   }finally{await h.close();}
 });
 
@@ -161,34 +162,18 @@ test('old summary source is derived-only while valid and cannot be exported afte
   assert.equal((await h.probe('b',c=>h.timeline.open(c,{ref}))).status,'not_found');
 });
 
-test('feedback deletion retires dependent assistant turns and balanced rewritten tool pairs without replay',async t=>{
-  const h=await memoryFixture(undefined,{compaction:policy,feedback:{}});t.after(h.close);
-  const tool=fixtureTool(h,()=>report('FEEDBACK_DELETE_SENTINEL'));t.after(()=>tool.handle.dispose());
-  const pointer=archivePointer((await invoke(h,tool.name)).value);
-  await seed(h,5);
-  const result=await h.probe('a',c=>h.memory.feedbackDelete(c,{ref:pointer.ref,expectedVersion:1,requestId:randomUUID(),reason:'删除'}));assert.equal(z.object({status:z.string()}).parse(result).status,'ok');
-  await next(h);assert.ok(!visible(lastChat(h)).includes('FEEDBACK_DELETE_SENTINEL'));assert.equal(tool.calls,1);
-});
-
-test('explicit historical lookup and its assistant paraphrase expire together before later compression',async t=>{
-  const h=await memoryFixture(undefined,{compaction:policy,feedback:{}});t.after(h.close);
-  const tool=fixtureTool(h,()=>report('历史虚构资料'));t.after(()=>tool.handle.dispose());const pointer=archivePointer((await invoke(h,tool.name)).value);
-  let requests=0;h.setResponse(()=>++requests===1?call('dafeiyu_tool_feedback_open',{ref:pointer.ref,expectedVersion:'1'}):textReply('EPHEMERAL_PARAPHRASE'));
-  h.simulator.send('a','回查归档',{id:randomUUID()});await h.core.whenIdle();assert.match(visible(lastChat(h)),/历史虚构资料/);
-  await next(h);assert.ok(!visible(lastChat(h)).includes('EPHEMERAL_PARAPHRASE'));
-  await seed(h,5);assert.ok(!compactCalls(h).some(r=>visible(r).includes('EPHEMERAL_PARAPHRASE')));
-});
-
-test('an open DSH compaction bracket blocks another writer but preserves normal chat',async t=>{
+test('an open DSH compaction bracket blocks another turn without corrupting the persisted session',async t=>{
   const h=await memoryFixture(undefined,{compaction:policy});t.after(h.close);
   const agent=await seed(h,2);agent.session.append('compaction/start',{compactionId:CompactionId(randomUUID()),turn:null});
-  await seed(h,4);assert.equal(compactCalls(h).length,0);
-  assert.ok(readCompactionEvents(agent.session).some(e=>e.type==='plugin:dafeiyu/compaction-check'&&e.data.status==='busy'));
+  const turns=agent.session.snapshotEvents().filter(event=>event.type==='turn/start').length,calls=h.adapter.requests.length;
+  const receipt=h.simulator.send('a','等待当前压缩结束',{id:randomUUID()});await h.core.whenIdle();
+  assert.equal(h.core.journal.get(receipt.id).state,'failed');assert.equal(h.adapter.requests.length,calls);assert.equal(compactCalls(h).length,0);
+  assert.equal(agent.session.snapshotEvents().filter(event=>event.type==='turn/start').length,turns);
 });
 
 test('insufficient reduction does not replace sources or repeatedly retry in the cooldown window',async t=>{
   const h=await memoryFixture(undefined,{compaction:{...policy,maxSummaryChars:8000,maxFragmentGroups:1,cooldownMs:600000}});t.after(h.close);
-  h.setCompactionResponse(()=>textReply(JSON.stringify({summary:'不应放大上下文。'.repeat(900)})));
+  h.setCompactionResponse(()=>textReply(JSON.stringify({fragments:[{kind:'note',text:'不应放大上下文。'.repeat(900)}]})));
   const agent=await seed(h,6);assert.equal(compactCalls(h).length,1);
   assert.ok(readCompactionEvents(agent.session).some(e=>e.type==='plugin:dafeiyu/compaction-check'&&e.data.status==='no-benefit'));
   assert.ok(!readCompactionEvents(agent.session).some(e=>e.type==='compaction/summary'));

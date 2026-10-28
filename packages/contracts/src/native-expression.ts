@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { TaskAssessment } from './task-assessment.js';
+import type { TaskReview } from './task-review.js';
 import type {ContextHandoff} from './context.js';
 import { ConversationSchema } from './conversation.js';
 import { PersonaSourceRefSchema } from './persona.js';
@@ -17,7 +17,7 @@ export const NativeVerificationFeedbackSchema=z.strictObject({kind:z.literal('de
 /** Created by the core from persisted, verified native execution facts, never model-supplied. */
 export interface NativeExpressionAccess {readonly execution:PersonaAccess;readonly anchor:TaskResultAnchor;readonly question:string;readonly output:string;
   readonly handoff?:ContextHandoff;
-  readonly assessment?:TaskAssessment;readonly selectedSourceIds?:readonly string[];
+  readonly review?:TaskReview;
   readonly operationalEvidence?:readonly NativeExpressionPacket['evidence'][number][];
   /** Core-owned synchronous read scope only; caller rechecks guard after it returns. */
   readSources?(read:()=>void):void;

@@ -11,7 +11,8 @@ if(mode==='rendering'){const original=NativeDeliveryStore.prototype.start;Native
 const h=await qqCapabilityFixture({tasks:true,deliverResults:true,existingRoot:root});
 try{if(mode==='resume'){
     await h.core.whenIdle();const db=new DatabaseSync(join(root,'core','runtime.sqlite'),{readOnly:true});let id:string;try{id=String(db.prepare('SELECT run_id FROM native_deliveries').get()?.run_id);}finally{db.close();}
-    console.log(JSON.stringify({state:h.core.messageTaskDeliveryStatus(id)?.state,modelCalls:h.adapter.requests.length,sends:h.platform.sent.length,realPlatform:false,realModel:false,serverAccess:false}));
+    const results=h.platform.sent.filter(value=>JSON.stringify(value).includes('虚构执行结果'));
+    console.log(JSON.stringify({state:h.core.messageTaskDeliveryStatus(id)?.state,modelCalls:h.adapter.requests.length,sends:results.length,otherSends:h.platform.sent.length-results.length,realPlatform:false,realModel:false,serverAccess:false}));
   }else{let chat=0;h.setResponse(request=>String(request.sessionId).startsWith('dafeiyu-delivery-v3-')?textReply('已核对的虚构人格结果'):String(request.sessionId).startsWith('memory-expression-verify-delivery-')?textReply('{"faithful":true,"issues":[]}'):String(request.sessionId).startsWith('dafeiyu-task-')?textReply('虚构执行结果'):++chat===1?call('qq_task_submit',{requestId:'source'}):textReply('已受理'));
     await h.message('任务：完成虚构恢复检查',{trigger:true});assert.fail('The selected crash point was not reached');}
 }finally{await h.close();}

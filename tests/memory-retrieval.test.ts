@@ -149,16 +149,6 @@ test('loopback endpoint restrictions reject remote services, credentials and red
   }
 });
 
-test('derived index migration preserves vector cache and rebuilds stable source ordering',async t=>{
-  const h=await retrievalFixture();t.after(h.close);h.seed('迁移后的稳定排序');await h.recall('排序');h.retrieval.close();
-  const db=new DatabaseSync(join(h.root,'retrieval.sqlite'));
-  const count=db.prepare('SELECT count(*) AS n FROM vector_cache').get()?.n;
-  db.exec('ALTER TABLE chunks DROP COLUMN order_no; PRAGMA user_version=1;');db.close();
-  const fake=fakeDependencies();const reopened=new MemoryRetrieval(h.store,h.root,config,fake.dependency);t.after(()=>reopened.close());
-  const result=await reopened.recall(scope(),{query:'排序'},AbortSignal.timeout(5000),()=>{});assert.equal(result.items.length,1);assert.equal(result.vectorsComputed,0);
-  const check=new DatabaseSync(join(h.root,'retrieval.sqlite'));try{assert.equal(check.prepare('PRAGMA user_version').get()?.user_version,2);assert.equal(check.prepare('SELECT count(*) AS n FROM vector_cache').get()?.n,count);}finally{check.close();}
-});
-
 test('lowered capacity applies to an existing snapshot and a later deletion allows reindexing',async t=>{
   const h=await retrievalFixture();t.after(h.close);const a=h.seed('第一条记录');h.seed('第二条记录');await h.recall('记录','lexical');
   const fake=fakeDependencies();const limited=new MemoryRetrieval(h.store,h.root,{...config,maxDocuments:1,maxChunks:1},fake.dependency);t.after(()=>limited.close());

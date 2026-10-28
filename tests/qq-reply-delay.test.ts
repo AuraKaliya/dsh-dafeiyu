@@ -26,7 +26,7 @@ test('segmented text waits once before the first send and cancellation leaves no
 test('a media-only reply counts zero text and mixed parts do not repeat the wait',async()=>{
   for(const text of ['', '正文']){const s=store();try{const base=reply(text),inboundId=base.id.slice(0,-6),data=Buffer.from('actual-fixture-bytes'),sha=createHash('sha256').update(data).digest('hex');let waits=0,sends=0;
     const media=ReplyMediaManifestSchema.parse({schemaVersion:1,id:randomUUID(),replyId:base.id,runId:randomUUID(),target:base.conversation,sourceMessageId:base.sourceMessageId,anchor:{kind:'reply',inboundId},textHash:qqTextHash(text),draft:{id:randomUUID(),version:1},parts:[{kind:'image',asset:{schemaVersion:1,id:randomUUID(),version:1,kind:'image',sha256:sha,bytes:data.length,mime:'image/png'}}],sourceStamp:'d'.repeat(64),credential:'e'.repeat(64),expiresAt:'2099-01-01T00:00:00Z'});
-    const transport=new QqMediaTransport({ledger:s.mediaDelivery,legacyProgress:()=>null,beforeSend:async value=>{waits++;assert.equal(qqReplyDelayMs(value.text),text?2040:2000);},check:async()=>{},send:async()=>String(++sends),confirmed:()=>{}});
+    const transport=new QqMediaTransport({ledger:s.mediaDelivery,textProgress:()=>null,beforeSend:async value=>{waits++;assert.equal(qqReplyDelayMs(value.text),text?2040:2000);},check:async()=>{},send:async()=>String(++sends),confirmed:()=>{}});
     const result=await transport.deliver({...base,media},new AbortController().signal,()=>{},async()=>data);assert.equal(result.status,'sent',JSON.stringify(result));assert.equal(waits,1);assert.equal(sends,text?2:1);
   }finally{s.close();}}
 });

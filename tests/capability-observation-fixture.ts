@@ -13,13 +13,13 @@ import { testTempDir as tmpdir } from './test-temp.js';
 
 export const capabilityScene:Conversation={channel:'simulator',account:'local',kind:'local',id:'a'};
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export async function capabilityFixture(sourceTracking=true){
+export async function capabilityFixture(){
   const root=await mkdtemp(join(tmpdir(),'dafeiyu-capability-')),state={version:1,valid:true,throwSelect:false,reads:0};
   let response:Response=()=>textReply('完成'),source:PersonaSourceRef|undefined,captured:ExecutionContext|undefined;
   let readHook:(context:ExecutionContext)=>void=()=>{};
   const h=await harness(root,request=>response(request),undefined,10000,undefined,undefined,true);
   await h.ctx.plugin(Query,{path:join(root,'query.sqlite'),openAt:'never'});
-  await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),sourceTracking});
+  await h.ctx.plugin(Timeline,{agentId:'dafeiyu'});const memory=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:join(root,'memory'),});
   const page={messages:[{id:'M1',text:'QQ_RAW_VIEW_SENTINEL：这是一份尚未核实的虚构观察。'}],limitations:['文字样本，不代表媒体理解']};
   const view=JSON.stringify(page),receipts:Record<string,unknown>[]=[];
   const fail=(error:unknown)=>{const code=error instanceof Error?error.message:'FAILED';if(code==='SIMULATED_STORAGE_UNKNOWN')throw error;return {status:'failed' as const,effects:'none' as const,completeness:'unknown' as const,data:null,sources:[],receipts:[],errorCode:/^[A-Z_]+$/.test(code)?code:'OBSERVATION_FAILED'};};
@@ -35,7 +35,7 @@ export async function capabilityFixture(sourceTracking=true){
       execute:async(input,context)=>{try{if(state.throwSelect)throw new Error('SIMULATED_STORAGE_UNKNOWN');const receipt=h.core.selectCapabilityObservation(context,'fixture-observer',h.core.capabilityResources(context,'fixture-observer')[0]!,input,view);receipts.push(receipt);
         return {status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(receipt),sources:[],receipts:[]};}catch(error){return fail(error);}}},
   ]});
-  h.core.configureExecution({profileId:'capability-fixture',createStore:true,policies:[{id:'conversation',producers:['channel-simulator'],actions:['qq_browse','qq_observe_select'],allowLocalWrite:true,resources:[capabilityScene]},
+  h.core.configureExecution({profileId:'capability-fixture',createStore:true,policies:[{id:'conversation',producers:['channel-simulator'],actions:['qq_browse','qq_observe_select',...["dafeiyu_memory_record","dafeiyu_memory_revise","dafeiyu_memory_delete","dafeiyu_memory_restore","dafeiyu_memory_search","dafeiyu_memory_open","dafeiyu_memory_deleted_search","dafeiyu_memory_deleted_open"]],allowLocalWrite:true,resources:[capabilityScene]},
     {id:'native',producers:['fixture-native'],actions:['qq_browse','qq_observe_select'],allowLocalWrite:true,resources:[capabilityScene]}]});
   h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();await h.core.recoverExecutions();h.core.recover();h.core.activate();
   return {...h,root,state,page,view,receipts,source:()=>source!,captured:()=>captured!,setResponse:(next:Response)=>{response=next;},setReadHook:(next:typeof readHook)=>{readHook=next;},unload:()=>handle.dispose(),

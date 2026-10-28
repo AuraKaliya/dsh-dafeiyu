@@ -21,7 +21,7 @@ test('a crash boundary after Task create but before Run binding resumes the same
   h=await executionHarness(root,()=>textReply('恢复完成'),undefined,false);
   try{await h.core.whenIdle();const accepted=h.port.submitTask(request);assert.equal(h.port.status(accepted.run).state,'completed');
     const db=new DatabaseSync(join(root,'memory','memory.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) AS n FROM task_workspaces').get()?.n,1);}finally{db.close();}
-    assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-assessment-')).length,1);
+    assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-task-')).length,1);assert.equal(h.adapter.requests.filter(value=>String(value.sessionId).startsWith('dafeiyu-review-')).length,0);
   }finally{await h.close();}
 });
 test('DSH flush without a committed Run result is not inferred as permission to rerun on restart',async()=>{

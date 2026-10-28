@@ -11,14 +11,14 @@ import { call,textReply } from './harness.js';
 import type { Config as MemoryConfig } from '@dafeiyu/memory';
 
 export async function provenanceFixture(root?:string,inputTokens=1000000,overrides:Partial<NonNullable<MemoryConfig['compaction']>>={}){
-  const h=await memoryFixture(root,{compaction:{inputTokens,cooldownMs:0,minGrowthTokens:0,minSavingsTokens:64,retainTurns:1,maxSummaryChars:400,...overrides},context:{},feedback:{}});
+  const h=await memoryFixture(root,{compaction:{inputTokens,cooldownMs:0,minGrowthTokens:0,minSavingsTokens:64,retainTurns:1,maxSummaryChars:400,...overrides},context:{},});
   const store=new MemoryStore(join(h.root,'memory.sqlite'));
   const scopeFor=(route:string):OperationScope=>({agentId:'dafeiyu',route,traceId:'fictional-local-write',operationId:randomUUID(),startedEventId:randomUUID()});
   const run=async(text:string,reply='虚构回复',room='a')=>{
     h.setResponse(()=>textReply(reply));const receipt=h.simulator.send(room,text,{id:randomUUID()});await h.core.whenIdle();
     const item=h.core.journal.get(receipt.id);assert.equal(item.state,'delivered');return item;
   };
-  const invoke=async(name:string,args:Record<string,string>,room='a',reply='虚构操作完成')=>{
+  const invoke=async(name:string,args:Record<string,unknown>,room='a',reply='虚构操作完成')=>{
     let requests=0;h.setResponse(()=>++requests===1?call(name,args):textReply(reply));
     const receipt=h.simulator.send(room,`执行虚构测试 ${name}`,{id:randomUUID()});await h.core.whenIdle();
     const item=h.core.journal.get(receipt.id);assert.equal(item.state,'delivered');return item;

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Conversation } from './index.js';
 import {ConversationSchema} from './conversation.js';
 
-export const ContextStageSchema=z.enum(['conversation','exploration','assessment','feedback','delivery','verification','recovery']);
+export const ContextStageSchema=z.enum(['conversation','exploration','review','feedback','delivery','verification','recovery']);
 export type ContextStage=z.infer<typeof ContextStageSchema>;
 const requestSource=z.strictObject({conversation:ConversationSchema,messageId:z.string(),occurredAt:z.iso.datetime(),text:z.string().max(32000)});
 export const ContextHandoffSchema=z.strictObject({schemaVersion:z.literal(1),stage:ContextStageSchema,

@@ -47,10 +47,11 @@ async function setup(initialIdentity=bot, features: Pick<QQ.Config, 'naturalName
   const config={agentId:'dafeiyu',botId:bot,ownerId:owner,groupIds:[group],httpURL:`http://127.0.0.1:${address.port}/`,
     wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile,dataDir:join(root,'qq'),reconnectMs:100,requestTimeoutMs:500,...features};
   let fiber=await h.ctx.plugin(QQ,config);
+  await h.ctx.dafeiyuQQ.start();
   if(initialIdentity===bot)await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online'&&wss.clients.size>0);
   return {...h,platform,config,wss,
     emit:(event:object)=>{for(const ws of wss.clients)if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(event));},
-    reload:async()=>{await fiber.dispose();fiber=await h.ctx.plugin(QQ,config);await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online');},
+    reload:async()=>{await fiber.dispose();fiber=await h.ctx.plugin(QQ,config);await h.ctx.dafeiyuQQ.start();await until(()=>h.ctx.dafeiyuQQ.getStatus().state==='online');},
     stop:async()=>{await fiber.dispose();await h.close();for(const ws of wss.clients)ws.terminate();await new Promise<void>(resolve=>wss.close(()=>resolve()));await new Promise<void>(resolve=>server.close(()=>resolve()));},
   };
 }

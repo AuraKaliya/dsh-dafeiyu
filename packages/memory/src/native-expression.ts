@@ -30,7 +30,6 @@ export class NativeExpression implements NativeExpressionPort {
         if(observed?.target){kind=observed.target.kind;targetStamp=observed.target.stamp;}}
       if(material===null){forbidden=true;continue;}
       proofs.push({source,viewHash:hash(material),fence,...(mediaStamp?{mediaStamp}:{}),...(targetStamp?{targetStamp}:{})});
-      if(access.selectedSourceIds?.length&&!access.selectedSourceIds.includes(source.id))continue;
       if(targetStamp&&kind==='inference')targetInferences.push(evidence.length);
       evidence.push({id:`S${evidence.length+1}`,kind,text:material});
     }};
@@ -45,7 +44,7 @@ export class NativeExpression implements NativeExpressionPort {
       evidence.push({...receipt,id:'O'+evidence.length});}
     if(anchor.outcome==='waiting')evidence.push({id:'W',kind:'reported',text:'程序状态：任务仍在等待，尚未完成。只能讨论需要补充或确认的事项，不能把它描述为已经完成。'});
     if(resultIncluded)evidence.push({id:'R',kind:'inference',text:z.string().min(1).max(32000).parse(access.output)});
-    if(resultIncluded&&access.assessment)evidence.push({id:'A',kind:'inference',text:JSON.stringify({kind:'model-result-assessment',...access.assessment,note:'模型对目标满足程度和价值的判断，不是程序事实或发送回执。'})});
+    if(resultIncluded&&access.review)evidence.push({id:'A',kind:'inference',text:JSON.stringify({kind:'model-work-review',...access.review,note:'模型对目标满足程度和价值的判断，不是程序事实或发送回执。'})});
     if(access.media)evidence.push({id:'M',kind:'reported',text:JSON.stringify({note:'程序已核验可用于此目标的媒体部件。以下仅为字节／类型元信息，不表示读懂其内容；正文只据其他获准证据描述内容。',parts:access.media.parts})});
     if(!evidence.length)throw new Error('NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL');
     if(access.handoff)evidence.push({id:'CONTEXT',kind:'reported',text:JSON.stringify({kind:'stage-handoff',...access.handoff})});

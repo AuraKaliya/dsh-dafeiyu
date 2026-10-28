@@ -13,23 +13,23 @@ import { qqCapabilityFixture,scene,otherGroup,bot,group,until } from './qq-capab
 import { call,textReply } from './harness.js';
 type Fixture=Awaited<ReturnType<typeof qqCapabilityFixture>>;
 const native=(id:unknown)=>String(id).startsWith('dafeiyu-task-'),render=(id:unknown)=>String(id).startsWith('dafeiyu-delivery-v3-'),verify=(id:unknown)=>String(id).startsWith('memory-expression-verify-delivery-');
+function isolatedEvidence(){let step=0;return (text:string)=>++step===1?call('qq_browse',{requestId:'public',target:scene}):step===2?call('qq_browse',{requestId:'private',target:{...scene,id:otherGroup}}):textReply(text);}
 const reply='PERSONA_RESULT：海风让我想起仍有许多未知值得探索。';
 function runId(h:Fixture){const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{return String(db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE q.producer='qq-tasks' ORDER BY r.rowid DESC LIMIT 1").get()?.id);}finally{db.close();}}
 const sentText=(sent:Record<string,unknown>)=>z.object({message:z.array(z.object({type:z.string(),data:z.object({text:z.string().optional()})}))}).parse(sent).message.filter(s=>s.type==='text').map(s=>s.data.text??'').join('');
 function script(h:Fixture,{text=reply,faithful=true,mixed=false}:{text?:string;faithful?:boolean;mixed?:boolean}={}){let chat=0,work=0;h.setResponse(request=>{
   if(render(request.sessionId))return textReply(text);if(verify(request.sessionId))return textReply(JSON.stringify({faithful,issues:faithful?[]:['虚构校验失败']}));
-  if(native(request.sessionId)){if(mixed&&++work===1)return call('qq_browse',{requestId:'public',target:scene});if(mixed&&work===2)return call('qq_browse',{requestId:'private',target:{...scene,id:otherGroup}});return textReply('EXECUTOR_REPORT_SENTINEL：这是执行器的候选结果。');}
+  if(native(request.sessionId)){if(mixed&&++work===1)return call('qq_browse',{requestId:'public',target:scene});if(mixed&&work===2)return call('qq_browse',{requestId:'private',target:{...scene,id:otherGroup}});return textReply(mixed?'EXECUTOR_REPORT_SENTINEL：这是执行器的候选结果。':text);}
   return ++chat===1?call('qq_task_submit',{requestId:'task'}):textReply('已受理任务');
 });}
-
-test('completed QQ tasks automatically render in a clean persisted DSH persona session, verify, and deliver once',async t=>{
+test('ordinary task delivery uses the persisted main Agent answer exactly once',async t=>{
   const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);script(h);await h.message('任务：写一句关于海洋的虚构感想',{trigger:true});
   const id=runId(h),status=h.core.messageTaskDeliveryStatus(id)!;assert.equal(status.state,'sent');assert.equal(h.platform.sent.length,2);assert.equal(sentText(h.platform.sent[1]!),reply);
-  assert.equal(h.adapter.requests.filter(r=>render(r.sessionId)).length,1);assert.equal(h.adapter.requests.filter(r=>verify(r.sessionId)).length,1);assert.equal(h.core.journal.list().length,1);
+  assert.equal(h.adapter.requests.filter(r=>render(r.sessionId)||verify(r.sessionId)).length,0);
   const calls=h.adapter.requests.length;assert.deepEqual(await h.core.deliverMessageTaskResult(id),status);assert.equal(h.adapter.requests.length,calls);assert.equal(h.platform.sent.length,2);
-  const target=h.adapter.requests.find(r=>render(r.sessionId))!;assert.equal(target.tools?.length??0,0);assert.match(JSON.stringify(target),/dafeiyu-task-result/);
-  const reader=await h.ctx.sessionPersistence.open(SessionId(String(target.sessionId)),'read');try{const events=(await reader.read()).events;assert.ok(events.some(e=>e.type==='assistant/message'));assert.ok(events.some(e=>e.type==='turn/end'));}finally{await reader.close();}
+  const task=h.adapter.requests.find(r=>native(r.sessionId))!;const reader=await h.ctx.sessionPersistence.open(SessionId(String(task.sessionId)),'read');try{const events=(await reader.read()).events;assert.ok(events.some(e=>e.type==='assistant/message'));assert.ok(events.some(e=>e.type==='turn/end'));}finally{await reader.close();}
 });
+
 
 test('a text task starts its write deadline after preflight while keeping authority checks and a whole receipt',async t=>{
   const h=await qqCapabilityFixture({tasks:true,deliverResults:true,deliveryTimeoutMs:500});t.after(h.close);const original=h.ctx.dafeiyuQQ.deliverTaskResult.bind(h.ctx.dafeiyuQQ);let prepared=false;
@@ -73,7 +73,7 @@ test('assistant revocation cancels a native task started by that group and preve
 });
 
 test('assistant revocation also cancels a task result already being formatted for that group',{timeout:15000},async t=>{
-  const h=await qqCapabilityFixture({tasks:true});script(h);await h.message('任务：准备一份虚构结果',{trigger:true});
+  const h=await qqCapabilityFixture({tasks:true});script(h,{mixed:true});await h.message('任务：准备一份虚构结果',{trigger:true});
   let entered!:()=>void,release!:()=>void,formattingSignal:AbortSignal|undefined;
   const started=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
   t.after(()=>{release();return h.close();});const before=h.platform.sent.length;
@@ -90,7 +90,7 @@ test('mixed private evidence and inherited global prompt content never enter the
 });
 
 test('failed independent verification never creates a send credential or performs the task-result send',async t=>{
-  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);script(h,{faithful:false});await h.message('任务：生成一份虚构结果',{trigger:true});
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);script(h,{faithful:false,mixed:true});await h.message('任务：生成一份虚构结果',{trigger:true});
   const id=runId(h),status=h.core.messageTaskDeliveryStatus(id)!;assert.equal(status.state,'rejected');assert.equal(status.error,'DELIVERY_UNFAITHFUL');assert.equal(h.platform.sent.length,2);assert.ok(h.platform.sent.every(sent=>!sentText(sent).includes(reply)&&!sentText(sent).includes('EXECUTOR_REPORT_SENTINEL')));
   const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{const row=db.prepare('SELECT body,credential FROM native_deliveries').get()!;assert.equal(row.body,null);assert.equal(row.credential,null);}finally{db.close();}
   const calls=h.adapter.requests.length;await h.core.deliverMessageTaskResult(id);assert.equal(h.adapter.requests.length,calls);
@@ -98,10 +98,10 @@ test('failed independent verification never creates a send credential or perform
 });
 
 for(const revoke of [false,true])test(`one unapproved wording repair ${revoke?'stops on source recall':'is independently verified and delivered once'}`,async t=>{
-  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);let chat=0,renders=0,checks=0;
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);const isolated=isolatedEvidence();let chat=0,renders=0,checks=0;
   h.setResponse(async request=>{if(render(request.sessionId)){renders++;if(renders===2){assert.match(JSON.stringify(request.messages),/previousCandidateUnapproved/);assert.match(JSON.stringify(request.messages),/总数与折叠数混淆/);assert.equal(request.tools?.length??0,0);}return textReply(renders===1?'虚构数据：折叠1600条。':'虚构数据：总数1600条，其中折叠1100条。');}
     if(verify(request.sessionId)){checks++;if(checks===1){if(revoke){const source=h.core.journal.list()[0]!.message.id;h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:Number(source)});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);}return textReply('{"faithful":false,"issues":["总数与折叠数混淆，应为总数1600、其中折叠1100。"]}');}assert.match(JSON.stringify(request.messages),/其中折叠1100/);return textReply('{"faithful":true,"issues":[]}');}
-    if(native(request.sessionId))return textReply('虚构数据：总数1600条，其中折叠1100条。');
+    if(native(request.sessionId))return isolated('虚构数据：总数1600条，其中折叠1100条。');
     return ++chat===1?call('qq_task_submit',{requestId:'wording-repair'}):textReply('已受理');});
   await h.message('任务：转述一组虚构数据',{trigger:true});const id=runId(h),status=h.core.messageTaskDeliveryStatus(id)!;
   if(revoke){assert.notEqual(status.state,'sent');assert.equal(renders,1);assert.ok(!JSON.stringify(h.platform.sent).includes('其中折叠1100'));}
@@ -110,7 +110,7 @@ for(const revoke of [false,true])test(`one unapproved wording repair ${revoke?'s
 });
 
 for(const mode of ['recover-cutoff','repeated-cutoff','invalid-json'] as const)test(`delivery verifier ${mode} keeps the candidate gated and exposes the actual failure phase`,async t=>{
-  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);let chat=0,checks=0;
+  const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);const isolated=isolatedEvidence();let chat=0,checks=0;
   h.setResponse(request=>{
     if(render(request.sessionId))return textReply(reply);
     if(verify(request.sessionId)){checks++;assert.ok((request.maxTokens??0)>=8192);
@@ -118,7 +118,7 @@ for(const mode of ['recover-cutoff','repeated-cutoff','invalid-json'] as const)t
       if(mode==='repeated-cutoff'||checks===1)return [{type:'finish',reason:{kind:'max-tokens'}}];
       return textReply('{"faithful":true,"issues":[]}');}
     if(String(request.sessionId).startsWith('dafeiyu-progress-')){assert.match(JSON.stringify(request.messages),/"sendAttempted":false/);assert.match(JSON.stringify(request.messages),/verification/);return textReply('结果核验未完成，正文还未发送。');}
-    if(native(request.sessionId))return textReply('完成虚构材料');
+    if(native(request.sessionId))return isolated('完成虚构材料');
     return ++chat===1?call('qq_task_submit',{requestId:'verify-recovery'}):textReply('已受理');
   });
   await h.message('任务：写一句虚构感想',{trigger:true});const state=h.core.messageTaskDeliveryStatus(runId(h))!;
@@ -142,13 +142,13 @@ test('task-result segment uncertainty is terminal and never rerenders or retrans
 });
 
 test('a source revoked during target persona generation prevents the result transport',async t=>{
-  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);script(h);await h.message('任务：核对来源',{trigger:true});const id=runId(h),before=h.platform.sent.length;
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);script(h,{mixed:true});await h.message('任务：核对来源',{trigger:true});const id=runId(h),before=h.platform.sent.length;
   h.setResponse(async request=>{if(render(request.sessionId)){h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:1});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);return textReply('失效结果');}return textReply('{"faithful":true,"issues":[]}');});
   assert.equal((await h.core.deliverMessageTaskResult(id))?.state,'interrupted');assert.equal(h.platform.sent.length,before);
 });
 
 test('tool calls in the target renderer are rejected without invoking a capability',async t=>{
-  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);script(h);await h.message('任务：不要执行额外操作',{trigger:true});const id=runId(h),before=h.platform.sent.length;
+  const h=await qqCapabilityFixture({tasks:true});t.after(h.close);script(h,{mixed:true});await h.message('任务：不要执行额外操作',{trigger:true});const id=runId(h),before=h.platform.sent.length;
   h.setResponse(request=>render(request.sessionId)?call('qq_browse',{requestId:'forbidden'}):textReply('{"faithful":true,"issues":[]}'));
   assert.equal((await h.core.deliverMessageTaskResult(id))?.state,'rejected');assert.equal(h.platform.sent.length,before);
 });
@@ -170,7 +170,7 @@ test('publication reading survives the send deadline, but task cancellation with
 
 test('a blocking objection gets a scoped persona discussion message while its native Run stays waiting',async t=>{
   const h=await qqCapabilityFixture({tasks:true,deliverResults:true});t.after(h.close);let chat=0,work=0;
-  h.setResponse(request=>render(request.sessionId)?textReply('我还需要你补充链接，任务目前没有完成。'):verify(request.sessionId)?textReply('{"faithful":true,"issues":[]}'):native(request.sessionId)?++work===1?call('dafeiyu_task_object',{requestId:'need-link',category:'missing-information',blocking:true,actions:[],reason:'缺少要查看的链接'}):textReply('等待链接'):++chat===1?call('qq_task_submit',{requestId:'work'}):textReply('已受理'));
+  h.setResponse(request=>render(request.sessionId)?textReply('我还需要你补充链接，任务目前没有完成。'):verify(request.sessionId)?textReply('{"faithful":true,"issues":[]}'):native(request.sessionId)?++work===1?call('dafeiyu_task_object',{requestId:'need-link',category:'missing-information',blocking:true,actions:[],reason:'缺少要查看的链接'}):textReply('我还需要你补充链接，任务目前没有完成。'):++chat===1?call('qq_task_submit',{requestId:'work'}):textReply('已受理'));
   await h.message('任务：检查那份材料',{trigger:true});const id=runId(h);assert.equal(h.core.messageTaskDeliveryStatus(id)?.state,'sent');assert.match(sentText(h.platform.sent.at(-1)!),/没有完成/);
   const db=new DatabaseSync(join(h.root,'core','runtime.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT state FROM runs WHERE id=?').get(id)?.state,'waiting');const row=db.prepare('SELECT anchor FROM native_deliveries').get();assert.equal(JSON.parse(String(row?.anchor)).outcome,'waiting');}finally{db.close();}
 });
@@ -178,36 +178,4 @@ test('a blocking objection gets a scoped persona discussion message while its na
 test('native execution excludes unregistered global context and section data',async t=>{
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);const a=h.ctx.systemPrompt.context({name:'unregistered-data',order:50,text:'NATIVE_UNREGISTERED_PRIVATE_SENTINEL'}),b=h.ctx.systemPrompt.section({name:'unregistered-section',order:50,text:'NATIVE_UNREGISTERED_SECTION_SENTINEL'});t.after(a);t.after(b);
   script(h);await h.message('任务：写一段虚构文字',{trigger:true});const request=JSON.stringify(h.adapter.requests.find(r=>native(r.sessionId)));assert.ok(!request.includes('NATIVE_UNREGISTERED_'));
-});
-
-test('target formatting uses the current scoped stage persona and stops if its real source is revoked',async t=>{
-  const h=await qqCapabilityFixture({tasks:true,extraConversationActions:['fixture_stage','fixture_adopt']});t.after(h.close);let source:PersonaSourceRef|undefined,trial:PersonaEntryRef|undefined,step=0;
-  const seed=h.core.registerExtension({id:'fixture-seed',version:'1',protocolVersion:4,agentId:'dafeiyu',actions:[fixtureAction(h.core,'fixture-seed',{id:'fixture_seed',description:'虚构阶段来源',inputSchema:z.strictObject({}),work:async(_raw,context)=>{
-    const scope=h.core.scopeFor(context),event=h.core.journal.events(scope.route).find(event=>event.type==='message.accepted'&&event.traceId===scope.traceId)!;
-    const receipt=z.object({id:z.uuid(),version:z.number(),revision:z.number()}).parse(await h.ctx.dafeiyuMemory.create(context,{requestId:'seed',kind:'knowledge',claimType:'reported_claim',content:'TARGET_STAGE_SENTINEL：这是虚构阶段认识。',sourceRefs:[`dafeiyu:source:${event.id}:0`]}));
-    const opened=z.object({item:z.object({contentHash:z.string()})}).parse(h.ctx.dafeiyuMemory.read(context,{id:receipt.id}));source={kind:'memory',agentId:'dafeiyu',scopeKey:scope.route,id:receipt.id,version:receipt.version,revision:receipt.revision,contentHash:opened.item.contentHash};return {id:receipt.id};}})]});t.after(()=>seed.dispose());
-  const stage=h.core.registerExtension({protocolVersion:4,id:'fixture-stage',version:'1',agentId:'dafeiyu',actions:[{id:'fixture_stage',version:'1',description:'选择本群虚构认识供下一轮试行',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_input,context)=>{
-    assert.ok(source);const persona=h.ctx.dafeiyuMemory.growth!,candidate=persona.proposeReference(context,{requestId:'propose',kind:'view',contentRef:source,supports:[source],counters:[],applicability:'当前测试群',reason:'仅测试'},'fixture-stage');
-    const reviewed=persona.review(context,{requestId:'trial',id:candidate.id,expectedVersion:1,state:'trial',reason:'准备真实后续会话试行，未采用'},'fixture-stage');trial={id:reviewed.id,version:reviewed.version};
-    const selected=persona.selectTrial(context,{requestId:'trial-select',expectedSelectionVersion:0,entries:[{candidate:trial,applicability:'当前测试群',exitConditions:['来源撤回或本群范围变化时退出']}]},'fixture-stage');
-    return {status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(selected),sources:[],receipts:[]};}},
-    {id:'fixture_adopt',version:'1',description:'引用已闭合的本群试行评审并采用暂定认识',inputSchema:z.strictObject({}),outputSchema:z.json(),effects:'local-write',execute:async(_input,context)=>{
-      assert.ok(trial);const candidate=trial,persona=h.ctx.dafeiyuMemory.growth!,outcome=persona.status(context,'fixture-stage').trialOutcomes.find(value=>value.candidate.id===candidate.id&&value.candidate.version===candidate.version&&value.state==='completed');assert.ok(outcome);
-      const reviewed=persona.reviewAdoption(context,{requestId:'adoption-review',candidate,trialOutcomes:[outcome.ref],supports:[],counters:[],
-        counterCheck:{status:'unknown',reason:'未在该合成样例之外取得反证查证结果'},conclusionScope:'当前测试群',targetMaturity:'tentative',
-        limitations:['仅当前测试群的合成文字与有限会话试行，不证明真实长期效果'],reason:'采用仍暂定的本群认识并保留来源及适用限制'},'fixture-stage');
-      assert.equal(reviewed.eligibility,'allowed');
-      const published=persona.publish(context,{requestId:'adopt',expectedStageVersion:0,entries:[{...candidate,review:reviewed.review}]},'fixture-stage');
-      return {status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(published),sources:[],receipts:[]};}}]});t.after(()=>stage.dispose());
-  h.setResponse(()=>++step===1?call('fixture_seed',{}):step===2?call('fixture_stage',{}):textReply('已选择虚构认识，等待后续会话实际试行'));await h.message('提供虚构阶段资料',{trigger:true});
-  const trialStart=h.adapter.requests.length;h.setResponse(()=>textReply('这次我先确认资料的适用范围，再作有限回应，尚未采用该认识。'));
-  await h.message('继续当前群的虚构表达练习',{trigger:true});
-  assert.ok(h.adapter.requests.slice(trialStart).some(request=>JSON.stringify(request.messages).includes('stage-persona-trial')));
-  let adoptionStep=0;h.setResponse(()=>++adoptionStep===1?call('fixture_adopt',{}):textReply('已依据闭合试行采用仍暂定的本群认识'));
-  await h.message('复核刚才的试行并决定是否采用',{trigger:true});assert.ok(trial);
-  const adopted=new DatabaseSync(join(h.root,'memory','memory.sqlite'),{readOnly:true});try{assert.equal(adopted.prepare('SELECT state FROM persona_candidates WHERE id=?').get(trial.id)?.state,'adopted');}finally{adopted.close();}
-  script(h);await h.message('任务：用当前人格整理文字',{trigger:true});const first=runId(h);assert.equal((await h.core.deliverMessageTaskResult(first))?.state,'sent');assert.ok(JSON.stringify(h.adapter.requests.find(request=>render(request.sessionId))?.messages).includes('TARGET_STAGE_SENTINEL'));
-  script(h);await h.message('任务：再整理一次',{trigger:true});const second=runId(h),sent=h.platform.sent.length;
-  h.setResponse(async request=>{if(render(request.sessionId)){h.emit({post_type:'notice',notice_type:'group_recall',self_id:Number(bot),group_id:Number(group),message_id:1});await until(()=>h.ctx.dafeiyuQQ.getStatus().counters.recalled===1);return textReply('不应发送');}return textReply('{"faithful":true,"issues":[]}');});
-  assert.equal((await h.core.deliverMessageTaskResult(second))?.state,'rejected');assert.equal(h.platform.sent.length,sent);
 });

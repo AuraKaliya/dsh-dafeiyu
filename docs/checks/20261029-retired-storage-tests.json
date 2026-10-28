@@ -1,0 +1,67 @@
+[
+  {
+    "file": "tests/bili-diagnostics.test.ts",
+    "test": "explicit v1 migration retains observations and cooldown; wrong identity cannot migrate",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/media-reply-store.test.ts",
+    "test": "media v1 upgrade is explicit and preserves existing assets, hashes and source revisions",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/memory-retrieval.test.ts",
+    "test": "derived index migration preserves vector cache and rebuilds stable source ordering",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/native-delivery-store.test.ts",
+    "test": "runtime v2 migration is explicit and preserves every old Run before adding an empty native delivery table",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-cache.test.ts",
+    "test": "QQ v2 migration preserves existing cache and receipts without inventing metadata",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-delivery-ledger.test.ts",
+    "test": "QQ v3 migration preserves caches, metadata, group snapshots and receipts while adding empty delivery tables",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-media-source.test.ts",
+    "test": "explicit QQ v4 migration preserves text hashes, receipts and ledger bodies without inventing media",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-storage.test.ts",
+    "test": "QQ legacy inspection and rejected implicit migration leave the original file byte-for-byte intact",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-storage.test.ts",
+    "test": "Host init uses the QQ schema target and read-only inspection requests migration for an old profile",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-storage.test.ts",
+    "test": "QQ v1 upgrades additively and stores account-bound membership without changing old receipts",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-storage.test.ts",
+    "test": "QQ v5 migration preserves real records and marks legacy group settings unknown until freshly read",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/qq-voice-task.test.ts",
+    "test": "runtime v3 requires an explicit protocol upgrade and preserves existing request bytes",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  },
+  {
+    "file": "tests/recent-state.test.ts",
+    "test": "schema twelve migration retains existing memory bytes and begins with no invented attention",
+    "replacement": "current-storage.test.ts / current-api.test.ts"
+  }
+]

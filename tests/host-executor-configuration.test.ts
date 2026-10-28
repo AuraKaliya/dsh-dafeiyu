@@ -28,7 +28,7 @@ async function fixture(){
   // Deliberately declare executor before its providers: actual feature dependencies must determine the order.
   const config=HostConfigSchema.parse({schemaVersion:1,profileId:'executor-config',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},
     modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},
-    plugins:[{id:'server-executor',required:true,config:settings},{id:'memory',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'model-scripted',required:true,config:{}}],
+    plugins:[{id:'server-executor',required:true,config:settings},{id:"memory-growth",required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'model-scripted',required:true,config:{}}],
     authorityPolicies:[{id:'owner-work',producers:['host-cli'],actions:[execute,status],allowLocalWrite:true,externalActions:[exact],resources:[serverExecutorScene('executor-config')]}]});
   await writeFile(join(root,'persona.md'),'虚构配置测试底色，不包含真实经历。\n');await writeFile(file,JSON.stringify(config));
   return {root,file,coordination,config,prepared:loadHostConfig(file)};
@@ -45,14 +45,14 @@ test('executor uses the fixed plugin and dependency graph; profile JSON cannot i
   assert.equal(prepared.plugins.filter(plugin=>plugin.id==='server-executor').length,1);assert.ok(Object.isFrozen(prepared.plugins.find(plugin=>plugin.id==='server-executor')?.config));
   const settings=pluginConfig(prepared,'server-executor')!;assert.equal(settings.command.entryPath,join(f.root,'fixed-launcher.js'));assert.equal(Object.hasOwn(settings,'mode'),false);
   for(const field of [{mode:'offline'},{allowedTools:['pwsh']},{modulePath:join(f.root,'unreviewed-plugin.js')}])assert.throws(await changed(f,withPlugin(f.config,'server-executor',{...executorSettings(f.config),...field})),/HOST_CONFIG_INVALID/);
-  assert.throws(await changed(f,{...f.config,plugins:f.config.plugins.map(plugin=>plugin.id==='server-executor'?{...plugin,id:'unreviewed-executor'}:plugin)}),/HOST_UNKNOWN_PLUGIN/);
+  assert.throws(await changed(f,{...f.config,plugins:f.config.plugins.map(plugin=>plugin.id==='server-executor'?{...plugin,id:'unreviewed-executor'}:plugin)}),/HOST_CONFIG_INVALID/);
   assert.equal(existsSync(prepared.paths.core),false);assert.equal(existsSync(prepared.paths.memory),false);assert.equal(existsSync(f.coordination),false);
 });
 
 test('executor requires a memory provider and tracked sources, while configured compaction is a legitimate tracking provider',async()=>{
-  const f=await fixture(),withoutMemory=withPlugin({...f.config,plugins:f.config.plugins.filter(plugin=>plugin.id!=='memory')},'timeline',{execution:false});
+  const f=await fixture(),withoutMemory=withPlugin({...f.config,plugins:f.config.plugins.filter(plugin=>plugin.id!=='memory-growth')},'timeline',{execution:false});
   assert.throws(await changed(f,withoutMemory),/HOST_EXECUTOR_MEMORY_REQUIRED/);
-  const untracked=withPlugin(f.config,'memory',{});assert.throws(await changed(f,untracked),/HOST_EXECUTOR_SOURCE_TRACKING_REQUIRED/);
+  const untracked=withPlugin(f.config,'memory-growth',{});assert.doesNotThrow(await changed(f,untracked));
   const compacted={...untracked,context:{...untracked.context,compactionInputTokens:4096}};
   assert.doesNotThrow(await changed(f,compacted));
   assert.throws(await changed(f,{...f.config,plugins:f.config.plugins.filter(plugin=>plugin.id!=='timeline')}),/HOST_DEPENDENCY_UNAVAILABLE/);
@@ -61,8 +61,8 @@ test('executor requires a memory provider and tracked sources, while configured 
 test('executor route and result recipient must match the Host model and actual configured QQ binding',async()=>{
   const f=await fixture(),settings=executorSettings(f.config);
   for(const route of [{...settings.route,model:'different'},{...settings.route,provider:'different'},{...settings.route,reasoningEffort:'max'}])assert.throws(await changed(f,withPlugin(f.config,'server-executor',{...settings,route})),/HOST_EXECUTOR_MODEL_ROUTE_MISMATCH/);
-  const qq=HostConfigSchema.shape.plugins.element.parse({id:'channel-qq',config:{botId:'12345678',ownerId:'87654321',groupIds:[],httpURL:'http://127.0.0.1:1/',wsURL:'ws://127.0.0.1:1/',tokenFile:'./fictional-token'}});
-  const bound={...f.config,paths:{...f.config.paths,channels:{'channel-qq':'./data/qq'}},plugins:[...f.config.plugins,qq]};assert.doesNotThrow(await changed(f,bound));
+  const qq=HostConfigSchema.shape.plugins.element.parse({id:"qq",config:{botId:'12345678',ownerId:'87654321',groupIds:[],httpURL:'http://127.0.0.1:1/',wsURL:'ws://127.0.0.1:1/',tokenFile:'./fictional-token'}});
+  const bound={...f.config,paths:{...f.config.paths,channels:{qq:'./data/qq'}},plugins:[...f.config.plugins,qq]};assert.doesNotThrow(await changed(f,bound));
   for(const resultOwner of [{account:'22334455',ownerId:'87654321'},{account:'12345678',ownerId:'22334455'}])assert.throws(await changed(f,withPlugin(bound,'server-executor',{...settings,resultOwner})),/HOST_EXECUTOR_OWNER_MISMATCH/);
   assert.equal(existsSync(join(f.root,'fictional-token')),false,'configuration validation must not require or create a login file');
 });

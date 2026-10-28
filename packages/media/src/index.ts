@@ -13,3 +13,5 @@ import type { Context } from '@deepseek-ai/cordis';
 export const name='dafeiyu-media';
 export const inject=['dafeiyu','llm'];
 export function apply(ctx:Context,config:Config){new MediaService(ctx,config);}
+
+export * from './storage-status.js';

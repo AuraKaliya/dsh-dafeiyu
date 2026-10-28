@@ -1,3 +1,7 @@
+import {digestSource} from './source-records.js';
+import {TaskDispositionSchema} from '@dafeiyu/contracts';
+import {ConversationCoordinator} from './conversation-coordinator.js';
+import {pendingRuntimeEvents,pendingProducerWork} from './storage-status.js';
 import {ContextItemSchema} from '@dafeiyu/contracts';
 import {situationContributor} from './situation-context.js';
 import {inspectRequestCapacity} from './context-plan.js';
@@ -7,8 +11,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { PhaseTimeoutsSchema } from '@dafeiyu/contracts';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
-import { API_VERSION, MessageSchema, ObservationSchema, conversationKey,ToolFeedbackSchema,FeedbackMetaSchema,FeedbackWitnessSchema,FEEDBACK_RETIRED_TEXT,FeedbackCaptureError } from '@dafeiyu/contracts';
-import type { FeedbackDelivery } from '@dafeiyu/contracts';
+import { API_VERSION, MessageSchema, ObservationSchema, conversationKey } from '@dafeiyu/contracts';
 import type { ConversationAccess, OperationScope, Json, PendingMessage, PersonaSnapshot, Receipt, Reply } from '@dafeiyu/contracts';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { DshRuntime, DshRunError } from './runtime.js';
@@ -63,11 +66,16 @@ const ConfigSchema = z.strictObject({
   context:contextConfigSchema.prefault({}),
 });
 export type Config = z.input<typeof ConfigSchema>;
+export type CoreRuntimeConfig=z.output<typeof ConfigSchema>;
 interface Registered { extension: Extension; controller: AbortController; active: boolean }
 declare module '@deepseek-ai/cordis' { interface Context { dafeiyu: DafeiyuService } }
 
 /** Owns a logical persona and its independent conversations; extensions own platform-specific work. */
 export class DafeiyuService extends Service {
+  pendingEvents(){return pendingRuntimeEvents(this.config.dataDir);}
+  pendingChannelWork(extension:string,producer:string,deliverResults:boolean){return this.journal.list(['accepted','processing','reply-ready','sending']).some(item=>item.extensionId===extension)||pendingProducerWork(this.config.dataDir,producer,deliverResults);}
+  deliveryFact(inboundId:string){const item=this.journal.get(inboundId);return {sourceMessageId:item.message.id,target:item.message.conversation,state:item.state,reply:item.reply?{id:item.reply.id,textHash:createHash('sha256').update(item.reply.text).digest('hex')}:null};}
+
   private expressionPreferences:{read:NonNullable<MemoryGrowthProvider['expressionPreferences']>}|undefined;
   private nativeTaskDelivery:NativeTaskDelivery|undefined;
   /** Program-only provenance checks for Growth views; these methods return no source body. */
@@ -133,7 +141,7 @@ export class DafeiyuService extends Service {
       let access:MediaReplyAccess,released=false,resourcesReleased=false;const releaseResources=()=>{if(resourcesReleased)return;resourcesReleased=true;captured!.release();final!.release();};
       const release=()=>{if(released)return;released=true;signal.removeEventListener('abort',releaseResources);this.mediaReplyAccesses.delete(access);releaseResources();};
       const guard=()=>{signal.throwIfAborted();this.controller.signal.throwIfAborted();if(resourcesReleased||!this.mediaReplyAccesses.has(access)||!source?.active||this.fatal||Date.parse(expiresAt)<=Date.now())throw new Error('MEDIA_REPLY_ACCESS_EXPIRED');
-        facts.guard();this.validateRunPersona(run);captured!.guard();final!.guard();};
+        facts.guard();this.conversations.validateRunPersona(run);captured!.guard();final!.guard();};
       const scopeGuard=()=>{signal.throwIfAborted();if(!this.mediaReplyAccesses.has(access))throw new Error('SCOPE_DENIED');facts.guard();};
       access=Object.freeze({execution:Object.freeze({...facts.execution,view:Object.freeze({...facts.execution.view,signal}),guard:scopeGuard}),authority:facts.authority,payloadHash:facts.body.payloadHash,replyId:reply.id,text,target,sourceMessageId:item.message.id,inboundId:item.id,anchor:Object.freeze({kind:'reply' as const,inboundId:item.id}),expiresAt,guard,
         release});allocated=access;
@@ -174,10 +182,11 @@ export class DafeiyuService extends Service {
   readonly journal: Journal;
   private readonly config: z.output<typeof ConfigSchema>;
   private readonly runtime: DshRuntime;
+  private readonly conversations:ConversationCoordinator;
   private experienceMemory:import('@dafeiyu/contracts').ExperienceMemoryPort|undefined;
   private foundationMemory:import('./foundation.js').FoundationSnapshot|undefined;
   bindExperienceMemory(port:import('@dafeiyu/contracts').ExperienceMemoryPort){
-    if(this.experienceMemory)throw new Error('DUPLICATE_PROVIDER');this.foundationMemory=port.foundation(readFoundation(this.config.personaFile));this.experienceMemory=port;
+    if(this.experienceMemory)throw new Error('DUPLICATE_PROVIDER');this.foundationMemory=port.foundation(()=>readFoundation(this.config.personaFile));this.experienceMemory=port;
     return ()=>{if(this.experienceMemory===port){this.experienceMemory=undefined;this.foundationMemory=undefined;}};
   }
   private readonly harness=new HarnessRuntime(()=>z.json().parse(this.configuredCapabilities()));
@@ -185,8 +194,6 @@ export class DafeiyuService extends Service {
   private readonly contexts:ContextCoordinator;
   private readonly personas:PersonaRuntime;
   private readonly extensions = new Map<string, Registered>();
-  private readonly queues = new Map<string, Promise<void>>();
-  private readonly scheduled = new Set<string>();
   private readonly actionScopes = new WeakMap<ConversationAccess,{context:ExecutionContext;owner:string}>();
   private readonly controller = new AbortController();
   private fatal: string | null = null;
@@ -208,33 +215,40 @@ export class DafeiyuService extends Service {
   constructor(ctx: Context, config: Config) {
     super(ctx, 'dafeiyu');
     this.config = ConfigSchema.parse(config);
-    this.persona();
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
     {this.contexts.register('core-situation','1',[situationContributor(()=>true,scene=>this.executions?.responsibilityFacts(scene)??[],
-      (request,item,proof)=>{const scope=this.contexts.scopeFor(request),runId=this.runStore?.findRequest('conversation',scope.traceId)?.runId;if(!runId||!this.runStore)throw new Error('RUN_NOT_RUNNING');this.runStore.bindInput(runId,'operational-context:'+runtimeHash([item.text,item.sources]),{route:scope.route,item,proof});},
-      (request,dependency)=>{try{const scope=this.contexts.scopeFor(request),record=z.object({route:z.string(),item:ContextItemSchema,proof:z.json()}).parse(this.runStore?.findContext('operational-context:'+dependency.hash));return record.route===scope.route&&record.item.id===dependency.id&&record.item.version===dependency.version&&runtimeHash([record.item.text,record.item.sources])===dependency.hash&&(this.executions?.responsibilitySnapshotCurrent(record.proof,request.conversation)??false);}catch{return false;}})]);
+      (request,item,proof)=>{const scope=this.contexts.scopeFor(request),runId=this.runStore?.findRequest('conversation',scope.traceId)?.runId;if(!runId||!this.runStore)throw new Error('RUN_NOT_RUNNING');if(this.runStore.get(runId).state!=='running')return;this.runStore.bindInput(runId,'operational-context:'+digestSource(JSON.stringify([item.text,item.sources])),{route:scope.route,item,proof});},
+      (request,dependency)=>{try{const scope=this.contexts.scopeFor(request),record=z.object({route:z.string(),item:ContextItemSchema,proof:z.json()}).parse(this.runStore?.findContext('operational-context:'+dependency.hash));return record.route===scope.route&&record.item.id===dependency.id&&record.item.version===dependency.version&&digestSource(JSON.stringify([record.item.text,record.item.sources]))===dependency.hash&&(this.executions?.responsibilitySnapshotCurrent(record.proof,request.conversation)??false);}catch{return false;}})]);
     this.contexts.pinRegion('core-situation:responsibilities');}
     this.personas=new PersonaRuntime(this.config.context);
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
-      (item,meta,text)=>this.feedbackViewCurrent({agentId:this.config.agentId,route:item.route,traceId:item.id},meta,text),this.config.agentId,()=>this.compactionBinding(),
+      this.config.agentId,()=>this.compactionBinding(),
       (frame,data,seqs)=>{const item=this.journal.get(frame.id);this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.harness);
+    this.conversations=new ConversationCoordinator({ctx:this.ctx,config:this.config,journal:this.journal,runtime:this.runtime,personas:this.personas,contexts:this.contexts,extensions:this.extensions,signal:this.controller.signal,
+      schedulingReady:()=>this.gate.active&&!this.admissionHeld,accepting:()=>this.accepting,failure:()=>this.fatal,fail:code=>{this.fatal=code;},
+      runs:()=>this.runStore,executions:()=>this.executions,conversationRuns:()=>this.conversationRuns,scheduler:()=>this.scheduler,media:()=>this.mediaPort,experience:()=>this.experienceMemory,
+      assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),modelRoute:()=>this.analysisModelRoute(),recoveryModel:()=>this.recoveryModel(),
+      targetPersona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),compaction:()=>this.compactionBinding(),
+      prepareMediaReply:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),event:(item,type,data,parent)=>this.event(item,type,data,parent)});
     this.contexts.register('core-delivery-recovery','1',[{id:'pending-replies',kind:'operational-fact',prepare:async request=>{
-      const scope=this.contexts.scopeFor(request),current=this.journal.get(scope.traceId),facts=this.replyStateFacts(current);
+      const scope=this.contexts.scopeFor(request),current=this.journal.get(scope.traceId),facts=this.conversations.replyStateFacts(current);
       return facts.map(f=>({id:f.inboundId,version:runtimeHash(f),text:JSON.stringify(f),expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:pending-reply:'+f.inboundId,version:'1',hash:runtimeHash(f)}]}));
-    },validate:(request,item)=>{try{const current=this.journal.get(this.contexts.scopeFor(request).traceId);return this.replyStateFacts(current).some(f=>f.inboundId===item.id&&runtimeHash(f)===item.version);}catch{return false;}}}]);
-    this.registry.register(this.config.agentId,{protocolVersion:4,id:CAPABILITY_OWNER,version:'1',agentId:this.config.agentId,actions:[{
-      id:CAPABILITY_QUERY,version:'1',description:'查询当前已注册的大肥鱼能力、提供方状态和任务要求。可选tool读取精确参数；注册不等于当前会话获准执行，也不证明外部依赖可用。',effects:'read',requiresTask:false,
+    },validate:(request,item)=>{try{const current=this.journal.get(this.contexts.scopeFor(request).traceId);return this.conversations.replyStateFacts(current).some(f=>f.inboundId===item.id&&runtimeHash(f)===item.version);}catch{return false;}}}]);
+    this.registry.register(this.config.agentId,{protocolVersion:API_VERSION,id:CAPABILITY_OWNER,version:'1',agentId:this.config.agentId,actions:[{
+      id:CAPABILITY_QUERY,version:'1',description:'查询当前已注册的大肥鱼能力、提供方状态和任务要求。可选tool读取精确参数；注册不等于当前会话获准执行，也不证明外部依赖可用。',effects:'read',scope:'any',
       inputSchema:z.strictObject({tool:z.string().min(1).max(160).optional()}),outputSchema:z.json(),execute:async(raw,context)=>{
         this.executionAuthority(context,CAPABILITY_OWNER);const {tool}=z.object({tool:z.string().optional()}).parse(raw),catalog=this.configuredCapabilities();
         const native=tool?this.registry.actions().find(action=>action.id===tool):undefined;
         const details=native?{id:native.id,description:native.description,parameters:native.input}:null;
         return {status:'succeeded',effects:'none',completeness:'complete',data:z.json().parse({...catalog,details}),sources:[],receipts:[]};
-      }},{id:'dafeiyu_task_outcome',version:'1',description:'说明本轮应等待还是完成。依据实际工作自行判断；这条决定不会伪造操作成功或消息送达。',effects:'local-write',requiresTask:true,
-        inputSchema:z.strictObject({next:z.enum(['complete','wait']),reason:z.string().trim().min(1).max(1000)}),outputSchema:z.json(),
+      }},{id:'dafeiyu_task_outcome',version:'1',description:'说明本轮应等待还是完成。依据实际工作自行判断；这条决定不会伪造操作成功或消息送达。',effects:'local-write',scope:'task',
+        inputSchema:TaskDispositionSchema,outputSchema:z.json(),
         execute:async(input,context)=>{if(!this.executions)throw new Error('DEPENDENCY_UNAVAILABLE');return {status:'succeeded',effects:'confirmed',completeness:'complete',data:this.executions.setDisposition(context,input),sources:[],receipts:[]};}
-      }]},{ids:[],actions:[],channels:[]});
+      },{id:'dafeiyu_task_review',version:'1',description:'按需复核当前工作的草案与实际操作，获得有局限的建议。是否采纳、继续、等待和留下什么想法仍由你决定；不会自动修改任务或人格。',scope:'task',effects:'read',inputSchema:z.strictObject({proposal:z.string().trim().min(1).max(16000)}),outputSchema:z.json(),
+        execute:async(input,context)=>{if(!this.executions)throw new Error('DEPENDENCY_UNAVAILABLE');return {status:'succeeded',effects:'none',completeness:'complete',data:await this.executions.review(context,input),sources:[],receipts:[]};}
+      }]});
     
   }
   recover():void {
@@ -259,6 +273,7 @@ export class DafeiyuService extends Service {
     this.assertOpen();
     if(this.gate.active){if(this.admissionHeld&&!options.deferWork)this.releaseAdmission(options);return;}
     if([...this.extensions.values()].some(entry=>entry.extension.lifecycleReady&&!entry.extension.lifecycleReady()))throw new Error('DEPENDENCY_UNAVAILABLE');
+    if(!this.experienceMemory||!this.repositoryPort?.ready()||!this.executionMemoryPort?.ready()||!this.executions||!this.personas.configured)throw new Error('DEPENDENCY_UNAVAILABLE');
     this.registry.checkReady(this.features());
     this.gate.activate();
     this.admissionHeld=true;if(!options.deferWork)this.releaseAdmission(options);
@@ -266,7 +281,7 @@ export class DafeiyuService extends Service {
   private releaseAdmission(options:{resumeMessages?:boolean;resumeExecutions?:boolean}):void {
     this.admissionHeld=false;
     try{for(const listener of this.readyListeners)listener();}catch(error){this.gate.quiesce();throw error;}
-    if(options.resumeMessages!==false)for(const item of this.journal.list(['accepted','reply-ready']))if(this.extensions.get(item.extensionId)?.active)this.schedule(item);
+    if(options.resumeMessages!==false)for(const item of this.journal.list(['accepted','reply-ready']))if(this.extensions.get(item.extensionId)?.active)this.conversations.schedule(item);
     if(options.resumeExecutions!==false){this.executions?.activate();this.nativeTaskDelivery?.activate();}
   }
   onReady(listener:()=>void):()=>void {
@@ -276,21 +291,22 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.assessment.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1','delivery.status-feedback.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.mediaPort?['media.assets.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.review.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1','delivery.status-feedback.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.mediaPort?['media.assets.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   bindMessageTasks(binding:MessageTaskBinding){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const channel=this.extensions.get(binding.channelExtensionId);
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
   submitMessageTask(context:ExecutionContext,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.submitMessageTask(context,pluginId,input);}
   messageTaskStatus(context:ExecutionContext,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const status=this.executions.messageTaskStatus(context,pluginId,input);return {...status,delivery:this.messageTaskDeliveryStatus(status.runId)};}
   controlMessageTask(context:ExecutionContext,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.controlMessageTask(context,pluginId,input);}
-  capabilityManifest(){return {features:[...new Set([...this.features(),...this.registry.providedFeatures()])],actions:this.registry.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,requiresTask:action.requiresTask}))};}
+  capabilityManifest(){return {features:[...new Set([...this.features(),...this.registry.providedFeatures()])],actions:this.registry.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,scope:action.scope}))};}
   private configuredCapabilities(){return {features:this.capabilityManifest().features.sort(),actions:[
-    ...this.registry.actions().map(action=>({id:action.id,owner:action.owner,version:action.version,purpose:Array.from(action.description).slice(0,120).join(''),effects:action.effects,requiresTask:action.requiresTask,providerReady:action.active()})),
+    ...this.registry.actions().map(action=>({id:action.id,owner:action.owner,version:action.version,purpose:Array.from(action.description).slice(0,120).join(''),effects:action.effects,scope:action.scope,providerReady:action.active()})),
   ].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0)};}
   get accepting(){return this.gate.active&&!this.admissionHeld&&!this.fatal&&!this.controller.signal.aborted&&this.dependenciesReady();}
   private dependenciesReady():boolean {
     try {
-      if(this.executions&&(!this.repositoryPort?.ready()||this.executions.health.error)||!this.personas.ready)return false;
+      if(!this.experienceMemory||!this.repositoryPort?.ready()||!this.executionMemoryPort?.ready()||!this.executions)return false;
+      if(this.executions&&this.executions.health.error||!this.personas.ready)return false;
       if([...this.extensions.values()].some(entry=>entry.extension.lifecycleReady&&!entry.extension.lifecycleReady()))return false;
       this.registry.checkReady(this.features());return true;
     }catch{return false;}
@@ -306,8 +322,6 @@ export class DafeiyuService extends Service {
     const bound:ExecutionMemoryPort=Object.freeze({ready:port.ready.bind(port),...(port.resourceEpoch?{resourceEpoch:port.resourceEpoch.bind(port)}:{}),validate:port.validate.bind(port),operationSources:port.operationSources.bind(port),outcomeSources:port.outcomeSources.bind(port),
       prepareContext:port.prepareContext.bind(port),validateContext:port.validateContext.bind(port),captureContinuity:port.captureContinuity.bind(port),checkpoint:port.checkpoint.bind(port),bindResult:port.bindResult.bind(port),
       generation:port.generation.bind(port),acceptIntent:port.acceptIntent.bind(port),intent:port.intent.bind(port),resolveIntent:port.resolveIntent.bind(port),summarizeFragments:port.summarizeFragments.bind(port),
-      ...(port.recordLifecycle?{recordLifecycle:port.recordLifecycle.bind(port)}:{}),
-      ...(port.recordAssessment?{recordAssessment:port.recordAssessment.bind(port)}:{}),
       ...(port.compactionPolicy?{compactionPolicy:Object.freeze({...port.compactionPolicy})}:{}),...(port.rewrite?{rewrite:port.rewrite.bind(port)}:{})});
     this.executionMemoryPort=bound;return ()=>{if(this.executionMemoryPort===bound)this.executionMemoryPort=undefined;};}
   personaAccess(context:ExecutionContext,pluginId:string,effect:'read'|'local-write'='read'):PersonaAccess {
@@ -327,12 +341,12 @@ export class DafeiyuService extends Service {
   async deliverPublicProgress(context:ExecutionContext,pluginId:string,raw:unknown):Promise<import('@dafeiyu/contracts').DeliveryResult>{
     if(!this.runStore||!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');
     const input=z.strictObject({kind:z.enum(['intent','progress','blocked']),text:z.string().trim().min(1).max(1000)}).parse(raw),authority=this.authorizeExternalTask(context,pluginId);
-    const source=this.quoteReplySource(context,pluginId),item=this.journal.get(source.inboundId),channel=this.deliveryChannel(item);
+    const source=this.quoteReplySource(context,pluginId),item=this.journal.get(source.inboundId),channel=this.conversations.deliveryChannel(item);
     if(!channel||item.message.conversation.channel!=='qq')throw new Error('DEPENDENCY_UNAVAILABLE');
     const facts=this.runStore.operations(context.runId).filter(operation=>operation.id!==context.operationId&&operation.state==='finished'&&operation.outcome?.effects!=='unknown'&&['succeeded','partial'].includes(operation.outcome?.status??'')&&!['qq_progress','dsh_tool_list'].includes(operation.action)).slice(-6);
     if(input.kind==='progress'&&!facts.length)throw new Error('PROGRESS_EVIDENCE_REQUIRED');
-    const signal=AbortSignal.any([context.signal,channel.signal]),guard=()=>{signal.throwIfAborted();authority.guard();if(this.deliveryChannel(item)?.identity!==channel.identity)throw new Error('SOURCE_STALE');};guard();
-    return this.enqueueTaskDelivery(item.route,async()=>{let invoked=false;try{guard();const persona=this.targetPersona(item,context.operationId,signal,guard),model={provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})};
+    const signal=AbortSignal.any([context.signal,channel.signal]),guard=()=>{signal.throwIfAborted();authority.guard();if(this.conversations.deliveryChannel(item)?.identity!==channel.identity)throw new Error('SOURCE_STALE');};guard();
+    return this.conversations.enqueueTaskDelivery(item.route,async()=>{let invoked=false;try{guard();const persona=this.targetPersona(item,context.operationId,signal,guard),model={provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})};
       const result=await renderPublicProgress(this.ctx,model,this.config.dataDir,context.operationId,persona.text,persona.items,{target:item.message.conversation,taskId:context.taskId!,runId:context.runId,inboundId:item.id,question:authority.authorization.goal,taskState:'running',
         evidence:[{id:'intent',kind:'inference',text:JSON.stringify({requestedPublicFeedback:input,note:'仅公开反馈草稿，不是完成事实。'})},...facts.map((operation,index)=>({id:'P'+index,kind:'reported' as const,text:JSON.stringify({action:operation.action,outcome:operation.outcome}).slice(0,8000)}))]},signal,()=>{guard();persona.guard();},this.config.context.requestMaxBytes-this.config.context.outputReserveBytes);
       guard();persona.guard();const reply:Reply={id:'qq-progress:'+context.operationId,conversation:item.message.conversation,sourceMessageId:item.message.id,text:result.text};
@@ -373,25 +387,25 @@ export class DafeiyuService extends Service {
   personaContext(request:ContextRequest){const scope=this.scopeForContext(request),id=this.runStore?.findRequest('conversation',scope.traceId)?.runId;const persona=id?this.personas.current(id):undefined;persona?.guard();return persona?.items??[];}
   configureExecution(raw:ExecutionOptions):void {
     this.assertOpen();if(this.gate.state!=='registered'||this.executions)throw new Error('SERVICE_LIFECYCLE_CONFLICT');
-    const options=ExecutionOptionsSchema.parse(raw),store=new RuntimeStore(resolve(this.config.dataDir,'runtime.sqlite'),{agentId:this.config.agentId,profileId:options.profileId},{create:options.createStore,requirePersonaManifest:true});
+    const options=ExecutionOptionsSchema.parse(raw),store=new RuntimeStore(resolve(this.config.dataDir,'runtime.sqlite'),{agentId:this.config.agentId,profileId:options.profileId},{create:options.createStore});
     this.runStore=store;this.scheduler=new RunScheduler(options.maxConcurrentRuns);
-    this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.validateRunPersona(run));
+    this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.conversations.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registry,scheduler:this.scheduler,options,personas:this.personas,
-      repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
-      turnTimeoutMs:this.config.turnTimeoutMs,assessmentTimeoutMs:this.config.phaseTimeouts.assessment,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),progress:id=>this.nativeTaskDelivery?.progress(id)??Promise.resolve(null),settled:id=>{if(this.runStore?.get(id).state==='failed')void this.nativeTaskDelivery?.progress(id).catch(()=>{});else void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
+      channelDescription:id=>this.conversations.deliveryChannel(this.journal.get(id))?.capability.description??'',repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
+      turnTimeoutMs:this.config.turnTimeoutMs,reviewTimeoutMs:this.config.phaseTimeouts.review,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.conversations.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),progress:id=>this.nativeTaskDelivery?.progress(id)??Promise.resolve(null),settled:id=>{if(this.runStore?.get(id).state==='failed')void this.nativeTaskDelivery?.progress(id).catch(()=>{});else void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
     this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:NATIVE_RENDER_ATTEMPTS*(this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification)+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
       feedbackSource:id=>this.executions!.feedbackSource(id),
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
-      channel:item=>this.deliveryChannel(item),
-      enqueue:(route,work)=>this.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire(false),
+      channel:item=>this.conversations.deliveryChannel(item),
+      enqueue:(route,work)=>this.conversations.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire(false),
       persona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),media:()=>this.mediaPort,mediaAccess:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),
     });
   }
   async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}
   executionProducer(id:string,options?:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id,options);}
   bindWakeAuthority(provider:WakeAuthorityProvider){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindWake(provider);}
-  bindExecutionLifecycle(owner:string,receive:(event:import('@dafeiyu/contracts').MaintenanceLifecycle)=>void){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindLifecycle(owner,receive);}
+  bindExecutionLifecycle(owner:string,receive:(event:import('@dafeiyu/contracts').ExecutionLifecycle)=>void){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindLifecycle(owner,receive);}
   captureActivityAnchor(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.captureActivity(context,pluginId);}
   activityAnchorStatus(anchor:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.activityAnchorStatus(anchor);}
   createMaintenanceAnchor(runId:string,taskId:string,epoch:number){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.maintenanceAnchor(runId,taskId,epoch);}
@@ -402,14 +416,14 @@ export class DafeiyuService extends Service {
   explicitTaskInstruction(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.explicitTaskInstruction(context,pluginId);}
   executionEvents(context:ExecutionContext,pluginId:string){const authority=this.executionAuthority(context,pluginId);if(authority.scope.kind!=='task')throw new Error('UNSUPPORTED_EXECUTION_ORIGIN');return this.journal.executionEvents(authority.agentId,authority.scope.taskId);}
   private persona() {
-    return this.foundationMemory??readFoundation(this.config.personaFile);
+    if(!this.foundationMemory)throw new Error('MEMORY_FOUNDATION_REQUIRED');return this.foundationMemory;
   }
   private event(item: PendingMessage, type: string, data: Record<string, Json> = {}, causedBy: string | null = null) {
     return eventFor(this.config.agentId, item, type, '@dafeiyu/core', CORE_VERSION, item.id, causedBy, data);
   }
   private assertOpen(): void {
     if (this.controller.signal.aborted) throw new Error('Dafeiyu is closing');
-    if (this.fatal) throw new Error(this.fatal);
+    if (this.fatal) throw new Error(this.fatal,{cause:this.conversations.failureCause});
   }
   /** Resolve an active invocation issued by this core. Model arguments cannot select a route or impersonate a context. */
   conversationAccess(context:ExecutionContext,owner:string):ConversationAccess {
@@ -419,14 +433,26 @@ export class DafeiyuService extends Service {
     const access=Object.freeze({operationId:context.operationId,conversation:item.message.conversation,sourceMessageId:item.message.id,signal:context.signal});
     this.actionScopes.set(access,{context,owner});return access;
   }
-  scopeFor(access:ConversationAccess):OperationScope {
+  scopeFor(access:ConversationAccess,effect:'read'|'local-write'='read'):OperationScope {
     const issued=this.actionScopes.get(access);if(!issued)throw new Error('SCOPE_DENIED');
-    const context=this.executionAuthority(issued.context,issued.owner);
+    const context=this.executions!.authority(issued.context,issued.owner,effect);
     if(context.scope.kind!=='conversation'||context.origin.kind!=='message'||!this.runStore)throw new Error('CONVERSATION_REQUIRED');
     return {agentId:context.agentId,route:context.scope.route,traceId:context.origin.inboundId,operationId:context.operationId,startedEventId:this.runStore.operation(context.operationId).startedEventId};
   }
+  operationDependencyCurrent(scope:import('@dafeiyu/contracts').TimelineScope,dep:Extract<SourceDependency,{kind:'execution-operation'}>):boolean {
+    try{if(!this.runStore||scope.agentId!==this.config.agentId)return false;const run=this.runStore.get(dep.runId),operation=this.runStore.operation(dep.operationId);
+      const route=run.definition.scope.kind==='conversation'?run.definition.scope.route:run.definition.scope.scopeKey;
+      return route===scope.route&&run.definition.scope.agentId===scope.agentId&&operation.runId===run.id&&operation.state==='finished'&&runtimeHash(operation.outcome)===dep.hash&&runtimeHash(this.runStore.readInput(run.id,'operation-inputs:'+operation.id))===dep.inputHash;
+    }catch{return false;}
+  }
   scopeForContext(request:ContextRequest):OperationScope{this.assertOpen();return this.contexts.scopeFor(request);}
-  private feedbackEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.feedbackProvider);}
+  experienceOriginCurrent(origin:import('@dafeiyu/contracts').RunOrigin):boolean {
+    try{for(let depth=0;depth<64;depth++){
+      if(origin.kind==='message'){const item=this.journal.get(origin.inboundId);return runtimeHash(item.message.conversation)===runtimeHash(origin.conversation)&&!this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id);}
+      if(origin.kind!=='continuation')return true;
+      if(!this.runStore)return false;origin=this.runStore.get(origin.parentRunId).definition.origin;
+    }return false;}catch{return false;}
+  }
   private observationEntry():Registered|undefined{return [...this.extensions.values()].find(e=>e.active&&e.extension.memoryObservationProvider);}
   private observationAuthority(entry:Registered,conversation:Conversation,context?:ConversationAccess):ObservationAuthority {
     this.assertOpen();if(!entry.active)throw new Error('Extension is unregistered');
@@ -459,13 +485,6 @@ export class DafeiyuService extends Service {
   historicalSourceCurrent(scope:Pick<OperationScope,'agentId'|'route'>,sessionId:string,seq:number):boolean{
     return scope.agentId===this.config.agentId&&this.journal.sessionFor(scope)===sessionId&&this.runtime.sourceCurrent(sessionId,seq);
   }
-  feedbackViewCurrent(scope:Pick<OperationScope,'agentId'|'route'|'traceId'>,raw:unknown,text:string):boolean{
-    const parsed=FeedbackMetaSchema.safeParse(raw);if(!parsed.success)return false;
-    if(text===FEEDBACK_RETIRED_TEXT)return true;
-    if(scope.agentId!==this.config.agentId||createHash('sha256').update(text).digest('hex')!==parsed.data.viewHash)return false;
-    const entry=this.feedbackEntry();if(!entry||entry.extension.id!==parsed.data.owner)return false;
-    try{return entry.extension.feedbackProvider!.validate(scope,parsed.data.witness);}catch{return false;}
-  }
   /** Host-only durable authorization for read/analyze/commit work, never an ConversationAccess. */
   issueAnalysisGrant(context: ConversationAccess): string { return this.journal.issueAnalysisGrant(this.scopeFor(context),CORE_VERSION); }
   analysisScope(grantId: string): OperationScope {
@@ -482,15 +501,14 @@ export class DafeiyuService extends Service {
   private recoveryModel(){return {provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})};}
   registerExtension(extension:Extension):ExtensionHandle {
     this.assertOpen();
-    if(extension.feedbackProvider&&this.feedbackEntry())throw new Error('DUPLICATE_PROVIDER');
     if(extension.memoryObservationProvider&&this.observationEntry())throw new Error('DUPLICATE_PROVIDER');
     if(extension.compactionProvider&&this.compactionBinding())throw new Error('DUPLICATE_PROVIDER');
-    const handle=this.registry.register(this.config.agentId,extension,{ids:[],actions:[],channels:[]});
+    const handle=this.registry.register(this.config.agentId,extension);
     const registered:Registered={extension:Object.freeze({...extension}),controller:new AbortController(),active:true};
     let release:()=>void;
     try{release=this.contexts.register(extension.id,extension.version,extension.conversationContexts??[]);this.extensions.set(extension.id,registered);}
     catch(error){handle.dispose();throw error;}
-    for(const item of this.journal.list(['accepted','reply-ready']))if(item.extensionId===extension.id)this.schedule(item);
+    for(const item of this.journal.list(['accepted','reply-ready']))if(item.extensionId===extension.id)this.conversations.schedule(item);
     return {
       observeMemory:(raw,context)=>{
         const input=MemoryObservationSchema.parse(raw),authority=this.observationAuthority(registered,input.conversation,context),provider=this.observationEntry()?.extension.memoryObservationProvider;
@@ -522,223 +540,29 @@ export class DafeiyuService extends Service {
           throw new Error('Extension does not own this channel/account');
         const receipt = this.journal.accept(this.config.agentId, extension.id, extension.version, message);
         const item = this.journal.get(receipt.id);
-        if (item.state === 'accepted' || item.state === 'reply-ready') this.schedule(item);
+        if (item.state === 'accepted' || item.state === 'reply-ready') this.conversations.schedule(item);
         return receipt;
       },
 
       dispose:()=>{if(!registered.active)return;registered.active=false;registered.controller.abort();release();handle.dispose();this.extensions.delete(extension.id);}
     };
   }
-  private schedule(item: PendingMessage): void {
-    if(!this.gate.active||this.admissionHeld)return;
-    if (this.scheduled.has(item.id)) return;
-    this.scheduled.add(item.id);
-    const previous = this.queues.get(item.route) ?? Promise.resolve();
-    const task = previous.then(() => this.process(item.id)).catch(() => {
-      // A failed journal/checkpoint cannot be safely papered over with another send.
-      this.fatal = 'Workflow storage failure; automatic processing stopped';
-    }).finally(() => {
-      this.scheduled.delete(item.id);
-      if (this.queues.get(item.route) === task) this.queues.delete(item.route);
-    });
-    this.queues.set(item.route, task);
-  }
-  private enqueueTaskDelivery<T>(route:string,work:()=>Promise<T>):Promise<T>{
-    this.assertAccepting();
-    const previous=this.queues.get(route)??Promise.resolve();
-    const result=previous.then(work);
-    const queued=result.then(()=>{},()=>{this.fatal='Task delivery persistence failure; automatic processing stopped';}).finally(()=>{if(this.queues.get(route)===queued)this.queues.delete(route);});
-    this.queues.set(route,queued);return result;
-  }
-  private async notifyConversationFailure(item:PendingMessage,failure:string){
-    if(item.message.conversation.channel!=='qq'||!this.accepting||failure==='PERSISTENCE_FAILED'||this.journal.events(item.route).some(e=>e.traceId===item.id&&e.type==='recovery.notice.started'))return;
-    const channel=this.deliveryChannel(item);if(!channel)return;
-    const signal=AbortSignal.any([this.controller.signal,channel.signal,AbortSignal.timeout(60000)]),id=randomUUID();
-    const guard=()=>{signal.throwIfAborted();if(!this.accepting||this.deliveryChannel(item)?.identity!==channel.identity||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');this.messageProcessingSignal(item.id)?.throwIfAborted();};
-    try{guard();}catch{return;}
-    const events=this.journal.events(item.route).filter(e=>e.traceId===item.id),operations=events.filter(e=>e.type==='operation.started').map(e=>({id:e.operationId,action:typeof e.data.action==='string'?e.data.action:'unknown',state:events.findLast(end=>end.operationId===e.operationId&&end.type!=='operation.started')?.type??'unknown'}));
-    this.journal.append(this.event(item,'recovery.notice.started',{noticeId:id,code:failure,phase:'recovery'}));
-    let text='【系统状态】刚才的处理未完成，进度和已有操作记录已保存；没有自动重做已执行的操作。',fallback=true,next='wait';
-    try{const persona=this.targetPersona(item,id,signal,guard),renderSignal=AbortSignal.any([signal,AbortSignal.timeout(20000)]);
-      const decision=await renderConversationRecovery(this.ctx,this.recoveryModel(),this.config.dataDir,id,persona.text,persona.items,{question:item.message.mainText??item.message.text,failureCode:failure,operations,originalTurn:'failed',automaticReplay:false},renderSignal,()=>{guard();persona.guard();});
-      text=decision.message;next=decision.next;fallback=false;
-    }catch{if(signal.aborted)return;}
-    try{guard();}catch{return;}this.journal.append(this.event(item,'recovery.notice.prepared',{noticeId:id,next,fallback}));
-    this.journal.append(this.event(item,'recovery.notice.sending',{noticeId:id}));
-    try{const result=await channel.capability.deliver({id:`recovery-notice:${item.id}`,conversation:item.message.conversation,sourceMessageId:item.message.id,text},signal,guard);
-      this.journal.append(this.event(item,'recovery.notice.'+result.status,{noticeId:id,...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code??'DELIVERY_INCOMPLETE'})}));
-    }catch{this.journal.append(this.event(item,'recovery.notice.unknown',{noticeId:id}));}
-  }
-  private pendingReplyFacts(current:PendingMessage){
-    const events=this.journal.events(current.route);
-    return this.journal.list(['uncertain','reply-ready']).filter(old=>old.id!==current.id&&old.route===current.route&&old.message.sender.id===current.message.sender.id&&old.reply).slice(-6).flatMap(old=>{
-      const progress=this.deliveryChannel(old)?.capability.deliveryProgress?.(old.reply!.id);if(!progress?.canResume||progress.unknown)return [];
-      const decision=events.findLast(e=>e.traceId===old.id&&['delivery.resume-requested','delivery.superseded'].includes(e.type)),interruption=events.findLast(e=>e.traceId===old.id&&['delivery.unknown','delivery.not-sent'].includes(e.type));
-      if(decision&&(!interruption||decision.seq>interruption.seq))return [];
-      return [{inboundId:old.id,sourceMessageId:old.message.id,state:'awaiting-reply-decision',confirmed:progress.confirmed,pending:progress.pending,unknown:progress.unknown,meaning:'前一答复因新消息暂缓；已发部分有回执，剩余确定未发。当前核心可决定续发或由新的回答替代。'}];
-    });
-  }
-  private replyStateFacts(current:PendingMessage){
-    const pending=this.pendingReplyFacts(current),events=this.journal.events(current.route);
-    const failures=this.journal.list(['failed']).filter(old=>old.id!==current.id&&old.route===current.route&&old.message.sender.id===current.message.sender.id).slice(-3).map(old=>{
-      const failed=events.findLast(e=>e.traceId===old.id&&e.type==='turn.failed'),notice=events.findLast(e=>e.traceId===old.id&&/^recovery\.notice\.(sent|not-sent|unknown)$/.test(e.type));
-      return {inboundId:old.id,sourceMessageId:old.message.id,state:'processing-failed',code:typeof failed?.data.code==='string'&&/^[A-Z0-9_]{1,100}$/.test(failed.data.code)?failed.data.code:'TURN_FAILED',notification:notice?.type??'unconfirmed',meaning:'此前这次处理没有完成。操作记录仍在，不能从失败推断所有动作均未执行，也不能自动重做旧动作。'};
-    });
-    return [...pending,...failures,...events.filter(e=>e.data.decisionSource===current.id&&['delivery.resume-requested','delivery.superseded'].includes(e.type)).slice(-6).map(e=>({inboundId:e.traceId,sourceMessageId:this.journal.get(e.traceId).message.id,state:e.type,meaning:e.type==='delivery.resume-requested'?'已选择续发并排队；尚不能推断已经送达。':'旧未发部分已由当前回答替代，已发回执保留。'}))];
-  }
-  private async decideRepliesBeforeTurn(current:PendingMessage,signal:AbortSignal){
-    const pending=this.pendingReplyFacts(current);if(!pending.length||this.journal.events(current.route).some(e=>e.traceId===current.id&&e.type==='reply.decision.started'))return;
-    this.journal.append(this.event(current,'reply.decision.started',{pending:pending.map(p=>p.inboundId)}));
-    const stamp=runtimeHash(pending),guard=()=>{signal.throwIfAborted();this.messageProcessingSignal(current.id)?.throwIfAborted();if(stamp!==runtimeHash(this.pendingReplyFacts(current)))throw new Error('REPLY_STATE_CHANGED');};
-    try{const persona=this.targetPersona(current,current.id,signal,guard),decision=await decidePendingReplies(this.ctx,this.recoveryModel(),this.config.dataDir,current.id,persona.text,persona.items,{incoming:current.message.mainText??current.message.text,pending:pending.map(p=>({...p,previousQuestion:this.journal.get(p.inboundId).message.mainText??this.journal.get(p.inboundId).message.text}))},AbortSignal.any([signal,AbortSignal.timeout(15000)]),()=>{guard();persona.guard();});
-      guard();const ids=new Set(decision.decisions.map(d=>d.inboundId));if(ids.size!==pending.length||decision.decisions.length!==pending.length||pending.some(p=>!ids.has(p.inboundId)))throw new Error('REPLY_DECISION_SCOPE');
-      this.journal.append(this.event(current,'reply.decision.prepared',{decisions:decision.decisions}));
-      for(const choice of decision.decisions)if(choice.action!=='wait')this.resolvePendingReply(current,choice.inboundId,choice.action);
-      this.journal.append(this.event(current,'reply.decision.completed',{decisions:decision.decisions}));
-    }catch{signal.throwIfAborted();this.journal.append(this.event(current,'reply.decision.waiting',{code:'REPLY_DECISION_UNAVAILABLE',preserved:true}));}
-  }
-  private resolvePendingReply(current:PendingMessage,id:string,decision:'resume'|'supersede'){
-    const old=this.journal.get(id);if(old.route!==current.route||old.message.sender.id!==current.message.sender.id||old.id===current.id)throw new Error('REPLY_SCOPE_DENIED');
-    const duplicate=this.journal.events(current.route).findLast(e=>e.traceId===old.id&&e.type==='delivery.'+(decision==='resume'?'resume-requested':'superseded')&&e.data.decisionSource===current.id);
-    if(duplicate)return {status:decision==='resume'?'queued':'superseded',inboundId:id,duplicate:true};
-    if(!this.pendingReplyFacts(current).some(f=>f.inboundId===id))throw new Error('REPLY_NOT_RESUMABLE');
-    this.journal.transition(id,old.state,decision==='resume'?'reply-ready':'handled',this.event(old,decision==='resume'?'delivery.resume-requested':'delivery.superseded',{decisionSource:current.id,decisionMessageId:current.message.id}));
-    if(decision==='resume')this.schedule(this.journal.get(id));
-    return {status:decision==='resume'?'queued':'superseded',inboundId:id,duplicate:false};
-  }
-  private replyRecoveryActions(item:PendingMessage):import('./execution-frame.js').NativeAction[] {
-    if(!this.pendingReplyFacts(item).length)return [];
-    return (['resume','supersede'] as const).map(decision=>{
-      const inputSchema=z.strictObject({inboundId:z.uuid()}),input=z.toJSONSchema(inputSchema),parameters=input as import('./capability-registry.js').BoundAction['parameters'];
-      const definition:import('./capability-registry.js').BoundAction={id:'dafeiyu_reply_'+decision,owner:'core',version:'1',pluginVersion:CORE_VERSION,
-        description:decision==='resume'?'续发当前会话确定未发送的答复部分。':'由当前回答替代旧答复尚未发送的部分。',effects:'local-write',requiresTask:false,input,parameters,active:()=>this.accepting,signal:this.controller.signal,
-        validateInput:raw=>inputSchema.parse(raw),execute:async()=>{throw new Error('CORE_DISPATCH_REQUIRED');}};
-      return {definition,execute:async(raw,_callId,signal)=>{signal.throwIfAborted();this.messageProcessingSignal(item.id)?.throwIfAborted();return {status:'succeeded',effects:'confirmed',completeness:'complete',sources:[],receipts:[],data:this.resolvePendingReply(item,inputSchema.parse(raw).inboundId,decision)};}};
-    });
-  }
-  private async process(id: string): Promise<void> {
-    const release=await this.scheduler?.acquire(true);
-    try{await this.processMessage(id);}finally{try{const runId=this.runStore?.findRequest('conversation',id)?.runId;if(runId)this.personas.current(runId)?.dispose();}finally{release?.();}}
-  }
-  private messageProcessingSignal(id: string): AbortSignal | undefined {
-    const item = this.journal.get(id), source = this.extensions.get(item.extensionId);
-    if (!source?.active) throw new Error('DEPENDENCY_UNAVAILABLE');
-    return source.extension.channels?.find(channel => channel.channel === item.message.conversation.channel
-      && channel.account === item.message.conversation.account)?.processingSignal?.(item.message);
-  }
-  private deliveryChannel(item: PendingMessage) {
-    const entry = this.extensions.get(item.extensionId), capability = entry?.extension.channels?.find(channel =>
-      channel.channel === item.message.conversation.channel && channel.account === item.message.conversation.account);
-    if (!entry?.active || !capability) return null;
-    try {
-      const access = capability.processingSignal?.(item.message); access?.throwIfAborted();
-      return { identity: entry, id: entry.extension.id, version: entry.extension.version, capability,
-        signal: access ? AbortSignal.any([entry.controller.signal, access]) : entry.controller.signal };
-    } catch { return null; }
-  }
-  private validateRunPersona(run:StoredRun):void{const binding=this.runStore?.personaBinding(run.id);if(binding?.kind==='bound')this.personas.validateStored(run,binding.manifest,[],this.controller.signal,()=>this.controller.signal.throwIfAborted());}
-  private async processMessage(id:string):Promise<void>{
-    if (!this.accepting) return;
-    let item = this.journal.get(id);
-    const source = this.extensions.get(item.extensionId);
-    if (!source?.active) return;
-    const channel = source.extension.channels?.find(capability => capability.channel === item.message.conversation.channel && capability.account === item.message.conversation.account);
-    if (item.state === 'accepted') {
-      const accepted = this.journal.events(item.route).find(event => event.traceId === item.id && event.type === 'message.accepted');
-      let started:import('@dafeiyu/contracts').EventRecord|undefined,run:StoredRun|undefined,result;
-      try {
-        const persona = this.persona();
-        const access = this.messageProcessingSignal(id);
-        const signal = AbortSignal.any([this.controller.signal, source.controller.signal, ...(access ? [access] : []), AbortSignal.timeout(this.config.turnTimeoutMs)]);
-        signal.throwIfAborted();
-        await this.decideRepliesBeforeTurn(item,signal);
-        run=this.conversationRuns?.begin(item,persona,this.analysisModelRoute(),[...this.extensions.values()].map(entry=>({id:entry.extension.id,version:entry.extension.version})),this.executions?.conversationSnapshot(source.extension.id),
-          record=>this.personas.prepare(record,persona,this.analysisModelRoute(),[],signal,()=>{signal.throwIfAborted();if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');}).manifest);
-        if(run)this.experienceMemory?.begin({id:run.id,scope:run.definition.scope,origin:run.definition.origin,goal:item.message.mainText??item.message.text,at:run.createdAt});
-        started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
-        this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
-        const nativeActions=run?this.executions?.conversationActions(run,source.extension.id,signal,()=>{if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');})??[]:[];
-        const capabilityDescription=[channel?.description,this.executions?JSON.stringify(this.executions.messageCapabilities(item.message)):null].filter(Boolean).join('\n');
-        const conversationActions=source.extension.id==='local-owner-tasks'?[]:this.replyRecoveryActions(item);
-        result = await this.runtime.run(item, persona, [...nativeActions,...conversationActions], signal, capabilityDescription,()=>!!(run&&this.runStore?.operations(run.id).some(op=>(op.plugin==='qq-tasks'&&op.action==='qq_task_submit'||op.plugin==='local-owner-tasks'&&op.action==='local_owner_task_submit')&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'))||!!(run&&this.mediaPort?.replyDraft?.(run.id)?.selected&&this.runStore?.operations(run.id).some(op=>op.action==='qq_sticker_use'&&op.plugin==='qq-stickers'&&op.state==='finished'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed')));
-        signal.throwIfAborted();
-        if(run)this.personas.current(run.id)?.guard();
-      } catch (error) {
-        const failure=error instanceof DshRunError?error.code:'TURN_FAILED';
-        if(run){this.conversationRuns?.fail(run,failure);this.experienceMemory?.settle(run.id,'failed');}
-        
-        await this.conversationRuns?.project();
-        this.journal.transition(item.id, this.journal.get(item.id).state, 'failed', { ...this.event(item, 'turn.failed', { code: failure, phase:'execution', note: 'Earlier operations may have effects; no automatic replay' }, started?.id??null),
-          sources: error instanceof DshRunError ? error.sources : [] });
-        await this.notifyConversationFailure(item,failure);
-        return;
-      }
-      if(run&&this.conversationRuns){this.conversationRuns.complete(run,item,result,started!.id);this.experienceMemory?.settle(run.id,'completed');await this.conversationRuns.project();}
-      else{const reply: Reply = { id: `${item.id}:reply`, conversation: item.message.conversation, sourceMessageId: item.message.id, text: result.text };
-        this.journal.transition(item.id, 'processing', 'reply-ready', { ...this.event(item, 'turn.completed', {}, started!.id), sources: result.sources }, reply);}
-      item = this.journal.get(id);
-    }
-    if (item.state !== 'reply-ready' || !item.reply) return;
-    const runId=this.runStore?.findRequest('conversation',item.id)?.runId;
-    if(runId&&this.runStore){try{this.validateRunPersona(this.runStore.get(runId));}catch{this.journal.transition(item.id,'reply-ready','failed',this.event(item,'delivery.blocked',{code:'SOURCE_STALE'}));return;}}
-    if (!channel || !source.active || this.controller.signal.aborted || this.fatal) return;
-    const completed = this.journal.events(item.route).findLast(event => event.traceId === item.id && event.type === 'turn.completed');
-    const deliveryOperation = randomUUID();
-    const deliveryEvent = (type: string, data: Record<string, Json>, parent: string | null) =>
-      eventFor(this.config.agentId, item, type, source.extension.id, source.extension.version, deliveryOperation, parent, data);
-    const sending = this.journal.transition(id, 'reply-ready', 'sending', deliveryEvent('delivery.started', { replyId: item.reply.id }, completed?.id ?? null));
-    let result,invoked=false,mediaSettlementPending=false;let release=()=>{};let mediaAccess:MediaReplyAccess|undefined,mediaManifestId:string|undefined,activeMedia:MediaPort|undefined;
-    try {
-      const signal=AbortSignal.any([this.controller.signal,source.controller.signal,AbortSignal.timeout(this.config.deliveryTimeoutMs)]);
-      const evidence=channel.deliveryValidation==='per-segment'?await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal):{guard:()=>{},release:()=>{}};release=evidence.release;
-      const authority=()=>{if(!source.active||this.fatal||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
-        if(runId&&this.runStore)this.validateRunPersona(this.runStore.get(runId));
-        evidence.guard();};
-      const mediaSelection=(op:{plugin:string;action:string})=>op.plugin==='media'&&op.action==='dafeiyu_media_reply'||op.plugin==='qq-stickers'&&op.action==='qq_sticker_use';
-      authority();const mediaOperation=runId?this.runStore?.operations(runId).findLast(op=>mediaSelection(op)&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'):undefined;
-      const uncertainMedia=runId&&this.runStore?.operations(runId).some(op=>mediaSelection(op)&&(op.state==='unknown'||op.outcome?.effects==='unknown'));
-      if(uncertainMedia)throw new Error('MEDIA_REPLY_OPERATION_UNCONFIRMED');
-      const selection=mediaOperation?z.object({currentDraftId:z.uuid(),currentVersion:z.number().int().positive(),selected:z.number().int().nonnegative()}).parse(mediaOperation.outcome!.data):null;
-      if(selection?.selected){
-        activeMedia=this.mediaPort;if(!activeMedia?.ready()||!activeMedia.replyDraft||!activeMedia.finalizeReply||!activeMedia.readReplyPart||!activeMedia.validateReply||!activeMedia.settleReply||channel.mediaDelivery!=='parts-v1'||!channel.deliverMedia)throw new Error('MEDIA_DELIVERY_NOT_CONFIGURED');
-        const draft=activeMedia.replyDraft(runId!);if(!draft||draft.id!==selection.currentDraftId||draft.version!==selection.currentVersion||draft.selected!==selection.selected)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');
-        mediaAccess=await this.prepareMediaReplyAccess(draft.authority,item.reply,signal);const manifest=await activeMedia.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaManifestId=manifest.id;
-        const guarded=()=>{authority();mediaAccess!.guard();if(this.mediaPort!==activeMedia||!activeMedia!.ready())throw new Error('SOURCE_STALE');activeMedia!.validateReply!(mediaAccess!,manifest.id);};guarded();invoked=true;
-        result=await channel.deliverMedia(structuredClone({...item.reply,media:manifest}),signal,guarded,position=>{guarded();return activeMedia!.readReplyPart!(mediaAccess!,manifest.id,position);});
-      }else{invoked=true;result = await channel.deliver(item.reply,signal,authority);}
-      if (result.status === 'sent' && !result.receiptId) throw new Error('Missing transport receipt');
-    } catch(error) { const code=error instanceof Error&&['MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH','MEDIA_REPLY_OPERATION_UNCONFIRMED','MEDIA_TARGET_DENIED','MEDIA_SIZE_LIMIT','MEDIA_BLOB_CORRUPT','MEDIA_TTS_NOT_CONFIGURED'].includes(error.message)?error.message:'SOURCE_STALE';
-      result = invoked?{status:'unknown' as const,code:'DELIVERY_UNKNOWN'}:{status:'not-sent' as const,code}; }finally{
-      try{const paused=result?.status==='unknown'&&channel?.deliveryProgress?.(item.reply.id)?.canResume===true;
-        if(mediaAccess&&mediaManifestId&&activeMedia?.settleReply&&(result?.status==='sent'||result?.status==='unknown'&&!paused)){
-        try{activeMedia.settleReply(mediaAccess,mediaManifestId,result.status==='sent'?'sent':'unknown');}catch{mediaSettlementPending=true;}
-      }}finally{if(mediaAccess)activeMedia?.releaseReply?.(mediaAccess);mediaAccess?.release();release();}}
-    const next = result.status === 'sent' ? 'delivered' : result.status === 'not-sent' ? ['QQ_MESSAGE_SEQUENCE_INVALID','DELIVERY_PLAN_INVALID','TEXT_SIZE_UNSUPPORTED','INVALID_TEXT_ENCODING'].includes(result.code)?'failed':'reply-ready' : 'uncertain';
-    this.journal.transition(id, 'sending', next, deliveryEvent(`delivery.${result.status}`, result.status === 'sent' ? { receiptId: result.receiptId } : { code: result.code }, sending.id));
-    if(mediaSettlementPending)this.journal.append(deliveryEvent('delivery.media-settlement-pending',{manifestId:mediaManifestId!,state:result.status},sending.id));
-  }
-  /** Explicit retry only for definitely-not-sent replies; never runs the model or replays tool operations. */
-  retryDelivery(id: string): void {
-    this.assertAccepting();
-    const item = this.journal.get(id);
-    if (item.state !== 'reply-ready') throw new Error('Only a definitely unsent reply may be retried');
-    this.schedule(item);
-  }
+  retryDelivery(id:string){this.conversations.retryDelivery(id);}
   getStatus() {
     return { agentId: this.config.agentId, state: this.fatal ? 'error' : this.controller.signal.aborted ? 'closed' : this.gate.active?(this.admissionHeld?'composing':this.dependenciesReady()?'ready':'degraded'):this.gate.state==='quiescing'?'draining':'composing',
-      lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null,nativeDelivery:this.closed?this.closedNativeDelivery:this.runStore?.nativeDeliveries.counts()??null, extensions: [...new Set([...this.extensions.keys(),...this.registry.ids()])], queuedRoutes: this.queues.size,
+      lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null,nativeDelivery:this.closed?this.closedNativeDelivery:this.runStore?.nativeDeliveries.counts()??null, extensions: [...new Set([...this.extensions.keys(),...this.registry.ids()])], queuedRoutes: this.conversations.queuedRoutes,
       messages: this.closed ? [] : this.journal.list().map(item => ({ id: item.id, state: item.state, sessionId: item.sessionId })) };
   }
   async whenIdle(): Promise<void> {
-    do{while(this.queues.size)await Promise.all([...this.queues.values()]);await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}while(this.queues.size||this.nativeTaskDelivery?.pending);
-    if (this.fatal) throw new Error(this.fatal);
+    do{await this.conversations.whenIdle();await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}while(this.conversations.queuedRoutes||this.nativeTaskDelivery?.pending);
+    if (this.fatal) throw new Error(this.fatal,{cause:this.conversations.failureCause});
   }
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.quiesce();this.readyListeners.clear();this.registry.close();
     this.controller.abort();
     this.closing = (async () => {
-      try{await Promise.all([...this.queues.values()]);await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}
+      try{await this.conversations.whenIdle();await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}
       finally{try { await this.runtime.close(); } finally {this.nativeTaskDelivery?.close();this.closedNativeDelivery=this.runStore?.nativeDeliveries.counts()??null;this.runStore?.close();this.closed = true;this.gate.close(); this.journal.close(); }}
     })();
     return this.closing;
@@ -750,3 +574,5 @@ export function apply(ctx: Context, config: Config): void {
   const core = new DafeiyuService(ctx, config);
   ctx.effect(() => () => core.close(), 'dafeiyu.close');
 }
+
+export * from './storage-status.js';

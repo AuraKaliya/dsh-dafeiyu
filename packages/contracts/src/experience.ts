@@ -21,5 +21,5 @@ export interface ExperienceMemoryPort {
   operation(input:{episodeId:string;id:string;action:string;outcome:ActionOutcome;at:string}):void;
   settle(episodeId:string,state:string):void;
   pending(scope:ExecutionScope):readonly Json[];
-  foundation(seed:PersonaSnapshot&{fileIdentity:string}):PersonaSnapshot&{fileIdentity:string};
+  foundation(seed:()=>PersonaSnapshot&{fileIdentity:string}):PersonaSnapshot&{fileIdentity:string};
 }

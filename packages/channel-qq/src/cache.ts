@@ -72,9 +72,7 @@ export class QqCache {
   private meta(route: string, row: CachedRow) {
     const existing = this.db.prepare('SELECT version,hash,body,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, row.id);
     if (existing) return { ...metadataSchema.parse(JSON.parse(String(existing.body))), version: Number(existing.version), hash: String(existing.hash), deleted: existing.deleted === 1 };
-    const body = metadataSchema.parse({ occurredAt: null, unsupported: [], truncated: null, known: false }), hash = digest({ sender: row.sender, text: row.text, ...body });
-    this.db.prepare('INSERT INTO qq_message_meta VALUES(?,?,1,?,0,?)').run(route, row.id, hash, JSON.stringify(body));
-    return { ...body, version: 1, hash, deleted: false };
+    throw new Error('INVALID_STORAGE');
   }
   remember(route: string, id: string, sender: string, raw: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[];groupGeneration?:number;history?:true;forwardIds?:readonly string[] }): boolean {
     routeSchema.parse(route); z.string().min(1).max(80).parse(id);

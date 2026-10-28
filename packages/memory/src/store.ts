@@ -11,7 +11,7 @@ import type { Json, OperationScope, TimelineScope } from '@dafeiyu/contracts';
 import type { NewEvent } from '@dafeiyu/journal';
 import { ExecutionEventInputSchema } from '@dafeiyu/contracts';
 import type { NewExecutionEvent } from '@dafeiyu/contracts';
-import { configureSqlite } from '@dafeiyu/journal';
+import { configureSqlite,matchesSchema } from '@dafeiyu/journal';
 import { MEMORY_VERSION, MemoryError, memoryRef, receiptSchema, revisionSchema } from './types.js';
 import type { Command, MutationReceipt, ReadMode, Revision, WriteContent,Evidence } from './types.js';
 import { MemoryBoundarySchema,boundaryAllows } from '@dafeiyu/contracts';
@@ -54,6 +54,7 @@ export interface MemoryView extends Revision {
   readonly useRestriction: 'evidence_only' | 'historical_evidence_only' | 'deleted_lookup_only';
 }
 export interface SearchInput { readonly query: string; readonly limit: number; readonly cursor?: string }
+const currentSchema=(db:DatabaseSync)=>{createStorageSchema(db);createAutobiographySchema(db);};
 
 /** Trusted persistence API. Model-facing access must go through the core-bound MemoryService. */
 export class MemoryStore {
@@ -73,14 +74,14 @@ export class MemoryStore {
       const version=this.db.prepare('PRAGMA user_version').get()?.user_version;
       const count=this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n;
       const fresh=app===0&&version===0&&count===0;
-      if(!fresh&&(app!==APPLICATION_ID||version!==MEMORY_SCHEMA_VERSION))throw new Error('INVALID_STORAGE');
+      if(!fresh&&(app!==APPLICATION_ID||version!==MEMORY_SCHEMA_VERSION||!matchesSchema(this.db,currentSchema)))throw new Error('INVALID_STORAGE');
       configureSqlite(this.db);
       if(fresh)this.transaction(()=>{createStorageSchema(this.db);createAutobiographySchema(this.db);this.db.exec(`PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=${MEMORY_SCHEMA_VERSION};`);});
       this.observations=new ObservationStore(this.db,work=>this.transaction(work),this);
       this.capabilities=new CapabilityObservations(this.db,this);
     } catch (error) { this.db.close(); throw error; }
   }
-  autobiography(agentId:string){return new Autobiography(this.db,work=>this.transaction(work),agentId);}
+  autobiography(agentId:string,originCurrent?:(origin:import('@dafeiyu/contracts').RunOrigin)=>boolean){return new Autobiography(this.db,work=>this.transaction(work),agentId,originCurrent);}
   private transaction<T>(work: () => T): T {
     const depth=this.transactionDepth++,savepoint=`memory_nested_${depth}`;
     try{

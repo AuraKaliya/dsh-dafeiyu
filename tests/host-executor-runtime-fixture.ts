@@ -38,11 +38,11 @@ const server=createServer(async(req,res)=>{requests++;if(req.headers.authorizati
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data}));});
 const wss=new WebSocketServer({server});await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();assert.ok(address&&typeof address!=='string');
 const command={nodePath:process.execPath,entryPath:join(root,'fictional-executor.js'),cwd:root,args:[],nodeHash:h64,entryHash:h64,profilePath:join(root,'fictional-profile.json'),profileHash:h64,env:{}};
-const config={schemaVersion:1,profileId:'executor-host-fixture',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite',channels:{'channel-qq':'./data/qq'}},
+const config={schemaVersion:1,profileId:'executor-host-fixture',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite',channels:{qq:'./data/qq'}},
   persona:{fixedFile:'./persona.md',kind:'test'},modelRoutes:{chat:{provider:'local-test',model:'scripted'}},runtime:{turnTimeoutMs:10000,shutdownGraceMs:scenario==='cancel'?50:3000},diagnostics:{snapshotIntervalMs:100},
-  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{}},
+  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:"memory-growth",required:true,config:{}},
     {id:'server-executor',required:true,config:{command,route,budgetAuthorizationId:'fictional-parent-ledger',resultOwner:{account:bot,ownerId:owner},maxExecutionMs:10000}},
-    {id:'channel-qq',required:true,config:{botId:bot,ownerId:owner,groupIds:[group],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile:'./token',requestTimeoutMs:5000,reconnectMs:100,capabilities:{enabled:true},tasks:{enabled:true,deliverResults:true}}}],
+    {id:"qq",required:true,config:{botId:bot,ownerId:owner,groupIds:[group],httpURL:`http://127.0.0.1:${address.port}/`,wsURL:`ws://127.0.0.1:${address.port}/`,tokenFile:'./token',requestTimeoutMs:5000,reconnectMs:100,capabilities:{enabled:true},tasks:{enabled:true,deliverResults:true}}}],
   authorityPolicies:[{id:'conversation',producers:['channel-qq'],actions:[...QQ_ACTIONS,...QQ_TASK_ACTIONS],allowLocalWrite:true},
     {id:'qq-task',producers:['qq-tasks'],actions:[action,statusAction,resultAction,'dafeiyu_task_intent','dafeiyu_task_object'],allowLocalWrite:true,externalActions:external,resources:[resource]},
     {id:'local',producers:['host-cli'],actions:[action,statusAction,resultAction],allowLocalWrite:true,externalActions:external,resources:[resource]}]};

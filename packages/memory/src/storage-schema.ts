@@ -55,7 +55,6 @@ CREATE TABLE native_expression_packets(id TEXT PRIMARY KEY,agent_id TEXT NOT NUL
 CREATE TABLE experience_items(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,version INTEGER NOT NULL,state TEXT NOT NULL);
 CREATE TABLE experience_revisions(id TEXT NOT NULL REFERENCES experience_items(id),version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(id,version));
 CREATE TABLE experience_relations(id TEXT PRIMARY KEY,maintenance_id TEXT NOT NULL,scope_key TEXT NOT NULL,body TEXT NOT NULL);
-CREATE TABLE maintenance_events(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL);
 CREATE TABLE maintenance_requests(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,result TEXT,error TEXT,updated_at TEXT NOT NULL,UNIQUE(agent_id,scope_key,producer,request_id));
 CREATE TABLE maintenance_receipts(agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,producer TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(agent_id,scope_key,producer,request_id));
 CREATE TABLE maintenance_watermarks(agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,request_id TEXT NOT NULL,watermark TEXT NOT NULL,PRIMARY KEY(agent_id,scope_key,request_id));
@@ -119,7 +118,6 @@ CREATE TRIGGER native_expression_retain BEFORE DELETE ON native_expression_packe
 CREATE TRIGGER experience_revision_immutable BEFORE UPDATE ON experience_revisions BEGIN SELECT RAISE(ABORT,'Immutable experience revision'); END;
 CREATE TRIGGER experience_revision_retain BEFORE DELETE ON experience_revisions BEGIN SELECT RAISE(ABORT,'Retain experience revision'); END;
 CREATE TRIGGER experience_relation_immutable BEFORE UPDATE ON experience_relations BEGIN SELECT RAISE(ABORT,'Immutable experience relation'); END;
-CREATE TRIGGER maintenance_event_immutable BEFORE UPDATE ON maintenance_events BEGIN SELECT RAISE(ABORT,'Immutable maintenance event'); END;
 CREATE TRIGGER maintenance_request_immutable BEFORE UPDATE OF id,agent_id,scope_key,producer,request_id,fingerprint,body ON maintenance_requests BEGIN SELECT RAISE(ABORT,'Immutable maintenance input'); END;
 CREATE TRIGGER maintenance_request_retain BEFORE DELETE ON maintenance_requests BEGIN SELECT RAISE(ABORT,'Retain maintenance request'); END;
 CREATE TRIGGER maintenance_receipt_immutable BEFORE UPDATE ON maintenance_receipts BEGIN SELECT RAISE(ABORT,'Immutable maintenance receipt'); END;

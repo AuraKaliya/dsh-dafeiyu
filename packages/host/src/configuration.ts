@@ -3,8 +3,8 @@ import { dirname,resolve,join } from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { HostConfigSchema,dependencyOrder,redactJson } from '@dafeiyu/contracts';
-import type { HostConfig } from '@dafeiyu/contracts';
-import { MemoryPluginConfigSchema } from '@dafeiyu/memory';
+import type { ExpandedHostConfig } from './plugin-assembly.js';
+import { MemoryPluginConfigSchema,readMemoryFoundation } from '@dafeiyu/memory';
 import { ActivityPluginConfigSchema,ACTIVITY_ACTIONS,validateQuiet } from '@dafeiyu/activity';
 import { MediaPluginConfigSchema } from '@dafeiyu/media';
 import { BiliPluginConfigSchema } from '@dafeiyu/bilibili';
@@ -17,7 +17,7 @@ import { readFoundation } from '@dafeiyu/core';
 import { physicalPath,resource,overlap,pathIdentity,within } from './paths.js';
 import type { HostResource } from './paths.js';
 import { InlineModelSettingsSchema } from './inline-model.js';
-import { normalizeHostPlugins } from './plugin-assembly.js';
+import { assembleHostPlugins } from './plugin-assembly.js';
 
 const endpoint=z.url().refine(raw=>{const url=new URL(raw);return (url.protocol==='https:'||url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname))&&!url.username&&!url.password&&!url.search&&!url.hash;});
 export const DeepSeekConfigSchema=z.strictObject({auth:z.enum(['api-key','dsh-account']).optional(),credentialStore:z.string().min(1).default(join(homedir(),'.dsh','.credentials.yaml')),credentialName:z.literal('DEEPSEEK_API_KEY').default('DEEPSEEK_API_KEY'),baseURL:endpoint.default('https://api.deepseek.com/anthropic'),inlineTransport:InlineModelSettingsSchema.optional()});
@@ -25,12 +25,12 @@ export const ScriptedConfigSchema=z.strictObject({response:z.string().trim().min
 export const TimelineConfigSchema=TimelinePluginConfigSchema;
 export const SimulatorConfigSchema=z.strictObject({account:z.string().min(1).max(100).default('local-test')});
 export const pluginSchemas={timeline:TimelineConfigSchema,memory:MemoryPluginConfigSchema,activity:ActivityPluginConfigSchema,media:MediaPluginConfigSchema,bilibili:BiliPluginConfigSchema,'server-executor':ServerExecutorPluginConfigSchema,'channel-qq':QqPluginConfigSchema,'channel-bili-owner':BiliOwnerPluginConfigSchema,'channel-simulator':SimulatorConfigSchema,'model-deepseek':DeepSeekConfigSchema,'model-scripted':ScriptedConfigSchema} as const;
-export const BILI_OWNER_NATIVE_ACTIONS=['bili_discover','bili_search_sources','bili_search','bili_video','bili_comments','bili_subtitles','bili_danmaku','bili_media','bili_observe_select',
+export const BILI_OWNER_NATIVE_ACTIONS=['dafeiyu_memory_pending','dafeiyu_memory_reflect','dafeiyu_memory_experience','dafeiyu_memory_self_status','dafeiyu_memory_self_update','dafeiyu_memory_self_withdraw','bili_discover','bili_search_sources','bili_search','bili_video','bili_comments','bili_subtitles','bili_danmaku','bili_media','bili_observe_select',
   'dafeiyu_media_acquire','dafeiyu_media_inspect','dafeiyu_media_read','dafeiyu_media_select','dafeiyu_execution_source_open','dafeiyu_execution_contribute','dafeiyu_execution_select','dafeiyu_execution_source_state','dafeiyu_task_intent','dafeiyu_task_object'] as const;
 export type PluginId=keyof typeof pluginSchemas;
 export interface PreparedPlugin {readonly id:PluginId;readonly enabled:boolean;readonly required:boolean;readonly requires:readonly string[];readonly config:Record<string,unknown>}
 export interface PreparedHostConfig {
-  readonly file:string;readonly config:HostConfig;readonly hash:string;readonly foundation:{hash:string;identity:string};
+  readonly file:string;readonly config:ExpandedHostConfig;readonly hash:string;readonly foundation:{hash:string;identity:string};
   readonly paths:{core:string;memory:string;sessions:string;query:string;channels:Readonly<Record<string,string>>;foundation:string};
   readonly plugins:readonly PreparedPlugin[];readonly order:readonly string[];readonly resources:readonly HostResource[];
   readonly declarations:readonly {path:string;identity:string}[];
@@ -40,7 +40,7 @@ function freeze(value:unknown):void{if(value&&typeof value==='object'&&!Object.i
 export function assertPaths(prepared:PreparedHostConfig){if(prepared.declarations.some(value=>pathIdentity(value.path)!==value.identity))throw new Error('HOST_PATH_CHANGED');}
 export function loadHostConfig(input:string):PreparedHostConfig{
   try{
-    const file=physicalPath(input),base=dirname(file),config=normalizeHostPlugins(readJSON(file));
+    const file=physicalPath(input),base=dirname(file),config=assembleHostPlugins(readJSON(file));
     if(redactJson(z.json().parse(config)).redacted)throw new Error('HOST_PRIVATE_CONFIG_REJECTED');
     const resolvePath=(path:string)=>physicalPath(resolve(base,path));
     const paths={core:resolvePath(config.paths.core),memory:resolvePath(config.paths.memory),sessions:resolvePath(config.paths.sessions),query:resolvePath(config.paths.query),
@@ -78,11 +78,11 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     if(!hasMemory&&enabled.some(p=>p.id==='timeline'&&p.config.execution===true))throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     if(config.context.compactionInputTokens!==undefined&&!hasMemory)throw new Error('HOST_COMPACTION_REQUIRES_MEMORY');
     const memory=enabled.find(p=>p.id==='memory');if(memory?.config.compaction&&config.context.compactionInputTokens!==undefined)throw new Error('HOST_DUPLICATE_COMPACTION_CONFIG');
-    if(memory?.config.maintenance&&!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_MAINTENANCE_SOURCE_TRACKING_REQUIRED');
+
     const activity=enabled.find(p=>p.id==='activity'),activityConfig=activity?ActivityPluginConfigSchema.parse(activity.config):null;
     if(activityConfig){if(!memory)throw new Error('HOST_ACTIVITY_MEMORY_REQUIRED');
       try{validateQuiet(activityConfig.quiet);}catch{throw new Error('HOST_ACTIVITY_QUIET_INVALID');}
-      if(!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_ACTIVITY_SOURCE_TRACKING_REQUIRED');
+
       const exploration=config.authorityPolicies.find(p=>p.id===activityConfig.explorationPolicy&&p.producers.includes('activity'));
       if(!exploration?.allowLocalWrite||ACTIVITY_ACTIONS.some(id=>!exploration.actions.includes(id)))throw new Error('HOST_ACTIVITY_POLICY_REQUIRED');
       if(activityConfig.maintenance){if(!memory.config.maintenance)throw new Error('HOST_ACTIVITY_MAINTENANCE_REQUIRED');
@@ -92,7 +92,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     const qq=enabled.find(p=>p.id==='channel-qq'),qqCapabilities=qq&&QqPluginConfigSchema.parse(qq.config).capabilities.enabled;
     const biliOwner=enabled.find(p=>p.id==='channel-bili-owner'),biliOwnerConfig=biliOwner?BiliOwnerPluginConfigSchema.parse(biliOwner.config):undefined;
     if(biliOwnerConfig){if(!memory)throw new Error('HOST_BILI_OWNER_MEMORY_REQUIRED');
-      if(!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_BILI_OWNER_SOURCE_TRACKING_REQUIRED');
+
       if(biliOwnerConfig.tasks.enabled){
         if(!enabled.some(plugin=>plugin.id==='bilibili')||!enabled.some(plugin=>plugin.id==='media'))throw new Error('HOST_BILI_OWNER_EXPLORATION_REQUIRED');
         const conversation=config.authorityPolicies.find(policy=>policy.id==='conversation'&&policy.producers.includes('channel-bili-owner'));
@@ -104,7 +104,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     }
     const executor=enabled.find(p=>p.id==='server-executor');if(executor){const settings=ServerExecutorPluginConfigSchema.parse(executor.config),route=config.modelRoutes.chat;
       if(!memory)throw new Error('HOST_EXECUTOR_MEMORY_REQUIRED');
-      if(!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_EXECUTOR_SOURCE_TRACKING_REQUIRED');
+
       if(settings.route.provider!==route.provider||settings.route.model!==route.model||settings.route.reasoningEffort!==(route.reasoningEffort??null))throw new Error('HOST_EXECUTOR_MODEL_ROUTE_MISMATCH');
       if(qq){const binding=QqPluginConfigSchema.parse(qq.config);if(settings.resultOwner.account!==binding.botId||settings.resultOwner.ownerId!==binding.ownerId)throw new Error('HOST_EXECUTOR_OWNER_MISMATCH');}
       const scene=serverExecutorScene(config.profileId),actions=['dafeiyu_server_execute_owner','dafeiyu_server_execute_autonomous','dafeiyu_server_execution_status','dafeiyu_server_execution_result'];
@@ -117,7 +117,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
       }
     }
     const media=enabled.find(p=>p.id==='media'),mediaConfig=media?MediaPluginConfigSchema.parse(media.config):undefined;
-    if(media){if(!memory)throw new Error('HOST_MEDIA_MEMORY_REQUIRED');if(!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_MEDIA_SOURCE_TRACKING_REQUIRED');
+    if(media){if(!memory)throw new Error('HOST_MEDIA_MEMORY_REQUIRED');
       if(mediaConfig?.vision&&mediaConfig.vision.provider!==config.modelRoutes.chat.provider)throw new Error('HOST_MEDIA_MODEL_ROUTE_UNAVAILABLE');}
     if(enabled.some(p=>p.id==='bilibili')&&!media)throw new Error('HOST_BILI_MEDIA_REQUIRED');
     const qqMedia=qq?QqPluginConfigSchema.parse(qq.config).media:undefined;if(qqMedia?.enabled&&!media)throw new Error('HOST_QQ_MEDIA_REQUIRED');
@@ -128,7 +128,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
       if(!policy?.allowLocalWrite||QQ_STICKER_ACTIONS.some(action=>!policy.actions.includes(action)))throw new Error('HOST_QQ_STICKER_POLICY_REQUIRED');
     }
     if(qqCapabilities){if(!memory)throw new Error('HOST_QQ_MEMORY_REQUIRED');
-      if(!memory.config.sourceTracking&&!memory.config.compaction&&config.context.compactionInputTokens===undefined)throw new Error('HOST_QQ_SOURCE_TRACKING_REQUIRED');
+
       const policy=config.authorityPolicies.find(policy=>policy.id==='conversation'&&policy.producers.includes('channel-qq'));
       if(!policy||!policy.allowLocalWrite||QQ_OBSERVATION_ACTIONS.some(action=>!policy.actions.includes(action)))throw new Error('HOST_QQ_CAPABILITY_POLICY_REQUIRED');
     }
@@ -145,7 +145,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
       ...enabled.map(plugin=>({id:plugin.id,provides:plugin.id.startsWith('model-')?['llm.route.v1']:plugin.id==='timeline'?['timeline.history.v1']:plugin.id==='bilibili'?['bilibili.read.v1']:plugin.id==='server-executor'?['server.execution.v1']:plugin.id==='media'?['media.assets.v1','media.processing.v1']:plugin.id==='activity'?['activity.plan.v1','activity.wakeup.v1']:plugin.id==='memory'?['task.repository.v1','memory.execution.v1','persona.stage-state.v1','persona.growth-selection.v1','continuity.checkpoint.v1','task.intent.v1','memory.capability-observation.v1','memory.native-expression.v1',...(memory?.config.maintenance?['memory.maintenance.v1']:[])]:[`channel.${plugin.id==='channel-qq'?'qq':plugin.id==='channel-bili-owner'?'bilibili-owner':'simulator'}.v1`],
         requires:[...(plugin.id.startsWith('model-')?[]:['core.registration.v1']),...(plugin.id==='memory'?['timeline.history.v1']:[]),...(plugin.id==='server-executor'?['execution.task.v1','memory.capability-observation.v1']:[]),...(plugin.id==='media'?['execution.task.v1','memory.capability-observation.v1']:[]),...(plugin.id==='bilibili'?['media.assets.v1','execution.task.v1','memory.capability-observation.v1']:[]),...(plugin.id==='activity'?['execution.task.v1','execution.source-anchor.v1','memory.execution.v1',...(activityConfig?.maintenance?['memory.maintenance.v1']:[])]:[]),...(plugin.id==='channel-bili-owner'?['memory.capability-observation.v1',...(biliOwnerConfig?.tasks.enabled?['bilibili.read.v1','media.assets.v1','execution.message-task.v1',...(biliOwnerConfig.tasks.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])]:[])]:[]),...(plugin.id==='channel-qq'&&qqCapabilities?['memory.capability-observation.v1','execution.resource-scope.v1']:[]),...(plugin.id==='channel-qq'&&qqMedia?.enabled?['media.assets.v1']:[]),...(plugin.id==='channel-qq'&&qqTasks?.enabled?['execution.message-task.v1',...(qqTasks.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])]:[]),...plugin.requires]})),
       ...(hasMemory?[{id:'core-execution',provides:['execution.task.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1','delivery.task-result.v1'],requires:['task.repository.v1']}]:[])];
-    const order=dependencyOrder(descriptors);const foundation=readFoundation(paths.foundation);
+    const order=dependencyOrder(descriptors);const foundation=readMemoryFoundation(paths.memory,config.agent.id)??readFoundation(paths.foundation);
     const declared=[file,...[config.paths.core,config.paths.memory,config.paths.sessions,config.paths.query,...Object.values(config.paths.channels),config.persona.fixedFile].map(path=>resolve(base,path))];
     const prepared:PreparedHostConfig={file,config,hash:runtimeHash({config,paths,plugins}),foundation:{hash:foundation.version,identity:foundation.fileIdentity},paths,plugins,order,resources,
       declarations:declared.map(path=>({path,identity:pathIdentity(path)}))};freeze(prepared);return prepared;

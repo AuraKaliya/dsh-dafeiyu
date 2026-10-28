@@ -5,12 +5,8 @@ import type { RetrievalDependencies } from '@dafeiyu/memory/retrieval-profile';
 import type { Config as CoreConfig } from '@dafeiyu/core';
 
 export async function memoryFixture(root?: string, options: Omit<Memory.Config, 'agentId' | 'dataDir'> = {}, dependencies?: RetrievalDependencies,context?:CoreConfig['context']) {
-  const h = await timelineFixture(root,context);
-  const configuration = { agentId: 'dafeiyu', dataDir: h.root, ...options };
-  const memoryFiber = dependencies
-    ? await h.ctx.plugin({ name:'memory-fixture',inject:Memory.inject,apply:(ctx:Context)=>{new Memory.MemoryService(ctx,configuration,dependencies);} })
-    : await h.ctx.plugin(Memory, configuration);
-  const memory = h.ctx.dafeiyuMemory;
+  const h = await timelineFixture(root,{...(context?.assembly?{}:{assembly:{recall:{enabled:false}}}),...context,regions:{'memory-persona:pending-experiences':{maxBytes:0},...context?.regions}},options,dependencies);
+  const memoryFiber=h.memoryFiber!,memory=h.ctx.dafeiyuMemory;
   return { ...h, memory, memoryFiber,
     evidence: async (room = 'a', text = '虚构约定：项目代号青羽842') => {
       const message = await h.seed(room, text);

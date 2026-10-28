@@ -10,10 +10,10 @@ const root=await mkdtemp(join(testTempDir(),'host-activity-flow-')),file=join(ro
 process.env.DSH_HOME=join(root,'data/core/dsh-home');
 const {ManagedHost,loadHostConfig,initializeProfile,readHostStatus,owners}=await import('@dafeiyu/host');
 const {ScriptedModel,call,textReply}=await import('./harness.js');
-const activityActions=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status'];
+const activityActions=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status','dafeiyu_memory_maintenance_request'];
 const config={schemaVersion:1,profileId:'activity-flow',agent:{id:'dafeiyu'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},
   modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},runtime:{turnTimeoutMs:60000,shutdownGraceMs:3000},diagnostics:{snapshotIntervalMs:100},
-  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:'memory',required:true,config:{maintenance:{}}},{id:'activity',required:true,config:{maintenance:true,tickMs:50}}],
+  plugins:[{id:'model-scripted',required:true,config:{}},{id:'timeline',required:true,config:{execution:true}},{id:"memory-growth",required:true,config:{maintenance:{}}},{id:'activity',required:true,config:{maintenance:true,tickMs:50}}],
   authorityPolicies:[{id:'local',producers:['host-cli'],actions:activityActions,allowLocalWrite:true},
     {id:'activity-explore',producers:['activity'],actions:[...activityActions,'fixture_observe'],allowLocalWrite:true},
     {id:'activity-maintenance',producers:['activity'],actions:['dafeiyu_memory_maintenance_status','dafeiyu_memory_consolidate','dafeiyu_memory_maintenance_result'],allowLocalWrite:true}]};
@@ -29,9 +29,9 @@ const adapter=new ScriptedModel(options=>{
   if(mode==='planning')return step===1?call('dafeiyu_activity_plan',{requestId:'plan',goal,trigger:{kind:'once',at:new Date(now+60000).toISOString()}}):textReply('计划保存，尚未探索');
   if(mode==='exploring'){
     assert.match(JSON.stringify(options.messages),/activity-occurrence/);
-    return step===1?call('fixture_observe',{}):step===2?call('dafeiyu_activity_update',{id:planId,requestId:'rest',expectedVersion:1,state:'paused'}):textReply('已经观察虚构样本，先休息');
+    return step===1?call('fixture_observe',{}):step===2?call('dafeiyu_activity_update',{id:planId,requestId:'rest',expectedVersion:1,state:'paused'}):step===3?call('dafeiyu_memory_maintenance_request',{requestId:'explicit-review',sources:[],reason:'整理这次主动观察的条件与未知'}):textReply('已经观察虚构样本，先休息');
   }
-  if(step===1){const id=String(read("SELECT id FROM maintenance_requests WHERE state='waiting-scheduler' AND json_extract(body,'$.sources[0]') IS NOT NULL ORDER BY rowid DESC LIMIT 1",'memory')[0]?.id);
+  if(step===1){const id=String(read("SELECT id FROM maintenance_requests WHERE state='ready' AND json_extract(body,'$.sources[0]') IS NOT NULL ORDER BY rowid DESC LIMIT 1",'memory')[0]?.id);
     assert.ok(JSON.stringify(options.messages).includes(id));return call('dafeiyu_memory_consolidate',{id});}
   return textReply('条件和未知已保留');
 });

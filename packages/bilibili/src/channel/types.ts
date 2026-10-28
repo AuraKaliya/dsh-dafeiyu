@@ -1,10 +1,11 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ConversationSchema,TaskResultAnchorSchema } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
 
 export const BILI_OWNER_EXTENSION='channel-bili-owner';
-export const BILI_OWNER_VERSION='0.1.0';
+export const BILI_OWNER_VERSION=RELEASE_VERSION;
 export const BILI_PUBLIC_SCENE=Object.freeze({channel:'bilibili',account:'public',kind:'local' as const,id:'public'});
 export const BiliOwnerHashSchema=z.string().regex(/^[a-f0-9]{64}$/);
 export const BiliOwnerCodeSchema=z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/);

@@ -1,3 +1,4 @@
+import {API_VERSION} from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { createHash } from 'node:crypto';
@@ -20,7 +21,7 @@ export class QqStickers {
   private readonly unregister:()=>void;
   private closed=false;
   constructor(private readonly ctx:Context,private readonly host:Host){
-    this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:QQ_STICKER_PROVIDER,version:'1',agentId:host.agentId,requires:['media.assets.v1','memory.capability-observation.v1','execution.resource-scope.v1'],provides:['qq.stickers.v1'],lifecycleReady:()=>!this.closed,
+    this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:QQ_STICKER_PROVIDER,version:'1',agentId:host.agentId,requires:['media.assets.v1','memory.capability-observation.v1','execution.resource-scope.v1'],provides:['qq.stickers.v1'],lifecycleReady:()=>!this.closed,
       resourceProofs:{current:proof=>this.current(proof),epoch:()=>this.closed?'closed':host.store.epoch()},actions:this.actions()});
     try{this.unregister=ctx.dafeiyu.registerMediaProvider({id:QQ_STICKER_PROVIDER,describe:key=>{const description=host.store.describe(key);return description&&this.current(description.origin)?description:null;},open:async(key,range,signal)=>{
       signal.throwIfAborted();if(range)throw new Error('STICKER_RANGE_UNSUPPORTED');const {data,description}=host.store.open(key);if(!this.current(description.origin))throw new Error('STICKER_SOURCE_STALE');

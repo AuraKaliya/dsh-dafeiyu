@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ActionOutcomeSchema, ExecutionScopeSchema, RunOriginSchema, conversationKey,PersonaManifestSchema } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
-import { configureSqlite } from '@dafeiyu/journal';
+import { configureSqlite,matchesSchema } from '@dafeiyu/journal';
 import { NativeDeliveryStore } from './native-delivery-store.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
@@ -51,7 +51,7 @@ export class RuntimeStore {
   private readonly nonce=randomUUID();
   private closed=false;
   readonly identity:Readonly<RuntimeIdentity>;
-  constructor(readonly file:string,identity:RuntimeIdentity,private readonly options:{create?:boolean;requirePersonaManifest?:boolean}={}){
+  constructor(readonly file:string,identity:RuntimeIdentity,private readonly options:{create?:boolean}={}){
     this.identity=Object.freeze(RuntimeIdentitySchema.parse(identity));
     if(!existsSync(file)&&!options.create)throw new Error('RUNTIME_INITIALIZATION_REQUIRED');
     if(options.create)mkdirSync(dirname(file),{recursive:true});
@@ -61,7 +61,7 @@ export class RuntimeStore {
       const count=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n);
       const fresh=version===0&&app===0&&count===0;
       if(fresh&&!options.create)throw new Error('RUNTIME_INITIALIZATION_REQUIRED');
-      if(!fresh&&(version!==RUNTIME_SCHEMA_VERSION||app!==RUNTIME_APPLICATION_ID))throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
+      if(!fresh&&(version!==RUNTIME_SCHEMA_VERSION||app!==RUNTIME_APPLICATION_ID||!matchesSchema(this.db,createStorageSchema)))throw new Error('RUNTIME_SCHEMA_UNSUPPORTED');
       this.db.exec('PRAGMA busy_timeout=5000;PRAGMA foreign_keys=ON;');
       if(fresh)this.initialize();
       const saved=this.db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();
@@ -145,7 +145,7 @@ export class RuntimeStore {
   }
   start(id:string,version:number,raw:unknown,persona?:unknown):StoredRun {
     const snapshot=RunSnapshotSchema.parse(raw);return this.transaction(()=>{const run=this.get(id);if(run.state!=='queued'||run.version!==version)throw new Error('VERSION_CONFLICT');
-      if(persona===undefined&&this.options.requirePersonaManifest)throw new Error('PERSONA_MANIFEST_REQUIRED');
+      if(persona===undefined)throw new Error('PERSONA_MANIFEST_REQUIRED');
       if(persona!==undefined){const manifest=PersonaManifestSchema.parse(persona);
         if(manifest.runId!==id||manifest.agentId!==run.definition.scope.agentId||manifest.foundationHash!==snapshot.personaVersion||manifest.modelRouteHash!==runtimeHash(snapshot.model))throw new Error('PERSONA_BINDING_CONFLICT');
         this.db.prepare('INSERT INTO run_persona_manifests VALUES(?,?,?)').run(id,JSON.stringify(manifest),runtimeHash(manifest));}
@@ -159,6 +159,13 @@ export class RuntimeStore {
     const result=RunResultRefSchema.parse(raw);return this.transaction(()=>{const run=this.get(id);if(run.state!=='running'||run.version!==version||run.snapshot?.sessionId!==result.sessionId)throw new Error('RESULT_BINDING_CONFLICT');
       if(this.operations(id).some(operation=>operation.state==='started'))throw new Error('OPERATION_PENDING');
       this.db.prepare('UPDATE runs SET result=? WHERE id=?').run(JSON.stringify(result),id);return this.transitionInside(id,version,'completed');});
+  }
+  waitWithResult(id:string,version:number,raw:unknown,code:string):StoredRun {
+    const result=RunResultRefSchema.parse(raw);return this.transaction(()=>{const run=this.get(id);
+      if(run.state!=='running'||run.version!==version||run.snapshot?.sessionId!==result.sessionId)throw new Error('RESULT_BINDING_CONFLICT');
+      if(this.operations(id).some(operation=>operation.state==='started'))throw new Error('OPERATION_PENDING');
+      this.db.prepare('UPDATE runs SET result=? WHERE id=?').run(JSON.stringify(result),id);return this.transitionInside(id,version,'waiting',code);
+    });
   }
   beginOperation(runId:string,callId:string,action:string,plugin:string,pluginVersion:string,input:unknown,actionVersion=pluginVersion){
     key.parse(callId);key.parse(action);key.parse(plugin);key.parse(pluginVersion);key.parse(actionVersion);const fingerprint=runtimeHash({action,plugin,pluginVersion,actionVersion,input});
@@ -191,7 +198,7 @@ export class RuntimeStore {
   phaseStatus(runId:string){this.get(runId);const types=['task.stage','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted',...['ready','sending','sent','not-sent','partial','uncertain','rejected','interrupted'].map(state=>'native.delivery.'+state)];
     const row=this.db.prepare("SELECT body FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type') IN ("+types.map(()=>'?').join(',')+") ORDER BY ordinal DESC LIMIT 1").get(runId,...types);if(!row)return null;
     const event=eventSchema.parse(JSON.parse(string(row.body))),phase=event.type==='task.stage'?event.data.phase:event.type==='run.completed'?'execution-ended':event.type.split('.').at(-1)!;
-    const active=['exploration','assessment','rendering','verification','ready','sending','waiting'].includes(String(phase));return {phase,startedAt:event.at,deadlineAt:event.data.deadlineAt??null,elapsedMs:active?Math.max(0,Date.now()-Date.parse(event.at)):0};}
+    const active=['exploration','review','rendering','verification','ready','sending','waiting'].includes(String(phase));return {phase,startedAt:event.at,deadlineAt:event.data.deadlineAt??null,elapsedMs:active?Math.max(0,Date.now()-Date.parse(event.at)):0};}
   /** Reads the immutable lifecycle fact, even after its outbox delivery was acknowledged. */
   latestRunEvent(runId:string,state:RunState){this.get(runId);RunStateSchema.parse(state);const row=this.db.prepare("SELECT id,body FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')=? ORDER BY ordinal DESC LIMIT 1").get(runId,`run.${state}`);
     if(!row)return null;const event=eventSchema.parse(JSON.parse(string(row.body)));if(event.id!==row.id||event.runId!==runId||event.type!==`run.${state}`)throw new Error('RUN_EVENT_BINDING_CONFLICT');return event;

@@ -47,7 +47,7 @@ test('task metadata is scoped to its real source conversation and expired or clo
   const h=await qqCapabilityFixture({tasks:true});t.after(h.close);let step=0,captured:ExecutionContext|undefined;const original=h.core.submitMessageTask.bind(h.core);
   h.core.submitMessageTask=(context,plugin,input)=>{captured=context;assert.throws(()=>original({...context},plugin,input),/SCOPE_DENIED/);return original(context,plugin,input);};
   h.setResponse(request=>native(request)?textReply('内部完成'):++step===1?call('qq_task_submit',{requestId:'first',title:'隔离任务'}):textReply('已受理'));await h.message('请整理讨论',{trigger:true});
-  const data=receiptSchema.parse(outcomes(h.adapter.requests.filter(request=>!native(request)&&!String(request.sessionId).startsWith('dafeiyu-assessment-')).at(-1)!).find(outcome=>receiptSchema.safeParse(outcome.data).success)!.data);
+  const data=receiptSchema.parse(outcomes(h.adapter.requests.filter(request=>!native(request)&&!String(request.sessionId).startsWith('dafeiyu-review-')).at(-1)!).find(outcome=>receiptSchema.safeParse(outcome.data).success)!.data);
   assert.throws(()=>original(captured!,'qq-tasks',{requestId:'expired',title:'旧授权'}),/SCOPE_DENIED/);
   step=0;h.setResponse(()=>++step===1?call('qq_task_status',{taskId:data.taskId}):textReply('查询结束'));await h.message('查询状态',{trigger:true,target:{...scene,id:otherGroup}});assert.equal(outcomes(h.adapter.requests.at(-1)!).at(-1)?.errorCode,'SCOPE_DENIED');
   step=0;await h.message('查询状态',{trigger:true});assert.equal(outcomes(h.adapter.requests.at(-1)!).at(-1)?.status,'succeeded');assert.equal(taskRows(h.root).length,1);

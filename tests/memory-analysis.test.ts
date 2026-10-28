@@ -153,7 +153,7 @@ test('plugin restart retains completed jobs and does not resubmit model or old w
   const source=await h.evidence('a',sentence);h.setAnalysisResponse(()=>textReply(JSON.stringify(result())));
   const id=(await submit(h,source.ref)).jobId;await settled(h,id);
   const calls=h.adapter.requests.filter(r=>String(r.sessionId).startsWith('memory-analysis-')).length;
-  await h.memoryFiber.dispose();const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());
+  await h.memoryFiber.dispose();const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();
   await h.ctx.dafeiyuMemory.whenAnalysisIdle();
   assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('memory-analysis-')).length,calls);
   assert.equal(statusSchema.parse(await h.probe('a',c=>h.ctx.dafeiyuMemory.analysisStatus(c,id))).state,'completed');
@@ -172,7 +172,7 @@ for(const deleted of [false,true])test(`lost commit acknowledgement recovers exa
   if(deleted)await h.probe('a',c=>h.memory.delete(c,{requestId:randomUUID(),id:item.id,expectedVersion:1,reason:'删除已写入但未确认的记录'}));
   const calls=h.adapter.requests.filter(r=>String(r.sessionId).startsWith('memory-analysis-')).length;
   db.exec('DROP TRIGGER simulated_ack_failure');
-  await h.memoryFiber.dispose();const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());
+  await h.memoryFiber.dispose();const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();
   const memory=h.ctx.dafeiyuMemory;await memory.whenAnalysisIdle();
   assert.equal(statusSchema.parse(await h.probe('a',c=>memory.analysisStatus(c,id))).state,'completed');
   assert.equal(h.adapter.requests.filter(r=>String(r.sessionId).startsWith('memory-analysis-')).length,calls);
@@ -188,7 +188,7 @@ test('interrupted analysis restarts with a fresh isolated DSH attempt and durabl
   });
   const id=(await submit(h,source.ref)).jobId;await entered.promise;await h.memoryFiber.dispose();
   h.setAnalysisResponse(()=>textReply(JSON.stringify(result())));
-  const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());
+  const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();
   const memory=h.ctx.dafeiyuMemory;await memory.whenAnalysisIdle();
   const status=await h.probe('a',c=>memory.analysisStatus(c,id));assert.equal(statusSchema.parse(status).state,'completed');
   assert.match(JSON.stringify(status),/"attempts":2/);
@@ -271,7 +271,7 @@ test('analysis audit outbox retries publication without duplicating delivered ev
   h.setAnalysisResponse(()=>textReply(JSON.stringify(result())));const id=(await submit(h,source.ref)).jobId;await settled(h,id);
   assert.equal(h.core.journal.events(source.message.route).filter(e=>e.type==='memory.analysis.finished').length,0);
   h.core.journal.appendOnce=original;await h.memoryFiber.dispose();
-  const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());
+  const restarted=await h.ctx.plugin(Memory,{agentId:'dafeiyu',dataDir:h.root,analysis:{}});t.after(()=>restarted.dispose());h.ctx.dafeiyuMemory.recover();h.ctx.dafeiyuMemory.activate();
   await h.ctx.dafeiyuMemory.whenAnalysisIdle();
   assert.equal(h.core.journal.events(source.message.route).filter(e=>e.type==='memory.analysis.finished').length,1);
   const events=h.core.journal.events(source.message.route).filter(e=>e.type.startsWith('memory.analysis.'));

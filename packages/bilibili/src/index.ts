@@ -10,3 +10,5 @@ import type { Context } from '@deepseek-ai/cordis';
 export const name='dafeiyu-bilibili';
 export const inject=['dafeiyu'];
 export function apply(ctx:Context,config:Config){new BiliService(ctx,config);}
+
+export * from './storage-status.js';

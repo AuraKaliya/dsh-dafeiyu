@@ -21,7 +21,9 @@ export class AutomaticRecall {
   constructor(private readonly ctx:Context,private readonly memory:MemoryStore,private readonly retrieval:MemoryRetrieval|null){}
   private current(scope:TimelineScope,item:MemoryView):boolean{
     const fresh=this.memory.read(scope,item.id,'normal',item.revision);if(!fresh||fresh.version!==item.version||fresh.contentHash!==item.contentHash)return false;
-    return this.memory.provenance(scope,item.id,item.revision).every(parent=>parent.sources.every(source=>source.kind!=='timeline'||this.ctx.dafeiyuTimeline.checkArchivedSource(scope,source.ref,source.contentHash)));
+    return this.memory.provenance(scope,item.id,item.revision).every(parent=>parent.sources.every(source=>source.kind!=='timeline'||
+      this.ctx.dafeiyuTimeline.checkArchivedSource(scope,source.ref,source.contentHash)&&
+      !this.memory.suppressedEvidence(scope,source.contentHash,ref=>this.ctx.dafeiyuTimeline.sameArchivedSource(scope,source.ref,ref))));
   }
   async prepare(request:ContextRequest):Promise<ContextItem[]>{
     const scope=this.ctx.dafeiyu.scopeForContext(request),config=this.ctx.dafeiyu.contextAssembly();if(!config.recall.enabled)return [];

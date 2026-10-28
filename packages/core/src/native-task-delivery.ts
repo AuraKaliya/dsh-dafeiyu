@@ -24,7 +24,7 @@ const codes=new Set(['SOURCE_STALE','DEPENDENCY_UNAVAILABLE','DELIVERY_BINDING_C
 const code=(error:unknown)=>error instanceof Error&&(codes.has(error.message.toUpperCase())||['DELIVERY_VERIFICATION_TIMEOUT','DELIVERY_VERIFICATION_MODEL_CHANGED','DELIVERY_VERIFICATION_MAX_TOKENS','DELIVERY_VERIFICATION_MODEL_ERROR','DELIVERY_VERIFICATION_ABORTED','DELIVERY_VERIFICATION_INVALID_RESULT','DELIVERY_RENDER_TIMEOUT'].includes(error.message))?error.message.toUpperCase():'NATIVE_DELIVERY_FAILED';
 const resultSchema=z.discriminatedUnion('status',[z.object({status:z.literal('sent'),receiptId:z.string().min(1).max(256)}),z.object({status:z.literal('not-sent'),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/)}),z.object({status:z.literal('unknown'),code:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/)})]);
 const terminal=new Set(['sent','not-sent','partial','uncertain','rejected','interrupted']);
-/** One intent per completed native Run, a clean persona turn, verification, then anchored transport. */
+/** Deliver the main Agent result; isolate and verify expression only when source scope requires it. */
 export class NativeTaskDelivery {
   private readonly notices=new Map<string,Promise<import('@dafeiyu/contracts').Json>>();
   private readonly active=new Map<string,Promise<ReturnType<RuntimeStore['nativeDeliveries']['status']>>>();
@@ -91,7 +91,7 @@ export class NativeTaskDelivery {
       if(record.state==='accepted'){
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
         const completed=this.host.store.get(runId);
-        if(packet.resultIncluded&&completed.state==='completed'&&completed.result){
+        if(packet.resultIncluded&&['completed','waiting'].includes(completed.state)&&completed.result){
           const text=await readPersistedResult(this.host.ctx,completed.result);guard();
           this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'source-admission',expression:'main-agent'});
           this.host.store.nativeDeliveries.rendered(runId,completed.result);this.host.store.nativeDeliveries.approve(runId,text);this.host.flush();
@@ -128,11 +128,10 @@ export class NativeTaskDelivery {
           if(!invoked){this.host.store.nativeDeliveries.sending(runId);this.host.flush();}if(deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');
           const started=performance.now();timer=setTimeout(()=>writeBudget.abort(new DOMException('Task result write timed out','TimeoutError')),remaining);active=true;invoked=true;let ended=false;
           return ()=>{if(ended)return;ended=true;if(timer)clearTimeout(timer);timer=undefined;remaining=Math.max(0,remaining-(performance.now()-started));active=false;};};
-        const notified=channel.capability.taskTextDispatch==='write-window-v1';
-        this.host.store.appendExecutionEvent(runId,'native.delivery.preflight',{deferredWriteBudget:notified,writeTimeoutMs:this.host.sendTimeoutMs});this.host.flush();
-        let closeLegacy:(()=>void)|undefined;try{if(!notified)closeLegacy=begin();const outcome=resultSchema.parse(await sendTaskResult(reply,record.anchor,sending,check,notified?begin:undefined));
+        this.host.store.appendExecutionEvent(runId,'native.delivery.preflight',{deferredWriteBudget:true,writeTimeoutMs:this.host.sendTimeoutMs});this.host.flush();
+        try{const outcome=resultSchema.parse(await sendTaskResult(reply,record.anchor,sending,check,begin));
           if(!invoked&&outcome.status!=='not-sent'){if(this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;throw new Error('DELIVERY_DISPATCH_NOT_NOTIFIED');}return outcome;
-        }finally{closeLegacy?.();if(timer)clearTimeout(timer);}
+        }finally{if(timer)clearTimeout(timer);}
       });}
       if(!invoked&&result.status==='not-sent'&&this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.notSentBeforeDispatch(runId,result.code);
       else this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);

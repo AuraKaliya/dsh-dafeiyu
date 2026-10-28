@@ -1,3 +1,4 @@
+export {executorFilesSnapshot,executorSnapshotPath} from './archive-integrity.js';
 export * from './types.js';
 export * from './store.js';
 export * from './protocol.js';
@@ -11,3 +12,5 @@ export * from './config.js';
 export * from './service.js';
 export * from './headless-manifest.js';
 export * from './windows-process.js';
+
+export * from './storage-status.js';

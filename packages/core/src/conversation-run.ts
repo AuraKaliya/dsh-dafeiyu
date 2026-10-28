@@ -11,20 +11,20 @@ import type { StoredRun } from './runtime-store.js';
 import type { RunResult } from './runtime.js';
 import { CORE_VERSION } from './version.js';
 import type { FoundationSnapshot } from './foundation.js';
-import { foundationManifest } from './persona-manifest.js';
 
 const projectionSchema=z.strictObject({inboundId:z.uuid(),startedEventId:z.uuid(),reply:z.strictObject({id:z.string(),conversation:ConversationSchema,sourceMessageId:z.string(),text:z.string()}),
-  sources:z.array(z.strictObject({kind:z.enum(['message','session','event']),id:z.string(),seq:z.number().int().nonnegative().optional(),route:z.string().optional()}))});
+  sources:z.array(z.strictObject({kind:z.enum(['message','session','event']),id:z.string(),seq:z.number().int().nonnegative().optional(),route:z.string().min(1)}))});
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 /** The journal owns delivery. The Run owns only the durable model execution and its projection. */
 export class ConversationRuns {
+  private projection:Promise<void>=Promise.resolve();
   constructor(private readonly ctx:Context,private readonly store:RuntimeStore,private readonly journal:Journal,private readonly agentId:string,private readonly validatePersona:(run:StoredRun)=>void=()=>{}){}
-  begin(item:PendingMessage,persona:FoundationSnapshot,model:HostConfig['modelRoutes']['chat'],registry:unknown,execution:{policyId:string;authority:unknown;actions:unknown}={policyId:'conversation',authority:null,actions:[]},preparePersona?:(run:StoredRun)=>PersonaManifest):StoredRun{
+  begin(item:PendingMessage,persona:FoundationSnapshot,model:HostConfig['modelRoutes']['chat'],registry:unknown,execution:{policyId:string;authority:unknown;actions:unknown},preparePersona:(run:StoredRun)=>PersonaManifest):StoredRun{
     const request=this.store.prepareRequest('conversation',item.id,{kind:'message',inboundId:item.id,messageHash:runtimeHash(item.message)});
     let run=this.store.acceptRun(request.id,{taskId:null,scope:{kind:'conversation',agentId:this.agentId,route:item.route},origin:{kind:'message',inboundId:item.id,conversation:item.message.conversation},intentVersion:0,policyId:execution.policyId});
     if(run.state==='accepted')run=this.store.transition(run.id,run.version,'queued');
     if(run.state!=='queued')throw new Error('RUN_INTERRUPTED');
-    return this.store.start(run.id,run.version,{sessionId:item.sessionId,personaVersion:persona.version,model,registryVersion:runtimeHash({extensions:registry,actions:execution.actions}),authorityVersion:runtimeHash({extension:item.extensionId,route:item.route,policy:execution.authority}),inputs:[]},preparePersona?.(run)??foundationManifest(run,persona,model));
+    return this.store.start(run.id,run.version,{sessionId:item.sessionId,personaVersion:persona.version,model,registryVersion:runtimeHash({extensions:registry,actions:execution.actions}),authorityVersion:runtimeHash({extension:item.extensionId,route:item.route,policy:execution.authority}),inputs:[]},preparePersona(run));
   }
   complete(run:StoredRun,item:PendingMessage,result:RunResult,startedEventId:string):void{
     if(!result.resultRef)throw new Error('PERSISTENCE_FAILED');
@@ -32,7 +32,12 @@ export class ConversationRuns {
     this.store.completeWithProjection(run.id,this.store.get(run.id).version,result.resultRef,z.record(z.string(),z.json()).parse(projection));
   }
   fail(run:StoredRun,code='MODEL_INCOMPLETE'):void{const current=this.store.get(run.id);if(['queued','running','cancelling'].includes(current.state))this.store.transition(run.id,current.version,'failed',code);}
-  async project():Promise<void>{for(const event of this.store.outbox()){
+  project():Promise<void>{
+    const work=this.projection.then(()=>this.projectNow());
+    this.projection=work.catch(()=>{});
+    return work;
+  }
+  private async projectNow():Promise<void>{for(const event of this.store.outbox()){
     const run=this.store.get(event.runId);if(run.definition.origin.kind!=='message')continue;
     if(event.type==='conversation.result-ready'){
       const projection=projectionSchema.parse(event.data),item=this.journal.get(run.definition.origin.inboundId),ref=run.result;
@@ -45,7 +50,7 @@ export class ConversationRuns {
         await readPersistedResult(this.ctx,ref);
         const operations=this.store.operations(run.id),delegated=operations.some(op=>op.plugin==='qq-tasks'&&op.action==='qq_task_submit'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'),media=operations.some(op=>['qq_sticker_use','dafeiyu_media_reply'].includes(op.action)&&op.outcome?.status==='succeeded'&&z.object({selected:z.number().positive()}).safeParse(op.outcome.data).success);
         this.journal.transition(item.id,'processing',!projection.reply.text&&delegated&&!media?'handled':'reply-ready',{...eventFor(this.agentId,item,'turn.completed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id,...(!projection.reply.text&&delegated&&!media?{replySuppressed:'accepted-task'}:{})}),
-          sources:projection.sources.map(source=>({kind:source.kind,id:source.id,...(source.seq===undefined?{}:{seq:source.seq}),...(source.route===undefined?{}:{route:source.route})}))},projection.reply);
+          sources:projection.sources.map(source=>({kind:source.kind,id:source.id,...(source.seq===undefined?{}:{seq:source.seq}),route:source.route}))},projection.reply);
       }else if(!['reply-ready','sending','delivered','handled','uncertain'].includes(item.state))throw new Error('RESULT_PROJECTION_CONFLICT');
     }else{
       const item=this.journal.get(run.definition.origin.inboundId),operation=typeof event.data.operationId==='string'?this.store.operation(event.data.operationId):null;

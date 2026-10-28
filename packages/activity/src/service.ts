@@ -1,3 +1,6 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
+import {API_VERSION} from '@dafeiyu/contracts';
+import {pendingActivityEvents} from './storage-status.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
@@ -24,6 +27,7 @@ declare module '@deepseek-ai/cordis' {interface Context {dafeiyuActivity:Activit
 export const ACTIVITY_ACTIONS=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status'] as const;
 
 export class ActivityService extends Service {
+  pendingEvents(){return pendingActivityEvents(this.config.dataDir); }
   readonly store:ActivityStore;
   readonly config:z.output<typeof configSchema>;
   readonly configHash:string;
@@ -36,7 +40,7 @@ export class ActivityService extends Service {
   constructor(ctx:Context,raw:Config,private readonly now:()=>number=Date.now,monotonic:()=>number=()=>performance.now()){
     super(ctx,'dafeiyuActivity');this.config=configSchema.parse(raw);this.configHash=activityHash(this.config.settings);
     this.store=new ActivityStore(join(this.config.dataDir,'activity.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.settings);
-    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:4,id:'activity',version:'0.1.0',agentId:this.config.agentId,
+    try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'activity',version:RELEASE_VERSION,agentId:this.config.agentId,
       requires:['execution.task.v1','execution.source-anchor.v1','memory.execution.v1',...(this.config.settings.maintenance?['memory.maintenance.v1']:[])],provides:['activity.plan.v1','activity.wakeup.v1'],lifecycleReady:()=>this.gate.active&&!this.closed&&this.scheduler.dependenciesReady(),actions:this.actions(),
       contexts:[{id:'wake',prepare:async view=>this.scheduler.context(view),validate:(view,item)=>this.scheduler.contextCurrent(view,item)}]});}
     catch(error){this.store.close();throw error;}
@@ -68,7 +72,7 @@ export class ActivityService extends Service {
       source};});
   }
   private actions():ActionCapability[]{
-    const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,fn:(input:unknown,c:ExecutionContext)=>unknown):ActionCapability=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',requiresTask:true,
+    const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,fn:(input:unknown,c:ExecutionContext)=>unknown):ActionCapability=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',scope:'task',
       execute:async(input,c)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(fn(input,c)),sources:[],receipts:[]};}
         catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'ACTIVITY_FAILED';
           return {status:'failed',effects:write&&!['INVALID_INPUT','SOURCE_NOT_EXPOSED','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','SCOPE_DENIED','ACTIVITY_CANCELLED','ACTIVITY_INTERVAL_TOO_SHORT','ACTIVITY_SOURCE_REQUIRED','ACTIVITY_REPLAN_REQUIRED','ACTIVITY_QUIET_ALL_DAY','PRIVATE_INPUT_REJECTED'].includes(code)?'unknown':'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});

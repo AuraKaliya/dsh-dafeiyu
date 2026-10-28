@@ -27,13 +27,6 @@ test('QQ media descriptors bind actual account, message and segment while keepin
   }finally{store.close();}
 });
 
-test('explicit QQ v4 migration preserves text hashes, receipts and ledger bodies without inventing media',async()=>{
-  const root=await mkdtemp(join(testTempDir(),'qq-media-migration-')),file=join(root,'qq.sqlite');let store=new QqStore(file);store.remember(route,'old','sender','保留的旧文字',metadata);store.sent('reply','receipt');const page=store.cache.browse(route,'owner',{requestId:'before'});store.close();
-  const db=new DatabaseSync(file);db.exec('DROP TABLE qq_media_sources;DROP TABLE qq_media_drafts;DROP TABLE qq_media_deliveries;DROP TABLE qq_media_parts;DROP TABLE qq_reply_quotes;DROP TABLE qq_message_batches;DROP TABLE qq_stickers;DROP TABLE qq_sticker_leases;PRAGMA user_version=4;');const old=db.prepare('SELECT * FROM qq_message_meta').all();assert.equal(inspectQqSchema(db).supported,true);db.close();const before=await readFile(file);
-  assert.throws(()=>new QqStore(file),/MIGRATION_REQUIRED/);assert.deepEqual(await readFile(file),before);store=new QqStore(file,{});try{assert.equal(store.receipt('reply'),'receipt');assert.equal(store.cache.proofCurrent(page.proof),true);assert.deepEqual(store.media.list(scene,'old'),[]);}finally{store.close();}
-  const migrated=new DatabaseSync(file);try{assert.equal(inspectQqSchema(migrated).version,QQ_SCHEMA_VERSION);assert.deepEqual(migrated.prepare('SELECT * FROM qq_message_meta').all(),old);}finally{migrated.close();}
-});
-
 test('controlled cache files support verified ranges and reject outside paths, aliases, mutation and revocation',async()=>{
   const root=await mkdtemp(join(testTempDir(),'qq-media-path-')),cache=join(root,'cache');await mkdir(cache);const file=join(cache,'audio.wav');await writeFile(file,'0123456789');const reader=new QqMediaReader(QqMediaConfigSchema.parse({cacheRoots:[cache]})),signal=new AbortController().signal;
   const range=await reader.local(file,{start:2,end:5},signal,()=>{});assert.equal(range.totalBytes,10);assert.deepEqual(range.range,{start:2,end:5});assert.equal((await bytes(range)).toString(),'2345');

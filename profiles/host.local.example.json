@@ -1,14 +1,53 @@
 {
   "schemaVersion": 1,
   "profileId": "local-formal",
-  "agent": {"id": "dafeiyu"},
-  "paths": {"core": "../.runtime/local-formal/core", "memory": "../.runtime/local-formal/memory", "sessions": "../.runtime/local-formal/sessions", "query": "../.runtime/local-formal/query.sqlite"},
-  "modelRoutes": {"chat": {"provider": "deepseek-official", "model": "deepseek-flash", "reasoningEffort": "max"}},
-  "persona": {"fixedFile": "./persona.foundation.md", "kind": "formal"},
+  "agent": {
+    "id": "dafeiyu"
+  },
+  "paths": {
+    "core": "../.runtime/local-formal/core",
+    "memory": "../.runtime/local-formal/memory",
+    "sessions": "../.runtime/local-formal/sessions",
+    "query": "../.runtime/local-formal/query.sqlite"
+  },
+  "modelRoutes": {
+    "chat": {
+      "provider": "deepseek-official",
+      "model": "deepseek-flash",
+      "reasoningEffort": "max"
+    }
+  },
+  "persona": {
+    "fixedFile": "./persona.foundation.md",
+    "kind": "formal"
+  },
   "plugins": [
-    {"id": "model-deepseek", "required": true},
-    {"id": "timeline", "required": true, "config": {"execution": true}},
-    {"id": "memory", "required": true}
+    {
+      "id": "model-deepseek",
+      "required": true
+    },
+    {
+      "id": "timeline",
+      "required": true,
+      "config": {
+        "execution": true
+      }
+    },
+    {
+      "id": "memory-growth",
+      "required": true
+    }
   ],
-  "authorityPolicies": [{"id": "local-task", "producers": ["host-cli"], "actions": ["dafeiyu_task_intent"], "allowLocalWrite": false}]
+  "authorityPolicies": [
+    {
+      "id": "local-task",
+      "producers": [
+        "host-cli"
+      ],
+      "actions": [
+        "dafeiyu_task_intent"
+      ],
+      "allowLocalWrite": false
+    }
+  ]
 }

@@ -1,3 +1,4 @@
+import {API_VERSION} from './protocol.js';
 import { z } from 'zod';
 import { ConversationSchema } from './conversation.js';
 import type { Json, ChannelCapability, Receipt } from './index.js';
@@ -48,7 +49,7 @@ export type ActionOutcome = z.infer<typeof ActionOutcomeSchema>;
 export interface ActionCapability {
   readonly id: string; readonly version: string; readonly description: string;
   readonly inputSchema: z.ZodType; readonly outputSchema: z.ZodType;
-  readonly effects: 'read' | 'local-write' | 'external-write'; readonly requiresTask?: boolean;
+  readonly effects: 'read' | 'local-write' | 'external-write'; readonly scope?: 'conversation'|'task'|'any';
   execute(input: Json, context: ExecutionContext): Promise<ActionOutcome>;
 }
 export interface TaskContextContributor {
@@ -65,7 +66,6 @@ export interface Extension {
   readonly resourceProofs?: ResourceProofProvider;
   readonly conversationContexts?: readonly import('./context.js').ContextContributor[];
   readonly compactionProvider?: import('./compaction.js').CompactionProvider;
-  readonly feedbackProvider?: import('./feedback.js').FeedbackProvider;
   readonly memoryObservationProvider?: import('./observation.js').MemoryObservationProvider;
 }
 export interface ExtensionHandle {
@@ -77,7 +77,7 @@ export interface ExtensionHandle {
   dispose():void;
 }
 
-export const ExtensionMetadataSchema = z.strictObject({ protocolVersion: z.literal(4), id: ExtensionIdSchema,
+export const ExtensionMetadataSchema = z.strictObject({ protocolVersion: z.literal(API_VERSION), id: ExtensionIdSchema,
   version: z.string().min(1).max(80), agentId: actor, provides: z.array(FeatureSchema).max(64).default([]), requires: z.array(FeatureSchema).max(64).default([]) });
 
 export const TaskSubmitSchema = z.strictObject({ requestId, title: z.string().trim().min(1).max(200), goal: z.string().trim().min(1).max(2000),

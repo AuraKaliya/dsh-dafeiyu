@@ -23,7 +23,7 @@ export async function semanticFixture(){
   const h=await provenanceFixture();await h.run('固定前缀');
   const a=await seedCheckpoint(h,raw,[{kind:'constraint',text:raw+'这段话是过程说明。'.repeat(30)},{kind:'pending',text:'尚未验收，不允许正式群发。'+'重复整理过程。'.repeat(30)}]);
   h.setCompactionResponse(scriptedSemantic);
-  const scope={...a.memory.scope},policy=new MemorySourcePolicy(h.ctx,h.store,null,null,()=> 'fixture');
+  const scope={...a.memory.scope},policy=new MemorySourcePolicy(h.ctx,h.store,null);
   const validate=(deps:readonly SourceDependency[])=>deps.every(d=>d.kind==='context'||policy.validate(scope,d));
   const provider=new MemoryCompaction(h.ctx,{inputTokens:1000000,semanticEnabled:true,timeoutMs:10000},()=>({epoch:'fixture',taskId:null,versions:{}}),policy);
   const plan=(view:ResolvedFragmentView=a.view,mode:'fusion'|'rebuild'='fusion',group='G1')=>prepareSummaryRewrite(h.session(),scope,summaryReference(view.manifestSeq,view.manifest),group,mode,
