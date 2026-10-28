@@ -14,6 +14,8 @@ const observedSchema=z.strictObject({schemaVersion:z.literal(2),kind:z.enum(['pr
   history:z.array(SourceDependencySchema).max(4096),occurredAt:z.iso.datetime({offset:true}),resource:z.string(),coverage:z.array(z.string()),completeness:z.enum(['complete','partial','unknown']),nature:PersonaSourceNatureSchema.optional()});
 const storedSchema=z.union([bodySchema,observedSchema]);
 export class ExecutionSources {
+  private readonly sourceReadStatements=new Map<string,import('node:sqlite').StatementSync>();
+  private sourceRead(sql:string){let statement=this.sourceReadStatements.get(sql);if(!statement){statement=this.db.prepare(sql);this.sourceReadStatements.set(sql,statement);}return statement;}
   constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(work:()=>T)=>T,private readonly resolve:PersonaResolver){}
   private ensureTask(access:PersonaAccess){access.guard();const scope=access.view.scope;if(scope.kind!=='task'||!access.view.taskId)throw new Error('TASK_REQUIRED');
     const task=this.db.prepare('SELECT epoch,status FROM task_workspaces WHERE id=? AND agent_id=?').get(scope.taskId,scope.agentId);
@@ -49,7 +51,7 @@ export class ExecutionSources {
     return row?PersonaSourceRefSchema.parse({kind:'execution-source',id,agentId:access.view.scope.agentId,scopeKey:row.scope_key,version:row.state_version,contentHash:row.content_hash}):null;}
   open(access:PersonaAccess,ref:PersonaSourceRef):PersonaMaterial|null{
     access.guard();if(ref.kind!=='execution-source'||ref.agentId!==access.view.scope.agentId||ref.scopeKey!==personaScope(access.view.scope))return null;
-    const row=this.db.prepare('SELECT * FROM execution_sources WHERE id=? AND scope_key=? AND deleted=0').get(ref.id,ref.scopeKey);
+    const row=this.sourceRead('SELECT * FROM execution_sources WHERE id=? AND scope_key=? AND deleted=0').get(ref.id,ref.scopeKey);
     if(!row||row.state_version!==ref.version||row.content_hash!==ref.contentHash)return null;const body=storedSchema.parse(JSON.parse(String(row.body)));
     if(personaScope(body.scope)!==ref.scopeKey||body.scope.agentId!==ref.agentId||createHash('sha256').update(body.text).digest('hex')!==ref.contentHash)return null;
     if(body.schemaVersion===2){if(body.history.length&&!access.validateHistory?.(body.history))return null;

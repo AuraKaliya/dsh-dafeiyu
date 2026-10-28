@@ -25,7 +25,8 @@ test('real DSH loop composes persona and delivers back to the same conversation'
   assert.match(JSON.stringify(h.adapter.requests[0]), /蓝色大肥鱼/);
   const item = h.core.journal.get(receipt.id);
   const events = h.core.journal.events(item.route);
-  assert.deepEqual(events.map(e => e.type), ['message.accepted', 'turn.started', 'persona.loaded', 'turn.completed', 'delivery.started', 'delivery.sent']);
+  assert.deepEqual(events.map(e => e.type), ['message.accepted', 'turn.started', 'persona.loaded', 'context.preparing', 'context.admitted', 'turn.completed', 'delivery.started', 'delivery.sent']);
+  assert.equal(events.find(e=>e.type==='context.preparing')?.plugin,'core-delivery-recovery');
   assert.equal(events[1]?.causedBy, events[0]?.id);
   assert.ok(events.find(e => e.type === 'turn.completed')?.sources.some(ref => ref.kind === 'session'));
 });

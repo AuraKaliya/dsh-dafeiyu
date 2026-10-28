@@ -12,6 +12,8 @@ export interface ExperienceDraft {
   target:{id:string;version:number}|null;
 }
 export class ExperienceStore {
+  private readonly sourceReadStatements=new Map<string,import('node:sqlite').StatementSync>();
+  private sourceRead(sql:string){let statement=this.sourceReadStatements.get(sql);if(!statement){statement=this.db.prepare(sql);this.sourceReadStatements.set(sql,statement);}return statement;}
   constructor(private readonly db:DatabaseSync,private readonly transaction:<T>(fn:()=>T)=>T,private readonly resolve:PersonaResolver){}
   private task(access:PersonaAccess){
     access.guard();const scope=access.view.scope;if(scope.kind!=='task')throw new Error('TASK_REQUIRED');
@@ -117,7 +119,7 @@ export class ExperienceStore {
   });}
   recover(){return this.db.prepare("UPDATE maintenance_requests SET state='failed',version=version+1,error='PROCESS_INTERRUPTED',updated_at=? WHERE state='running'").run(new Date().toISOString()).changes;}
   sourceCurrent(access:PersonaAccess,ref:PersonaSourceRef):boolean {
-    const rows=this.db.prepare("SELECT r.body,i.version,i.state FROM experience_revisions r JOIN experience_items i ON i.id=r.id WHERE i.agent_id=? AND i.scope_key=? AND json_extract(r.body,'$.contentRef.id')=? ORDER BY r.version DESC LIMIT 1")
+    const rows=this.sourceRead("SELECT r.body,i.version,i.state FROM experience_revisions r JOIN experience_items i ON i.id=r.id WHERE i.agent_id=? AND i.scope_key=? AND json_extract(r.body,'$.contentRef.id')=? ORDER BY r.version DESC LIMIT 1")
       .all(access.view.scope.agentId,personaScope(access.view.scope),ref.id);
     if(!rows.length)return true;const row=rows[0]!,value=ExperienceRevisionSchema.parse(JSON.parse(String(row.body)));
     // A superseded inference is still a dated input to its correction. Current adoption is
