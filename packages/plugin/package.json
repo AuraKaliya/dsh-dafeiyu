@@ -11,7 +11,8 @@
     ".": "./lib/index.js",
     "./settings": "./lib/settings.js",
     "./installation": "./lib/installation.js",
-    "./client": "./client.js"
+    "./client": "./client.js",
+    "./package.json": "./package.json"
   },
   "bin": {
     "dafeiyu": "./bin/dafeiyu.mjs"

@@ -6,7 +6,7 @@ export const inject = ['slots', 'remote'];
 export async function apply(ctx) {
     const unmount = await ctx.remote.$mount(managementRemote);
     ctx.effect(() => unmount);
-    const request = async (body) => { const result = await ctx.remote.dafeiyuManagement.request(JSON.stringify(body)); if (!result.ok)
+    const request = async (body) => { const service = ctx.get('remote.dafeiyuManagement'); if (service === undefined) throw new Error('MANAGEMENT_REMOTE_UNAVAILABLE'); const result = await service.request(JSON.stringify(body)); if (!result.ok)
         throw new Error(result.error.code); return JSON.parse(result.value); };
     const App = createManagementApp(body => request({ apiVersion: API_VERSION, ...body }));
     ctx.effect(() => { const style = document.createElement('style'); style.textContent = css; document.head.append(style); return () => style.remove(); });

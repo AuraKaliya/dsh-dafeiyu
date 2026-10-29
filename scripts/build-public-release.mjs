@@ -64,7 +64,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   const plugin=json(join(repository,'packages/plugin/package.json'));
   const manifest={name:'dsh-dafeiyu',version:plugin.version,type:'module',description:plugin.description,license:'MIT',
     main:'./runtime/plugin/lib/index.js',types:'./runtime/plugin/lib/index.d.ts',
-    exports:{'.':{types:'./runtime/plugin/lib/index.d.ts',default:'./runtime/plugin/lib/index.js'},'./settings':'./runtime/plugin/lib/settings.js','./installation':'./runtime/plugin/lib/installation.js','./client':'./client.js'},
+    exports:{'.':{types:'./runtime/plugin/lib/index.d.ts',default:'./runtime/plugin/lib/index.js'},'./settings':'./runtime/plugin/lib/settings.js','./installation':'./runtime/plugin/lib/installation.js','./client':'./client.js','./package.json':'./package.json'},
     bin:{dafeiyu:'./bin/dafeiyu.mjs'},files:['client.js','runtime','bin','examples','docs','cordis.patch.yml','README.md','LICENSE','NOTICE'],
     engines:{node:'>=24.13.0 <25',dsh:'>=0.2.1-rc.2 <0.3.0'},dsh:{...plugin.dsh,bundle:{patch:'./cordis.patch.yml'}},
     repository:{type:'git',url:'https://github.com/AuraKaliya/dsh-dafeiyu.git'},homepage:'https://github.com/AuraKaliya/dsh-dafeiyu#readme',
