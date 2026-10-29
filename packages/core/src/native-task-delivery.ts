@@ -63,16 +63,25 @@ export class NativeTaskDelivery {
   async whenIdle(){while(this.active.size||this.notices.size)await Promise.allSettled([...this.active.values(),...this.notices.values()]);}
   get pending(){return this.active.size+this.notices.size;}
   progress(runId:string):Promise<import('@dafeiyu/contracts').Json>{const existing=this.notices.get(runId);if(existing)return existing;const work=this.statusNotice(runId).finally(()=>this.notices.delete(runId));this.notices.set(runId,work);return work;}
+  private failureSummary(code:string|null):string{switch(code){case 'MODEL_INCOMPLETE':return '任务执行没有正常收尾，已经完成的工作仍保留';case 'SOURCE_STALE':return '执行中引用的资料失效，需要重新核对后再继续';case 'CAPACITY_EXCEEDED':return '本轮容量不足，需要缩小范围';default:return '任务执行中断，已经完成的工作仍保留';}}
   private async statusNotice(runId:string):Promise<import('@dafeiyu/contracts').Json>{
     const source=this.host.feedbackSource(runId);if(!source||this.host.signal.aborted)return {status:'not-sent',code:'STATUS_SOURCE_UNAVAILABLE'};
     const channel=this.host.channel(source.item);if(!channel)return {status:'not-sent',code:'STATUS_CHANNEL_UNAVAILABLE'};
     const signal=AbortSignal.any([this.host.signal,channel.signal,AbortSignal.timeout(this.host.ctx.dafeiyu.phaseTimeouts().feedback)]);
     const guard=()=>{signal.throwIfAborted();const current=this.host.feedbackSource(runId);if(!current||current.state!==source.state||this.host.channel(source.item)?.identity!==channel.identity)throw new Error('SOURCE_STALE');};
-    try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,runId,persona.text,persona.items,
-      {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。'})}]},signal,()=>{guard();persona.guard();},32000);
-      const receipt=await this.host.enqueue(source.item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'task-status:'+runId,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text:result.text},signal,()=>{guard();persona.guard();});});
-      this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status});this.host.flush();return z.json().parse(receipt);
-    }catch{return {status:'not-sent',code:'STATUS_NOT_SENT'};}
+    const failed=source.state==='failed',noticeId=`${runId}-${source.state}`,failure=failed?{code:source.error??'EXECUTION_FAILED',summary:this.failureSummary(source.error),completed:source.operations.filter(op=>op.state==='finished'&&op.status==='succeeded').length,unknown:source.operations.filter(op=>op.effects==='unknown').length}:null;
+    let invoked=false;
+    try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,noticeId,persona.text,persona.items,
+      {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:failed?'向原会话说明这次卡在哪里、已经做到什么、接下来怎么办。':'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,failure,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。不要说任务已完成或结果已发送；不要输出内部错误码。'})}]},signal,()=>{guard();persona.guard();},32000);
+      const receipt=await this.host.enqueue(source.item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'task-status:'+noticeId,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text:result.text},signal,()=>{guard();persona.guard();});});
+      invoked=true;this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status});this.host.flush();return z.json().parse(receipt);
+    }catch{
+      if(invoked)return {status:'unknown',code:'STATUS_EVENT_FAILED'};
+      try{guard();const text=failed?'我这边卡住了，任务先停在当前进度；已经完成的部分和记录都还在，我换个办法再继续。':'我这边暂时停一下，已经完成的部分和记录都还在。';
+        const receipt=await this.host.enqueue(source.item.route,async()=>{guard();return channel.capability.deliver({id:`task-status-fallback:${runId}:${source.state}`,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text},signal,()=>guard());});
+        this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status,fallback:true});this.host.flush();return z.json().parse(receipt);
+      }catch{return {status:'not-sent',code:'STATUS_NOT_SENT'};}
+    }
   }
   close(){this.unregister();}
   private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire(),deadlineAt=performance.now()+this.host.timeoutMs;let invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;

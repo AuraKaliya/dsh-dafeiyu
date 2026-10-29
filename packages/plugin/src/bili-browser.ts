@@ -20,9 +20,14 @@ const homeDiscoverScript=discoverScript.replace("querySelectorAll('a[href]')","q
 const commentsScript="(()=>{const host=document.querySelector('bili-comments'),root=host?.shadowRoot||document.querySelector('#comment');if(!root)return null;const parts=[];let ready=false;const walk=n=>{if(n.nodeType===1&&(['STYLE','SCRIPT','TEMPLATE','NOSCRIPT','SVG'].includes(n.tagName)||n.hidden))return;const start=parts.length;if(n.nodeType===3&&n.textContent.trim())parts.push(n.textContent.trim());for(const c of n.childNodes||[])walk(c);if(n.shadowRoot)walk(n.shadowRoot);if(n.nodeType===1&&n.matches('bili-comment-thread-renderer,.reply-item,.list-item')&&parts.length>start)ready=true;};walk(root);const text=parts.join('\\n');if(!ready||!text.trim())return null;return {title:(document.querySelector('h1')?.innerText||document.title).slice(0,300),text:text.slice(0,5000),truncated:text.length>5000};})()";
 function evaluated(raw:unknown):unknown{const value=z.object({ok:z.literal(true),value:z.string()}).parse(raw);return JSON.parse(value.value) as unknown;}
 export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:string,call:BrowserToolCall,signal:AbortSignal,clock:BrowserReadinessClock=readinessClock):Promise<BiliBrowserResult>{
-  const input=BiliBrowserRequestSchema.parse(request);z.string().regex(/^[1-9]\d{0,19}$/).parse(expectedUid);signal.throwIfAborted();const url=input.section==='discover'?(input.feed==='popular'?'https://www.bilibili.com/v/popular/all':'https://www.bilibili.com/'):`https://www.bilibili.com/video/${input.bvid}/`;
+  const input=BiliBrowserRequestSchema.parse(request);z.string().regex(/^[1-9]\d{0,19}$/).parse(expectedUid);signal.throwIfAborted();const url=input.section==='discover'?(input.feed==='popular'?'https://www.bilibili.com/v/popular/all':'https://www.bilibili.com/'):`https://www.bilibili.com/video/${input.bvid??`av${input.aid}`}/`;
   const opened=z.object({url:z.string(),challenge:z.object({blocked:z.boolean(),kind:z.string().max(40).optional()}).optional()}).parse(await call('dsh_browser_open',{url},signal));
-  const verifyUrl=(value:string)=>{const actual=new URL(value);if(actual.origin!=='https://www.bilibili.com'||actual.pathname!==new URL(url).pathname)throw new Error('BILI_BROWSER_REDIRECT');};
+  let finalUrl=opened.url;
+  const verifyUrl=(value:string)=>{const actual=new URL(value);if(actual.origin!=='https://www.bilibili.com')throw new Error('BILI_BROWSER_REDIRECT');
+    if(input.section==='discover'){if(actual.pathname!==new URL(url).pathname)throw new Error('BILI_BROWSER_REDIRECT');finalUrl=value;return;}
+    if(input.bvid){if(actual.pathname!==`/video/${input.bvid}/`)throw new Error('BILI_BROWSER_REDIRECT');finalUrl=value;return;}
+    if(actual.pathname!==`/video/av${input.aid}`&&actual.pathname!==`/video/av${input.aid}/`&&!/^\/video\/BV[1-9A-HJ-NP-Za-km-z]{10}\/?$/.test(actual.pathname))throw new Error('BILI_BROWSER_REDIRECT');
+    finalUrl=value;};
   verifyUrl(opened.url);
   if(opened.challenge?.blocked&&opened.challenge.kind!=='generic')throw new Error('BILI_BROWSER_CHALLENGE');
   // One shared budget after navigation. Poll only the existing DOM, never reload or retry an API request.
@@ -52,5 +57,6 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
   },'BILI_BROWSER_CONTENT_UNAVAILABLE');
   await verify();
   await checkReportedChallenge();
-  return BiliBrowserResultSchema.parse({transport:'dsh-browser',accountUid:expectedUid,bvid:input.bvid??null,section:input.section,...(input.section==='discover'?{feed:input.feed??'home'}:{}),url,title:redactContent(content.title).value,text:redactContent(content.text).value,truncated:content.truncated,observedAt:new Date().toISOString(),...(content.frame?{frame:content.frame}:{})});
+  const resolvedBvid=()=>{const match=/^\/video\/(BV[1-9A-HJ-NP-Za-km-z]{10})\/?$/.exec(new URL(finalUrl).pathname);return match?.[1]??null;};
+  return BiliBrowserResultSchema.parse({transport:'dsh-browser',accountUid:expectedUid,bvid:input.bvid??resolvedBvid(),section:input.section,...(input.section==='discover'?{feed:input.feed??'home'}:{}),url,title:redactContent(content.title).value,text:redactContent(content.text).value,truncated:content.truncated,observedAt:new Date().toISOString(),...(content.frame?{frame:content.frame}:{})});
 }

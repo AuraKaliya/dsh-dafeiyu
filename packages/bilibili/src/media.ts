@@ -16,7 +16,7 @@ export function rejectRestricted(raw:unknown){const value=z.record(z.string(),z.
 export class BiliMedia implements MediaSourceProvider {
   readonly id='bilibili';
   constructor(private readonly store:BiliStore,private readonly client:BiliClient,private readonly ready:()=>boolean){}
-  describe(key:string):MediaSourceDescription|null {try{if(!this.ready())return null;const media=this.store.media(key,Date.now(),true);return media&&this.store.current(media.description.origin)?media.description:null;}catch{return null;}}
+  describe(key:string):MediaSourceDescription|null {try{if(!this.ready())return null;const media=this.store.media(key,Date.now(),true);if(!media)return null;const originCurrent=media.description.kind==='image'?this.store.valid(media.description.origin):this.store.current(media.description.origin);return originCurrent?media.description:null;}catch{return null;}}
   prepareBrowserFrame(raw:unknown){const frame=BiliBrowserFrameSchema.parse(raw),base64=frame.dataUrl.slice('data:image/jpeg;base64,'.length),bytes=Buffer.from(base64,'base64');
     if(bytes.toString('base64')!==base64||bytes.length<4||bytes[0]!==255||bytes[1]!==216||bytes[2]!==255)throw new Error('BILI_BROWSER_FRAME_INVALID');
     const key='frame:'+randomUUID(),sha256=createHash('sha256').update(bytes).digest('hex'),source={provider:'bilibili',key};

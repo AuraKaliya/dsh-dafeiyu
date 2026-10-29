@@ -731,8 +731,6 @@ export class ExecutionCoordinator {
       this.grants.set(context,{action,runId:run.id,guard,commitGuard});this.flushEvents();
       try{if(run.definition.scope.kind==='conversation')await this.d.projectConversation?.();guard();const outcome=await action.execute(input,context);
         this.d.store.finishOperation(operation.id,outcome);this.flushEvents();let value:Json;try{value=result(operation.id,callId,outcome);}catch(error){this.evidence.get(run.id)?.invalidate();throw error;}guard();
-        if(run.definition.scope.kind==='task'&&action.owner!=='qq-progress'&&Date.now()-Date.parse(run.createdAt)>30000&&this.d.progress&&!this.d.store.readInput(run.id,'automatic-progress-attempt')&&!this.d.store.operations(run.id).some(op=>op.plugin==='qq-progress'&&op.outcome?.effects==='confirmed')){
-          this.d.store.bindInput(run.id,'automatic-progress-attempt',{at:new Date().toISOString()});try{this.d.store.bindInput(run.id,'automatic-progress',await this.d.progress(run.id));}catch{/* A status failure never changes the actual tool result. */}guard();}
         return value;
       }catch(error){if(this.d.store.operation(operation.id).state==='started')this.d.store.finishOperation(operation.id,{status:'unknown',effects:action.effects==='read'?'none':'unknown',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:safeCode(error)});
         throw new Error(safeCode(error));
