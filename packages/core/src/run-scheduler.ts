@@ -26,6 +26,14 @@ export interface RunLease {
   readonly preemptible?: boolean;
 }
 
+/** Soft focus lease: which conversation currently owns interactive affinity. Never a resource lock. */
+export interface FocusLease {
+  readonly route: string;
+  readonly expiresAt: string;
+  readonly affinityUntil: string | null;
+  readonly switchCooldownUntil: string;
+}
+
 export interface AttentionDecision {
   readonly at: string;
   readonly chosen: string;
@@ -151,6 +159,18 @@ export class RunScheduler {
     return {
       route: this.focusRoute && at < this.focusUntil ? this.focusRoute : null,
       affinity: this.focusRoute && at < this.affinityUntil ? this.focusRoute : null,
+    };
+  }
+
+  /** Serializable snapshot for diagnostics/tests; null when the focus lease expired. */
+  get focusLease(): FocusLease | null {
+    const at = this.now();
+    if (!this.focusRoute || at >= this.focusUntil) return null;
+    return {
+      route: this.focusRoute,
+      expiresAt: new Date(this.focusUntil).toISOString(),
+      affinityUntil: at < this.affinityUntil ? new Date(this.affinityUntil).toISOString() : null,
+      switchCooldownUntil: new Date(this.switchCooldownUntil).toISOString(),
     };
   }
 

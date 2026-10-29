@@ -52,6 +52,7 @@ interface CallLease { class: CallClass; workItemId?: string }
 
 - 第一版 RunLease 决定“哪个执行空间占运行名额”；本版 CallLease 决定“下一次模型调用给谁”；FocusLease 仍是 `RunScheduler.noteInbound` 的交互亲和，不锁资源。
 - 三层租约的边界保持：Run 级只准入，Call 级只排序，Feedback 只记录与到期，不互相替代。
+- `RunScheduler.focusLease` 暴露 FocusLease 快照（route / expiresAt / affinityUntil / switchCooldownUntil），供诊断与测试；关注点仍是软亲和，不锁资源。
 
 ## 4. 仍未完成（下一批）
 

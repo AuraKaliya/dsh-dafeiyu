@@ -55,6 +55,8 @@ test('focus route wins the interactive tie-break',async()=>{
   const scheduler=new RunScheduler(1,{interactiveReserve:0});
   const releaseHolder=await scheduler.acquire(lease('holder','interactive','qq:group:1'));
   scheduler.noteInbound('qq:group:2');
+  assert.equal(scheduler.focusLease?.route,'qq:group:2');
+  assert.ok(scheduler.focusLease?.expiresAt);
   const order:string[]=[];
   const first=scheduler.acquire(lease('a','interactive','qq:group:1')).then(release=>{order.push('a');return release;});
   const second=scheduler.acquire(lease('b','interactive','qq:group:2')).then(release=>{order.push('b');return release;});
