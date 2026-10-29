@@ -49,8 +49,9 @@ export class ConversationRuns {
         // Read persisted DSH facts, without creating an Agent or running a model.
         await readPersistedResult(this.ctx,ref);
         const operations=this.store.operations(run.id),delegated=operations.some(op=>op.plugin==='qq-tasks'&&op.action==='qq_task_submit'&&op.outcome?.status==='succeeded'&&op.outcome.effects==='confirmed'),media=operations.some(op=>['qq_sticker_use','dafeiyu_media_reply'].includes(op.action)&&op.outcome?.status==='succeeded'&&z.object({selected:z.number().positive()}).safeParse(op.outcome.data).success);
-        this.journal.transition(item.id,'processing',!projection.reply.text&&delegated&&!media?'handled':'reply-ready',{...eventFor(this.agentId,item,'turn.completed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id,...(!projection.reply.text&&delegated&&!media?{replySuppressed:'accepted-task'}:{})}),
-          sources:projection.sources.map(source=>({kind:source.kind,id:source.id,...(source.seq===undefined?{}:{seq:source.seq}),route:source.route}))},projection.reply);
+        const delegatedEmpty=!projection.reply.text.trim()&&delegated&&!media,delivery=delegatedEmpty?{...projection.reply,text:'任务已受理，正在后台执行；完成后把结果发给你。'}:projection.reply;
+        this.journal.transition(item.id,'processing','reply-ready',{...eventFor(this.agentId,item,'turn.completed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id,...(delegatedEmpty?{replyFallback:'accepted-task'}:{})}),
+          sources:projection.sources.map(source=>({kind:source.kind,id:source.id,...(source.seq===undefined?{}:{seq:source.seq}),route:source.route}))},delivery);
       }else if(!['reply-ready','sending','delivered','handled','uncertain'].includes(item.state))throw new Error('RESULT_PROJECTION_CONFLICT');
     }else{
       const item=this.journal.get(run.definition.origin.inboundId),operation=typeof event.data.operationId==='string'?this.store.operation(event.data.operationId):null;
