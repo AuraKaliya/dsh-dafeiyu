@@ -45,6 +45,12 @@ test('a conversation cannot read another conversation episode or reflection',()=
   }finally{f.store.close();}
 });
 
+test('pending experience index is stable while its business content is unchanged',()=>{
+  const f=fixture();try{f.memory.settle(f.id,'failed');const scope=f.access.view.scope,first=f.memory.context(scope)[0]!,second=f.memory.context(scope)[0]!;
+    assert.deepEqual(second,first);assert.match(first.id,/^experience-index:[a-f0-9]{64}$/);assert.ok(!first.text.includes('observedAt'));
+    assert.equal(f.memory.contextCurrent(scope,first),true);}finally{f.store.close();}
+});
+
 test('recalled origins withdraw automatic experience indexes and explicit episode reads',()=>{
   let available=true;const f=fixture(()=>available);try{
     const scope=f.access.view.scope,item=f.memory.context(scope)[0]!;assert.ok(item);assert.equal(f.memory.contextCurrent(scope,item),true);

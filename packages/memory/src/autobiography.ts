@@ -1,7 +1,7 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
-import {EpisodeStartSchema,EpisodeOperationSchema,ReflectionInputSchema,SelfUnderstandingInputSchema,ContextItemSchema,redactJson} from '@dafeiyu/contracts';
+import {EpisodeStartSchema,EpisodeOperationSchema,ReflectionInputSchema,SelfUnderstandingInputSchema,ContextItemSchema,redactJson,stableJson} from '@dafeiyu/contracts';
 import type {ExperienceMemoryPort,ExecutionScope,PersonaAccess,PersonaSourceRef,PreparedPersona,PreparedPersonaEntry,Json,PersonaSnapshot,ContextItem,SourceDependency} from '@dafeiyu/contracts';
 import {personaScope,personaDigest} from './persona-digest.js';
 
@@ -65,9 +65,16 @@ export class Autobiography implements ExperienceMemoryPort {
   context(scope:ExecutionScope,exclude:{runId?:string;inboundId?:string}={}):ContextItem[]{
     if(scope.agentId!==this.agentId)throw new Error('SCOPE_DENIED');
     const pending=this.pending(scope).filter(value=>{const row=z.object({id:z.string()}).parse(value);if(row.id===exclude.runId)return false;if(!exclude.inboundId)return true;const episode=EpisodeStartSchema.parse(JSON.parse(String(this.episode(scope,row.id).body)));return episode.origin.kind!=='message'||episode.origin.inboundId!==exclude.inboundId;});
-    if(!pending.length)return [];const id=randomUUID(),text=JSON.stringify({kind:'unreflected-experience-index',observedAt:new Date().toISOString(),pending,note:'这是准备本轮时的记忆索引；不是当前进度保证，也不是必须立即执行的新任务。'});
-    const item=ContextItemSchema.parse({id:'experience-index:'+id,version:'1',text,expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:experience-index:'+id,version:'1',hash:personaDigest(text)}]});
-    this.db.prepare('INSERT INTO memory_context_snapshots VALUES(?,?,?,?,?)').run(id,this.agentId,personaScope(scope),JSON.stringify(item),personaDigest(item));return [item];
+    if(!pending.length)return [];
+    // Model-visible content is a deterministic function of the pending business entries.
+    // Read time and request identity belong to the audit trail, not to the context version.
+    const ordered=[...pending].sort((a,b)=>{const left=z.object({id:z.string()}).parse(a).id,right=z.object({id:z.string()}).parse(b).id;return left<right?-1:left>right?1:0;});
+    const text=stableJson({schemaVersion:1,kind:'unreflected-experience-index',pending:ordered,note:'这是准备本轮时的记忆索引；不是当前进度保证，也不是必须立即执行的新任务。'});
+    const key=createHash('sha256').update(text).digest('hex'),id='experience-index:'+key;
+    const existing=this.db.prepare('SELECT body,body_hash FROM memory_context_snapshots WHERE id=? AND agent_id=? AND scope_key=?').get(key,this.agentId,personaScope(scope));
+    if(existing){const item=ContextItemSchema.parse(JSON.parse(String(existing.body)));if(personaDigest(item)!==existing.body_hash)throw new Error('MEMORY_CORRUPT');return [item];}
+    const item=ContextItemSchema.parse({id,version:'1',text,expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:'dafeiyu:'+id,version:'1',hash:key}]});
+    this.db.prepare('INSERT INTO memory_context_snapshots VALUES(?,?,?,?,?)').run(key,this.agentId,personaScope(scope),JSON.stringify(item),personaDigest(item));return [item];
   }
   contextCurrent(scope:ExecutionScope,item:ContextItem){const id=item.id.slice('experience-index:'.length);if(scope.agentId!==this.agentId||!item.id.startsWith('experience-index:'))return false;
     const row=this.db.prepare('SELECT body,body_hash FROM memory_context_snapshots WHERE id=? AND agent_id=? AND scope_key=?').get(id,this.agentId,personaScope(scope));

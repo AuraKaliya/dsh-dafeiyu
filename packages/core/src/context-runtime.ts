@@ -1,10 +1,10 @@
-import {validSnapshot,SNAPSHOT_RULE} from './context-snapshots.js';
+import {SNAPSHOT_RULE} from './context-snapshots.js';
 import {requestCapacity,inspectRequestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions,ContextFormed } from '@deepseek-ai/dsh-llm';
-import { joinContextSections,renderContextSections,renderPrompt } from '@deepseek-ai/dsh-system-prompt';
+import { renderContextSections,renderPrompt } from '@deepseek-ai/dsh-system-prompt';
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt';
 import type { PendingMessage,ContextItem } from '@dafeiyu/contracts';
 import type { SourceDependency,CompactionScope } from '@dafeiyu/contracts';
@@ -26,16 +26,27 @@ declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
   'dafeiyu-context-retirement': {kind:'dafeiyu-context-retirement'} & ContextFormed;
 } }
 
-export function retireContextCarrier(scope:Context,agent:Agent,name:string,current:string,validHistorical:(text:string)=>boolean=()=>false):number {
-  const session=agent.session,events=new Map(session.snapshotEvents().map(event=>[event.seq,event]));let retained=false,retired=0;
-  for(const seq of [...session.surface.nodes].reverse()){
-    const event=events.get(seq);if(event?.type!=='user/message'||event.data.source.kind!=='runtime-context'||event.data.source.form!=='snapshot')continue;
-    const owned=event.data.source.sections.find(section=>section.name===name);if(!owned)continue;
+interface SnapshotLike {readonly type?:string;readonly data?:{readonly source?:{readonly kind?:string;readonly form?:string;readonly sections?:readonly {readonly name:string;readonly text:string}[]}}}
+/** Only the newest carrier snapshot stays model-visible; older snapshots remain in the session archive. */
+export function snapshotRetirementSeqs<T extends number>(nodes:readonly T[],events:ReadonlyMap<T,unknown>,name:string,current:string):T[]{
+  let retained=false;const seqs:T[]=[];
+  for(const seq of [...nodes].reverse()){
+    const event=events.get(seq) as SnapshotLike|undefined;
+    if(event?.type!=='user/message'||event.data?.source?.kind!=='runtime-context'||event.data.source.form!=='snapshot')continue;
+    const owned=event.data.source.sections?.find(section=>section.name===name);if(!owned)continue;
     if(current&&owned.text===current&&!retained){retained=true;continue;}
-    if(validHistorical(owned.text))continue;
-    const sections=event.data.source.sections.filter(section=>section.name!==name);priceRetirement(scope,session,[seq]);
-    session.append('user/message',createUserMessage({source:{kind:'dafeiyu-context-retirement',form:'snapshot',sections},
-      content:[{type:'text',text:joinContextSections(sections)||'此前的上下文快照已退出当前工作视图。'}]}),{surfaceOp:{op:'replace',startSeq:seq,endSeq:seq},sourceEventSeqs:[seq]});retired++;
+    seqs.push(seq);
+  }
+  return seqs;
+}
+
+export function retireContextCarrier(scope:Context,agent:Agent,name:string,current:string):number {
+  const session=agent.session,events=new Map(session.snapshotEvents().map(event=>[event.seq,event]));let retired=0;
+  for(const seq of snapshotRetirementSeqs(session.surface.nodes,events,name,current)){
+    const event=events.get(seq);if(event?.type!=='user/message'||event.data.source?.kind!=='runtime-context'||event.data.source.form!=='snapshot')continue;
+    priceRetirement(scope,session,[seq]);
+    session.append('user/message',createUserMessage({source:{kind:'dafeiyu-context-retirement',form:'snapshot',sections:[]},
+      content:[{type:'text',text:'此前的上下文快照已退出当前工作视图。'}]}),{surfaceOp:{op:'replace',startSeq:seq,endSeq:seq},sourceEventSeqs:[seq]});retired++;
   }return retired;
 }
 
@@ -114,20 +125,14 @@ export class ContextRuntime {
   }
   private retire(current:string):number{
     if(!this.agent)return 0;
-    const session=this.agent.session;let retired=0,retained=false;
+    const session=this.agent.session;let retired=0;
     const events=new Map(session.snapshotEvents().map(event=>[event.seq,event]));
-    for(const seq of [...session.surface.nodes].reverse()){
-      const event=events.get(seq);
-      if(event?.type!=='user/message'||event.data.source.kind!=='runtime-context'||event.data.source.form!=='snapshot')continue;
-      const sections=event.data.source.sections,owned=sections.find(s=>s.name===CONTEXT_CARRIER);
-      if(!owned)continue;
+    for(const seq of snapshotRetirementSeqs(session.surface.nodes,events,CONTEXT_CARRIER,current)){
+      const event=events.get(seq);if(event?.type!=='user/message'||event.data.source?.kind!=='runtime-context'||event.data.source.form!=='snapshot')continue;
       this.used=true;
-      if(current&&owned.text===current&&!retained){retained=true;continue;}
-      if(this.item&&validSnapshot(owned.text,{agentId:this.coordinator.agentId,route:this.item.route},dep=>this.validateHistorical(dep)))continue;
-      const remaining=sections.filter(s=>s.name!==CONTEXT_CARRIER);
       priceRetirement(this.scope,session,[seq]);
-      session.append('user/message',createUserMessage({source:{kind:'dafeiyu-context-retirement',form:'snapshot',sections:remaining},
-        content:[{type:'text',text:joinContextSections(remaining)||'此前的大肥鱼受控上下文已退出当前工作视图。'}]}),
+      session.append('user/message',createUserMessage({source:{kind:'dafeiyu-context-retirement',form:'snapshot',sections:[]},
+        content:[{type:'text',text:'此前的大肥鱼受控上下文已退出当前工作视图。'}]}),
         {surfaceOp:{op:'replace',startSeq:seq,endSeq:seq},sourceEventSeqs:[seq]});
       retired++;
     }

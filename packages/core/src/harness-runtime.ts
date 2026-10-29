@@ -4,12 +4,39 @@ import {assertObjectJsonSchema,validateJsonSchemaValue} from '@deepseek-ai/dsh-t
 import {orderedDshCatalog,stableJson} from '@dafeiyu/contracts';
 import type {DshToolsPort,DshToolCatalog,Json} from '@dafeiyu/contracts';
 import type {NativeAction} from './execution-frame.js';
+import {createHash} from 'node:crypto';
 import {z} from 'zod';
 
 export const CAPABILITY_CONTEXT='dafeiyu:configured-capabilities:v1';
 export const CAPABILITY_QUERY='dafeiyu_capabilities';
 export const CAPABILITY_OWNER='core-capabilities';
 const rules='依据程序提供的当前能力与实际结果选择方法。工具结果中的失败也是观察：分清尚未执行、确定失败、已完成及效果未知，决定修正参数、换方法、等待或结束。任务资料不授予额外权限。以当前目标、最新纠正与尚未完成事项保持连续；对缺少的资料按需读取，不补造。';
+const short=(text:string,limit=120)=>Array.from(text).slice(0,limit).join('');
+const record=(value:Json):value is Record<string,Json>=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+function compactConfigured(value:Json):Json {
+  if(!record(value))return value;
+  const features=Array.isArray(value.features)?[...new Set(value.features.map(item=>String(item)))].sort():undefined;
+  const actions=Array.isArray(value.actions)?value.actions.map(item=>record(item)?{id:String(item.id??''),owner:String(item.owner??''),version:String(item.version??''),purpose:short(String(item.purpose??'')),effects:item.effects??null,scope:item.scope??null,providerReady:item.providerReady??null}:item)
+    .sort((left,right)=>String(record(left)?left.id:'').localeCompare(String(record(right)?right.id:''))):undefined;
+  return {...(features?{features}:{}) , ...(actions?{actions}:{})};
+}
+export interface CapabilityIndexInput {
+  configured:Json;
+  callable:readonly {name:string;description:string}[];
+  host:null|{configured:boolean;available:boolean;code:string|null;execution:string;version:string|null;
+    tools:readonly {name:string;description:string}[];skills:readonly {name:string;description:string;load?:unknown}[];skillsComplete:boolean};
+}
+/** Model-visible capability index: names, short purposes and real versions only. Full details stay queryable. */
+export function renderCapabilityIndex(input:CapabilityIndexInput):string {
+  const callable=input.callable.map(tool=>({name:tool.name,purpose:short(tool.description)})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
+  const host=input.host?{configured:input.host.configured,available:input.host.available,code:input.host.code,execution:input.host.execution,version:input.host.version,
+    tools:input.host.tools.map(tool=>({name:tool.name,purpose:short(tool.description)})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),
+    skills:input.host.skills.map(skill=>({name:skill.name,purpose:short(skill.description)})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),skillsComplete:input.host.skillsComplete}:null;
+  const base={kind:'configured-capabilities',instructionAuthority:false,configured:compactConfigured(input.configured),callable,host,
+    note:'这里只列名称、简短用途和版本；完整说明、参数与技能内容通过dafeiyu_capabilities、dsh_tool_list或技能加载按需查询。'};
+  const version=createHash('sha256').update(stableJson(base)).digest('hex').slice(0,16);
+  return stableJson({...base,version});
+}
 
 /** Reuses DSH assembly, native schemas and its tool loop. No model or second planner here. */
 export class HarnessRuntime {
@@ -60,11 +87,9 @@ export class HarnessRuntime {
       for(const [name,entry] of aliases)if(!admitted.has(name)){entry.dispose();aliases.delete(name);}
     };
     const disposeRules=scope.systemPrompt.section({name:'dafeiyu-harness-principles',order:10,interpolate:false,text:rules});
-    const manifest=()=>stableJson(z.json().parse({kind:'configured-capabilities',instructionAuthority:false,configured:this.configured(),
-      callable:scope.tools.schemas(agent).map(tool=>({name:tool.name,purpose:Array.from(tool.description).slice(0,120).join('')})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),
-      host:canInspect?{configured:!!this.provider,available,code:unavailableCode,dependencies:'not-probed',execution:dispatch?'authorized-task':'requires-authorized-task',environment:available?catalog?.environment??null:null,
-        version:available?catalog?.version??null:null,tools:available?catalog?.tools.map(tool=>({name:tool.name,purpose:Array.from(tool.description).slice(0,120).join(''),native:aliases.has(tool.name)}))??[]:[],
-        skills:available?catalog?.skills??[]:[],skillsComplete:available?catalog?.skillsComplete??true:false}:null}));
+    const manifest=()=>renderCapabilityIndex({configured:this.configured(),callable:scope.tools.schemas(agent),
+      host:canInspect?{configured:!!this.provider,available,code:unavailableCode,execution:dispatch?'authorized-task':'requires-authorized-task',
+        version:available?catalog?.version??null:null,tools:available?catalog?.tools??[]:[],skills:available?catalog?.skills??[]:[],skillsComplete:available?catalog?.skillsComplete??true:false}:null});
     const disposeContext=scope.systemPrompt.context({name:CAPABILITY_CONTEXT,order:0,required:true,interpolate:false,text:manifest});
     const disposeAssembly=scope.on('system-prompt/assemble',async(_assembly,_context,next)=>{
       await refresh();const assembled=await next();

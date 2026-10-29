@@ -58,8 +58,23 @@ export function requestCapacity(request:{messages:unknown;tools?:unknown;toolHis
   return {bytes:total,reserveBytes:reserve,maximumBytes:maximum,categories,withinBudget:total+reserve<=maximum,measurement:'utf8-serialized-bytes' as const};
 }
 
+/** Read-only projection of the provider wire shape used for the capacity probe. It removes
+ * `source.sections`, which is local provenance metadata and is not serialized by the provider
+ * adapter; the authoritative local/audit measurement remains `requestCapacity`. */
+export function wireProjection(request:{messages:readonly unknown[];tools?:unknown;toolHistory?:unknown}){
+  const messages=request.messages.map(message=>{
+    if(message===null||typeof message!=='object'||Array.isArray(message))return message;
+    const source=(message as {source?:Record<string,unknown>}).source;if(!source||!( 'sections'in source))return message;
+    const {sections:_sections,...rest}=source;return {...message,source:rest};
+  });
+  const categories={messages:contextBytes(messages),tools:contextBytes(request.tools??[]),toolHistory:contextBytes(request.toolHistory??null)};
+  const bytes=contextBytes({messages,tools:request.tools??[],toolHistory:request.toolHistory??null});
+  return {bytes,categories,measurement:'wire-projection-source-sections-excluded' as const};
+}
+
 export async function inspectRequestCapacity(ctx:Context,options:GenerateOptions,maximum:number,reserve:number,known?:LlmResolvedModelInfo){
   const capacity=requestCapacity(options,maximum,reserve);if(!capacity.withinBudget)throw new Error('CONTEXT_REQUEST_CAPACITY');
+  const wire=wireProjection(options),runtimeSnapshotCount=options.messages.filter(message=>message.role==='user'&&message.source?.kind==='runtime-context'&&message.source.form==='snapshot').length;
   const messageBreakdown={system:0,currentInput:0,history:0,toolResults:0,runtimeContext:0,mediaBlocks:0};
   const currentInput=options.messages.findLastIndex(message=>message.role==='user'&&(!message.source||['user','dafeiyu-execution'].includes(message.source.kind)));
   options.messages.forEach((message,index)=>{const bytes=contextBytes(message);
@@ -74,7 +89,7 @@ export async function inspectRequestCapacity(ctx:Context,options:GenerateOptions
   const estimatedInputTokens=Math.max(Math.ceil(capacity.bytes/3),meter?options.messages.reduce((sum,message)=>sum+(message.id===undefined?Math.ceil(contextBytes(message)/3):meter.estimateMessage(message)),0)+Math.ceil((capacity.categories.tools+capacity.categories.toolHistory)/3):0);
   const contextWindow=info.context?.contextWindow??null,outputTokens=options.maxTokens??info.defaultMaxTokens??null;
   if(contextWindow!==null&&estimatedInputTokens+(outputTokens??0)>=contextWindow)throw new Error('MODEL_CONTEXT_CAPACITY');
-  return {...capacity,messageBreakdown,estimatedInputTokens,tokenMeasurement:meter?'sdk-estimate-with-utf8-floor':'utf8-conservative-estimate',modelContextWindow:contextWindow,
+  return {...capacity,wire,auditBytes:capacity.bytes,runtimeSnapshotCount,messageBreakdown,estimatedInputTokens,tokenMeasurement:meter?'sdk-estimate-with-utf8-floor':'utf8-conservative-estimate',modelContextWindow:contextWindow,
     reservedOutputTokens:outputTokens,estimateOnly:true,modelLimitsKnown:contextWindow!==null&&outputTokens!==null};
 }
 

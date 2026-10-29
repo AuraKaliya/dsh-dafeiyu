@@ -1,4 +1,4 @@
-import {validSnapshot,SNAPSHOT_RULE} from './context-snapshots.js';
+import {SNAPSHOT_RULE} from './context-snapshots.js';
 import {retireContextCarrier} from './context-runtime.js';
 import {requestCapacity,inspectRequestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
@@ -57,7 +57,7 @@ export class NativeRuntime {
           SNAPSHOT_RULE,
         ].join('\n')});
         // Keep standard DSH instruction sections. Unrelated runtime data is not a task handoff.
-        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const active=this.sessions.get(frame.sessionId);if(active?.frame){active.repairs=0;await active.frame.refreshContexts?.();const text=active.frame.contexts?.length?JSON.stringify({kind:'native-context',regions:active.frame.contexts}):active.frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:active.frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]});retireContextCarrier(ctx,active.handle.agent,'dafeiyu:persona-context:v1',text,prior=>validSnapshot(prior,{agentId:active.frame!.view.scope.agentId,route:active.frame!.view.scope.kind==='task'?active.frame!.view.scope.scopeKey:active.frame!.view.scope.route},dep=>active.frame!.evidence?.contextView().validateHistorical(dep)??false));}const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>this.harness.acceptsSection(section.name)),contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
+        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const active=this.sessions.get(frame.sessionId);if(active?.frame){active.repairs=0;await active.frame.refreshContexts?.();const text=active.frame.contexts?.length?JSON.stringify({kind:'native-context',regions:active.frame.contexts}):active.frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:active.frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]});retireContextCarrier(ctx,active.handle.agent,'dafeiyu:persona-context:v1',text);}const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>this.harness.acceptsSection(section.name)),contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
       });
       if(!scope||!compaction){await handle.dispose();throw new Error('DSH_SCOPE_MISSING');}
       owned={handle,scope,compaction,lastRequest:undefined,get frame(){return slot.frame;},set frame(value){slot.frame=value;}};this.sessions.set(frame.sessionId,owned);
