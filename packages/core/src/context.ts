@@ -5,8 +5,9 @@ import type { ContextContributor,ContextItem,ContextRequest,OperationScope,Pendi
 import type { Journal } from '@dafeiyu/journal';
 import { CORE_VERSION } from './version.js';
 
-import {admitContext,contextManifest,requestCapacity} from './context-plan.js';
-import type {ContextPacket} from './context-plan.js';
+import {admitContext,contextManifest} from './context-plan.js';
+import type {ContextPacket,RequestCapacity} from './context-plan.js';
+import type {WorkingViewPlan} from './working-view.js';
 export type {ContextPacket} from './context-plan.js';
 const policySchema=ContextRegionPolicySchema;
 export const contextConfigSchema=ContextBudgetSchema;
@@ -89,11 +90,16 @@ export class ContextCoordinator {
       validate:(item:ContextItem)=>{this.scopeFor(request);return entry.contributor.validate(request,item);},
     };}),Math.max(0,Math.min(allowance,this.config.maxBytes)));
   }
-  audit(item:PendingMessage,packet:ContextPacket,retired:number,nativeNames:readonly string[],requestBytes:number,capacity?:ReturnType<typeof requestCapacity>):void{
+  repair(item:PendingMessage,data:{attempt:number;excessBytes:number;allowanceBytes:number;requestBytes:number;maximumBytes:number}):void{
+    this.journal.append({agentId:this.agentId,route:item.route,traceId:item.id,operationId:randomUUID(),causedBy:null,
+      type:'context.repair',plugin:'core',pluginVersion:CORE_VERSION,occurredAt:new Date().toISOString(),sources:[],
+      data:{...data,policy:'controlled-context-shrink-v1'}});
+  }
+  audit(item:PendingMessage,packet:ContextPacket,retired:number,nativeNames:readonly string[],requestBytes:number,capacity?:RequestCapacity,workingView?:WorkingViewPlan):void{
     this.latest.delete(item.route);this.latest.set(item.route,{manifest:contextManifest('conversation',packet),requestBytes});while(this.latest.size>64)this.latest.delete(this.latest.keys().next().value!);
     this.journal.append({agentId:this.agentId,route:item.route,traceId:item.id,operationId:randomUUID(),causedBy:null,
       type:'context.admitted',plugin:'core',pluginVersion:CORE_VERSION,occurredAt:new Date().toISOString(),sources:[],
-      data:{...(capacity?{capacity}:{}),plan:contextManifest('conversation',packet),bytes:bytes(packet.text),requestBytes,retired,decisions:packet.decisions,nativeRegions:[...nativeNames],selected:packet.regions.map(r=>({owner:r.owner,region:r.region,
+      data:{...(capacity?{capacity}:{}),...(workingView?{workingView:z.json().parse(workingView)}:{}),plan:contextManifest('conversation',packet),bytes:bytes(packet.text),requestBytes,retired,decisions:packet.decisions,nativeRegions:[...nativeNames],selected:packet.regions.map(r=>({owner:r.owner,region:r.region,
         items:r.items.map(i=>({id:i.id,version:i.version,sources:i.sources}))}))}});
   }
 }

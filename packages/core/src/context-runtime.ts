@@ -11,6 +11,7 @@ import type { SourceDependency,CompactionScope } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import { ContextCoordinator,CONTEXT_CARRIER,bytes } from './context.js';
 import type { PreparedRegion,ContextPacket } from './context.js';
+import {buildWorkingViewPlan} from './working-view.js';
 import { priceRetirement } from './compaction-runtime.js';
 import {CAPABILITY_CONTEXT} from './harness-runtime.js';
 
@@ -27,6 +28,8 @@ declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
 } }
 
 interface SnapshotLike {readonly type?:string;readonly data?:{readonly source?:{readonly kind?:string;readonly form?:string;readonly sections?:readonly {readonly name:string;readonly text:string}[]}}}
+export const MAX_CONTROLLED_CONTEXT_REPAIRS=2;
+export function shrinkControlledAllowance(current:number,excess:number):number{return Math.max(0,current-Math.max(1024,excess));}
 /** Only the newest carrier snapshot stays model-visible; older snapshots remain in the session archive. */
 export function snapshotRetirementSeqs<T extends number>(nodes:readonly T[],events:ReadonlyMap<T,unknown>,name:string,current:string):T[]{
   let retained=false;const seqs:T[]=[];
@@ -61,8 +64,9 @@ export class ContextRuntime {
   private nativeNames:string[]=[];
   private used=false;
   private retired=0;
-  private repairs=0;
+  private repairRounds=0;
   private retryPending=false;
+  private allowanceOverride:number|undefined;
   private nativeSections:{name:string;text:string}[]=[];
   private capacity:{request:GenerateOptions;data:Awaited<ReturnType<typeof inspectRequestCapacity>>}|undefined;
   private lastValidation=0;
@@ -74,7 +78,6 @@ export class ContextRuntime {
       const accepted=await next();
       if(!this.item||!context.agent||!context.signal)return accepted;
       this.agent=context.agent;this.preparing=true;
-      this.repairs=0;this.retryPending=false;
       this.coordinator.release(this.prepared);this.prepared=[];
       this.prepared=await this.coordinator.prepare(this.item,context.signal);
       this.nativeNames=accepted.contexts.filter(c=>c.name!==CONTEXT_CARRIER).map(c=>c.name);
@@ -89,7 +92,7 @@ export class ContextRuntime {
       return next();
     });
   }
-  begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;this.preparing=true;this.retired=0;}
+  begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;this.preparing=true;this.retired=0;this.repairRounds=0;this.retryPending=false;this.allowanceOverride=undefined;}
   end():void{this.coordinator.release(this.prepared);this.prepared=[];this.item=undefined;this.preparing=true;}
   async measure(options:GenerateOptions){this.capacity={request:options,data:await inspectRequestCapacity(this.scope,options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes)};}
   sourceItems(){return this.packet.regions.flatMap(region=>region.items.map(item=>({owner:region.owner,region:region.region,item})));}
@@ -121,7 +124,8 @@ export class ContextRuntime {
     // Provisional allocation; dispatch checks the complete final request, including native changes.
     const history=this.agent?.session.deriveMessages()??[];
     const fixed=bytes(history)+bytes(renderPrompt(assembly))+bytes(native)+bytes(assembly.tools);
-    return Math.max(0,Math.min(this.coordinator.config.maxBytes,this.coordinator.config.requestMaxBytes-this.coordinator.config.outputReserveBytes-fixed));
+    const base=Math.max(0,Math.min(this.coordinator.config.maxBytes,this.coordinator.config.requestMaxBytes-this.coordinator.config.outputReserveBytes-fixed));
+    return this.allowanceOverride===undefined?base:Math.min(base,this.allowanceOverride);
   }
   private retire(current:string):number{
     if(!this.agent)return 0;
@@ -155,10 +159,21 @@ export class ContextRuntime {
     const carriers=options.messages.flatMap(message=>message.role==='user'&&'source' in message&&message.source.kind==='runtime-context'&&message.source.form==='snapshot'
       ?message.source.sections.filter(s=>s.name===CONTEXT_CARRIER):[]);
     if(carriers.at(-1)?.text!==packet.text)throw new Error('Controlled context snapshot mismatch');
-    const capacity=this.capacity?.request===options?this.capacity.data:requestCapacity(options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes),requestBytes=capacity.bytes;
-    if(!capacity.withinBudget)
+    const inspected=this.capacity?.request===options?this.capacity.data:undefined;
+    const capacity=inspected??requestCapacity(options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes),requestBytes=capacity.bytes;
+    if(!capacity.withinBudget){
+      const excess=capacity.bytes+capacity.reserveBytes-capacity.maximumBytes;
+      if(allowRepair&&this.repairRounds<MAX_CONTROLLED_CONTEXT_REPAIRS&&this.item){
+        const next=shrinkControlledAllowance(this.allowance,excess);
+        if(next<this.allowance){this.allowanceOverride=next;this.repairRounds++;this.retryPending=true;
+          this.coordinator.repair(this.item,{attempt:this.repairRounds,excessBytes:excess,allowanceBytes:next,requestBytes:capacity.bytes,maximumBytes:capacity.maximumBytes});return false;}
+      }
       throw new Error('Context request budget exceeded');
-    if(audit){this.coordinator.audit(this.item,packet,this.retired,this.nativeNames,requestBytes,capacity);this.retired=0;}
+    }
+    if(audit){
+      const capabilityBytes=bytes(this.nativeSections.find(section=>section.name===CAPABILITY_CONTEXT)?.text??'');
+      this.coordinator.audit(this.item,packet,this.retired,this.nativeNames,requestBytes,inspected,inspected?buildWorkingViewPlan({packet,capacity:inspected,retired:this.retired,capabilityBytes}):undefined);this.retired=0;
+    }
     this.lastValidation=performance.now();return true;
   }
 }

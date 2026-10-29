@@ -100,3 +100,5 @@ export async function prepareWithin<T>(work:(signal:AbortSignal)=>Promise<T>,sig
   try{return await Promise.race([work(combined),new Promise<never>((_resolve,reject)=>{listener=()=>reject(new Error(signal.aborted?'CONTEXT_CANCELLED':'CONTEXT_PREPARE_TIMEOUT'));combined.addEventListener('abort',listener,{once:true});if(combined.aborted)listener();})]);}
   finally{clearTimeout(timer);combined.removeEventListener('abort',listener);}
 }
+
+export type RequestCapacity = Awaited<ReturnType<typeof inspectRequestCapacity>>;

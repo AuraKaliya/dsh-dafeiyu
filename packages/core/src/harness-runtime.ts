@@ -26,6 +26,7 @@ export interface CapabilityIndexInput {
   host:null|{configured:boolean;available:boolean;code:string|null;execution:string;version:string|null;
     tools:readonly {name:string;description:string}[];skills:readonly {name:string;description:string;load?:unknown}[];skillsComplete:boolean};
 }
+export const CAPABILITY_INDEX_MAX_BYTES=16000;
 /** Model-visible capability index: names, short purposes and real versions only. Full details stay queryable. */
 export function renderCapabilityIndex(input:CapabilityIndexInput):string {
   const callable=input.callable.map(tool=>({name:tool.name,purpose:short(tool.description)})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
@@ -34,8 +35,17 @@ export function renderCapabilityIndex(input:CapabilityIndexInput):string {
     skills:input.host.skills.map(skill=>({name:skill.name,purpose:short(skill.description)})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),skillsComplete:input.host.skillsComplete}:null;
   const base={kind:'configured-capabilities',instructionAuthority:false,configured:compactConfigured(input.configured),callable,host,
     note:'这里只列名称、简短用途和版本；完整说明、参数与技能内容通过dafeiyu_capabilities、dsh_tool_list或技能加载按需查询。'};
-  const version=createHash('sha256').update(stableJson(base)).digest('hex').slice(0,16);
-  return stableJson({...base,version});
+  const render=(value:Record<string,Json>)=>stableJson({...value,version:createHash('sha256').update(stableJson(value)).digest('hex').slice(0,16)});
+  let text=render({...base,truncated:false});
+  if(Buffer.byteLength(text)>CAPABILITY_INDEX_MAX_BYTES){
+    const compactHost=base.host?{...base.host,tools:[],skills:[]}:null;
+    const configured=record(base.configured)&&Array.isArray(base.configured.actions)?{...base.configured,actions:[]}:base.configured;
+    text=render({...base,truncated:true,configured,callable:[],host:compactHost});
+    if(Buffer.byteLength(text)>CAPABILITY_INDEX_MAX_BYTES){
+      text=render({...base,truncated:true,configured:{features:[]},callable:[],host:compactHost});
+    }
+  }
+  return text;
 }
 
 /** Reuses DSH assembly, native schemas and its tool loop. No model or second planner here. */
