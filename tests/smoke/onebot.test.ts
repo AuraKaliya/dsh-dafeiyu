@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {OneBot,oneBotDiagnostic} from '../packages/channel-qq/lib/onebot.js';
+import {OneBot,oneBotDiagnostic} from '../../packages/channel-qq/lib/onebot.js';
 
 test('OneBot response diagnostics retain the platform code and redact authorization without implying safe retry',async t=>{
   const token='fictional-onebot-credential-never-a-real-secret',server=createServer((_request,response)=>{response.setHeader('Content-Type','application/json');response.end(JSON.stringify({status:'failed',retcode:1200,data:null,wording:'send private message rejected: result=10 authorization Bearer '+token}));});

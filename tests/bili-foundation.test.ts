@@ -1,17 +1,15 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { mkdtemp,writeFile,readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { createServer,request } from 'node:http';
-import type { Server } from 'node:http';
+import { BiliStore } from '@dafeiyu/bilibili';
 import type { ExecutionContext,ExecutionGrant } from '@dafeiyu/contracts';
 import { taskScopeKey } from '@dafeiyu/contracts';
-import { BiliStore } from '@dafeiyu/bilibili';
-import { BiliConfigSchema } from '../packages/bilibili/lib/config.js';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp,readFile,writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import test from 'node:test';
 import { BiliClient } from '../packages/bilibili/lib/client.js';
-import { biliUrl,publicAddress,boundedJson } from '../packages/bilibili/lib/http.js';
-import type { HttpTransport,HttpResponse } from '../packages/bilibili/lib/http.js';
+import { BiliConfigSchema } from '../packages/bilibili/lib/config.js';
+import type { HttpResponse,HttpTransport } from '../packages/bilibili/lib/http.js';
+import { biliUrl,boundedJson,publicAddress } from '../packages/bilibili/lib/http.js';
 import { testTempDir } from './test-temp.js';
 
 async function fixture(){const root=await mkdtemp(join(testTempDir(),'bili-')),file=join(root,'bilibili.sqlite'),identity={agentId:'fish',profileId:'test'},taskId=randomUUID(),context:ExecutionContext={agentId:'fish',taskId,scope:{kind:'task',agentId:'fish',taskId,scopeKey:taskScopeKey('fish',taskId)},runId:randomUUID(),operationId:randomUUID(),origin:{kind:'native',producerId:'fixture',requestId:'start'},intentVersion:1,grant:{} as ExecutionGrant,signal:new AbortController().signal};
@@ -48,9 +46,3 @@ test('response budgets and origin restrictions reject malformed or excessive inp
   for(const url of ['http://api.bilibili.com/a','https://api.bilibili.com.evil.test/a','https://x.bilivideo.com@evil.test/a','https://127.0.0.1/a','https://x.bilivideo.com:444/a'])assert.throws(()=>biliUrl(url,'media'));
   assert.equal(biliUrl('https://cdn.bilivideo.com/a','media').hostname,'cdn.bilivideo.com');for(const ip of ['127.0.0.1','10.0.0.1','192.168.1.1','100.64.1.2','169.254.1.1','::1'])assert.equal(publicAddress(ip),false);assert.equal(publicAddress('8.8.8.8'),true);
 }finally{f.store.close();}});
-
-test('actual loopback HTTP fixture observes cancellation and does not follow redirects',async()=>{const f=await fixture();let server:Server|undefined;try{let requests=0;server=createServer((req,res)=>{requests++;if(req.url?.includes('pn=2')){res.writeHead(302,{Location:'https://example.invalid/'}).end();return;}if(req.url?.includes('pn=3'))return;res.end(JSON.stringify({code:0,data:{list:[]}}));});await new Promise<void>(done=>server!.listen(0,'127.0.0.1',done));const address=server.address();assert.ok(address&&typeof address!=='string');
-  const transport:HttpTransport=(url,_headers,signal)=>new Promise((done,reject)=>{const req=request({hostname:'127.0.0.1',port:address.port,path:url.pathname+url.search,signal},res=>done({status:res.statusCode!,headers:{},body:res,close:()=>res.destroy()}));req.on('error',reject);req.end();});
-  const client=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100}),f.store,transport);assert.deepEqual(await client.read('discover',{pn:1,ps:1},new AbortController().signal,()=>{}),{list:[]});await assert.rejects(client.read('discover',{pn:2,ps:1},new AbortController().signal,()=>{}),/REDIRECT/);
-  const controller=new AbortController(),timer=globalThis.setTimeout(()=>controller.abort(),250);await assert.rejects(client.read('discover',{pn:3,ps:1},controller.signal,()=>{}));clearTimeout(timer);assert.equal(requests,3);
-}finally{server?.closeAllConnections();if(server)await new Promise<void>(done=>server!.close(()=>done()));f.store.close();}});

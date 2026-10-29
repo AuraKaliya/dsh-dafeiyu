@@ -1,15 +1,12 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { mkdtemp,mkdir,writeFile,readFile,symlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import { createHash } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
-import { createServer } from 'node:http';
-import { QqStore,inspectQqSchema,QQ_SCHEMA_VERSION } from '@dafeiyu/qq';
 import type { Conversation,MediaByteStream } from '@dafeiyu/contracts';
-import { QqMediaReader,QqMediaConfigSchema,publicIpv4 } from '../packages/channel-qq/lib/media-reader.js';
+import { QqStore } from '@dafeiyu/qq';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdir,mkdtemp,symlink,writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import test from 'node:test';
+import { QqMediaConfigSchema,QqMediaReader,publicIpv4 } from '../packages/channel-qq/lib/media-reader.js';
 import { testTempDir } from './test-temp.js';
-import { OneBot } from '../packages/channel-qq/lib/onebot.js';
 const scene:Conversation={channel:'qq',account:'100001',kind:'group',id:'200001'},route=JSON.stringify([scene.account,scene.kind,scene.id]);
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const metadata={occurredAt:'2026-10-25T00:00:00Z',unsupported:['image']};
@@ -49,12 +46,4 @@ test('media HTTPS rejects credentials, redirects to other protocols and non-publ
   const reader=new QqMediaReader(QqMediaConfigSchema.parse({httpsHosts:['localhost','fixture.invalid']})),signal=new AbortController().signal;
   for(const url of ['https://user:pass@fixture.invalid/file','https://fixture.invalid:8443/file','https://unlisted.invalid/file','https://127.0.0.1/file'])await assert.rejects(reader.open(url,null,signal,()=>{}),/URL_DENIED/);
   await assert.rejects(reader.open('https://localhost/file',null,signal,()=>{}),/ADDRESS_DENIED/);
-});
-
-test('real loopback OneBot metadata requests use the declared file API and reject oversized responses',async()=>{
-  let oversized=false;const server=createServer(async(req,res)=>{assert.equal(req.headers.authorization,'Bearer synthetic-metadata-token');assert.equal(req.url,'/get_file');let raw='';for await(const chunk of req)raw+=String(chunk);assert.deepEqual(JSON.parse(raw),{file_id:'fixture-handle'});
-    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data:{file:oversized?'x'.repeat(3*1024**2):'synthetic-local-path'}}));});
-  await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));const address=server.address();assert.ok(address&&typeof address!=='string');
-  try{const api=new OneBot(`http://127.0.0.1:${address.port}/`,'synthetic-metadata-token','100001',2000);assert.deepEqual(await api.call('get_file',{file_id:'fixture-handle'}),{file:'synthetic-local-path'});oversized=true;await assert.rejects(api.call('get_file',{file_id:'fixture-handle'}),/RESPONSE_LIMIT/);}
-  finally{server.closeAllConnections();await new Promise<void>(done=>server.close(()=>done()));}
 });

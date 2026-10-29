@@ -1,8 +1,14 @@
 import { spawn, execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
-import { join, resolve, basename } from 'node:path';
+import { join, resolve } from 'node:path';
 import { TestStorage, childEnvironment, budgetCheck, repository } from './testing/workspace.ts';
 import { freeBytes, removeTree } from './testing/files.ts';
+import { selectTests } from './testing/selection.ts';
+
+const available = (await Promise.all(['tests', 'tests/tooling', 'tests/smoke'].map(async directory =>
+  (await readdir(join(repository, directory))).filter(name => name.endsWith('.test.ts')).map(name => directory + '/' + name)
+))).flat().sort();
+const selection = selectTests(available, process.argv.slice(2));
 
 const storage = new TestStorage();
 const unlock = await storage.lock();
@@ -37,26 +43,22 @@ try {
     try { const reason = await budgetCheck(run); if (reason) stop(reason); } catch { stop('TEST_STORAGE_MONITOR_FAILED'); }
     finally { monitoring = false; }
   }, 2000);
-  const available = [...(await readdir(join(repository, 'tests'))).filter(name => name.endsWith('.test.ts')).map(name => 'build-tests/' + name.replace(/\.ts$/,'.js')),
-    ...(await readdir(join(repository, 'tests', 'tooling'))).filter(name => name.endsWith('.test.ts')).map(name => 'tests/tooling/' + name)].sort();
-  const requested = process.argv.slice(2), files = requested.length ? requested : available;
-  if (!files.length || files.some(file => !available.includes(file))) throw new Error('TEST_FILE_NOT_ALLOWED');
+  console.log(`Test suite: ${selection.suite} (${selection.files.length} files)`);
   await execute('build', ['scripts/build.mjs']);
-  if(requested.length){
-    // Child-process fixtures are loaded by path rather than TypeScript imports. Compile
-    // them too so targeted runs can never execute an obsolete generated fixture.
-    const fixtures=(await readdir(join(repository,'tests'))).filter(name=>name.endsWith('.ts')&&!name.endsWith('.test.ts'));
-    const sources=[...fixtures.map(name=>resolve(repository,'tests',name)),...files.filter(file=>file.startsWith('build-tests/')).map(file=>resolve(repository,'tests',basename(file).replace(/\.js$/,'.ts')))];
-    if(sources.length){const config=join(run.root,'test-types.json');
-      await writeFile(config,JSON.stringify({extends:resolve(repository,'tests/tsconfig.json'),compilerOptions:{rootDir:resolve(repository,'tests'),outDir:resolve(repository,'build-tests')},include:[],files:sources}));
-      await execute('test-types',['node_modules/typescript/bin/tsc','-p',config]);}
-  }else await execute('test-types', ['node_modules/typescript/bin/tsc', '-p', 'tests/tsconfig.json']);
-  if(requested.length){
-    const config=join(run.root,'tooling-types.json');
-    const tooling=(await readdir(join(repository,'scripts/testing'))).filter(name=>name.endsWith('.ts')).map(name=>resolve(repository,'scripts/testing',name));
-    await writeFile(config,JSON.stringify({extends:resolve(repository,'scripts/testing/tsconfig.json'),include:[],files:[...tooling,...files.filter(file=>file.startsWith('tests/tooling/')).map(file=>resolve(repository,file))]}));
-    await execute('tooling-types',['node_modules/typescript/bin/tsc','-p',config]);
-  }else await execute('tooling-types', ['node_modules/typescript/bin/tsc', '-p', 'scripts/testing/tsconfig.json']);
+  // Imports compile the small shared fixtures transitively. There are no path-loaded subprocess scenarios.
+  const sources = selection.typecheck.filter(file => !file.startsWith('tests/tooling/')).map(file => resolve(repository, file));
+  if (sources.length) {
+    const config = join(run.root, 'test-types.json');
+    await writeFile(config, JSON.stringify({ extends: resolve(repository, 'tests/tsconfig.json'), compilerOptions: {
+      rootDir: resolve(repository, 'tests'), outDir: resolve(repository, 'build-tests') }, include: [], files: sources }));
+    await execute('test-types', ['node_modules/typescript/bin/tsc', '-p', config]);
+  }
+  const tooling = (await readdir(join(repository, 'scripts/testing'))).filter(name => name.endsWith('.ts')).map(name => resolve(repository, 'scripts/testing', name));
+  const config = join(run.root, 'tooling-types.json');
+  await writeFile(config, JSON.stringify({ extends: resolve(repository, 'scripts/testing/tsconfig.json'), include: [],
+    files: [...tooling, ...selection.typecheck.filter(file => file.startsWith('tests/tooling/')).map(file => resolve(repository, file))] }));
+  await execute('tooling-types', ['node_modules/typescript/bin/tsc', '-p', config]);
+  const files = selection.files.map(file => file.startsWith('tests/tooling/') ? file : file.replace(/^tests\//, 'build-tests/').replace(/\.ts$/, '.js'));
   await execute('tests', ['scripts/testing/driver.ts', ...files]);
   const summary = JSON.parse(await readFile(join(run.root, 'summary.json'), 'utf8'));
   if (!summary.success || summary.counts.tests < 1) throw new Error('TEST_SUMMARY_FAILED');
@@ -70,7 +72,7 @@ try {
     let summary = null; try { summary = JSON.parse(await readFile(join(run.root, 'summary.json'), 'utf8')); } catch { /* A build failure has no test summary. */ }
     const cleanup = await storage.finish(run, stopped ? stopped === 'TEST_INTERRUPTED' ? 'interrupted' : 'failed' : 'passed', stopped);
     if (cleanup.blocked.length) process.exitCode = 1;
-    const report = { schemaVersion: 1, runId: run.id, startedAt: run.createdAt, finishedAt: new Date().toISOString(), stages, summary,
+    const report = { schemaVersion: 1, runId: run.id, suite: selection.suite, files: selection.files, startedAt: run.createdAt, finishedAt: new Date().toISOString(), stages, summary,
       reason: stopped, cleanup, freeBytes: await freeBytes(storage.root), realModel: false, realPlatform: false, serverAccess: false };
     const reports = join(repository, '.runtime', 'test-reports'); await mkdir(reports, { recursive: true });
     await writeFile(join(reports, run.id + '.json'), JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
@@ -78,8 +80,6 @@ try {
     const old = await Promise.all((await readdir(reports)).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).map(async name => ({ name, time: (await stat(join(reports, name))).mtimeMs })));
     for (const entry of old.sort((a, b) => b.time - a.time).slice(20)) await removeTree(join(reports, entry.name), reports);
     console.log(JSON.stringify({ runId: run.id, passed: !stopped && !cleanup.blocked.length, tests: summary?.counts ?? null, cleanup, report: join(reports, run.id + '.json') }));
-    if(process.send)await new Promise(resolve=>process.send({type:'test-report',report},()=>resolve()));
   } else console.error(stopped ?? 'TEST_RUN_FAILED');
   await unlock();
-  if(process.connected)process.disconnect();
 }

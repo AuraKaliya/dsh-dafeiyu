@@ -12,9 +12,10 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "host": "npm run build && node scripts/dafeiyu-host.mjs",
-    "test": "node scripts/test-all.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:smoke": "node scripts/run-tests.mjs --smoke",
     "test:cleanup": "node scripts/cleanup-test-runs.mjs",
-    "check": "npm test",
+    "check": "node scripts/run-tests.mjs --check",
     "build:release": "npm run build && node scripts/build-public-release.mjs"
   },
   "devDependencies": {

@@ -80,14 +80,16 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
       for(const tree of ['src','bin','assets','workers','windows','vendor','examples','docs'])for(const file of files(join(root,tree)))put(destination,'source/packages/'+directory+'/'+portable(relative(root,file)),readFileSync(file));
       for(const name of ['README.md','LICENSE','NOTICE','cordis.patch.yml'])if(existsSync(join(root,name)))put(destination,'source/packages/'+directory+'/'+name,readFileSync(join(root,name)));
     }
-    const development=json(join(repository,'package.json'));development.scripts={build:'node scripts/build.mjs',test:'node scripts/test-all.mjs','test:cleanup':'node scripts/cleanup-test-runs.mjs','build:release':'npm run build && node scripts/build-public-release.mjs'};
+    const development=json(join(repository,'package.json'));
+    // Use the same lightweight development entry points in a source release.
+    development.scripts={...development.scripts};delete development.scripts.host;
     put(destination,'source/package.json',JSON.stringify(development,null,2)+'\n');
-    for(const file of ['package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/build.mjs','scripts/test-all.mjs','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
+    for(const file of ['package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/build.mjs','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
     for(const file of files(join(repository,'scripts/testing')))put(destination,'source/'+portable(relative(repository,file)),readFileSync(file));
-    const selected=['current-api.test.ts','task-review.test.ts','current-storage.test.ts','autobiography.test.ts','agent-flow.test.ts','plugin-startup.test.ts','installation.test.ts','installation-runtime-fixture.ts','plugin-integration.test.ts','bili-owner-production.test.ts','bili-owner-production-fixture.ts','bili-owner-production-lease-child.ts'];
+    const selected=['current-api.test.ts','current-storage.test.ts','autobiography.test.ts','plugin-startup.test.ts','test-temp.ts','smoke/host.test.ts','smoke/onebot.test.ts','tooling/test-selection.test.ts','tooling/test-storage.test.ts'];
     const visited=new Set();function testFile(path){if(visited.has(path))return;visited.add(path);const bytes=readFileSync(join(repository,'tests',path),'utf8');put(destination,'source/tests/'+path,bytes);
       for(const match of bytes.matchAll(/(?:from\s*|import\()\s*['"](\.\/[^'"]+)['"]/g)){const dependency=portable(join(dirname(path),match[1])).replace(/\.js$/,'.ts');if(existsSync(join(repository,'tests',dependency)))testFile(dependency);}}
-    selected.forEach(testFile);put(destination,'source/tests/tooling/README.md','Public smoke suite; full internal acceptance evidence is not distributed.\n');
+    selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }
   const inventory=files(destination).map(file=>({path:portable(relative(destination,file)),bytes:lstatSync(file).size,sha256:hash(readFileSync(file))}));

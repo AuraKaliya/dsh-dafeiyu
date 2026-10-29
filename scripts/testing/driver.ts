@@ -7,7 +7,7 @@ import { availableParallelism } from 'node:os';
 const root = process.env.DAFEIYU_TEST_RUN;
 if (!root) throw new Error('MANAGED_TEST_RUN_REQUIRED');
 const failures: { name: string; file: string | null }[] = [];
-run({ files: process.argv.slice(2), concurrency: Math.max(1, Math.min(4, availableParallelism() - 1)), isolation: 'process',
+run({ files: process.argv.slice(2), concurrency: Math.max(1, Math.min(4, availableParallelism() - 1)), isolation: 'process', timeout: 10000,
   setup(stream) { stream.on('test:fail', failure => { if (failures.length < 100) failures.push({ name: failure.name.slice(0, 400), file: failure.file ? basename(failure.file) : null }); });
     stream.on('test:summary', summary => {
     if (summary.file !== undefined) return;

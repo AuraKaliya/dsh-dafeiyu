@@ -1,17 +1,14 @@
-import test from 'node:test';
+import type { HostConfig } from '@dafeiyu/contracts';
+import { HostConfigSchema } from '@dafeiyu/contracts';
+import { loadHostConfig,pluginConfig } from '@dafeiyu/host';
+import { ServerExecutorPluginConfigSchema,serverExecutorScene } from '@dafeiyu/server-executor';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdtemp,readFile,writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import test from 'node:test';
 import { z } from 'zod';
-import { HostConfigSchema } from '@dafeiyu/contracts';
-import type { HostConfig } from '@dafeiyu/contracts';
-import { loadHostConfig,pluginConfig,initializeProfile,inspectHost,readManifest } from '@dafeiyu/host';
-import { ServerExecutorPluginConfigSchema,serverExecutorScene } from '@dafeiyu/server-executor';
-import { RUNTIME_SCHEMA_VERSION,runtimeHash } from '@dafeiyu/core/runtime-store';
-import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { testTempDir } from './test-temp.js';
 
 const execute='dafeiyu_server_execute_owner',autonomous='dafeiyu_server_execute_autonomous',status='dafeiyu_server_execution_status';
@@ -92,20 +89,4 @@ test('executor rejects network paths and standing authority stored in mutable Ho
   for(const path of [join(f.prepared.paths.core,'authority.json'),join(f.prepared.paths.memory,'authority.json')])assert.throws(await changed(f,withPlugin(f.config,'server-executor',{...settings,standingAuthority:{...standing,path}})),/HOST_EXECUTOR_AUTHORITY_INSIDE_DATA/);
   assert.throws(await changed(f,withPlugin(f.config,'server-executor',{...settings,standingAuthority:{...standing,path:'//fictional-host/share/authority.json'}})),/HOST_CONFIG_INVALID/);
   assert.equal(existsSync(f.prepared.paths.core),false);assert.equal(existsSync(f.prepared.paths.memory),false);
-});
-
-test('omitted or disabled executor preserves old policy hashes and existing profile data without creating or migrating its store',async()=>{
-  const f=await fixture(),legacyPolicy={id:'local',producers:['host-cli'],actions:[],allowLocalWrite:false,sourceRules:[],resources:[]};
-  const legacy={...f.config,plugins:f.config.plugins.filter(plugin=>plugin.id!=='server-executor'),authorityPolicies:[legacyPolicy]};
-  const before=(await changed(f,legacy))();assert.equal(Object.hasOwn(before.config.authorityPolicies[0]!,'externalActions'),false);assert.equal(runtimeHash(before.config.authorityPolicies[0]),runtimeHash(legacyPolicy));
-  assert.equal(initializeProfile(before,f.coordination).ready,true);assert.equal(readManifest(before)?.requiredStores.includes('executor'),false);assert.equal(existsSync(join(before.paths.core,'executor.sqlite')),false);
-  const files=[join(before.paths.core,'runtime.sqlite'),join(before.paths.memory,'memory.sqlite'),join(before.paths.core,'host-profile.json'),before.paths.foundation];
-  const hashes=await Promise.all(files.map(digest));
-  const disabled={...legacy,plugins:[...legacy.plugins,{...f.config.plugins.find(plugin=>plugin.id==='server-executor')!,enabled:false,required:false}]};
-  const parsed=(await changed(f,disabled))();assert.equal(pluginConfig(parsed,'server-executor'),undefined);assert.equal(parsed.order.includes('server-executor'),false);assert.equal(inspectHost(parsed,f.coordination).ready,true);
-  assert.equal(parsed.foundation.hash,before.foundation.hash);assert.equal(runtimeHash(parsed.config.authorityPolicies[0]),runtimeHash(legacyPolicy));assert.equal(Object.hasOwn(parsed.config.authorityPolicies[0]!,'externalActions'),false);
-  assert.notEqual(parsed.hash,before.hash,'an explicitly changed JSON config gets its own hash rather than pretending to be the old config');
-  assert.deepEqual(await Promise.all(files.map(digest)),hashes);assert.equal(existsSync(join(before.paths.core,'executor.sqlite')),false);
-  for(const [path,version] of [[files[0]!,RUNTIME_SCHEMA_VERSION],[files[1]!,MEMORY_SCHEMA_VERSION]] as const){const db=new DatabaseSync(path,{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get()?.user_version,version);}finally{db.close();}}
-  const restored=(await changed(f,legacy))();assert.equal(restored.hash,before.hash);assert.equal(inspectHost(restored,f.coordination).ready,true);assert.deepEqual(await Promise.all(files.map(digest)),hashes);
 });

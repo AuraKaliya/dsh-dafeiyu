@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { OperationScope } from '@dafeiyu/contracts';
 import { MemoryStore } from '@dafeiyu/memory/store';
 import { MemoryRetrieval } from '@dafeiyu/memory/retrieval';
-import { defaultProfile, loadProfile, RetrievalError } from '@dafeiyu/memory/retrieval-profile';
+import { loadProfile, RetrievalError } from '@dafeiyu/memory/retrieval-profile';
 import type { EmbeddingProfile, RetrievalConfig, RetrievalDependencies, TextChunk } from '@dafeiyu/memory/retrieval-profile';
 
 export function scope(route='a'): OperationScope {
@@ -52,8 +52,4 @@ export async function retrievalFixture(overrides: Partial<RetrievalConfig> = {})
     recall:(query:string,strategy:'lexical'|'semantic'|'hybrid'='hybrid',route='a',rebuild=false)=>retrieval.recall(scope(route),{query,strategy,rebuild},AbortSignal.timeout(5000),()=>{}),
     close:()=>{retrieval.close();store.close();},
   };
-}
-export async function alteredProfile(root: string) {
-  const profile=JSON.parse(await readFile(defaultProfile,'utf8'));profile.queryPrefix='用于查找虚构记忆：';
-  const path=join(root,'alternate-profile.json');await writeFile(path,JSON.stringify(profile));return path;
 }

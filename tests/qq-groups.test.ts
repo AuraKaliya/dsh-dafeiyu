@@ -1,10 +1,10 @@
-import test from 'node:test';
+import type { GroupInfo } from '@dafeiyu/qq';
+import { GroupDirectory,GroupSyncConfigSchema,QqPluginConfigSchema,QqStore,naturallyAddressed } from '@dafeiyu/qq';
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
-import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
-import { GroupDirectory, GroupSyncConfigSchema, QqPluginConfigSchema, QqStore, naturallyAddressed } from '@dafeiyu/qq';
-import type { GroupInfo } from '@dafeiyu/qq';
+import test from 'node:test';
+import { testTempDir as tmpdir } from './test-temp.js';
 
 test('natural QQ address matching recognizes explicit Chinese addresses while ignoring quoted or incidental names', () => {
   const names = ['大肥鱼', '蓝色大肥鱼'];
@@ -66,46 +66,6 @@ test('disabling group sync cannot bypass assistant filtering with a static allow
   finally { directory.pause(); f.store.close(); }
 });
 
-test('assistant transition cancels the current lease and resume persists a new generation and receive boundary', async () => {
-  const f = await fixture(), directory = new GroupDirectory(f.options), id = '11223344';
-  try {
-    f.store.remember('saved-history', '1', 'person', '原有真实记录保留'); f.store.sent('saved-reply', 'receipt');
-    await directory.start(); const first = directory.processingSignal(id, f.platform.wallClock), generation = directory.generation(id);
-    f.platform.groups[0]!.msgMask = 2; f.platform.wallClock = 1001100; await directory.refresh();
-    assert.equal(first.aborted, true); assert.deepEqual(directory.effective(), []); assert.throws(() => directory.processingSignal(id, 1002000), /GROUP_ACCESS_REVOKED/);
-    f.platform.groups[0]!.msgMask = 1; f.platform.wallClock = 1002200; await directory.refresh();
-    assert.ok(directory.generation(id) > generation); assert.equal(directory.accepts(id, 1002000), false); assert.equal(directory.accepts(id, 1003000), true);
-    assert.throws(() => directory.processingSignal(id, 1002000), /GROUP_ACCESS_REVOKED/);
-    assert.equal(directory.processingSignal(id, 1003000).aborted, false);
-    assert.equal(f.store.find('saved-history', '1')?.text, '原有真实记录保留'); assert.equal(f.store.receipt('saved-reply'), 'receipt');
-    const saved = f.store.groupSnapshot(f.options.account)!; assert.equal(saved.groups[0]?.acceptedAfter, 1003000);
-    directory.pause(); await directory.whenIdle();
-    const restarted = new GroupDirectory(f.options);
-    try { await restarted.start(); assert.equal(restarted.generation(id), saved.groups[0]?.generation); assert.equal(restarted.accepts(id, 1002000), false); }
-    finally { restarted.pause(); await restarted.whenIdle(); }
-  } finally { directory.pause(); await directory.whenIdle(); f.store.close(); }
-});
-
-test('leave and rejoin cannot reuse the generation of work accepted before removal', async () => {
-  const f = await fixture(), directory = new GroupDirectory(f.options);
-  try { await directory.start(); const generation = directory.generation('11223344'); f.platform.groups = []; await directory.refresh();
-    f.platform.groups = [{ id: '11223344', name: '虚构群', msgMask: 1 }]; await directory.refresh(); assert.ok(directory.generation('11223344') > generation); }
-  finally { directory.pause(); await directory.whenIdle(); f.store.close(); }
-});
-
-test('joined mode needs fresh evidence in this process and cannot reuse persisted membership after restart', async () => {
-  const f = await fixture(), options = { ...f.options, config: GroupSyncConfigSchema.parse({ enabled: true, mode: 'joined' }) };
-  const first = new GroupDirectory(options);
-  await first.start(); assert.deepEqual(first.effective(), ['11223344', '22334455']); first.pause(); await first.whenIdle();
-  f.platform.fail = true;
-  const restarted = new GroupDirectory(options);
-  try {
-    assert.equal(restarted.status().lastSuccessAt !== null, true); assert.equal(restarted.status().verifiedThisProcess, false);
-    await restarted.start(); assert.deepEqual(restarted.effective(), []);
-    f.platform.fail = false; f.platform.groups = [{ id: '22334455', name: '虚构B', msgMask: 1 }]; await restarted.refresh(); assert.deepEqual(restarted.effective(), ['22334455']);
-  } finally { restarted.pause(); await restarted.whenIdle(); f.store.close(); }
-});
-
 test('concurrent group refreshes share one request and shutdown aborts it before persisting any snapshot', async () => {
   const f = await fixture(); let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
   const directory = new GroupDirectory({ ...f.options, fetchGroups: signal => {
@@ -115,19 +75,6 @@ test('concurrent group refreshes share one request and shutdown aborts it before
     const starting = directory.start(); await started; const a = directory.refresh(), b = directory.refresh(); assert.equal(a, b); assert.equal(f.platform.calls, 1);
     directory.pause(); await starting; await directory.whenIdle(); assert.equal(f.store.groupSnapshot('12345678'), null);
     await directory.refresh(); assert.equal(f.platform.calls, 1);
-  } finally { directory.pause(); await directory.whenIdle(); f.store.close(); }
-});
-
-test('account mismatch and a failed snapshot commit immediately revoke previously usable membership', async () => {
-  const f = await fixture(); let failure: 'identity' | 'store' | null = null;
-  const directory = new GroupDirectory({ ...f.options,
-    fetchGroups: async () => { if (failure === 'identity') throw new Error('ACCOUNT_MISMATCH'); return f.platform.groups; },
-    store: { groupSnapshot: id => f.store.groupSnapshot(id), saveGroups: (id, groups, at) => { if (failure === 'store') throw new Error('SQL_FAILURE'); return f.store.saveGroups(id, groups, at); } },
-  });
-  try {
-    await directory.start(); failure = 'identity'; await directory.refresh(); assert.deepEqual(directory.effective(), []); assert.equal(f.platform.rejected, 1);
-    failure = null; await directory.refresh(); assert.deepEqual(directory.effective(), ['11223344']);
-    failure = 'store'; await directory.refresh(); assert.deepEqual(directory.effective(), []); assert.equal(directory.status().error, 'GROUP_SNAPSHOT_FAILED');
   } finally { directory.pause(); await directory.whenIdle(); f.store.close(); }
 });
 

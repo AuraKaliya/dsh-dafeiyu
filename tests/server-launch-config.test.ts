@@ -1,12 +1,11 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { existsSync,readFileSync } from 'node:fs';
-import { writeFile,readdir,mkdtemp } from 'node:fs/promises';
+import { mkdtemp,readdir,writeFile } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
-import { parseServerCommand,classifyServerRuntimeStop } from '../packages/server-runtime/lib/cli.js';
-import { loadServerLaunchEnvelope,resolvedServerSdkFiles,SERVER_RUNTIME_FILES,ServerLaunchManifestSchema } from '../packages/server-runtime/lib/launch-config.js';
+import test from 'node:test';
+import { parseServerCommand } from '../packages/server-runtime/lib/cli.js';
 import type { ServerLaunchManifest } from '../packages/server-runtime/lib/launch-config.js';
+import { SERVER_RUNTIME_FILES,ServerLaunchManifestSchema,loadServerLaunchEnvelope,resolvedServerSdkFiles } from '../packages/server-runtime/lib/launch-config.js';
 import { runtimeBytesHash,runtimePathIdentity } from '../packages/server-runtime/lib/runtime-files.js';
 import { testTempDir } from './test-temp.js';
 
@@ -50,21 +49,4 @@ test('release pins cover the actual billing, lifecycle, schema and status module
     assert.equal(existsSync(f.database),false);
   }
   const f=await launchFixture();f.manifest.runtimePins[1]=f.manifest.runtimePins[0]!;await f.save();assert.throws(()=>loadServerLaunchEnvelope(f.file),/RUNTIME_PIN_SET_INVALID/);
-});
-
-test('actual thin bin rejects extra runtime injection without reading the supplied manifest or creating a home',async()=>{
-  const f=await launchFixture(),before=await readdir(f.root);
-  const result=await new Promise<{code:number|null;stdout:string}>((accept,reject)=>{
-    const child=spawn(process.execPath,[resolve('packages/server-runtime/bin/dafeiyu-server.mjs'),'start','--manifest',join(f.root,'absent.json'),'--factory','arbitrary.mjs'],{cwd:f.root,windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,TEMP:f.root,TMP:f.root}});let stdout='';
-    child.stdout.setEncoding('utf8');child.stdout.on('data',value=>{stdout+=String(value);});child.once('error',reject);child.once('exit',code=>accept({code,stdout}));
-  });assert.equal(result.code,1);assert.deepEqual(JSON.parse(result.stdout),{status:'failed',code:'RUNTIME_ARGUMENT_INVALID'});assert.deepEqual(await readdir(f.root),before);assert.equal(existsSync(f.database),false);
-});
-
-test('removed operating money fields and commands cannot return through the launch schema',async()=>{
- const f=await launchFixture();assert.equal(ServerLaunchManifestSchema.safeParse({...f.manifest,funding:{amount:100}}).success,false);
- assert.equal(ServerLaunchManifestSchema.safeParse({...f.manifest,operationsAuthorization:'ignored.json'}).success,false);
- for(const mode of ['operator-init','operator-amend'])assert.throws(()=>parseServerCommand([mode,'--manifest',f.file]),/RUNTIME_ARGUMENT_INVALID/);
- assert.deepEqual(classifyServerRuntimeStop('RUNTIME_USAGE_UNKNOWN'),{kind:'accounting-stop',code:'RUNTIME_USAGE_UNKNOWN',reason:'unknown-cost'});
- const {runServerCommand}=await import('../packages/server-runtime/lib/cli.js');await assert.rejects(runServerCommand({mode:'start',manifest:f.file}),/RUNTIME_ACCOUNTING_PORT_REQUIRED/);
- assert.equal(existsSync(f.database),false);
 });

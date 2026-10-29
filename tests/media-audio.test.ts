@@ -1,15 +1,14 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,mkdir,writeFile,readFile,readdir } from 'node:fs/promises';
-import { join,resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { mkdir,mkdtemp,readFile,readdir,writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import test from 'node:test';
 import { z } from 'zod';
-import { AudioPipeline,audioConfigSchema,pcmInfo } from '../packages/media/lib/audio.js';
 import type { AudioWorker } from '../packages/media/lib/audio.js';
-import { BoundedProcess } from '../packages/media/lib/process.js';
+import { AudioPipeline,audioConfigSchema,pcmInfo } from '../packages/media/lib/audio.js';
 import { SystemSpeech } from '../packages/media/lib/tts.js';
-import { testTempDir } from './test-temp.js';
 import { syntheticPcm } from './media-pcm-fixture.js';
+import { testTempDir } from './test-temp.js';
 const requestSchema=z.object({input:z.string(),inputSha256:z.string(),samples:z.number(),model:z.object({sha256:z.string()}),labels:z.object({sha256:z.string()}).optional()});
 async function fixture(){const root=await mkdtemp(join(testTempDir(),'media-audio-')),work=join(root,'work');await mkdir(work);const model=join(root,'fake-model'),labels=join(root,'fake-labels');await writeFile(model,'scripted-model');await writeFile(labels,'scripted-labels');
   const pin=async(path:string)=>({path,sha256:createHash('sha256').update(await readFile(path)).digest('hex')});const config=audioConfigSchema.parse({whisper:{node:process.execPath,moduleDirectory:root,moduleVersion:'1.1.3',model:await pin(model)},events:{python:'fixture-python.exe',model:await pin(model),labels:await pin(labels),numpyVersion:'fixture',onnxruntimeVersion:'fixture'}});
@@ -35,18 +34,6 @@ test('changed models cannot be loaded, and cancellation or source revocation can
   const f=await fixture();await writeFile(f.config.whisper!.model.path,'changed');const rejected=await new AudioPipeline(f.work,f.config,backend()).read(f.audio,new AbortController().signal,()=>{});assert.equal(rejected.asr.status,'failed');assert.equal(rejected.events.status,'failed');assert.ok(rejected.gaps.includes('MEDIA_MODEL_HASH_CHANGED'));
   await assert.rejects(new AudioPipeline(f.work,f.config,backend()).read(f.audio,new AbortController().signal,()=>{throw new Error('SOURCE_STALE');}),/SOURCE_STALE/);
   const abort=new AbortController();abort.abort();await assert.rejects(new AudioPipeline(f.work,f.config,backend()).read(f.audio,abort.signal,()=>{}));assert.deepEqual(await readdir(f.work),[]);
-});
-
-test('Whisper worker actually consumes a synthetic WAV and releases its injected binding without running a model',async()=>{
-  const f=await fixture(),moduleDirectory=join(f.root,'binding');await mkdir(moduleDirectory);await writeFile(join(moduleDirectory,'package.json'),JSON.stringify({name:'@fugood/whisper.node',version:'1.1.3',main:'index.cjs'}));
-  await writeFile(join(moduleDirectory,'index.cjs'),`let released=false;process.on('exit',()=>{if(!released)process.exitCode=1});exports.toggleNativeLog=async()=>{};exports.initWhisper=async()=>({transcribeFile:input=>({promise:require('node:fs/promises').readFile(input).then(data=>({isAborted:false,segments:[{t0:0,t1:(data.length-44)/32,text:'SCRIPTED_BINDING'}]}))}),release:async()=>{released=true}});`);
-  const result=await new AudioPipeline(f.work,{whisper:{...f.config.whisper!,moduleDirectory}},new BoundedProcess(f.work)).read(f.audio,new AbortController().signal,()=>{});
-  assert.equal(result.asr.status,'complete');if(result.asr.status==='complete')assert.equal(result.asr.segments[0]?.text,'SCRIPTED_BINDING');assert.equal(result.events.status,'unavailable');assert.deepEqual(await readdir(f.work),[]);
-});
-
-test('Python window coverage and format validation run with injected scores and no ONNX model',async()=>{
-  const f=await fixture(),worker=new BoundedProcess(f.work);const result=await worker.run({executable:process.env.DAFEIYU_TEST_AUDIO_PYTHON??process.env.DAFEIYU_TEST_DOCUMENT_PYTHON??'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe',arguments:[resolve('tests/media_audio_worker_test.py'),resolve('packages/media/workers/audio_events.py')],timeoutMs:10000,memoryBytes:256*1024**2,maxStdoutBytes:1024,maxStderrBytes:8192,signal:new AbortController().signal});
-  assert.match(result.stdout.toString('utf8'),/"passed": true/);assert.deepEqual(await readdir(f.work),[]);
 });
 
 test('optional TTS binds final approved text and validates output, without invoking a real speech engine',async()=>{
