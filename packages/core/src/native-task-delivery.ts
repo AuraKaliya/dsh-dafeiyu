@@ -5,6 +5,7 @@ import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskRes
 import type { ContextCoordinator } from './context.js';
 import type { RuntimeStore } from './runtime-store.js';
 import type { DeliveryChannel } from './delivery-channel.js';
+import type { FeedbackLedger } from './feedback-ledger.js';
 import { nativeDeliveryHash } from './native-delivery-store.js';
 import { renderTaskResult,renderPublicProgress } from './target-renderer.js';
 import type {DeliveryRepair} from './target-renderer.js';
@@ -19,6 +20,7 @@ interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:s
   model():AgentOptions;channel(item:PendingMessage):DeliveryChannel|null;accepting():boolean;flush():void;
   enqueue<T>(route:string,work:()=>Promise<T>):Promise<T>;acquire():Promise<()=>void>;
   notice(input:{item:PendingMessage;text:string;deliveryId:string;status:'sent'|'not-sent'|'unknown';kind:'progress'|'result'|'failure';receiptId?:string}):void;
+  feedback?:FeedbackLedger;
   media():MediaPort|undefined;mediaAccess(authority:MediaReplyAuthority,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>;
 }
 const codes=new Set(['SOURCE_STALE','DEPENDENCY_UNAVAILABLE','DELIVERY_BINDING_CONFLICT','DELIVERY_RENDER_ALREADY_EXISTS','DELIVERY_TOOLS_FORBIDDEN','DELIVERY_CAPACITY','MODEL_INCOMPLETE','PERSISTENCE_FAILED','DELIVERY_CREDENTIAL_INVALID','DELIVERY_BODY_MISMATCH','NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL','NATIVE_EXPRESSION_UNAVAILABLE','NATIVE_EXPRESSION_CAPACITY','PRIVATE_INPUT_REJECTED','DELIVERY_UNFAITHFUL','DELIVERY_VERIFICATION_INCOMPLETE','MEDIA_TARGET_DENIED','MEDIA_SOURCE_SUPPRESSED','MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH']);
@@ -74,8 +76,11 @@ export class NativeTaskDelivery {
     let invoked=false;
     try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,noticeId,persona.text,persona.items,
       {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:failed?'向原会话说明这次卡在哪里、已经做到什么、接下来怎么办。':'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,failure,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。不要说任务已完成或结果已发送；不要输出内部错误码。'})}]},signal,()=>{guard();persona.guard();},32000);
+      let feedbackId:string|undefined;
+      try{feedbackId=this.host.feedback?.queue({workItemId:runId,route:source.item.route,kind:'must-know',text:result.text,dueAt:new Date().toISOString()}).id;}catch{/* Status delivery remains authoritative if the ledger write fails. */}
       const receipt=await this.host.enqueue(source.item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'task-status:'+noticeId,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text:result.text},signal,()=>{guard();persona.guard();});});
       this.host.notice({item:source.item,text:result.text,deliveryId:'task-status:'+noticeId,status:receipt.status,kind:failed?'failure':'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{})});
+      if(feedbackId&&receipt.status==='sent'){try{this.host.feedback?.markSent(feedbackId,'task-status:'+noticeId,source.item.route);}catch{/* The sent notice above is still the continuity record. */}}
       invoked=true;this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status});this.host.flush();return z.json().parse(receipt);
     }catch{
       if(invoked)return {status:'unknown',code:'STATUS_EVENT_FAILED'};

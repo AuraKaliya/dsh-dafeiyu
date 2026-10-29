@@ -5,6 +5,7 @@ import { ExecutorPermitSchema,ExecutorRouteSchema,ExecutorSettlementSchema,Execu
 import type { ExecutorPermit } from '@dafeiyu/server-executor/protocol';
 import type { ExecutionBudgetPort } from '@dafeiyu/server-executor/budget';
 import { ModelCallGate } from './call-gate.js';
+import type { CallLease } from './call-gate.js';
 import { ModelBudgetRequestSchema,ModelBudgetSettlementSchema,RuntimeIdentitySchema,runtimeCode } from './types.js';
 import type { ModelBudgetAuthority,ModelBudgetRequest,ModelBudgetSettlement,RuntimeCallRecord } from './types.js';
 
@@ -48,7 +49,7 @@ export class SharedModelBudget {
   snapshot():readonly RuntimeCallRecord[]{return structuredClone([...this.calls.values()].map(({request,permit,state,settlement})=>({request,permit,state,settlement})));}
   whenIdle(timeoutMs=10000):Promise<void>{return this.gate.whenIdle(timeoutMs);}
 
-  async reserve(raw:ModelBudgetRequest,signal:AbortSignal):Promise<ExecutorPermit> {
+  async reserve(raw:ModelBudgetRequest,signal:AbortSignal,lease?:CallLease):Promise<ExecutorPermit> {
     const request=ModelBudgetRequestSchema.parse(raw);signal.throwIfAborted();
     const inherited=this.dispatch.getStore();
     if(inherited&&this.calls.get(inherited)?.state==='reserved')throw new Error('RUNTIME_NESTED_MODEL_CALL');
@@ -56,7 +57,7 @@ export class SharedModelBudget {
     const route=this.route;
     if(request.provider!==route.provider||request.model!==route.model||request.reasoningEffort!==route.reasoningEffort||request.inputBound!==route.contextWindow||request.outputBound>route.maxOutputTokens||request.requestBytes>route.maxRequestBytes)throw new Error('RUNTIME_ROUTE_CHANGED');
     if(this.seen.has(request.callId))throw new Error('RUNTIME_CALL_REPLAY');this.seen.add(request.callId);
-    const deadline=Math.min(request.deadline,Date.now()+this.remainingMs()),release=await this.gate.acquire(signal,deadline);
+    const deadline=Math.min(request.deadline,Date.now()+this.remainingMs()),release=await this.gate.acquire(signal,deadline,lease);
     let owned=false;
     try {
       signal.throwIfAborted();this.assertReady();

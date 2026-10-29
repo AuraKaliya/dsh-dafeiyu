@@ -38,6 +38,7 @@ import { ExecutionCoordinator,ExecutionOptionsSchema } from './execution-coordin
 import type { ExecutionOptions } from './execution-coordinator.js';
 import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import { RunScheduler } from './run-scheduler.js';
+import { FeedbackLedger } from './feedback-ledger.js';
 import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
@@ -214,6 +215,7 @@ export class DafeiyuService extends Service {
   private executions:ExecutionCoordinator|undefined;
   private runStore:RuntimeStore|undefined;
   private scheduler:RunScheduler|undefined;
+  private feedback:FeedbackLedger;
   private executionRecovered=false;
   private conversationRuns:ConversationRuns|undefined;
 
@@ -221,6 +223,7 @@ export class DafeiyuService extends Service {
     super(ctx, 'dafeiyu');
     this.config = ConfigSchema.parse(config);
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
+    this.feedback = new FeedbackLedger(this.journal, this.config.agentId);
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
     registerSentNotices(this.contexts,this.journal,this.config.agentId);
     {this.contexts.register('core-situation','1',[situationContributor(()=>true,scene=>this.executions?.responsibilityFacts(scene)??[],
@@ -356,8 +359,13 @@ export class DafeiyuService extends Service {
       const result=await renderPublicProgress(this.ctx,model,this.config.dataDir,context.operationId,persona.text,persona.items,{target:item.message.conversation,taskId:context.taskId!,runId:context.runId,inboundId:item.id,question:authority.authorization.goal,taskState:'running',
         evidence:[{id:'intent',kind:'inference',text:JSON.stringify({requestedPublicFeedback:input,note:'仅公开反馈草稿，不是完成事实。'})},...facts.map((operation,index)=>({id:'P'+index,kind:'reported' as const,text:JSON.stringify({action:operation.action,outcome:operation.outcome}).slice(0,8000)}))]},signal,()=>{guard();persona.guard();},this.config.context.requestMaxBytes-this.config.context.outputReserveBytes);
       guard();persona.guard();const reply:Reply={id:'qq-progress:'+context.operationId,conversation:item.message.conversation,sourceMessageId:item.message.id,text:result.text};
+      const now=new Date(),kind=input.kind==='blocked'?'must-know':input.kind==='progress'?'worth-sharing':'progress';
+      let feedbackId:string|undefined;
+      try{feedbackId=this.feedback.queue({workItemId:context.runId,route:item.route,kind,text:result.text,sourceEventId:context.operationId,
+        ...(kind==='must-know'?{dueAt:now.toISOString()}:{}),...(kind==='worth-sharing'?{expiresAt:new Date(now.getTime()+15*60_000).toISOString()}:{})}).id;}catch{/* Feedback is an audit trail; it must not block an approved public notice. */}
       invoked=true;const receipt=await channel.capability.deliver(reply,signal,()=>{guard();persona.guard();});
       this.conversations.recordNotice(item,{text:result.text,deliveryId:reply.id,status:receipt.status,kind:'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{})});
+      if(feedbackId&&receipt.status==='sent'){try{this.feedback.markSent(feedbackId,reply.id,item.route);}catch{/* The notice is still recorded above. */}}
       return receipt;
       }catch{return {status:invoked?'unknown' as const:'not-sent' as const,code:invoked?'QQ_PROGRESS_RESULT_UNKNOWN':'QQ_PROGRESS_NOT_SENT'};}
     });
@@ -412,6 +420,7 @@ export class DafeiyuService extends Service {
     this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:NATIVE_RENDER_ATTEMPTS*(this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification)+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
       feedbackSource:id=>this.executions!.feedbackSource(id),
+      feedback:this.feedback,
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
       channel:item=>this.conversations.deliveryChannel(item),
       enqueue:(route,work)=>this.conversations.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire({workItemId:'native-delivery',route:'',class:'interactive',maxDurationMs:this.config.deliveryTimeoutMs,preemptible:true}),
@@ -429,6 +438,7 @@ export class DafeiyuService extends Service {
   private readonly activityPressureReaders=new Map<string,()=>number>();
   bindActivityPressure(id:string,read:()=>number){if(this.activityPressureReaders.has(id))throw new Error('DUPLICATE_PROVIDER');this.activityPressureReaders.set(id,read);return ()=>{this.activityPressureReaders.delete(id);};}
   activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:(this.executions?.foregroundPending??0)+this.journal.list(['accepted','processing','reply-ready','sending']).length+[...this.activityPressureReaders.values()].reduce((sum,read)=>sum+Math.max(0,read()),0)};}
+  feedbackLedger(){return this.feedback;}
   executionAuthority(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authority(context,pluginId);}
   authorizeExternalTask(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authorizeExternalTask(context,pluginId);}
   externalTaskSourceCurrent(authorization:unknown,pluginId:string):boolean{return this.executions?.externalTaskSourceCurrent(authorization,pluginId)??false;}

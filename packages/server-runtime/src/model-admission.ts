@@ -5,6 +5,7 @@ import type { StreamChunk } from '@deepseek-ai/dsh-llm';
 import { normalizeExecutorUsage } from '@dafeiyu/server-executor/protocol';
 import type { ExecutorSettlement,ExecutorUsage } from '@dafeiyu/server-executor/protocol';
 import { SharedModelBudget } from './shared-budget.js';
+import type { CallLease } from './call-gate.js';
 import { RuntimeIdentitySchema,runtimeCode } from './types.js';
 
 const installed=new WeakSet<object>();
@@ -14,6 +15,8 @@ export interface ParentModelAdmissionOptions {
   readonly maximumCallMs:number;
   /** Cancels the actual owners' work controllers, including isolated analysis contexts. */
   readonly cancelActive:(code:string)=>void;
+  /** Optional call-level lease; absent keeps the gate FIFO. */
+  readonly leaseFor?:(request:{readonly purpose?:string})=>CallLease|undefined;
   readonly guard?:()=>void;
 }
 
@@ -48,7 +51,7 @@ export function installParentModelAdmission(ctx:Context,budget:SharedModelBudget
     const bytes=Buffer.byteLength(body);if(bytes>route.maxRequestBytes)throw new Error('RUNTIME_REQUEST_TOO_LARGE');
     const callId=randomUUID(),started=Date.now(),owner={kind:'host' as const,profileId};
     const permit=await budget.reserve({authorizationId:budget.authorizationId,owner,deadline:started+options.maximumCallMs,callId,provider:request.provider,model:request.model,
-      reasoningEffort:effort,requestHash:hash(body),sessionHash:hash(String(request.sessionId??'')),inputBound:route.contextWindow,outputBound:output,requestBytes:bytes,purpose:request.purpose??'task'},request.signal);
+      reasoningEffort:effort,requestHash:hash(body),sessionHash:hash(String(request.sessionId??'')),inputBound:route.contextWindow,outputBound:output,requestBytes:bytes,purpose:request.purpose??'task'},request.signal,options.leaseFor?.(request.purpose===undefined?{}:{purpose:request.purpose}));
     let usage:ExecutorUsage|null=null,finish:ExecutorSettlement['finish']='interrupted',error:string|null=null,complete=false,invalid=false;
     let iterator:AsyncIterator<StreamChunk>|undefined,drained=false;
     try{

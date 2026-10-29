@@ -69,7 +69,8 @@ export async function createProductionRuntime(config:PreparedHostConfig,options:
       if(mounted||actual!==config||actual.hash!==config.hash)throw new Error('RUNTIME_HOST_BINDING_MISMATCH');
       mounted=true;disposed=false;ctx.effect(()=>()=>{disposed=true;},'dafeiyu.server-runtime.host-lifetime');
       await validateParentModelAdmission(ctx,budget);
-      installParentModelAdmission(ctx,budget,{profileId:config.config.profileId,maximumCallMs:options.maximumCallMs,guard,cancelActive:code=>cancelManagedModelWork(ctx,code)});
+      installParentModelAdmission(ctx,budget,{profileId:config.config.profileId,maximumCallMs:options.maximumCallMs,guard,cancelActive:code=>cancelManagedModelWork(ctx,code),
+        leaseFor:({purpose})=>({class:purpose==='compaction'||purpose==='session-title'?'background':'interactive'})});
     },
   };
   return {budget,parentProof:processControl.parentEvidence(),hostOptions:Object.freeze(hostOptions),close:host=>lifetime.close(host)};
