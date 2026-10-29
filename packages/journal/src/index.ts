@@ -164,6 +164,12 @@ export class Journal {
     return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='conversation' ORDER BY seq").all(route)
       .map(row => ({ ...JSON.parse(text(row.body)), seq: Number(row.seq) }) as EventRecord);
   }
+  /** Bounded type-filtered conversation view for per-request context contributors. */
+  recentEvents(route:string,type:string,limit=6):EventRecord[] {
+    const count=Math.max(1,Math.min(64,Math.trunc(limit)));
+    return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.type')=? ORDER BY seq DESC LIMIT ?")
+      .all(route,type,count).map(row=>({...JSON.parse(text(row.body)),seq:Number(row.seq)}) as EventRecord).reverse();
+  }
   /** Authorization predicates are evaluated inside the SQL query, including persisted visibility. */
   private scopePredicate(): string {
     return "route=? AND json_extract(body,'$.agentId')=? AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.visibility.route')=?";

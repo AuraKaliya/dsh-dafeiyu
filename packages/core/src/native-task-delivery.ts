@@ -18,6 +18,7 @@ interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:s
   persona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
   model():AgentOptions;channel(item:PendingMessage):DeliveryChannel|null;accepting():boolean;flush():void;
   enqueue<T>(route:string,work:()=>Promise<T>):Promise<T>;acquire():Promise<()=>void>;
+  notice(input:{item:PendingMessage;text:string;deliveryId:string;status:'sent'|'not-sent'|'unknown';kind:'progress'|'result'|'failure';receiptId?:string}):void;
   media():MediaPort|undefined;mediaAccess(authority:MediaReplyAuthority,reply:Reply,signal:AbortSignal):Promise<MediaReplyAccess>;
 }
 const codes=new Set(['SOURCE_STALE','DEPENDENCY_UNAVAILABLE','DELIVERY_BINDING_CONFLICT','DELIVERY_RENDER_ALREADY_EXISTS','DELIVERY_TOOLS_FORBIDDEN','DELIVERY_CAPACITY','MODEL_INCOMPLETE','PERSISTENCE_FAILED','DELIVERY_CREDENTIAL_INVALID','DELIVERY_BODY_MISMATCH','NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL','NATIVE_EXPRESSION_UNAVAILABLE','NATIVE_EXPRESSION_CAPACITY','PRIVATE_INPUT_REJECTED','DELIVERY_UNFAITHFUL','DELIVERY_VERIFICATION_INCOMPLETE','MEDIA_TARGET_DENIED','MEDIA_SOURCE_SUPPRESSED','MEDIA_DELIVERY_NOT_CONFIGURED','MEDIA_DRAFT_AUTHORITY_MISMATCH']);
@@ -74,11 +75,13 @@ export class NativeTaskDelivery {
     try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,noticeId,persona.text,persona.items,
       {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:failed?'向原会话说明这次卡在哪里、已经做到什么、接下来怎么办。':'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,failure,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。不要说任务已完成或结果已发送；不要输出内部错误码。'})}]},signal,()=>{guard();persona.guard();},32000);
       const receipt=await this.host.enqueue(source.item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'task-status:'+noticeId,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text:result.text},signal,()=>{guard();persona.guard();});});
+      this.host.notice({item:source.item,text:result.text,deliveryId:'task-status:'+noticeId,status:receipt.status,kind:failed?'failure':'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{})});
       invoked=true;this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status});this.host.flush();return z.json().parse(receipt);
     }catch{
       if(invoked)return {status:'unknown',code:'STATUS_EVENT_FAILED'};
       try{guard();const text=failed?'我这边卡住了，任务先停在当前进度；已经完成的部分和记录都还在，我换个办法再继续。':'我这边暂时停一下，已经完成的部分和记录都还在。';
         const receipt=await this.host.enqueue(source.item.route,async()=>{guard();return channel.capability.deliver({id:`task-status-fallback:${runId}:${source.state}`,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text},signal,()=>guard());});
+        this.host.notice({item:source.item,text,deliveryId:`task-status-fallback:${runId}:${source.state}`,status:receipt.status,kind:failed?'failure':'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{})});
         this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status,fallback:true});this.host.flush();return z.json().parse(receipt);
       }catch{return {status:'not-sent',code:'STATUS_NOT_SENT'};}
     }
@@ -144,6 +147,7 @@ export class NativeTaskDelivery {
       });}
       if(!invoked&&result.status==='not-sent'&&this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.notSentBeforeDispatch(runId,result.code);
       else this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
+      this.host.notice({item,text:body,deliveryId:`native-delivery:${record.id}`,status:result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':'unknown',kind:'result',...(result.status==='sent'?{receiptId:result.receiptId}:{})});
     }catch(error){const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
     }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');}catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
@@ -162,6 +166,7 @@ export class NativeTaskDelivery {
           phase:sendAttempted?'transport':row.error?.startsWith('DELIVERY_VERIFICATION_')||row.error==='DELIVERY_UNFAITHFUL'?'verification':'pre-send',
           note:sendAttempted?'发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。':'回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。'})}]},signal,()=>{guard();persona.guard();},32000);
       const receipt=await this.host.enqueue(item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'native-status:'+row.id,conversation:row.anchor.target,sourceMessageId:item.message.id,text:message.text},signal,()=>{guard();persona.guard();});});
+      this.host.notice({item,text:message.text,deliveryId:'native-status:'+row.id,status:receipt.status,kind:'failure',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{})});
       this.host.store.appendExecutionEvent(runId,'native.delivery.feedback',{status:receipt.status});this.host.flush();
     }catch{/* The original delivery state remains authoritative; never resend its rejected body. */}
   }

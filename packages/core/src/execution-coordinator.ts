@@ -581,7 +581,10 @@ export class ExecutionCoordinator {
     this.queued.set(run.id,work);this.taskQueues.set(taskId,work);
   }
   private async process(id:string):Promise<void>{
-    const release=await this.d.scheduler.acquire(['explicit-task','mixed'].includes(this.motivation(this.d.store.get(id)).kind));
+    const scheduled=this.d.store.get(id),motivation=this.motivation(scheduled).kind;
+    const cls:'owner-task'|'background'|'autonomy'=motivation==='explicit-task'||motivation==='mixed'?'owner-task':motivation==='self-exploration'?'background':'autonomy';
+    const scope=scheduled.definition.scope;
+    const release=await this.d.scheduler.acquire({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
     try{if(!this.d.accepting()||this.failure)return;let run=this.d.store.get(id);if(!['accepted','queued'].includes(run.state))return;
       const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);let runPersona:RunPersona|undefined,trialInputs:readonly ExecutionInput[]=[];
       try{

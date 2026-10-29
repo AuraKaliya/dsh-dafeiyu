@@ -1,6 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
-import {SourceDependencySchema} from '@dafeiyu/contracts';
+import {SourceDependencySchema,redactContent} from '@dafeiyu/contracts';
 import type {Context} from '@deepseek-ai/cordis';
 import type {AgentOptions} from '@deepseek-ai/dsh-agent';
 import type {ContextItem,Extension,Json,PendingMessage,Reply,MediaPort,MediaReplyAccess,MediaReplyAuthority,ExperienceMemoryPort} from '@dafeiyu/contracts';
@@ -166,7 +166,9 @@ export class ConversationCoordinator {
   }
 
   private async process(id: string): Promise<void> {
-    const release=await this.scheduler?.acquire(true);
+    const item=this.journal.get(id);
+    this.scheduler?.noteInbound(item.route);
+    const release=await this.scheduler?.acquire({workItemId:`conversation:${id}`,route:item.route,class:'interactive',maxDurationMs:this.config.turnTimeoutMs,preemptible:true});
     try{await this.processMessage(id);}finally{try{const runId=this.runStore?.findRequest('conversation',id)?.runId;if(runId)this.personas.current(runId)?.dispose();}finally{release?.();}}
   }
 
@@ -279,4 +281,35 @@ export class ConversationCoordinator {
     if (item.state !== 'reply-ready') throw new Error('Only a definitely unsent reply may be retried');
     this.schedule(item);
   }
+
+  /**
+   * Records text that actually left (or may have left) the process for this scene.
+   * The target session must be able to answer "what did I already tell them?".
+   */
+  recordNotice(item: PendingMessage, notice: SentNotice): void {
+    try {
+      if (!notice.text.trim() || !notice.deliveryId.trim()) return;
+      const text = redactContent(notice.text).value.slice(0, 4000);
+      if (!text) return;
+      const duplicate = this.journal.recentEvents(item.route,'notice.sent',64).some(event => event.data.deliveryId === notice.deliveryId);
+      if (duplicate) return;
+      this.journal.append(this.event(item, 'notice.sent', {
+        text,
+        deliveryId: notice.deliveryId,
+        status: notice.status,
+        kind: notice.kind,
+        ...(notice.receiptId ? { receiptId: notice.receiptId } : {}),
+      }));
+    } catch {
+      // Delivery state remains authoritative; a continuity record must not turn a completed send into unknown.
+    }
+  }
+}
+
+export interface SentNotice {
+  readonly text: string;
+  readonly deliveryId: string;
+  readonly status: 'sent' | 'not-sent' | 'unknown';
+  readonly kind: 'progress' | 'result' | 'failure';
+  readonly receiptId?: string;
 }

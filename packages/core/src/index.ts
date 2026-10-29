@@ -18,6 +18,7 @@ import { Journal, eventFor } from '@dafeiyu/journal';
 import { DshRuntime, DshRunError } from './runtime.js';
 import {renderConversationRecovery,decidePendingReplies} from './conversation-recovery.js';
 import { ContextCoordinator,contextConfigSchema } from './context.js';
+import {registerSentNotices} from './notice-context.js';
 import type { ContextRequest } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
 import type { CompactionBinding } from './compaction-runtime.js';
@@ -221,6 +222,7 @@ export class DafeiyuService extends Service {
     this.config = ConfigSchema.parse(config);
     this.journal = new Journal(resolve(this.config.dataDir, 'journal.sqlite'));
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
+    registerSentNotices(this.contexts,this.journal,this.config.agentId);
     {this.contexts.register('core-situation','1',[situationContributor(()=>true,scene=>this.executions?.responsibilityFacts(scene)??[],
       (request,item,proof)=>{const scope=this.contexts.scopeFor(request),runId=this.runStore?.findRequest('conversation',scope.traceId)?.runId;if(!runId||!this.runStore)throw new Error('RUN_NOT_RUNNING');if(this.runStore.get(runId).state!=='running')return;this.runStore.bindInput(runId,'operational-context:'+digestSource(JSON.stringify([item.text,item.sources])),{route:scope.route,item,proof});},
       (request,dependency)=>{try{const scope=this.contexts.scopeFor(request),record=z.object({route:z.string(),item:ContextItemSchema,proof:z.json()}).parse(this.runStore?.findContext('operational-context:'+dependency.hash));return record.route===scope.route&&record.item.id===dependency.id&&record.item.version===dependency.version&&digestSource(JSON.stringify([record.item.text,record.item.sources]))===dependency.hash&&(this.executions?.responsibilitySnapshotCurrent(record.proof,request.conversation)??false);}catch{return false;}})]);
@@ -354,7 +356,9 @@ export class DafeiyuService extends Service {
       const result=await renderPublicProgress(this.ctx,model,this.config.dataDir,context.operationId,persona.text,persona.items,{target:item.message.conversation,taskId:context.taskId!,runId:context.runId,inboundId:item.id,question:authority.authorization.goal,taskState:'running',
         evidence:[{id:'intent',kind:'inference',text:JSON.stringify({requestedPublicFeedback:input,note:'仅公开反馈草稿，不是完成事实。'})},...facts.map((operation,index)=>({id:'P'+index,kind:'reported' as const,text:JSON.stringify({action:operation.action,outcome:operation.outcome}).slice(0,8000)}))]},signal,()=>{guard();persona.guard();},this.config.context.requestMaxBytes-this.config.context.outputReserveBytes);
       guard();persona.guard();const reply:Reply={id:'qq-progress:'+context.operationId,conversation:item.message.conversation,sourceMessageId:item.message.id,text:result.text};
-      invoked=true;return await channel.capability.deliver(reply,signal,()=>{guard();persona.guard();});
+      invoked=true;const receipt=await channel.capability.deliver(reply,signal,()=>{guard();persona.guard();});
+      this.conversations.recordNotice(item,{text:result.text,deliveryId:reply.id,status:receipt.status,kind:'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{})});
+      return receipt;
       }catch{return {status:invoked?'unknown' as const:'not-sent' as const,code:invoked?'QQ_PROGRESS_RESULT_UNKNOWN':'QQ_PROGRESS_NOT_SENT'};}
     });
   }
@@ -392,7 +396,15 @@ export class DafeiyuService extends Service {
   configureExecution(raw:ExecutionOptions):void {
     this.assertOpen();if(this.gate.state!=='registered'||this.executions)throw new Error('SERVICE_LIFECYCLE_CONFLICT');
     const options=ExecutionOptionsSchema.parse(raw),store=new RuntimeStore(resolve(this.config.dataDir,'runtime.sqlite'),{agentId:this.config.agentId,profileId:options.profileId},{create:options.createStore});
-    this.runStore=store;this.scheduler=new RunScheduler(options.maxConcurrentRuns);
+    this.runStore=store;this.scheduler=new RunScheduler(options.maxConcurrentRuns,{
+      interactiveReserve:options.maxConcurrentRuns>1?1:0,
+      antiStarvation:3,
+      onDecision:decision=>{
+        if(!decision.route)return;
+        if(decision.waiting===0&&decision.backgroundActive===0&&decision.chosenClass==='interactive'&&decision.reason==='interactive')return;
+        this.journal.append({agentId:this.config.agentId,route:decision.route,traceId:randomUUID(),operationId:randomUUID(),causedBy:null,
+          type:'attention.decided',plugin:'@dafeiyu/core',pluginVersion:CORE_VERSION,occurredAt:decision.at,sources:[],data:z.record(z.string(),z.json()).parse(decision)});
+      }});
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.conversations.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registry,scheduler:this.scheduler,options,personas:this.personas,
       channelDescription:id=>this.conversations.deliveryChannel(this.journal.get(id))?.capability.description??'',repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
@@ -402,7 +414,8 @@ export class DafeiyuService extends Service {
       feedbackSource:id=>this.executions!.feedbackSource(id),
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
       channel:item=>this.conversations.deliveryChannel(item),
-      enqueue:(route,work)=>this.conversations.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire(false),
+      enqueue:(route,work)=>this.conversations.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire({workItemId:'native-delivery',route:'',class:'interactive',maxDurationMs:this.config.deliveryTimeoutMs,preemptible:true}),
+      notice:notice=>this.conversations.recordNotice(notice.item,{text:notice.text,deliveryId:notice.deliveryId,status:notice.status,kind:notice.kind,...(notice.receiptId?{receiptId:notice.receiptId}:{})}),
       persona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),media:()=>this.mediaPort,mediaAccess:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),
     });
   }
