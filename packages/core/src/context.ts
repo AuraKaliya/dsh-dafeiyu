@@ -90,7 +90,7 @@ export class ContextCoordinator {
       validate:(item:ContextItem)=>{this.scopeFor(request);return entry.contributor.validate(request,item);},
     };}),Math.max(0,Math.min(allowance,this.config.maxBytes)));
   }
-  repair(item:PendingMessage,data:{attempt:number;excessBytes:number;allowanceBytes:number;requestBytes:number;maximumBytes:number}):void{
+  repair(item:PendingMessage,data:{attempt:number;excessBytes:number;allowanceBytes:number;requestBytes:number;maximumBytes:number;phase?:'guard'|'measure'}):void{
     this.journal.append({agentId:this.agentId,route:item.route,traceId:item.id,operationId:randomUUID(),causedBy:null,
       type:'context.repair',plugin:'core',pluginVersion:CORE_VERSION,occurredAt:new Date().toISOString(),sources:[],
       data:{...data,policy:'controlled-context-shrink-v1'}});

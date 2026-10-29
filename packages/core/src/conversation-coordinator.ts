@@ -101,7 +101,7 @@ export class ConversationCoordinator {
     try{guard();}catch{return;}
     const events=this.journal.events(item.route).filter(e=>e.traceId===item.id),operations=events.filter(e=>e.type==='operation.started').map(e=>({id:e.operationId,action:typeof e.data.action==='string'?e.data.action:'unknown',state:events.findLast(end=>end.operationId===e.operationId&&end.type!=='operation.started')?.type??'unknown'}));
     this.journal.append(this.event(item,'recovery.notice.started',{noticeId:id,code:failure,phase:'recovery'}));
-    let text='【系统状态】刚才的处理未完成，进度和已有操作记录已保存；没有自动重做已执行的操作。',fallback=true,next='wait';
+    let text=`【系统状态】刚才的处理未完成（${failure}），进度和已有操作记录已保存；没有自动重做已执行的操作。`,fallback=true,next='wait';
     try{const persona=this.targetPersona(item,id,signal,guard),renderSignal=AbortSignal.any([signal,AbortSignal.timeout(20000)]);
       const decision=await renderConversationRecovery(this.ctx,this.recoveryModel(),this.config.dataDir,id,persona.text,persona.items,{question:item.message.mainText??item.message.text,failureCode:failure,operations,originalTurn:'failed',automaticReplay:false},renderSignal,()=>{guard();persona.guard();});
       text=decision.message;next=decision.next;fallback=false;

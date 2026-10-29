@@ -46,7 +46,7 @@ export class DshRuntime {
     ctx.on('llm/stream',async function*(options,next){
       const owned=options.sessionId?sessions.get(options.sessionId):undefined;
       if(!owned){yield* next();return;}
-      await yieldEventLoop();owned.lastRequest=options;await owned.context.measure(options);
+      await yieldEventLoop();owned.lastRequest=options;if(!await owned.context.measure(options)){yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;}
       if(!owned.context.guard(options,true,true)){
         yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
       }

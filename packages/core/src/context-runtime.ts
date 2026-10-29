@@ -67,6 +67,7 @@ export class ContextRuntime {
   private repairRounds=0;
   private retryPending=false;
   private allowanceOverride:number|undefined;
+  private capacityRepairUsed=false;
   private nativeSections:{name:string;text:string}[]=[];
   private capacity:{request:GenerateOptions;data:Awaited<ReturnType<typeof inspectRequestCapacity>>}|undefined;
   private lastValidation=0;
@@ -92,9 +93,19 @@ export class ContextRuntime {
       return next();
     });
   }
-  begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;this.preparing=true;this.retired=0;this.repairRounds=0;this.retryPending=false;this.allowanceOverride=undefined;}
+  begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;this.preparing=true;this.retired=0;this.repairRounds=0;this.retryPending=false;this.allowanceOverride=undefined;this.capacityRepairUsed=false;}
   end():void{this.coordinator.release(this.prepared);this.prepared=[];this.item=undefined;this.preparing=true;}
-  async measure(options:GenerateOptions){this.capacity={request:options,data:await inspectRequestCapacity(this.scope,options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes)};}
+  async measure(options:GenerateOptions):Promise<boolean>{
+    try{this.capacity={request:options,data:await inspectRequestCapacity(this.scope,options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes)};return true;}
+    catch(error){
+      if(error instanceof Error&&error.message==='CONTEXT_REQUEST_CAPACITY'&&!this.capacityRepairUsed&&this.item){
+        const raw=requestCapacity(options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes),excess=raw.bytes+raw.reserveBytes-raw.maximumBytes,next=shrinkControlledAllowance(this.allowance,excess);
+        if(next<this.allowance){this.allowanceOverride=next;this.capacityRepairUsed=true;this.retryPending=true;
+          this.coordinator.repair(this.item,{attempt:1,excessBytes:excess,allowanceBytes:next,requestBytes:raw.bytes,maximumBytes:raw.maximumBytes,phase:'measure'});return false;}
+      }
+      throw error;
+    }
+  }
   sourceItems(){return this.packet.regions.flatMap(region=>region.items.map(item=>({owner:region.owner,region:region.region,item})));}
   // Capability declarations have the same authority as tool schemas, not evidence about the world.
   // Their availability is rechecked at dispatch; a catalog refresh does not revoke old factual replies.
@@ -166,7 +177,7 @@ export class ContextRuntime {
       if(allowRepair&&this.repairRounds<MAX_CONTROLLED_CONTEXT_REPAIRS&&this.item){
         const next=shrinkControlledAllowance(this.allowance,excess);
         if(next<this.allowance){this.allowanceOverride=next;this.repairRounds++;this.retryPending=true;
-          this.coordinator.repair(this.item,{attempt:this.repairRounds,excessBytes:excess,allowanceBytes:next,requestBytes:capacity.bytes,maximumBytes:capacity.maximumBytes});return false;}
+          this.coordinator.repair(this.item,{attempt:this.repairRounds,excessBytes:excess,allowanceBytes:next,requestBytes:capacity.bytes,maximumBytes:capacity.maximumBytes,phase:'guard'});return false;}
       }
       throw new Error('Context request budget exceeded');
     }
