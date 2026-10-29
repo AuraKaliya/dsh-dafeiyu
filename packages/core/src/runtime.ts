@@ -1,3 +1,4 @@
+import {observeUsage} from './usage.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle, AgentOptions } from '@deepseek-ai/dsh-agent';
 import { SessionId,pluginRecordOf } from '@deepseek-ai/dsh-session';
@@ -39,6 +40,7 @@ export class DshRuntime {
   constructor(private readonly ctx:Context,private readonly model:AgentOptions,private readonly cwd:string,private readonly coordinator:ContextCoordinator,
     private readonly agentId:string,private readonly compactionBinding:()=>CompactionBinding|undefined,
     private readonly compactionAudit:CompactionAudit,private readonly harness=new HarnessRuntime()) {
+    observeUsage(ctx);
     this.native=new NativeRuntime(ctx,model,cwd,harness);
     const sessions=this.handles;
     ctx.on('llm/stream',async function*(options,next){

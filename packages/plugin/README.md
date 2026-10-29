@@ -1,8 +1,10 @@
 # 大肥鱼 · dsh-dafeiyu
 
-v0.22.3 预览版 · [更新说明](docs/release-notes.md)
+v0.25.0 开发版 · [更新说明](docs/release-notes.md)
 
 基于 DeepSeek Harness 的可成长智能体。通过交流与探索积累经历，由记忆与成长统一管理阶段人格、偏好和关系；核心使用这些状态，独立判断并执行明确任务。
+
+在 DSH 设置中打开“大肥鱼管理中心”。当前管理范围、模块注册及验证边界见 [管理中心说明](docs/management-center-0.25.md)。
 
 ## 功能
 

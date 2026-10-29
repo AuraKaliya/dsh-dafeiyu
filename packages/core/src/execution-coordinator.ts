@@ -1,3 +1,4 @@
+import {withRunUsage} from './usage.js';
 import {TaskDispositionSchema} from '@dafeiyu/contracts';
 import {stageHandoff} from './context-handoff.js';
 import type {ExecutionView} from '@dafeiyu/contracts';
@@ -383,6 +384,17 @@ export class ExecutionCoordinator {
   private taskRef(producer:string,id:string){const ref=Object.freeze({id});this.tasks.set(ref,{producer,id});return ref;}
   private resolve(producer:string,ref:RunRef){const authority=this.refs.get(ref);if(authority?.producer!==producer)throw new Error('SCOPE_DENIED');return this.d.store.get(authority.id);}
   private resolveTask(producer:string,ref:TaskRef){const authority=this.tasks.get(ref);if(authority?.producer!==producer)throw new Error('SCOPE_DENIED');return authority.id;}
+  async management(action:string,raw:unknown){
+    if(action==='list'){const input=z.strictObject({offset:z.number().int().nonnegative().default(0)}).parse(raw);return this.d.store.list().reverse().slice(input.offset,input.offset+50).map(run=>({id:run.id,taskId:run.definition.taskId,state:run.state,version:run.version,createdAt:run.createdAt,updatedAt:run.updatedAt,error:run.error,origin:run.definition.origin.kind}));}
+    const input=z.strictObject({id:z.uuid(),requestId:z.uuid().optional(),expectedVersion:z.number().int().positive().optional()}).parse(raw),run=this.d.store.get(input.id);
+    if(!run.definition.taskId){if(action==='detail')return {run,operations:this.d.store.operations(run.id).slice(-100),allowedActions:[]};throw new Error('MANAGEMENT_TASK_REQUIRED');}
+    const producer=this.d.store.request(run.requestKey).producer,port=this.producer(producer),ref=port.restoreRun(run.id),status=port.status(ref);
+    if(action==='detail'){let result:string|null=null;try{result=await port.readResult(ref);}catch{}return {run,status,result,usage:this.d.store.usage(run.id),operations:this.d.store.operations(run.id),allowedActions:run.state==='running'?['pause','cancel']:['accepted','queued'].includes(run.state)?['cancel']:run.state==='waiting'&&status.checkpoints.length?['resume']:[]};}
+    if(!input.requestId||input.expectedVersion!==run.version)throw new Error('MANAGEMENT_REVISION_CONFLICT');
+    if(action==='pause'||action==='cancel')return this.control(producer,run,{requestId:input.requestId,expectedVersion:input.expectedVersion,reason:'主人在管理中心请求'+action},action);
+    if(action==='resume'){const checkpoint=status.checkpoints.at(-1);if(!checkpoint)throw new Error('CHECKPOINT_REQUIRED');const task=port.openTask(run.definition.taskId),state=port.taskState(task);return port.resume(task,{requestId:input.requestId,expectedVersion:state.version,taskId:task.id,policyId:run.definition.policyId,parentRunId:run.id,checkpointId:checkpoint});}
+    throw new Error('MANAGEMENT_ACTION_INVALID');
+  }
   producer(raw:string,options?:unknown){const producer=ProducerSchema.parse(raw),declared=z.strictObject({motivation:MotivationSchema}).optional().parse(options);
     if(!this.d.options.policies.some(policy=>policy.producers.includes(producer)))throw new Error('SCOPE_DENIED');
     return Object.freeze({
@@ -646,7 +658,7 @@ export class ExecutionCoordinator {
           program:z.json().parse({...z.record(z.string(),z.json()).parse(program),handoff}),contexts,evidence,
           audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
           checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
-        const result=await this.d.runtime.runExecution(frame);admittedGuard();
+        const result=await withRunUsage(receipt=>this.d.store.bindInput(frame.view.runId,'model-usage:'+receipt.id,receipt),()=>this.d.runtime.runExecution(frame));admittedGuard();
         if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
         this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.bindInput(id,'agent-result',result.resultRef);
         const decisions=this.d.store.operations(id).filter(op=>op.plugin===CAPABILITY_OWNER&&op.action==='dafeiyu_task_outcome'&&op.outcome?.status==='succeeded');

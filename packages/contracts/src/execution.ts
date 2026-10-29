@@ -58,7 +58,7 @@ export interface TaskContextContributor {
   validate(view: ExecutionView, item: ContextItem): boolean;
 }
 export interface Extension {
-  readonly protocolVersion:4; readonly id: string; readonly version: string; readonly agentId: string;
+  readonly protocolVersion:typeof API_VERSION; readonly id: string; readonly version: string; readonly agentId: string;
   readonly provides?: readonly string[]; readonly requires?: readonly string[];
   readonly actions?: readonly ActionCapability[]; readonly channels?: readonly ChannelCapability[];
   readonly contexts?: readonly TaskContextContributor[];

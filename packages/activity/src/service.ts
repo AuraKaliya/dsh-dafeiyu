@@ -24,9 +24,10 @@ const updateSchema=z.strictObject({id:z.uuid(),requestId:PersonaRequestIdSchema,
 export const configSchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100),dataDir:z.string().min(1),settings:ActivityConfigSchema.prefault({})});
 export type Config=z.input<typeof configSchema>;
 declare module '@deepseek-ai/cordis' {interface Context {dafeiyuActivity:ActivityService}}
-export const ACTIVITY_ACTIONS=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status'] as const;
+export const ACTIVITY_ACTIONS=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status','dafeiyu_activity_rest'] as const;
 
 export class ActivityService extends Service {
+  management(action:string,raw:unknown){if(action==='plan.update'){const input=z.strictObject({id:z.uuid(),requestId:z.uuid(),expectedVersion:z.number().int().positive(),state:z.enum(['active','paused','cancelled'])}).parse(raw),plan=this.store.get(input.id);return this.store.update(input.id,plan.body.owner,{requestId:input.requestId,expectedVersion:input.expectedVersion,state:input.state},this.now());}if(action==='configure-budget')return this.store.rounds.configure(raw);if(action!=='status')throw new Error('MANAGEMENT_ACTION_INVALID');return {health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list()};}
   pendingEvents(){return pendingActivityEvents(this.config.dataDir); }
   readonly store:ActivityStore;
   readonly config:z.output<typeof configSchema>;
@@ -76,7 +77,7 @@ export class ActivityService extends Service {
       execute:async(input,c)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(fn(input,c)),sources:[],receipts:[]};}
         catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'ACTIVITY_FAILED';
           return {status:'failed',effects:write&&!['INVALID_INPUT','SOURCE_NOT_EXPOSED','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','SCOPE_DENIED','ACTIVITY_CANCELLED','ACTIVITY_INTERVAL_TOO_SHORT','ACTIVITY_SOURCE_REQUIRED','ACTIVITY_REPLAN_REQUIRED','ACTIVITY_QUIET_ALL_DAY','PRIVATE_INPUT_REJECTED'].includes(code)?'unknown':'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});
-    return [make(ACTIVITY_ACTIONS[0],'为自己建立有来源的探索计划。时间安排不授予新的数据或平台权限；可以休息。',planSchema,true,(i,c)=>this.plan(c,i)),
+    return [make(ACTIVITY_ACTIONS[3],'当前活动完成后结束本轮并休息；不重置已经发生的用量。',z.strictObject({}),true,(_i,c)=>{this.access(c,true);return this.scheduler.rest(c.runId);}),make(ACTIVITY_ACTIONS[0],'为自己建立有来源的探索计划。时间安排不授予新的数据或平台权限；可以休息。',planSchema,true,(i,c)=>this.plan(c,i)),
       make(ACTIVITY_ACTIONS[1],'持版本调整自己计划的时间、频率或暂停／取消。改变探索目标创建新的工作代次，原Task目标不改写。',updateSchema,true,(i,c)=>this.update(c,i)),
       make(ACTIVITY_ACTIONS[2],'查看当前Task拥有或正在执行的活动计划，不读取其它任务。',z.strictObject({id:z.uuid().optional()}),false,(i,c)=>this.status(c,z.object({id:z.uuid().optional()}).parse(i).id))];
   }

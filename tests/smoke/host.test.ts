@@ -1,3 +1,4 @@
+import {z} from 'zod';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -31,6 +32,8 @@ test('offline Host connects Core, memory, registered tools and one simulator rep
   const host = await ManagedHost.start(prepared, { coordination });
   t.after(() => host.close());
   assert.equal(host.snapshot().phase, 'ready');
+  const personality=await host.management('memory','status',null);assert.equal(z.object({foundation:z.object({text:z.string()})}).parse(personality).foundation.text,'本机虚构底色。');
+  assert.ok(Array.isArray(await host.management('tasks','list',{})));
   assert.ok(host.snapshot().plugins.some(plugin => plugin.id === 'memory' && plugin.state === 'ready'));
   const actions = host.core.capabilityManifest().actions;
   assert.ok(actions.some(action => action.owner === 'memory'));

@@ -31,6 +31,6 @@
   "activity": {
     "enabled": true,
     "timeZone": "Asia/Shanghai",
-    "dailyActiveMs": 3600000
+    "roundTokens": 100000, "roundDurationMs": 900000
   }
 }

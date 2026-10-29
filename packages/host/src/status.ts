@@ -1,3 +1,4 @@
+import {ACTIVITY_SCHEMA_VERSION} from '@dafeiyu/activity';
 import {RUNTIME_SCHEMA_VERSION} from '@dafeiyu/core/runtime-store';
 import { existsSync,readFileSync,statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,7 +21,7 @@ const snapshotSchema=z.strictObject({schemaVersion:z.literal(1),profileId:id,age
       polling:z.boolean(),inFlight:count,lastPollAt:z.iso.datetime().nullable(),error:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),bindingFault:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable().optional(),backoffUntil:count,bindingReady:z.boolean(),counts:z.strictObject({inbound:z.record(z.string(),count),deliveries:z.record(z.string(),count)}),leaseEpoch:count.positive()}).optional(),
     taskDelivery:z.strictObject({total:count,pending:count,sent:count,partial:count,uncertain:count,blocked:count}).nullable().optional(),
     qq:z.strictObject({state:z.enum(['starting','online','offline','rejected','stopped']),groupSync:z.enum(['disabled','unavailable','current','stale']),groupError:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),effectiveGroups:count,lastGroupSync:z.iso.datetime().nullable(),capabilities:z.boolean().optional(),tasks:z.strictObject({enabled:z.boolean(),registered:z.boolean(),deliverResults:z.boolean()}).optional(),delivery:z.strictObject({plans:count,pending:count,unknown:count}).optional()}).nullable().optional()}),
-  counts:z.strictObject({activeRuns:count,queuedRuns:count,queuedRoutes:count,pendingMessages:count,outbox:count}),schemas:z.strictObject({journal:z.literal(1),memory:z.literal(MEMORY_SCHEMA_VERSION),runtime:z.literal(RUNTIME_SCHEMA_VERSION),activity:z.literal(1).nullable().optional(),media:z.literal(2).nullable().optional(),bilibili:z.literal(2).nullable().optional(),executor:z.literal(1).optional(),biliOwner:z.literal(2).optional()})});
+  counts:z.strictObject({activeRuns:count,queuedRuns:count,queuedRoutes:count,pendingMessages:count,outbox:count}),schemas:z.strictObject({journal:z.literal(1),memory:z.literal(MEMORY_SCHEMA_VERSION),runtime:z.literal(RUNTIME_SCHEMA_VERSION),activity:z.literal(ACTIVITY_SCHEMA_VERSION).nullable().optional(),media:z.literal(2).nullable().optional(),bilibili:z.literal(2).nullable().optional(),executor:z.literal(1).optional(),biliOwner:z.literal(2).optional()})});
 export type SavedHostSnapshot=z.infer<typeof snapshotSchema>;
 /** An old or edited file is evidence of a snapshot, never proof of a live healthy instance. */
 export function readHostStatus(config:PreparedHostConfig,coordination?:string,now=Date.now()){

@@ -1,3 +1,4 @@
+import {reportExternalUsage} from '@dafeiyu/core/usage';
 import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import {API_VERSION} from '@dafeiyu/contracts';
 import { Service } from '@deepseek-ai/cordis';
@@ -144,7 +145,7 @@ export class ServerExecutorService extends Service {
         allowedTools:profile.allowedTools,handshakeTimeoutMs:settings.handshakeTimeoutMs,cancelGraceMs:settings.cancelGraceMs,
         beforeSpawn:()=>{guard();job=this.store.claimLaunch(job.id,scope,job.version,nonceHash,this.now());},
         onReady:process=>{guard();job=this.store.running(job.id,scope,job.version,{nonceHash,profileHash:settings.command.profileHash,process},this.now());}});
-      const parsed=resultSchema.parse(result);job=this.store.get(job.id,scope);this.reconcileBudget(job,parsed);
+      const parsed=resultSchema.parse(result);for(const record of parsed.budget){const usage=record.settlement?.usage;reportExternalUsage({id:record.call.callId,tokens:record.state==='settled'&&usage?usage.inputTokens+usage.outputTokens:null,durationMs:record.settlement?.durationMs??0});}reportExternalUsage({id:job.id,tokens:0,durationMs:0,marker:true});job=this.store.get(job.id,scope);this.reconcileBudget(job,parsed);
       const envelope=envelopeSchema.parse({schemaVersion:1,jobId:job.id,jobHash:job.hash,configHash:this.configHash,authorization,authorizationHash:authority.hash,inputSources:sources,standing:standingRef,osEvidence:{mode:this.config.mode,admission,termination},result:parsed});
       const output=this.writeEnvelope(envelope),terminal=this.terminal(job,parsed,output,envelope.osEvidence.admission);this.store.seal(job.id,scope,job.version,terminal,this.now());
     }catch(error){try{job=this.store.get(job.id,scope);if(!job.receipt){const gap=executorError(error,'EXECUTOR_ADAPTER_FAILED');

@@ -33,6 +33,7 @@ export * from './bili-browser.js';
 export * from './qq-expression.js';
 export * from './task-review.js';
 export * from './experience.js';
+export * from './management.js';
 import type { TaskMemoryProvider } from './task-memory.js';
 import type { MemoryObservationProvider,ObservationReceipt } from './observation.js';
 import type { CompactionProvider } from './compaction.js';

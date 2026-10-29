@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/host",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -12,20 +12,21 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
-    }
+    },
+    "./management": "./lib/management-definition.js"
   },
   "dependencies": {
-    "@dafeiyu/activity": "0.24.0",
-    "@dafeiyu/bilibili": "0.24.0",
-    "@dafeiyu/channel-simulator": "0.24.0",
-    "@dafeiyu/contracts": "0.24.0",
-    "@dafeiyu/core": "0.24.0",
-    "@dafeiyu/journal": "0.24.0",
-    "@dafeiyu/media": "0.24.0",
-    "@dafeiyu/memory": "0.24.0",
-    "@dafeiyu/qq": "0.24.0",
-    "@dafeiyu/server-executor": "0.24.0",
-    "@dafeiyu/timeline": "0.24.0",
+    "@dafeiyu/activity": "0.25.0",
+    "@dafeiyu/bilibili": "0.25.0",
+    "@dafeiyu/channel-simulator": "0.25.0",
+    "@dafeiyu/contracts": "0.25.0",
+    "@dafeiyu/core": "0.25.0",
+    "@dafeiyu/journal": "0.25.0",
+    "@dafeiyu/media": "0.25.0",
+    "@dafeiyu/memory": "0.25.0",
+    "@dafeiyu/qq": "0.25.0",
+    "@dafeiyu/server-executor": "0.25.0",
+    "@dafeiyu/timeline": "0.25.0",
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",

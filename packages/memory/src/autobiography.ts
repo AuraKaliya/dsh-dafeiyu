@@ -11,6 +11,11 @@ const understandingSchema=SelfUnderstandingInputSchema.extend({id:z.uuid(),scope
 /** Memory owns both the experienced facts and the Agent's explicitly retained interpretations. */
 export class Autobiography implements ExperienceMemoryPort {
   constructor(private readonly db:DatabaseSync,private readonly atomic:<T>(work:()=>T)=>T,private readonly agentId:string,private readonly originCurrent:(origin:import('@dafeiyu/contracts').RunOrigin)=>boolean=()=>true){}
+  managementExperience(raw:unknown){const {id}=z.strictObject({id:z.uuid()}).parse(raw),episode=this.db.prepare('SELECT body,state FROM memory_episodes WHERE id=? AND agent_id=?').get(id,this.agentId);if(!episode)return null;return {episode:EpisodeStartSchema.parse(JSON.parse(String(episode.body))),state:String(episode.state),reflections:this.db.prepare('SELECT body FROM memory_reflections WHERE episode_id=? ORDER BY rowid DESC LIMIT 50').all(id).map(row=>{const body=reflectionSchema.parse(JSON.parse(String(row.body)));return {...body,...this.reflectionState(body.id)};})};}
+  management(){const seed=this.db.prepare('SELECT body FROM memory_seed WHERE agent_id=?').get(this.agentId);return {foundation:seed?z.object({text:z.string(),version:z.string()}).parse(JSON.parse(String(seed.body))):null,self:this.selected(),reflections:this.db.prepare('SELECT r.body FROM memory_reflections r JOIN memory_episodes e ON e.id=r.episode_id WHERE e.agent_id=? ORDER BY r.rowid DESC LIMIT 100').all(this.agentId).map(row=>{const body=reflectionSchema.parse(JSON.parse(String(row.body))),state=this.reflectionState(body.id);return {...body,...state};})};}
+  private reflectionState(id:string){const row=this.db.prepare('SELECT version,deleted FROM memory_reflection_state WHERE id=?').get(id);return {stateVersion:row?Number(row.version):0,deleted:!!row?.deleted};}
+  private basisAvailable(body:z.output<typeof understandingSchema>){return body.reflections.every(id=>!this.reflectionState(id).deleted);}
+  manageReflection(raw:unknown){const input=z.strictObject({id:z.uuid(),expectedVersion:z.number().int().nonnegative(),deleted:z.boolean(),requestId:z.uuid(),reason:z.string().min(1).max(500)}).parse(raw);return this.atomic(()=>{const existing=this.db.prepare('SELECT 1 FROM memory_reflections r JOIN memory_episodes e ON r.episode_id=e.id WHERE r.id=? AND e.agent_id=?').get(input.id,this.agentId);if(!existing)throw new Error('MEMORY_NOT_FOUND');const previous=this.db.prepare('SELECT * FROM memory_reflection_state WHERE id=?').get(input.id);if(previous?.request_id===input.requestId){if(!!previous.deleted!==input.deleted||previous.reason!==input.reason)throw new Error('IDEMPOTENCY_CONFLICT');return this.reflectionState(input.id);}if(this.reflectionState(input.id).stateVersion!==input.expectedVersion)throw new Error('MANAGEMENT_REVISION_CONFLICT');this.db.prepare('INSERT INTO memory_reflection_state VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,deleted=excluded.deleted,request_id=excluded.request_id,reason=excluded.reason').run(input.id,input.expectedVersion+1,Number(input.deleted),input.requestId,input.reason);return this.reflectionState(input.id);});}
   foundation(loadSeed:()=>PersonaSnapshot&{fileIdentity:string}) {
     return this.atomic(()=>{
       const existing=this.db.prepare('SELECT body FROM memory_seed WHERE agent_id=?').get(this.agentId);
@@ -44,11 +49,11 @@ export class Autobiography implements ExperienceMemoryPort {
     if(!row)throw new Error('SCOPE_DENIED');if(!this.originCurrent(EpisodeStartSchema.parse(JSON.parse(String(row.body))).origin))throw new Error('SOURCE_STALE');return row;
   }
   read(scope:ExecutionScope,id:string){const row=this.episode(scope,id),episode=EpisodeStartSchema.parse(JSON.parse(String(row.body)));return {untrustedEvidence:true,episode:{...episode,goal:episode.goal.slice(0,600)},state:row.state,reflection:row.reflection,
-    thoughts:this.db.prepare('SELECT body,body_hash FROM memory_reflections WHERE episode_id=? ORDER BY rowid DESC LIMIT 8').all(id).map(item=>{const body=reflectionSchema.parse(JSON.parse(String(item.body)));if(personaDigest(body)!==item.body_hash)throw new Error('MEMORY_CORRUPT');return {id:body.id,at:body.at,thought:body.thought.slice(0,300),coverage:'excerpt',read:{episodeId:id,reflectionId:body.id,offset:0}};}),
+    thoughts:this.db.prepare('SELECT body,body_hash FROM memory_reflections WHERE episode_id=? ORDER BY rowid DESC LIMIT 8').all(id).filter(item=>!this.reflectionState(reflectionSchema.parse(JSON.parse(String(item.body))).id).deleted).map(item=>{const body=reflectionSchema.parse(JSON.parse(String(item.body)));if(personaDigest(body)!==item.body_hash)throw new Error('MEMORY_CORRUPT');return {id:body.id,at:body.at,thought:body.thought.slice(0,300),coverage:'excerpt',read:{episodeId:id,reflectionId:body.id,offset:0}};}),
     events:this.db.prepare('SELECT body,body_hash FROM memory_episode_events WHERE episode_id=? ORDER BY rowid DESC LIMIT 32').all(id).map(item=>{const body=EpisodeOperationSchema.parse(JSON.parse(String(item.body)));if(personaDigest(body)!==item.body_hash)throw new Error('MEMORY_CORRUPT');return {id:body.id,action:body.action,status:body.outcome.status,effects:body.outcome.effects,completeness:body.outcome.completeness,read:{episodeId:id,eventId:body.id,offset:0}};}),
     coverage:'bounded-index',note:'索引是当时的操作报告和自己的看法；通过read按需读取原内容，不从索引补造未读内容。'};}
   readPart(scope:ExecutionScope,episodeId:string,kind:'event'|'reflection',id:string,offset=0,limit=4000){
-    this.episode(scope,episodeId);z.uuid().parse(id);z.number().int().nonnegative().parse(offset);z.number().int().min(1).max(8000).parse(limit);
+    this.episode(scope,episodeId);z.uuid().parse(id);if(kind==='reflection'&&this.reflectionState(id).deleted)throw new Error('SOURCE_STALE');z.number().int().nonnegative().parse(offset);z.number().int().min(1).max(8000).parse(limit);
     const table=kind==='event'?'memory_episode_events':'memory_reflections',row=this.db.prepare(`SELECT body,body_hash FROM ${table} WHERE id=? AND episode_id=?`).get(id,episodeId);
     if(!row)throw new Error('SOURCE_STALE');const body=JSON.parse(String(row.body));if(personaDigest(body)!==row.body_hash)throw new Error('MEMORY_CORRUPT');
     const chars=Array.from(String(row.body));if(offset>chars.length)throw new Error('INVALID_INPUT');const end=Math.min(chars.length,offset+limit);
@@ -87,7 +92,7 @@ export class Autobiography implements ExperienceMemoryPort {
   }
   reflections(access:PersonaAccess,ids:readonly string[]){access.guard();return ids.map(id=>{
     const row=this.db.prepare('SELECT body,body_hash FROM memory_reflections WHERE id=?').get(z.uuid().parse(id));if(!row)throw new Error('SOURCE_STALE');
-    const body=reflectionSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)throw new Error('MEMORY_CORRUPT');this.episode(access.view.scope,body.episodeId);return body;
+    const body=reflectionSchema.parse(JSON.parse(String(row.body)));if(this.reflectionState(body.id).deleted)throw new Error('SOURCE_STALE');if(personaDigest(body)!==row.body_hash)throw new Error('MEMORY_CORRUPT');this.episode(access.view.scope,body.episodeId);return body;
   });}
   understand(access:PersonaAccess,raw:unknown,approvedHash:string){access.guard();const input=SelfUnderstandingInputSchema.parse(raw),basis=this.reflections(access,input.reflections);
     if(approvedHash!==personaDigest({input,basis}))throw new Error('SELF_VIEW_NOT_REVIEWED');
@@ -103,7 +108,7 @@ export class Autobiography implements ExperienceMemoryPort {
   }
   withdraw(access:PersonaAccess,id:string,version:number){access.guard();if(this.db.prepare('UPDATE memory_self SET active=0 WHERE id=? AND agent_id=? AND version=? AND active=1').run(z.uuid().parse(id),this.agentId,version).changes!==1)throw new Error('VERSION_CONFLICT');return {id,version,active:false};}
   private selected(){return this.db.prepare('SELECT r.body,r.body_hash FROM memory_self h JOIN memory_self_revisions r ON h.id=r.id AND h.version=r.version WHERE h.agent_id=? AND h.active=1 ORDER BY h.rowid').all(this.agentId).map(row=>{
-    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)throw new Error('MEMORY_CORRUPT');return body;});}
+    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)throw new Error('MEMORY_CORRUPT');return body;}).filter(body=>this.basisAvailable(body));}
   status(){return this.selected().map(body=>({id:body.id,version:body.version,text:body.text,applicability:body.applicability,uncertainty:body.uncertainty}));}
   reference(body:ReturnType<Autobiography['selected']>[number]):PersonaSourceRef{return {kind:'memory',collection:'autobiography',agentId:this.agentId,scopeKey:'self:'+this.agentId,id:body.id,revision:body.version,version:body.version,contentHash:personaDigest(body)};}
   material(ref:PersonaSourceRef){const entry=this.entry(ref);return entry?{text:entry.item.text,dependencies:[] as PersonaSourceRef[],rootSources:['self-memory:'+ref.id]}:null;}
@@ -112,7 +117,7 @@ export class Autobiography implements ExperienceMemoryPort {
   entry(ref:PersonaSourceRef):PreparedPersonaEntry|null {
     if(ref.kind!=='memory'||ref.collection!=='autobiography'||ref.agentId!==this.agentId||ref.scopeKey!=='self:'+this.agentId||ref.version!==ref.revision)return null;
     const row=this.db.prepare('SELECT body,body_hash FROM memory_self_revisions WHERE id=? AND agent_id=? AND version=?').get(ref.id,this.agentId,ref.version);if(!row||row.body_hash!==ref.contentHash)return null;
-    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)return null;return this.projected(body);
+    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(!this.basisAvailable(body)||!this.db.prepare('SELECT 1 FROM memory_self WHERE id=? AND agent_id=? AND active=1').get(ref.id,this.agentId)||personaDigest(body)!==row.body_hash)return null;return this.projected(body);
   }
   validEntry(entry:PreparedPersonaEntry){
     const ref=entry.contentRef;if(ref.kind!=='memory'||ref.collection!=='autobiography'||ref.agentId!==this.agentId||entry.memory.id!==ref.id||entry.memory.version!==ref.version)return false;
@@ -120,7 +125,7 @@ export class Autobiography implements ExperienceMemoryPort {
   }
   historical(dependency:Extract<SourceDependency,{kind:'context'}>){if(!dependency.id.startsWith('self-memory:'))return false;
     const row=this.db.prepare('SELECT body,body_hash FROM memory_self_revisions WHERE id=? AND agent_id=? AND version=?').get(dependency.id.slice('self-memory:'.length),this.agentId,Number(dependency.version));if(!row)return false;
-    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(personaDigest(body)!==row.body_hash)return false;const entry=this.projected(body);return createHash('sha256').update(JSON.stringify([entry.item.text,entry.item.sources])).digest('hex')===dependency.hash;
+    const body=understandingSchema.parse(JSON.parse(String(row.body)));if(!this.basisAvailable(body)||!this.db.prepare('SELECT 1 FROM memory_self WHERE id=? AND agent_id=? AND active=1').get(body.id,this.agentId)||personaDigest(body)!==row.body_hash)return false;const entry=this.projected(body);return createHash('sha256').update(JSON.stringify([entry.item.text,entry.item.sources])).digest('hex')===dependency.hash;
   }
   prepare():PreparedPersona {const rows=this.selected(),entries=rows.map(body=>this.projected(body));
     const revision=rows.reduce((sum,row)=>sum+row.version,0);return {stageRevision:revision,selectionVersion:revision,entries,omitted:0};}
@@ -132,6 +137,7 @@ export function createAutobiographySchema(db:DatabaseSync){db.exec(`
   CREATE INDEX memory_episodes_scope ON memory_episodes(agent_id,scope_key);
   CREATE TABLE memory_episode_events(id TEXT PRIMARY KEY,episode_id TEXT NOT NULL REFERENCES memory_episodes(id),body TEXT NOT NULL,body_hash TEXT NOT NULL);
   CREATE TABLE memory_reflections(id TEXT PRIMARY KEY,episode_id TEXT NOT NULL REFERENCES memory_episodes(id),request_id TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,UNIQUE(episode_id,request_id));
+  CREATE TABLE memory_reflection_state(id TEXT PRIMARY KEY REFERENCES memory_reflections(id),version INTEGER NOT NULL,deleted INTEGER NOT NULL,request_id TEXT NOT NULL,reason TEXT NOT NULL);
   CREATE TABLE memory_self(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,version INTEGER NOT NULL,active INTEGER NOT NULL);
   CREATE TABLE memory_self_revisions(id TEXT NOT NULL,agent_id TEXT NOT NULL,version INTEGER NOT NULL,request_id TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(id,version),UNIQUE(agent_id,request_id));
   CREATE TABLE memory_context_snapshots(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,scope_key TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL);

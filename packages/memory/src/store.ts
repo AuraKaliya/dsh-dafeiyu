@@ -31,7 +31,7 @@ import { NativeExpression } from './native-expression.js';
 import { ExperienceStore } from './experience-store.js';
 
 export const MEMORY_APPLICATION_ID = 0x44464d32;
-export const MEMORY_SCHEMA_VERSION = 1;
+export const MEMORY_SCHEMA_VERSION = 2;
 const APPLICATION_ID = MEMORY_APPLICATION_ID;
 const string = (value: unknown): string => z.string().parse(value);
 const integer = (value: unknown): number => z.number().int().safe().parse(value);
@@ -60,6 +60,8 @@ const currentSchema=(db:DatabaseSync)=>{createStorageSchema(db);createAutobiogra
 export class MemoryStore {
   private readonly db: DatabaseSync;
   private closed = false;
+  managementList(agentId:string,raw:unknown){const input=z.strictObject({query:z.string().max(100).default(''),offset:z.number().int().nonnegative().default(0)}).parse(raw);return this.db.prepare('SELECT i.id,i.route,i.version,i.deleted,r.body FROM memory_items i JOIN memory_revisions r ON i.id=r.id AND i.head=r.revision WHERE i.agent_id=? AND instr(r.body,?)>0 ORDER BY i.ordinal DESC LIMIT 50 OFFSET ?').all(agentId,input.query,input.offset).map(row=>({id:String(row.id),route:String(row.route),version:Number(row.version),deleted:!!row.deleted,content:JSON.parse(String(row.body))}));}
+  managementRoute(agentId:string,id:string){const row=this.db.prepare('SELECT route FROM memory_items WHERE agent_id=? AND id=?').get(agentId,z.uuid().parse(id));if(!row)throw new Error('MEMORY_NOT_FOUND');return String(row.route);}
   private transactionDepth=0;
   private taskSourceValidator:((agentId:string,jobId:string,purpose:MemoryAccessPurpose)=>'valid'|'deleted'|'changed'|'unavailable')|undefined;
   private readonly validatingTaskSources=new Set<string>();

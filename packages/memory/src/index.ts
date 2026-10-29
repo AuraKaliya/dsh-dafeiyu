@@ -54,6 +54,10 @@ declare module '@deepseek-ai/cordis' { interface Context { dafeiyuMemory: Memory
 
 /** Scope-bound memory operations with opt-in independent analysis through the official DSH loop. */
 export class MemoryService extends Service {
+  management(action:string,raw:unknown){if(action==='experience')return this.growth?.autobiography.managementExperience(raw)??null;if(action==='reflection'){if(!this.growth)throw new Error('MEMORY_GROWTH_REQUIRED');return this.growth.autobiography.manageReflection(raw);}if(action==='status')return this.growth?.autobiography.management()??{foundation:null,self:[],reflections:[]};if(action==='list')return this.store.managementList(this.config.agentId,raw);
+    if(action!=='delete'&&action!=='restore')throw new Error('MANAGEMENT_ACTION_INVALID');const input=z.strictObject({id:z.uuid(),requestId:z.uuid(),expectedVersion:z.number().int().positive(),reason:z.string().trim().min(1).max(500)}).parse(raw);
+    const scope=this.ctx.dafeiyu.managementMemoryScope(this.store.managementRoute(this.config.agentId,input.id),input.requestId,action);const result=this.store.mutate(scope,{...input,action});this.flush();return result;}
+
   pendingEvents(){return pendingMemoryEvents(this.config.dataDir); }
   private readonly config: z.output<typeof configSchema>;
   private readonly store: MemoryStore;
@@ -108,7 +112,7 @@ export class MemoryService extends Service {
           prepare:async(request:import('@dafeiyu/contracts').ContextRequest)=>{ctx.dafeiyu.scopeForContext(request);return this.growth?.qqExpression.prepare(request.conversation)??[];},
           validate:(request:import('@dafeiyu/contracts').ContextRequest,item:import('@dafeiyu/contracts').ContextItem)=>{ctx.dafeiyu.scopeForContext(request);return this.growth?.qqExpression.prepare(request.conversation).some(current=>JSON.stringify(current)===JSON.stringify(item))??false;}},{id:'growth',kind:'working-state' as const,
           prepare:async(request:import('@dafeiyu/contracts').ContextRequest)=>ctx.dafeiyu.personaContext(request),
-          validate:(request:import('@dafeiyu/contracts').ContextRequest,item:import('@dafeiyu/contracts').ContextItem)=>ctx.dafeiyu.personaContext(request).some(current=>JSON.stringify(current)===JSON.stringify(item))}]),{id:'task-workspace',kind:'working-state',
+          validateHistorical:(request:import('@dafeiyu/contracts').ContextRequest,dependency:Extract<import('@dafeiyu/contracts').SourceDependency,{kind:'context'}>)=>{ctx.dafeiyu.scopeForContext(request);return this.growth?.autobiography.historical(dependency)??false;},validate:(request:import('@dafeiyu/contracts').ContextRequest,item:import('@dafeiyu/contracts').ContextItem)=>ctx.dafeiyu.personaContext(request).some(current=>JSON.stringify(current)===JSON.stringify(item))}]),{id:'task-workspace',kind:'working-state',
           prepare:async request=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)),
           validate:(request,item)=>this.tasks.sceneItems(ctx.dafeiyu.scopeForContext(request)).some(current=>JSON.stringify(ContextItemSchema.parse(current))===JSON.stringify(item))}],
         compactionProvider:new MemoryCompaction(ctx,this.config.compaction??{inputTokens:1000000},basis,sourcePolicy,!this.config.compaction),

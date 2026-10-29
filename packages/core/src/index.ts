@@ -1,3 +1,4 @@
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import {digestSource} from './source-records.js';
 import {TaskDispositionSchema} from '@dafeiyu/contracts';
 import {ConversationCoordinator} from './conversation-coordinator.js';
@@ -73,6 +74,9 @@ declare module '@deepseek-ai/cordis' { interface Context { dafeiyu: DafeiyuServi
 /** Owns a logical persona and its independent conversations; extensions own platform-specific work. */
 export class DafeiyuService extends Service {
   pendingEvents(){return pendingRuntimeEvents(this.config.dataDir);}
+  managementUsage(runId:string){return this.runStore?.usage(runId)??{tokens:null,knownTokens:0,calls:0};}
+  managementTasks(action:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.management(action,input);}
+  managementMemoryScope(route:string,requestId:string,action:string){const id=z.uuid().parse(requestId),event=this.journal.append({agentId:this.config.agentId,route,traceId:id,operationId:id,causedBy:null,type:'management.memory.'+action,plugin:'core',pluginVersion:RELEASE_VERSION,occurredAt:new Date().toISOString(),sources:[],data:{owner:true}});return {agentId:this.config.agentId,route,traceId:id,operationId:id,startedEventId:event.id};}
   pendingChannelWork(extension:string,producer:string,deliverResults:boolean){return this.journal.list(['accepted','processing','reply-ready','sending']).some(item=>item.extensionId===extension)||pendingProducerWork(this.config.dataDir,producer,deliverResults);}
   deliveryFact(inboundId:string){const item=this.journal.get(inboundId);return {sourceMessageId:item.message.id,target:item.message.conversation,state:item.state,reply:item.reply?{id:item.reply.id,textHash:createHash('sha256').update(item.reply.text).digest('hex')}:null};}
 
@@ -409,7 +413,9 @@ export class DafeiyuService extends Service {
   captureActivityAnchor(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.captureActivity(context,pluginId);}
   activityAnchorStatus(anchor:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.activityAnchorStatus(anchor);}
   createMaintenanceAnchor(runId:string,taskId:string,epoch:number){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.maintenanceAnchor(runId,taskId,epoch);}
-  activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:this.executions?.foregroundPending??0};}
+  private readonly activityPressureReaders=new Map<string,()=>number>();
+  bindActivityPressure(id:string,read:()=>number){if(this.activityPressureReaders.has(id))throw new Error('DUPLICATE_PROVIDER');this.activityPressureReaders.set(id,read);return ()=>{this.activityPressureReaders.delete(id);};}
+  activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:(this.executions?.foregroundPending??0)+this.journal.list(['accepted','processing','reply-ready','sending']).length+[...this.activityPressureReaders.values()].reduce((sum,read)=>sum+Math.max(0,read()),0)};}
   executionAuthority(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authority(context,pluginId);}
   authorizeExternalTask(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authorizeExternalTask(context,pluginId);}
   externalTaskSourceCurrent(authorization:unknown,pluginId:string):boolean{return this.executions?.externalTaskSourceCurrent(authorization,pluginId)??false;}

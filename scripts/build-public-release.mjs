@@ -64,12 +64,13 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   const plugin=json(join(repository,'packages/plugin/package.json'));
   const manifest={name:'dsh-dafeiyu',version:plugin.version,type:'module',description:plugin.description,license:'MIT',
     main:'./runtime/plugin/lib/index.js',types:'./runtime/plugin/lib/index.d.ts',
-    exports:{'.':{types:'./runtime/plugin/lib/index.d.ts',default:'./runtime/plugin/lib/index.js'},'./settings':'./runtime/plugin/lib/settings.js','./installation':'./runtime/plugin/lib/installation.js'},
-    bin:{dafeiyu:'./bin/dafeiyu.mjs'},files:['runtime','bin','examples','docs','cordis.patch.yml','README.md','LICENSE','NOTICE'],
-    engines:{node:'>=24.13.0 <25',dsh:'>=0.2.1-rc.2 <0.3.0'},dsh:{bundle:{patch:'./cordis.patch.yml'}},
+    exports:{'.':{types:'./runtime/plugin/lib/index.d.ts',default:'./runtime/plugin/lib/index.js'},'./settings':'./runtime/plugin/lib/settings.js','./installation':'./runtime/plugin/lib/installation.js','./client':'./client.js'},
+    bin:{dafeiyu:'./bin/dafeiyu.mjs'},files:['client.js','runtime','bin','examples','docs','cordis.patch.yml','README.md','LICENSE','NOTICE'],
+    engines:{node:'>=24.13.0 <25',dsh:'>=0.2.1-rc.2 <0.3.0'},dsh:{...plugin.dsh,bundle:{patch:'./cordis.patch.yml'}},
     repository:{type:'git',url:'https://github.com/AuraKaliya/dsh-dafeiyu.git'},homepage:'https://github.com/AuraKaliya/dsh-dafeiyu#readme',
     keywords:['dsh','deepseek-harness','agent','memory','qq','bilibili'],dependencies,imports,dafeiyuPackages:versions};
   put(destination,'package.json',JSON.stringify(manifest,null,2)+'\n');
+  put(destination,'client.js',readFileSync(join(repository,'packages/plugin/client.js')));
   put(destination,'bin/dafeiyu.mjs',"#!/usr/bin/env node\nawait import('../runtime/plugin/bin/dafeiyu.mjs');\n");
   for(const file of ['README.md','LICENSE','NOTICE','cordis.patch.yml'])put(destination,file,readFileSync(join(repository,'packages/plugin',file)));
   for(const tree of ['examples','docs'])for(const file of files(join(repository,'packages/plugin',tree)))put(destination,tree+'/'+portable(relative(join(repository,'packages/plugin',tree),file)),readFileSync(file));
@@ -77,16 +78,16 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   if(includeSource){
     for(const directory of moduleNames){const root=join(repository,'packages',directory);
       for(const name of ['package.json','tsconfig.json'])put(destination,'source/packages/'+directory+'/'+name,readFileSync(join(root,name)));
-      for(const tree of ['src','bin','assets','workers','windows','vendor','examples','docs'])for(const file of files(join(root,tree)))put(destination,'source/packages/'+directory+'/'+portable(relative(root,file)),readFileSync(file));
+      for(const tree of ['src','client','bin','assets','workers','windows','vendor','examples','docs'])for(const file of files(join(root,tree)))put(destination,'source/packages/'+directory+'/'+portable(relative(root,file)),readFileSync(file));
       for(const name of ['README.md','LICENSE','NOTICE','cordis.patch.yml'])if(existsSync(join(root,name)))put(destination,'source/packages/'+directory+'/'+name,readFileSync(join(root,name)));
     }
     const development=json(join(repository,'package.json'));
     // Use the same lightweight development entry points in a source release.
     development.scripts={...development.scripts};delete development.scripts.host;
     put(destination,'source/package.json',JSON.stringify(development,null,2)+'\n');
-    for(const file of ['package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/build.mjs','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
+    for(const file of ['package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/build.mjs','scripts/generate-management.mjs','scripts/preview-management.mjs','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
     for(const file of files(join(repository,'scripts/testing')))put(destination,'source/'+portable(relative(repository,file)),readFileSync(file));
-    const selected=['current-api.test.ts','current-storage.test.ts','autobiography.test.ts','plugin-startup.test.ts','test-temp.ts','smoke/host.test.ts','smoke/onebot.test.ts','tooling/test-selection.test.ts','tooling/test-storage.test.ts'];
+    const selected=['management.test.ts','management-client.test.ts','activity-rounds.test.ts','activity-idle.test.ts','context-snapshots.test.ts','current-api.test.ts','current-storage.test.ts','autobiography.test.ts','plugin-startup.test.ts','test-temp.ts','smoke/host.test.ts','smoke/onebot.test.ts','tooling/test-selection.test.ts','tooling/test-storage.test.ts'];
     const visited=new Set();function testFile(path){if(visited.has(path))return;visited.add(path);const bytes=readFileSync(join(repository,'tests',path),'utf8');put(destination,'source/tests/'+path,bytes);
       for(const match of bytes.matchAll(/(?:from\s*|import\()\s*['"](\.\/[^'"]+)['"]/g)){const dependency=portable(join(dirname(path),match[1])).replace(/\.js$/,'.ts');if(existsSync(join(repository,'tests',dependency)))testFile(dependency);}}
     selected.forEach(testFile);

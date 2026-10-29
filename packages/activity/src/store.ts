@@ -1,3 +1,5 @@
+import {IdleWorkStore,createIdleSchema} from './idle.js';
+import {ActivityRounds,createRoundSchema} from './rounds.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync,mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -9,8 +11,8 @@ import type { ActivityScheduleBody,ActivityDomainEvent,WakeOccurrenceBody,Activi
 import { initialDue,elapsedDue,nextAllowed,validateQuiet,localTime,daySlices } from './time.js';
 
 export const ACTIVITY_APPLICATION_ID=0x44464134;
-export const ACTIVITY_SCHEMA_VERSION=1;
-export const ACTIVITY_TABLES=['activity_metadata','activity_schedules','activity_schedule_revisions','activity_tasks','activity_occurrences','activity_outbox','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage','activity_clock'] as const;
+export const ACTIVITY_SCHEMA_VERSION=2;
+export const ACTIVITY_TABLES=['activity_metadata','activity_schedules','activity_schedule_revisions','activity_tasks','activity_occurrences','activity_outbox','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage','activity_clock','activity_rounds','activity_round_items','activity_idle_work'] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const createSchema=ActivityScheduleBodySchema.omit({id:true,version:true,createdAt:true,updatedAt:true,taskGeneration:true}).extend({requestId:PersonaRequestIdSchema});
 const updateSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().positive(),state:ActivityScheduleBodySchema.shape.state.optional(),
@@ -32,6 +34,8 @@ export interface StoredOccurrence {body:WakeOccurrenceBody;state:ActivityOccurre
 /** Trusted program persistence. No method accepts model authority directly. */
 export class ActivityStore {
   private readonly db:DatabaseSync;
+  readonly rounds:ActivityRounds;
+  readonly idle:IdleWorkStore;
   readonly config:z.output<typeof ActivityConfigSchema>;
   readonly identity:z.infer<typeof identitySchema>;
   private closed=false;
@@ -47,8 +51,12 @@ export class ActivityStore {
       for(const table of ACTIVITY_TABLES)this.db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
       configureSqlite(this.db);
     }catch(error){this.db.close();throw error;}
+    this.idle=new IdleWorkStore(this.db);
+    this.rounds=new ActivityRounds(this.db,this.config,this.config.minIntervalMs);
   }
-  private initialize(){this.db.exec(`
+  management(){return this.db.prepare('SELECT id FROM activity_schedules ORDER BY rowid DESC LIMIT 100').all().map(row=>this.get(String(row.id)));}
+  admitIdle(work:Parameters<IdleWorkStore['save']>[0],now:number){this.transaction(()=>{this.idle.save(work);this.rounds.admit('idle:'+work.id,now);});}
+  private initialize(){createRoundSchema(this.db);createIdleSchema(this.db);this.db.exec(`
     CREATE TABLE activity_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
     CREATE TABLE activity_schedules(id TEXT PRIMARY KEY,owner_key TEXT NOT NULL,version INTEGER NOT NULL,task_generation INTEGER NOT NULL,status TEXT NOT NULL,next_due INTEGER,not_before INTEGER NOT NULL DEFAULT 0,event_cursor INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,error TEXT);
     CREATE INDEX activity_due ON activity_schedules(status,next_due,not_before);
@@ -64,7 +72,7 @@ export class ActivityStore {
     CREATE TABLE activity_usage(run_id TEXT NOT NULL,day TEXT NOT NULL,milliseconds INTEGER NOT NULL,PRIMARY KEY(run_id,day));
     CREATE TABLE activity_clock(id INTEGER PRIMARY KEY CHECK(id=1),last_seen INTEGER NOT NULL);
     INSERT INTO activity_clock VALUES(1,0);
-    PRAGMA application_id=${ACTIVITY_APPLICATION_ID};PRAGMA user_version=1;
+    PRAGMA application_id=${ACTIVITY_APPLICATION_ID};PRAGMA user_version=${ACTIVITY_SCHEMA_VERSION};
   `);
     for(const table of ['activity_metadata','activity_schedule_revisions','activity_tasks','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage']){
       this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable activity history');END;
@@ -143,9 +151,10 @@ export class ActivityStore {
   issue(id:string,now:number):WakeOccurrenceBody|null {return this.transaction(()=>{
     const time=this.clock(now),plan=this.get(id);if(plan.status!=='active'||plan.body.state!=='active'||time<plan.notBefore)return null;
     if(this.db.prepare("SELECT 1 FROM activity_occurrences WHERE schedule_id=? AND state IN ('pending','accepted','running') LIMIT 1").get(id))return null;
+    if(this.rounds.pending().some(id=>id.startsWith('idle:')||this.occurrence(id).state==='waiting'))return null;
     if(Number(this.db.prepare("SELECT count(*) AS n FROM activity_occurrences WHERE state IN ('pending','accepted','running')").get()?.n)>=this.config.maxConcurrent)return null;
-    if(this.used(time)>=this.config.dailyActiveMs)return null;
-    if(time<this.lastWake()+this.config.minIntervalMs)return null;
+    if(!this.rounds.canStart(time))return null;
+
     const allowed=nextAllowed(time,plan.body.timeZone,plan.body.quiet);if(allowed>time){this.db.prepare('UPDATE activity_schedules SET not_before=? WHERE id=?').run(allowed,id);return null;}
     const conditional=this.condition(plan);let due:number|null,next:number|null;
     if(plan.body.trigger.kind==='condition'){if(!conditional)return null;due=time;next=null;}
@@ -156,11 +165,12 @@ export class ActivityStore {
       taskId:task.taskId,taskEpoch:task.epoch,taskGeneration:plan.body.taskGeneration,dueAt:new Date(due).toISOString(),createdAt:new Date(time).toISOString(),
       reason:plan.body.purpose==='maintenance'?'maintenance':conditional?'condition':'time',eventId:conditional?.id??null,configHash:plan.body.configHash});
     this.db.prepare("INSERT INTO activity_occurrences(id,schedule_id,schedule_version,body,body_hash,state,updated_at) VALUES(?,?,?,?,?,'pending',?)").run(body.id,id,plan.body.version,JSON.stringify(body),activityHash(body),time);
-    this.db.prepare('INSERT INTO activity_outbox(id) VALUES(?)').run(body.id);
+    this.db.prepare('INSERT INTO activity_outbox(id) VALUES(?)').run(body.id);this.rounds.admit(body.id,time);
     if(conditional&&plan.body.trigger.kind==='condition')this.db.prepare('INSERT INTO activity_condition_watermarks VALUES(?,?,?,?)').run(id,plan.body.trigger.event,plan.body.trigger.key,conditional.watermark!);
     this.db.prepare('UPDATE activity_schedules SET next_due=?,not_before=?,event_cursor=coalesce(?,event_cursor),status=? WHERE id=?')
       .run(next,time+this.config.minIntervalMs,conditional?.seq??null,next===null&&plan.body.trigger.kind!=='condition'?'exhausted':'active',id);return body;
   });}
+  occurrenceRuns(id:string){return [...new Set(this.db.prepare("SELECT json_extract(body,'$.runId') AS run_id FROM activity_run_events WHERE occurrence_id=?").all(id).map(row=>String(row.run_id)))];}
   occurrence(id:string):StoredOccurrence {const row=this.db.prepare('SELECT * FROM activity_occurrences WHERE id=?').get(PersonaRequestIdSchema.parse(id));if(!row)throw new Error('ACTIVITY_OCCURRENCE_UNKNOWN');
     const body=WakeOccurrenceBodySchema.parse(JSON.parse(String(row.body)));if(activityHash(body)!==row.body_hash)throw new Error('ACTIVITY_STATE_CORRUPT');return {body,state:ActivityOccurrenceStateSchema.parse(row.state),runId:row.run_id===null?null:String(row.run_id),startedAt:row.started_at===null?null:Number(row.started_at),error:row.error===null?null:String(row.error)};}
   byRun(runId:string):StoredOccurrence|null {const direct=this.db.prepare('SELECT id FROM activity_occurrences WHERE run_id=?').get(runId);
@@ -169,8 +179,8 @@ export class ActivityStore {
   lastWake(){const occurrence=this.db.prepare("SELECT json_extract(body,'$.createdAt') AS at FROM activity_occurrences ORDER BY rowid DESC LIMIT 1").get();
     const resume=this.db.prepare("SELECT max(json_extract(receipt,'$.at')) AS at FROM activity_requests WHERE json_extract(receipt,'$.kind')='resume-intent'").get();return Math.max(occurrence?Date.parse(String(occurrence.at)):-Infinity,resume?.at===null?-Infinity:Number(resume?.at??-Infinity));}
   maintenancePlan(id:string){const row=this.db.prepare("SELECT s.id FROM activity_schedules s JOIN activity_schedule_revisions r ON r.id=s.id AND r.version=s.version WHERE json_extract(r.body,'$.maintenanceId')=? ORDER BY s.rowid DESC LIMIT 1").get(id);return row?this.get(String(row.id)):null;}
-  pauseIntent(id:string,runId:string,reason:'foreground'|'daily-budget'|'time-budget',expectedVersion:number,now:number){
-    const parse=(value:unknown)=>z.object({kind:z.literal('pause-intent'),requestId:PersonaRequestIdSchema,runId:z.uuid(),reason:z.enum(['foreground','daily-budget','time-budget']),expectedVersion:z.number(),at:z.number()}).parse(value);
+  pauseIntent(id:string,runId:string,reason:'foreground',expectedVersion:number,now:number){
+    const parse=(value:unknown)=>z.object({kind:z.literal('pause-intent'),requestId:PersonaRequestIdSchema,runId:z.uuid(),reason:z.literal('foreground'),expectedVersion:z.number(),at:z.number()}).parse(value);
     return this.transaction(()=>{const occurrence=this.occurrence(id);if(occurrence.runId!==runId)throw new Error('ACTIVITY_RECEIPT_CONFLICT');const requestId=activityHash(['pause',id,runId,reason]);
       return this.request(`pause:${id}`,requestId,activityHash([id,runId,reason]),parse,()=>({kind:'pause-intent' as const,requestId,runId,reason,expectedVersion,at:this.clock(now)}));});}
   pausedBy(id:string,runId:string){const row=this.db.prepare("SELECT receipt FROM activity_requests WHERE scope_key=? AND json_extract(receipt,'$.runId')=? ORDER BY rowid DESC LIMIT 1").get(`pause:${id}`,runId);

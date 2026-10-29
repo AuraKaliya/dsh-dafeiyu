@@ -14,7 +14,7 @@ const responseSchema = z.object({ status: z.string(), retcode: z.number(), data:
 const diagnosticSchema=z.strictObject({kind:z.literal('onebot-call'),action:z.string().max(80),phase:z.enum(['before-fetch','fetch','body','response']),elapsedMs:z.number().nonnegative(),fetchInvoked:z.boolean(),callerAborted:z.boolean(),requestTimedOut:z.boolean(),httpStatus:z.number().int().optional(),retcode:z.number().optional(),status:z.enum(['ok','failed','async','other']).optional(),wording:z.string().max(200).optional(),errorName:z.string().max(40).optional()});
 class OneBotFailure extends Error {constructor(message:string,readonly diagnostic:z.infer<typeof diagnosticSchema>){super(message);}}
 export function oneBotDiagnostic(error:unknown){return error instanceof OneBotFailure?error.diagnostic:{kind:'local-call' as const,errorName:error instanceof Error&&/^[A-Za-z]{1,40}$/.test(error.name)?error.name:'Error'};}
-type OneBotAction = 'get_login_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'get_forward_msg' | 'get_group_msg_history' | 'get_friend_msg_history' | 'send_private_msg' | 'send_group_msg';
+type OneBotAction = 'get_login_info' | 'get_version_info' | 'get_status' | 'get_group_list' | 'get_image' | 'get_record' | 'get_file' | 'get_forward_msg' | 'get_group_msg_history' | 'get_friend_msg_history' | 'send_private_msg' | 'send_group_msg';
 export class OneBot {
   constructor(private readonly base: string, private readonly token: string, readonly botId: string, private readonly timeoutMs: number) {}
   call(action: OneBotAction, params: object, signal?: AbortSignal): Promise<unknown> { return this.request(action, params, signal); }

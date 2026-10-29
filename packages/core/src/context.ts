@@ -27,7 +27,7 @@ export class ContextCoordinator {
   private readonly latest=new Map<string,{manifest:ReturnType<typeof contextManifest>;requestBytes:number}>();
   status(route:string){return this.latest.get(route)??null;}
   pinRegion(name:string):()=>void{this.pinnedRegions.add(name);return ()=>{this.pinnedRegions.delete(name);};}
-  constructor(private readonly agentId:string,private readonly journal:Journal,config:z.input<typeof contextConfigSchema>={}){
+  constructor(readonly agentId:string,private readonly journal:Journal,config:z.input<typeof contextConfigSchema>={}){
     this.config=contextConfigSchema.parse(config);
     if(this.config.outputReserveBytes>=this.config.requestMaxBytes)throw new Error('Invalid context reserve');
   }

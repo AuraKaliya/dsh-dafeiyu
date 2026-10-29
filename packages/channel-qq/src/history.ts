@@ -12,6 +12,7 @@ const messageSchema = z.object({
 export type QqHistoryMessage = z.infer<typeof messageSchema>;
 interface HistoryHost {
   botId: string;
+  windowMs?:number;
   allowed(scene: Conversation): boolean;
   fetch(scene: Conversation, anchor: string | null, signal: AbortSignal): Promise<unknown>;
   append(scene: Conversation, message: QqHistoryMessage): { added: boolean; media: number };
@@ -20,7 +21,7 @@ interface HistoryHost {
 
 /** Explicit observation only. Historical messages never enter the live message/trigger pipeline. */
 export async function readRecentQqHistory(host: HistoryHost, scene: Conversation, signal: AbortSignal) {
-  const now = host.now?.() ?? Date.now(), since = now - QQ_HISTORY_WINDOW_MS;
+  const now = host.now?.() ?? Date.now(), since = now - (host.windowMs??QQ_HISTORY_WINDOW_MS);
   const guard = () => { signal.throwIfAborted(); if (scene.channel !== 'qq' || scene.account !== host.botId || !host.allowed(scene)) throw new Error('TARGET_NOT_ALLOWED'); };
   const seen = new Set<string>(); let anchor: string | null = null, pages = 0, received = 0, appended = 0, media = 0, excluded = 0, limited = false;
   for (; pages < 5;) {
@@ -47,5 +48,5 @@ export async function readRecentQqHistory(host: HistoryHost, scene: Conversation
     if (pages === 5) limited = true;
   }
   guard(); return { since: new Date(since).toISOString(), until: new Date(now).toISOString(), pages, received, appended, mediaReferences: media, excluded, limited,
-    coverage: '仅按需追加观察前24小时、当前已授权会话的实际QQ记录；最多5页。不覆盖已有文字、不自动重放；可由核心选择感兴趣内容引用回复。平台记录可能不完整。' };
+    coverage: '仅按需追加配置时间窗口内、当前已授权会话的实际QQ记录；最多5页。不覆盖已有文字、不自动重放；可由核心选择感兴趣内容引用回复。平台记录可能不完整。' };
 }

@@ -1,0 +1,22 @@
+import {fileURLToPath} from 'node:url';
+// Local UI preview only. No Agent, credentials, model call or platform connection is opened.
+import {build} from 'esbuild';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {managementModules} from '../packages/plugin/lib/management-catalog.js';
+import {promptCatalog} from '../packages/plugin/lib/prompt-catalog.js';
+import {InstallationSettingsSchema} from '../packages/plugin/lib/settings.js';
+import {readPath} from '../packages/plugin/lib/management-settings.js';
+import {API_VERSION,RELEASE_VERSION} from '../packages/contracts/lib/protocol.js';
+const directory=new URL('../.runtime/management-preview/',import.meta.url);await mkdir(directory,{recursive:true});
+const settings=InstallationSettingsSchema.parse({schemaVersion:1,dataDir:'./preview-data',model:{model:'preview-model',credentialStore:'./preview-credentials'},qq:{botId:'123456',ownerId:'654321',tokenFile:'./preview-token',httpURL:'http://127.0.0.1:13000',wsURL:'ws://127.0.0.1:13001'}});
+const fixture={apiVersion:API_VERSION,version:RELEASE_VERSION,modules:managementModules,prompts:promptCatalog,runtime:{state:'stopped'},configuration:{revision:'0'.repeat(64),values:Object.fromEntries(managementModules.flatMap(module=>module.sections.flatMap(section=>section.fields.map(field=>[field.path,readPath(settings,field.path)??null]))))}};
+const entry=`import React from 'react';import {createRoot} from 'react-dom/client';import {createManagementApp} from './packages/plugin/client/app.js';const fixture=${JSON.stringify(fixture)};const App=createManagementApp(async body=>body.kind==='describe'?{ok:true,value:fixture}:{ok:false,code:'此页面仅预览界面；真实操作请在 DSH 设置中使用'});createRoot(document.getElementById('root')).render(React.createElement(App));`;
+await build({stdin:{contents:entry,resolveDir:process.cwd(),sourcefile:'management-preview.js',loader:'js'},bundle:true,format:'iife',outfile:fileURLToPath(new URL('app.js',directory)),platform:'browser',define:{'process.env.NODE_ENV':'"development"'}});
+await writeFile(new URL('style.css',directory),await readFile(new URL('../packages/plugin/client/style.css',import.meta.url)));
+await writeFile(new URL('index.html',directory),'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>大肥鱼管理中心 · 实现界面预览</title><link rel="stylesheet" href="/style.css"><style>body{margin:0;background:#f5f7f8;color:#24353c}.preview-note{font:12px system-ui;text-align:center;padding:10px;background:#e5f1f3}#root{max-width:780px;margin:24px auto;background:white;padding:28px;border-radius:12px}@media(max-width:650px){#root{margin:0;padding:18px}}</style><div class="preview-note">实现界面预览 · 示例配置，仅用于查看布局 · 未连接真实实例</div><div id="root"></div><script src="/app.js"></script></html>');
+if(process.argv.includes('--build-only'))process.exit(0);
+const routes=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']]]);
+const server=createServer(async(req,res)=>{const route=routes.get(req.url??'');if(req.method!=='GET'||!route){res.writeHead(404);res.end();return;}try{res.writeHead(200,{'Content-Type':route[1],'Cache-Control':'no-store','Content-Security-Policy':"default-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'"});res.end(await readFile(new URL(route[0],directory)));}catch{res.writeHead(500);res.end();}});
+server.listen(Number(process.argv[2]??0),'127.0.0.1',()=>console.log('http://127.0.0.1:'+server.address().port+'/'));
+process.once('SIGINT',()=>server.close());process.once('SIGTERM',()=>server.close());

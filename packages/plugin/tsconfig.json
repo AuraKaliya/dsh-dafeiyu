@@ -1,1 +1,37 @@
-{"extends":"../../tsconfig.base.json","compilerOptions":{"composite":true,"rootDir":"src","outDir":"lib"},"include":["src/**/*.ts"],"references":[{"path":"../host"},{"path":"../contracts"},{"path":"../channel-qq"},{"path":"../bilibili"},{"path":"../activity"},{"path":"../media"}]}
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "lib"
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../host"
+    },
+    {
+      "path": "../contracts"
+    },
+    {
+      "path": "../channel-qq"
+    },
+    {
+      "path": "../bilibili"
+    },
+    {
+      "path": "../activity"
+    },
+    {
+      "path": "../media"
+    },
+    {
+      "path": "../memory"
+    },
+    {
+      "path": "../core"
+    }
+  ]
+}

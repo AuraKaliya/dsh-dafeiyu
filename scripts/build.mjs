@@ -1,3 +1,4 @@
+import {generatePromptCatalog,buildManagementClient} from './generate-management.mjs';
 import {existsSync,lstatSync,readdirSync,unlinkSync} from 'node:fs';
 import {dirname,join,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -17,6 +18,7 @@ function prune(directory,source){
 }
 for(const entry of readdirSync(join(repository,'packages'),{withFileTypes:true}))if(entry.isDirectory())prune(join(repository,'packages',entry.name,'lib'),join(repository,'packages',entry.name,'src'));
 prune(join(repository,'build-tests'),join(repository,'tests'));
+generatePromptCatalog();
 const child=spawn(process.execPath,[join(repository,'node_modules/typescript/bin/tsc'),'-b',...process.argv.slice(2)],{cwd:repository,windowsHide:true,stdio:'inherit'});
 child.on('error',()=>{process.exitCode=1;});
-child.on('exit',code=>{process.exitCode=code??1;});
+child.on('exit',async code=>{process.exitCode=code??1;if(code===0)try{await buildManagementClient();}catch(error){console.error(error);process.exitCode=1;}});

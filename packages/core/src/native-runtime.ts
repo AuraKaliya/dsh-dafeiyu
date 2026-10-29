@@ -1,3 +1,4 @@
+import {validSnapshot,SNAPSHOT_RULE} from './context-snapshots.js';
 import {retireContextCarrier} from './context-runtime.js';
 import {requestCapacity,inspectRequestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
@@ -28,10 +29,9 @@ export class NativeRuntime {
     ctx.on('llm/stream',async function*(options,next){const owned=options.sessionId?sessions.get(options.sessionId):undefined;
       if(!owned){yield* next();return;}await yieldEventLoop();const frame=owned.frame;if(!frame)throw new Error('RUN_NOT_RUNNING');
       owned.lastRequest=options;const capacity=await inspectRequestCapacity(owned.scope,options,frame.requestMaxBytes,frame.outputReserveBytes);
-      const current=frame.contexts?.length?JSON.stringify({kind:'native-context',regions:frame.contexts}):frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:frame.personaItems}):'';
+      const current=frame.contexts?.length?JSON.stringify({kind:'native-context',regions:frame.contexts}):frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]});
       const carriers=options.messages.flatMap(message=>message.role==='user'&&'source'in message&&message.source.kind==='runtime-context'&&message.source.form==='snapshot'?message.source.sections.filter(section=>section.name==='dafeiyu:persona-context:v1'):[]);
-      if(current&&carriers.length>1&&carriers.every(section=>section.text===current)&&!owned.repairs){retireContextCarrier(owned.scope,owned.handle.agent,'dafeiyu:persona-context:v1',current);owned.repairs=1;owned.retryPending=true;yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_NATIVE_CONTEXT_REASSEMBLE',message:'Reassemble the owned task context before dispatch'}}};return;}
-      if(carriers.length!==(current?1:0)||carriers.some(section=>section.text!==current))throw new Error('NATIVE_CONTEXT_SNAPSHOT_MISMATCH');
+      if(carriers.at(-1)?.text!==current)throw new Error('NATIVE_CONTEXT_SNAPSHOT_MISMATCH');
       frame.contextAudit?.({manifest:frame.contextPlan?.()??null,capacity:z.json().parse(capacity)});owned.compaction.guard(options,true);frame.evidence?.expose(owned.compaction.exposedDependencies());
       const guard=()=>{frame.view.signal.throwIfAborted();frame.guard();owned.compaction.guard(options);};guard();
       if(!requestCapacity(options,frame.requestMaxBytes,frame.outputReserveBytes).withinBudget)throw new Error('CAPACITY_EXCEEDED');
@@ -45,7 +45,7 @@ export class NativeRuntime {
     if(!owned){let scope:Context|undefined,compaction:CompactionRuntime|undefined;const slot:{frame:TaskExecutionFrame|undefined}={frame};
       const handle=await openAgentSession(this.ctx,frame.sessionId,this.model,this.cwd,ctx=>{scope=ctx;ctx.tools.presentAs('native');ctx.on('agent/request-error',async(payload,next)=>{const active=this.sessions.get(frame.sessionId);if(payload.failure.code==='DAFEIYU_NATIVE_CONTEXT_REASSEMBLE'&&active?.retryPending){active.retryPending=false;return {kind:'retry' as const};}return next();});
         ctx.systemPrompt.section({name:'dafeiyu-persona',order:0,interpolate:false,text:()=>slot.frame?.persona.text??''});
-        ctx.systemPrompt.context({name:'dafeiyu:persona-context:v1',order:10000,interpolate:false,text:()=>slot.frame?.contexts?.length?JSON.stringify({kind:'native-context',regions:slot.frame.contexts}):slot.frame?.personaItems?.length?JSON.stringify({kind:'stage-persona',items:slot.frame.personaItems}):''});
+        ctx.systemPrompt.context({name:'dafeiyu:persona-context:v1',order:10000,interpolate:false,text:()=>slot.frame?.contexts?.length?JSON.stringify({kind:'native-context',regions:slot.frame.contexts}):slot.frame?.personaItems?.length?JSON.stringify({kind:'stage-persona',items:slot.frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]})});
         compaction=new CompactionRuntime(ctx,frame.view.scope.agentId,()=>slot.frame?.evidence?.binding(),(_item,data)=>slot.frame?.audit?.(data),{
           sourceItems:()=>slot.frame?.evidence?.contextView().sourceItems()??[],nativeDependencies:scope=>slot.frame?.evidence?.contextView().nativeDependencies(scope)??[],
           validateHistorical:dep=>slot.frame?.evidence?.contextView().validateHistorical(dep)??false});
@@ -54,9 +54,10 @@ export class NativeRuntime {
           '关注工作是否推进目标，区分尝试、实际执行、成果评价和外部送达。对影响目标的缺口作明确判断，继续独立可做的部分；偏好与方法分歧可以讨论。阶段反馈面向对方的实际需要，表达必要进展、阻碍与限制。',
           '当前任务已受理。workflow记录本轮阶段与结果交付方式；你负责判断工作是否完成、是否需要继续或等待，并直接写出面向对方的最终回答。结束或等待前，通过记忆工具记录这次经历带来的看法、疑问或打算；不必为每次底层读取单独写感想。程序负责资料范围校验及实际交付。未提供接收或发送工具不代表任务未受理或不能交付，不为寻找这些工具反复检查无关状态。',
           '回答既有状态时，保留与当前判断直接相关的来源资格、纠正关系、反证、未完成事项和未知效果。自述、摘要和推断不能代替实际回执；记录缺失只表示当前不能核实，不表示过去一定没有发生。假设、修辞及写作示例应明确标识，不能当作自己的真实经历。',
+          SNAPSHOT_RULE,
         ].join('\n')});
         // Keep standard DSH instruction sections. Unrelated runtime data is not a task handoff.
-        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const active=this.sessions.get(frame.sessionId);if(active?.frame){active.repairs=0;await active.frame.refreshContexts?.();const text=active.frame.contexts?.length?JSON.stringify({kind:'native-context',regions:active.frame.contexts}):active.frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:active.frame.personaItems}):'';retireContextCarrier(ctx,active.handle.agent,'dafeiyu:persona-context:v1',text);}const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>this.harness.acceptsSection(section.name)),contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
+        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const active=this.sessions.get(frame.sessionId);if(active?.frame){active.repairs=0;await active.frame.refreshContexts?.();const text=active.frame.contexts?.length?JSON.stringify({kind:'native-context',regions:active.frame.contexts}):active.frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:active.frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]});retireContextCarrier(ctx,active.handle.agent,'dafeiyu:persona-context:v1',text,prior=>validSnapshot(prior,{agentId:active.frame!.view.scope.agentId,route:active.frame!.view.scope.kind==='task'?active.frame!.view.scope.scopeKey:active.frame!.view.scope.route},dep=>active.frame!.evidence?.contextView().validateHistorical(dep)??false));}const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>this.harness.acceptsSection(section.name)),contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
       });
       if(!scope||!compaction){await handle.dispose();throw new Error('DSH_SCOPE_MISSING');}
       owned={handle,scope,compaction,lastRequest:undefined,get frame(){return slot.frame;},set frame(value){slot.frame=value;}};this.sessions.set(frame.sessionId,owned);

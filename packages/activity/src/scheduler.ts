@@ -1,3 +1,4 @@
+import {IdleActivity} from './idle.js';
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { ContextItemSchema } from '@dafeiyu/contracts';
@@ -8,6 +9,7 @@ type Producer=ReturnType<Context['dafeiyu']['executionProducer']>;
 type RunStatus=ReturnType<Producer['status']>;
 
 export class ActivityScheduler {
+  private readonly idle:IdleActivity;
   private readonly explore:ReturnType<Context['dafeiyu']['executionProducer']>;
   private readonly maintain:ReturnType<Context['dafeiyu']['executionProducer']>;
   private readonly unbindWake:()=>void;
@@ -20,8 +22,10 @@ export class ActivityScheduler {
   private started=false;
   private closed=false;
   private failure:string|null=null;
+  private lastForegroundAt:number;
   private readonly runClocks=new Map<string,number>();
   constructor(private readonly ctx:Context,private readonly store:ActivityStore,private readonly configHash:string,private readonly ready:()=>boolean,private readonly now:()=>number,private readonly monotonic:()=>number=()=>performance.now()){
+    this.lastForegroundAt=this.now();this.idle=new IdleActivity(ctx,store);
     this.explore=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'self-exploration',basis:['scheduled-autonomous-exploration']}});
     this.maintain=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'maintenance',basis:['durable-memory-maintenance-request']}});
     this.unbindWake=ctx.dafeiyu.bindWakeAuthority({producerId:'activity',validate:(origin,task)=>this.authorized(origin,task),sourceAnchor:origin=>this.store.snapshot(origin.scheduleId,origin.scheduleVersion).anchor,
@@ -33,7 +37,7 @@ export class ActivityScheduler {
   dependenciesReady(){return !this.store.config.maintenance||!!this.memory?.ready();}
   hasDependencies(){return !this.store.config.maintenance||!!this.memory;}
   private port(plan:StoredSchedule){return plan.body.purpose==='maintenance'?this.maintain:this.explore;}
-  private source(plan:StoredSchedule){if(plan.body.configHash!==this.configHash)return {state:'stale' as const,code:'ACTIVITY_CONFIG_CHANGED'};
+  private source(plan:StoredSchedule){if(plan.body.purpose==='maintenance'?!this.store.config.maintenance:!this.store.config.plans)return {state:'stale' as const,code:'ACTIVITY_KIND_DISABLED'};
     if(!plan.body.anchor)return {state:'stale' as const,code:'ACTIVITY_SOURCE_REQUIRED'};return this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor);}
   private authorized(origin:Extract<RunOrigin,{kind:'wake'}>,task:TaskState):boolean {
     try{if(this.closed||!this.ready()||!this.dependenciesReady()||origin.producerId!=='activity')return false;
@@ -74,7 +78,7 @@ export class ActivityScheduler {
     return !!plan.anchor&&this.ctx.dafeiyu.activityAnchorStatus(plan.anchor).state==='valid'&&this.contextFor(occurrence).some(value=>activityHash(value)===activityHash(item));
   }catch{return false;}}
   private receive(event:ExecutionLifecycle){
-    if(this.closed)return;
+    if(this.closed)return;this.idle.receive(event);
     let occurrence:StoredOccurrence|null=null;
     if(event.origin.kind==='wake'&&event.origin.producerId==='activity')occurrence=this.store.occurrence(event.origin.occurrenceId);
     else if(event.origin.kind==='continuation'){
@@ -111,7 +115,9 @@ export class ActivityScheduler {
     const task=port.createTask({requestId:`activity:${plan.body.id}:${plan.body.taskGeneration}`,title:Array.from(plan.body.goal).slice(0,80).join(''),goal:plan.body.goal}),state=port.taskState(task);
     this.store.bindTask(plan.body.id,plan.body.taskGeneration,task.id,state.epoch);binding=this.store.task(plan.body.id);if(!binding)throw new Error('ACTIVITY_TASK_REQUIRED');return binding;
   }
-  private pressure(){const value=this.ctx.dafeiyu.activityPressure();return value.foregroundWaiting+value.foregroundRuns>0;}
+  rest(runId:string){if(!this.store.idle.owns(runId)&&!this.store.byRun(runId))throw new Error('ACTIVITY_RUN_REQUIRED');this.store.rounds.requestRest();return {restAfterActivity:true};}
+  private settleRounds(now:number){for(const id of this.store.rounds.pending()){if(id.startsWith('idle:'))continue;const occurrence=this.store.occurrence(id);if(!['completed','failed','cancelled','blocked'].includes(occurrence.state))continue;if(!occurrence.runId){this.store.rounds.settle(id,{tokens:0,knownTokens:0},0,now);continue;}const usages=this.store.occurrenceRuns(id).map(run=>this.ctx.dafeiyu.managementUsage(run)),knownTokens=usages.reduce((sum,usage)=>sum+usage.knownTokens,0);this.store.rounds.settle(id,{tokens:usages.length&&usages.every(usage=>usage.tokens!==null)?knownTokens:null,knownTokens},this.store.occurrenceUsed(id),now);}}
+  private pressure(){const value=this.ctx.dafeiyu.activityPressure();const now=this.now(),busy=value.foregroundWaiting+value.foregroundRuns>0;if(busy)this.lastForegroundAt=now;return busy||now-this.lastForegroundAt<this.store.config.idleAfterMs;}
   private reconcile(occurrence:StoredOccurrence,status:RunStatus){
     if(!['completed','waiting','failed','cancelled','interrupted'].includes(status.state)||!occurrence.runId)return;
     const events=this.ctx.dafeiyu.journal.executionRunStates(this.store.identity.agentId,occurrence.body.taskId,occurrence.runId),terminal=events.findLast(event=>event.type===`run.${status.state}`);
@@ -130,18 +136,17 @@ export class ActivityScheduler {
     if(status.state==='waiting'&&occurrence.state!=='waiting'){this.reconcile(occurrence,status);continue;}
     const source=this.source(original);if(source.state==='stale'){this.store.block(current.body.id,source.code??'SOURCE_STALE',now);this.retireOwnedTask(original);current.status='blocked';}
     if(current.body.state==='cancelled'||current.status==='blocked'){
-      if(['accepted','queued','running'].includes(status.state))port.cancel(ref,{requestId:activityHash(['cancel',occurrence.body.id,occurrence.runId]),expectedVersion:status.version,reason:'活动计划取消或失效'});continue;
+      if(['accepted','queued','running','waiting'].includes(status.state))port.cancel(ref,{requestId:activityHash(['cancel',occurrence.body.id,occurrence.runId]),expectedVersion:status.version,reason:'活动计划取消或失效'});continue;
     }
     const monotonicStart=this.runClocks.get(occurrence.runId),elapsed=monotonicStart===undefined?occurrence.startedAt===null?0:Math.max(0,now-occurrence.startedAt):Math.max(0,this.monotonic()-monotonicStart),used=this.store.occurrenceUsed(occurrence.body.id);
-    const reason=used+elapsed>=this.store.config.maxActiveMs?'time-budget':this.store.used(now)+elapsed>=this.store.config.dailyActiveMs?'daily-budget':this.pressure()?'foreground':null;
+    const reason=this.pressure()?'foreground':null;
     if(status.state==='running'&&reason){const pause=this.store.pauseIntent(occurrence.body.id,occurrence.runId,reason,status.version,now);
       port.pause(ref,{requestId:pause.requestId,expectedVersion:pause.expectedVersion,reason:`活动让出：${reason}`});continue;}
     if(status.state!=='waiting')continue;
     if(status.error==='TASK_CAPABILITY_CHANGE_PENDING')continue; // The installer/loading handoff owns this continuation; keep its wake authority live.
     const pause=this.store.pausedBy(occurrence.body.id,occurrence.runId);
-    if(!pause){this.store.block(current.body.id,'ACTIVITY_WAITING_DISCUSSION',now);continue;}
-    if(pause.reason==='time-budget'||used>=this.store.config.maxActiveMs){this.store.block(current.body.id,'ACTIVITY_TIME_BUDGET',now);continue;}
-    if(this.pressure()||this.store.used(now)>=this.store.config.dailyActiveMs||now<Math.max(pause.at,this.store.lastWake())+this.store.config.minIntervalMs)continue;
+    if(!pause){if(status.error!==null)this.store.block(current.body.id,'ACTIVITY_WAITING_DISCUSSION',now);continue;}
+    if(this.pressure())continue;
     if(current.body.version!==occurrence.body.scheduleVersion||current.body.state!=='active'||this.source(original).state!=='valid'){this.store.block(current.body.id,'ACTIVITY_RESUME_STALE',now);continue;}
     const checkpoint=status.checkpoints.at(-1);if(!checkpoint){this.store.block(current.body.id,'ACTIVITY_CHECKPOINT_MISSING',now);continue;}
     const task=port.openTask(occurrence.body.taskId),state=port.taskState(task),intent=this.store.resumeIntent(occurrence.body.id,occurrence.runId,checkpoint,state.version,now);
@@ -169,14 +174,14 @@ export class ActivityScheduler {
   tick():Promise<void>{if(this.pending)return this.pending;if(!this.started||this.closed||!this.ready()||!this.dependenciesReady()||!this.ctx.dafeiyu.accepting)return Promise.resolve();
     const work=Promise.resolve().then(()=>{
       if(!this.started||this.closed||!this.ready()||!this.ctx.dafeiyu.accepting)return;
-      const now=this.now();this.importMemory(now);this.controlActive(now);if(this.pressure())return;
+      const now=this.now();this.importMemory(now);this.controlActive(now);const idleBusy=this.idle.control(now,this.pressure());this.settleRounds(now);if(this.pressure()||idleBusy)return;
       this.dispatch(now);
-      for(const id of this.store.due(now)){const plan=this.store.get(id),source=this.source(plan);if(source.state==='pending')continue;
+      for(const id of this.store.due(now)){const plan=this.store.get(id);const source=this.source(plan);if(source.state==='pending')continue;
         if(source.state==='stale'){this.store.block(id,source.code??'SOURCE_STALE',now);this.retireOwnedTask(plan);continue;}
         if(plan.body.purpose==='maintenance'){const item=plan.body.maintenanceId?this.memory?.inspect(plan.body.maintenanceId):null;
           if(!item||!['ready'].includes(item.state)){this.store.block(id,'MAINTENANCE_NO_LONGER_PENDING',now);continue;}}
         this.ensureTask(plan);this.store.issue(id,now);
-      }this.dispatch(now);
+      }this.dispatch(now);if(!this.store.rounds.pending().length&&!this.idle.start(now))this.store.rounds.end('no-pending-activity',now);
     }).catch(error=>{this.failure=safeCode(error);this.stop();}).finally(()=>{if(this.pending===work)this.pending=undefined;});this.pending=work;return work;
   }
   async whenIdle(){await this.pending;}

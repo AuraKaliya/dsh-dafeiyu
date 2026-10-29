@@ -9,7 +9,7 @@ import { hashFile } from './files.js';
 
 const pinned=z.strictObject({path:z.string().min(1),sha256:z.string().regex(/^[a-f0-9]{64}$/)});
 export const audioConfigSchema=z.strictObject({
-  whisper:z.strictObject({node:z.string().min(1),moduleDirectory:z.string().min(1),moduleVersion:z.literal('1.1.3'),model:pinned,language:z.string().regex(/^(auto|[a-z]{2,3})$/).default('auto'),memoryBytes:z.number().int().min(128*1024**2).max(2*1024**3).default(512*1024**2)}).optional(),
+  whisper:z.strictObject({node:z.string().min(1),moduleDirectory:z.string().min(1),moduleVersion:z.literal('1.1.3').default('1.1.3'),model:pinned,language:z.string().regex(/^(auto|[a-z]{2,3})$/).default('auto'),memoryBytes:z.number().int().min(128*1024**2).max(2*1024**3).default(512*1024**2)}).optional(),
   events:z.strictObject({python:z.string().min(1),model:pinned,labels:pinned,onnxruntimeVersion:z.string().min(1),numpyVersion:z.string().min(1),memoryBytes:z.number().int().min(128*1024**2).max(2*1024**3).default(512*1024**2)}).optional(),
 });
 export type AudioConfig=z.output<typeof audioConfigSchema>;

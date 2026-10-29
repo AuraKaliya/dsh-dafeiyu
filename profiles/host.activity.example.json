@@ -47,8 +47,7 @@
         "timeZone": "Asia/Shanghai",
         "tickMs": 5000,
         "minIntervalMs": 60000,
-        "maxActiveMs": 300000,
-        "dailyActiveMs": 3600000,
+        "roundTokens": 100000, "roundDurationMs": 900000,
         "quiet": []
       }
     }

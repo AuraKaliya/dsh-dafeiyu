@@ -34,7 +34,7 @@ test('self-understanding requires retained reflection and a reviewed self-only v
     const basis=f.memory.reflections(f.access,input.reflections),saved=f.memory.understand(f.access,input,personaDigest({input,basis}));
     const entry=f.memory.prepare().entries[0]!;assert.equal(entry.memory.id,saved.id);assert.equal(entry.contentRef.kind,'memory');assert.ok(f.memory.validEntry(entry));
     assert.ok(!entry.item.text.includes('受托比较材料时'));assert.ok(entry.item.text.includes('目前限于'));
-    f.memory.withdraw(f.access,saved.id,saved.version);assert.equal(f.memory.validEntry(entry),true);assert.equal(f.memory.prepare().entries.length,0);
+    f.memory.withdraw(f.access,saved.id,saved.version);assert.equal(f.memory.validEntry(entry),false);assert.equal(f.memory.prepare().entries.length,0);
   }finally{f.store.close();}
 });
 
@@ -53,3 +53,5 @@ test('recalled origins withdraw automatic experience indexes and explicit episod
     assert.throws(()=>f.memory.reflect(f.access,{requestId:'after-recall',thought:'不能重新引入已撤回的资料。'}),/SOURCE_STALE/);
   }finally{f.store.close();}
 });
+
+test('owner removal of a reflection invalidates its self-understanding and restoration preserves the original text',()=>{const f=fixture();try{const reflection=f.memory.reflect(f.access,{requestId:'basis',thought:'我更喜欢先核实再回答。'});const input=SelfUnderstandingInputSchema.parse({requestId:'self',expectedVersion:0,text:'我倾向核实来源。',applicability:'说明事实时',reflections:[reflection.id]}),basis=f.memory.reflections(f.access,input.reflections);f.memory.understand(f.access,input,personaDigest({input,basis}));const before=f.memory.prepare().entries[0]!;const command={id:reflection.id,expectedVersion:0,deleted:true,requestId:randomUUID(),reason:'主人管理依据'};f.memory.manageReflection(command);assert.deepEqual(f.memory.prepare().entries,[]);assert.equal(f.memory.validEntry(before),false);assert.throws(()=>f.memory.reflections(f.access,[reflection.id]),/SOURCE_STALE/);f.memory.manageReflection({...command,expectedVersion:1,deleted:false,requestId:randomUUID()});assert.equal(f.memory.prepare().entries[0]?.item.text,before.item.text);}finally{f.store.close();}});

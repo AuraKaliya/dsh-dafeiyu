@@ -13,9 +13,9 @@ import { loopbackURL, OneBot, platformId,oneBotDiagnostic } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
 import { readRecentQqHistory,QQ_HISTORY_WINDOW_MS } from './history.js';
-import { waitForQqReply,waitBetweenQqMessages,deliveryAbortCode } from './reply-delay.js';
+import { waitForQqReply,waitBetweenQqMessages,deliveryAbortCode,QqReplyDelaySchema } from './reply-delay.js';
 import { forwardHandles,recentForwardNodes } from './forward.js';
-export { qqReplyDelayMs } from './reply-delay.js';
+export { qqReplyDelayMs,QqReplyDelaySchema } from './reply-delay.js';
 import { naturallyAddressed } from './trigger.js';
 import { QqCapabilities, QqCapabilitiesConfigSchema, QQ_ACTIONS, qqResourceRoute } from './capabilities.js';
 import { QqSegmentedTransport } from './transport.js';
@@ -57,7 +57,7 @@ const configSchema = z.strictObject({
   naturalNames: z.array(z.string().trim().min(2).max(32).regex(/^[\p{L}\p{N}_-]+$/u)).max(16).default([]),
   groupSync: GroupSyncConfigSchema.prefault({}),
   capabilities: QqCapabilitiesConfigSchema.prefault({}),
-  replyDelay:z.boolean().default(false),
+  replyDelay:QqReplyDelaySchema.prefault({}),historyWindowMs:z.number().int().min(1000).max(604800000).default(86400000),
   messageBatch:QqBatchConfigSchema.prefault({}),
   stickers:QqStickersConfigSchema.prefault({}),
   tasks: QqTasksConfigSchema.prefault({}),
@@ -85,6 +85,9 @@ const quoteKey=(reply:Reply)=>reply.taskResult?'task:'+reply.taskResult.runId:re
 
 /** Explicitly scoped QQ transport. No model calls, shell tools, friend approvals or history replay. */
 export class QqChannel extends Service {
+  management(action:string,input:unknown){if(action==='connection.check')return this.checkManagementConnection();if(action==='status')return this.getStatus();if(action.startsWith('stickers.'))return this.store.stickers.management(action.slice(9),input);throw new Error('MANAGEMENT_ACTION_INVALID');}
+
+  private async checkManagementConnection(){const signal=this.controller.signal;const login=z.object({user_id:platformId}).parse(await this.api.call('get_login_info',{},signal));if(login.user_id!==this.config.botId)throw new Error('QQ_ACCOUNT_MISMATCH');let component:unknown=null;try{component=z.object({app_name:z.string().max(100).optional(),app_version:z.string().max(100).optional(),protocol_version:z.string().max(100).optional()}).parse(await this.api.call('get_version_info',{},signal));}catch{}return {accountVerified:true,botId:login.user_id,component,state:this.state,checkedAt:new Date().toISOString(),outboundMessages:0};}
   private localOwnerTransport:QqSegmentedTransport|undefined;
   private readonly config: z.output<typeof configSchema>;
   private readonly api: OneBot;
@@ -136,11 +139,11 @@ export class QqChannel extends Service {
     try {
       this.store.delivery.recover();
       this.store.mediaDelivery.recover();
-      this.transport=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
+      this.transport=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),...(this.config.replyDelay.enabled?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal,this.config.replyDelay),betweenMessages:(signal:AbortSignal)=>waitBetweenQqMessages(signal,this.config.replyDelay)}:{}),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
         confirmed:(reply,text,receipt)=>{this.counters.segmentsConfirmed++;if(this.store.delivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
           if(reply.taskResult)this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,'[任务交付占位：正文须经核心任务来源验证后回查，不能据此推断任务内容。]',{occurredAt:null,unsupported:['task-result-body-withheld']});
           else this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text);}});
-      this.mediaTransport=new QqMediaTransport({ledger:this.store.mediaDelivery,...(this.config.replyDelay?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal),betweenMessages:waitBetweenQqMessages}:{}),textProgress:id=>this.store.delivery.progress(id),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,part,data,signal)=>this.sendMediaPart(reply,part,data,signal),confirmed:(reply,part,receipt)=>{
+      this.mediaTransport=new QqMediaTransport({ledger:this.store.mediaDelivery,...(this.config.replyDelay.enabled?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal,this.config.replyDelay),betweenMessages:(signal:AbortSignal)=>waitBetweenQqMessages(signal,this.config.replyDelay)}:{}),textProgress:id=>this.store.delivery.progress(id),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,part,data,signal)=>this.sendMediaPart(reply,part,data,signal),confirmed:(reply,part,receipt)=>{
         if(part.kind==='image'&&this.config.stickers.enabled)this.store.stickers.used(reply.conversation,part.asset,reply.id);
         this.counters.segmentsConfirmed++;if(this.store.mediaDelivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
         const text=reply.taskResult?'[任务媒体交付占位：须经核心来源校验后回查，不能从此推断任务内容。]':part.kind==='text'?part.text:'[已发送受控媒体部件：'+part.kind+'；此占位不包含原媒体内容。]';
@@ -152,7 +155,7 @@ export class QqChannel extends Service {
         conversationContexts:[backgroundContributor(ctx,{store:this.store,allowed:scene=>this.allowed(scene),accepts:(scene,time,generation)=>scene.kind==='group'&&this.groups.accepts(scene.id,time)&&generation===this.groups.generation(scene.id)})],
         channels: [{ channel: 'qq', account: this.config.botId,deliveryValidation:'per-segment',deliveryProgress:id=>{const p=this.deliveryStatus(id);if(!p)return null;const segments='segments'in p?p.segments:p.parts;return {confirmed:p.confirmed,pending:p.pending,unknown:p.unknown,canResume:p.unknown===0&&p.pending>0&&segments.some(s=>s.state==='pending'&&s.code==='DELIVERY_INTERRUPTED_BY_MESSAGE')};},
           processingSignal: message => this.processingSignal(message),
-          description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:QQ_HISTORY_WINDOW_MS,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
+          description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:this.config.historyWindowMs,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority,writeWindow)=>this.deliverTaskResult(reply,anchor,signal,authority,writeWindow) }] });
       this.batches=this.store.batches(this.config.messageBatch,{current:message=>{try{this.processingSignal(message).throwIfAborted();return true;}catch{return false;}},submit:message=>{const receipt=this.handle.ingest(message);if(!receipt.duplicate)this.counters.accepted++;},failed:()=>{this.error='BATCH_SUBMISSION_FAILED';}});
@@ -163,6 +166,7 @@ export class QqChannel extends Service {
       if(this.config.media.enabled)this.media=new QqMedia(ctx,{agentId:this.config.agentId,store:this.store,api:this.api,settings:this.config.media,allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&this.state==='online',sourceEpoch:()=>JSON.stringify([this.state==='rejected',this.groups.effective()]),rejectIdentity:()=>{this.verified=false;this.state='rejected';this.error='ACCOUNT_MISMATCH';this.socket?.terminate();}});
       if(this.config.stickers.enabled)this.stickers=new QqStickers(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store.stickers,allowed:scene=>this.allowed(scene)});
     } catch (error) {this.progress?.dispose();this.stickers?.close();this.media?.close();this.tasks?.close();this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
+    ctx.effect(()=>ctx.dafeiyu.bindActivityPressure('qq',()=>this.stopped?0:this.batches.count()));
     ctx.effect(() => () => this.close(), 'qq.close');
   }
   private observation(type: Parameters<ExtensionHandle['observe']>[0]['type'], code: string, conversation?: Conversation): void {
@@ -329,7 +333,7 @@ export class QqChannel extends Service {
     if (!receipt.duplicate) this.counters.accepted++;
   }
   private readHistory(scene:Conversation,signal:AbortSignal) {
-    return readRecentQqHistory({botId:this.config.botId,allowed:target=>!this.stopped&&this.verified&&this.state==='online'&&this.allowed(target),
+    return readRecentQqHistory({botId:this.config.botId,windowMs:this.config.historyWindowMs,allowed:target=>!this.stopped&&this.verified&&this.state==='online'&&this.allowed(target),
       fetch:(target,anchor,workSignal)=>this.api.history(target,anchor,workSignal),append:(target,message)=>{
         const route=this.cacheRoute(target);if(this.store.cache.recalled(route,message.message_id))return {added:false,media:0};
         const media=this.media?.remember(target,message.message_id,message.user_id,message,message.message);
@@ -342,7 +346,7 @@ export class QqChannel extends Service {
   private async readForward(scene:Conversation,messageId:string,index:number,signal:AbortSignal){const guard=()=>{signal.throwIfAborted();if(this.stopped||!this.verified||!this.allowed(scene))throw new Error('TARGET_NOT_ALLOWED');};guard();
     const route=this.cacheRoute(scene),handle=this.store.cache.forward(route,messageId,index),proof=this.store.cache.messageProof(route,messageId);
     await this.api.verify(signal);const raw=await this.api.call('get_forward_msg',{id:handle},signal);await this.api.verify(signal);guard();
-    if(!this.store.cache.proofCurrent(proof))throw new Error('SOURCE_STALE');const result=recentForwardNodes(raw),sender=this.store.find(route,messageId)?.sender??this.config.ownerId;let remaining=8;
+    if(!this.store.cache.proofCurrent(proof))throw new Error('SOURCE_STALE');const result=recentForwardNodes(raw,Date.now(),this.config.historyWindowMs),sender=this.store.find(route,messageId)?.sender??this.config.ownerId;let remaining=8;
     const messages=result.messages.map(({parts,...node})=>{const selected=parts.filter(p=>['image','record','video','file'].includes(p.type)).slice(0,remaining);remaining-=selected.length;
       const media=this.media?.remember(scene,messageId,sender,{forward:proof.hash,node:node.index,parts:selected},selected,1000+(index*20+node.index)*1000);
       return {...node,kinds:[...new Set(parts.map(p=>p.type))],...(media?.attachments.length?{media:media.attachments}:{})};});return {...result,messages};}
@@ -358,7 +362,7 @@ export class QqChannel extends Service {
       await this.api.verify(workSignal);authority();};
     // Each invocation supplies its own authority; the transport only retains immutable ledger state.
     this.localOwnerTransport??=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),
-      ...(this.config.replyDelay?{beforeSend:(value:Reply,workSignal:AbortSignal)=>waitForQqReply(value.text,workSignal),betweenMessages:waitBetweenQqMessages}:{}),
+      ...(this.config.replyDelay.enabled?{beforeSend:(value:Reply,workSignal:AbortSignal)=>waitForQqReply(value.text,workSignal,this.config.replyDelay),betweenMessages:(signal:AbortSignal)=>waitBetweenQqMessages(signal,this.config.replyDelay)}:{}),
       check:async(value,workSignal)=>{if(this.stopped||!this.verified||this.state!=='online')throw new Error('CHANNEL_OFFLINE');if(value.conversation.channel!=='local-owner'||value.conversation.account!==this.config.botId||value.conversation.kind!=='local'||value.conversation.id!==value.sourceMessageId)throw new Error('TARGET_NOT_ALLOWED');await this.api.verify(workSignal);},
       send:async(_value,text,workSignal)=>z.object({message_id:platformId}).parse(await this.api.call('send_private_msg',{user_id:Number(this.config.ownerId),message:[{type:'text',data:{text}}]},workSignal)).message_id,
       confirmed:(value,text,receipt)=>{const target={channel:'qq',account:this.config.botId,kind:'private' as const,id:this.config.ownerId};this.store.remember(this.cacheRoute(target),receipt,this.config.botId,value.taskResult?'[本地主人委托的任务结果已交付；正文须经任务来源核验。]':text,{occurredAt:new Date().toISOString(),unsupported:value.taskResult?['task-result-body-withheld']:[]});}});
@@ -442,3 +446,5 @@ export class QqChannel extends Service {
 export async function apply(ctx: Context, config: Config): Promise<void> { const channel = new QqChannel(ctx, config);  }
 
 export * from './storage-status.js';
+
+export {loopbackURL} from './onebot.js';

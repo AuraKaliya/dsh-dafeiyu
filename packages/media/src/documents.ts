@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BoundedProcess,contained } from './process.js';
 import { hashFile } from './files.js';
-export const documentConfigSchema=z.strictObject({python:z.string().min(1),pypdfVersion:z.literal('6.10.0')});
+export const documentConfigSchema=z.strictObject({python:z.string().min(1),pypdfVersion:z.literal('6.10.0').default('6.10.0')});
 const resultSchema=z.strictObject({schemaVersion:z.literal(1),kind:z.enum(['text','json','csv','pdf','docx','xlsx']),sha256:z.string().length(64),bytes:z.number().int().nonnegative(),
   units:z.array(z.strictObject({kind:z.enum(['page','paragraph','row']),locator:z.string().max(400),text:z.string().max(5000),cachedFormula:z.boolean().optional(),index:z.number().int().nonnegative(),textStart:z.number().int().nonnegative(),textEnd:z.number().int().nonnegative()})).max(64),
   next:z.strictObject({offset:z.number().int().nonnegative(),textOffset:z.number().int().nonnegative()}).nullable(),totalUnits:z.number().int().nonnegative().nullable(),gaps:z.array(z.string().max(300)).max(20)});

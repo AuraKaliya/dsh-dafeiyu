@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/server-executor",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -40,11 +40,11 @@
     }
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.24.0",
-    "@dafeiyu/journal": "0.24.0",
-    "@dafeiyu/core": "0.24.0",
-    "@dafeiyu/memory": "0.24.0",
-    "@dafeiyu/server-bootstrap": "0.24.0",
+    "@dafeiyu/contracts": "0.25.0",
+    "@dafeiyu/journal": "0.25.0",
+    "@dafeiyu/core": "0.25.0",
+    "@dafeiyu/memory": "0.25.0",
+    "@dafeiyu/server-bootstrap": "0.25.0",
     "zod": "4.4.3",
     "yaml": "2.9.0"
   },

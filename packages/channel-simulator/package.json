@@ -1,5 +1,5 @@
 {
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": true,
   "types": "./lib/index.d.ts",
   "name": "@dafeiyu/channel-simulator",
@@ -8,8 +8,8 @@
     "@deepseek-ai/cordis": "4.0.5"
   },
   "dependencies": {
-    "@dafeiyu/core": "0.24.0",
-    "@dafeiyu/contracts": "0.24.0"
+    "@dafeiyu/core": "0.25.0",
+    "@dafeiyu/contracts": "0.25.0"
   },
   "exports": {
     ".": {

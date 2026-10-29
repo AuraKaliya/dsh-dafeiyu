@@ -18,6 +18,16 @@ type Sticker={id:string;sha256:string;version:number;body:z.infer<typeof bodySch
 
 /** Persistent original bytes, independent of the disposable media cache. No model paths or URLs. */
 export class QqStickerStore {
+  /** Trusted owner surface: revisions prevent stale edits; scope cannot be widened here. */
+  management(action:string,raw:unknown){
+    if(action==='list'){const input=z.strictObject({query:z.string().max(100).default(''),offset:z.number().int().min(0).default(0)}).parse(raw);return this.rows().filter(row=>JSON.stringify(row.body).includes(input.query)).slice(input.offset,input.offset+50).map(row=>({id:row.id,version:row.version,...row.body}));}
+    const input=z.strictObject({id:z.uuid(),expectedVersion:z.number().int().positive().optional(),name:z.string().optional(),description:z.string().optional(),tags:z.array(z.string()).optional(),enabled:z.boolean().optional(),deleted:z.boolean().optional()}).parse(raw),row=this.get(input.id);
+    if(action==='preview'){if(row.body.bytes>2*1024**2)throw new Error('STICKER_PREVIEW_TOO_LARGE');return {mime:row.body.mime,data:this.bytes(row).toString('base64')};}
+    if(action!=='update')throw new Error('MANAGEMENT_ACTION_INVALID');if(row.version!==input.expectedVersion)throw new Error('MANAGEMENT_REVISION_CONFLICT');
+    const {id:_id,expectedVersion:_version,...patch}=input,body=bodySchema.parse({...row.body,...patch,...(input.deleted?{enabled:false}:{})});
+    if(!body.deleted)this.bytes(row);this.db.prepare('UPDATE qq_stickers SET version=version+1,body=? WHERE id=? AND version=?').run(JSON.stringify(body),row.id,row.version);
+    return {id:row.id,version:row.version+1,...body};
+  }
   private readonly root:string;
   constructor(private readonly db:DatabaseSync,directory:string,private readonly config:z.output<typeof QqStickersConfigSchema>){
     this.root=resolve(directory);mkdirSync(this.root,{recursive:true});if(lstatSync(this.root).isSymbolicLink()||realpathSync(this.root)!==this.root)throw new Error('STICKER_PATH_ESCAPE');
@@ -33,7 +43,7 @@ export class QqStickerStore {
   collect(scene:Conversation,origin:{messageId:string;sender:string},metadata:z.infer<typeof StickerMetadataSchema>,data:Uint8Array,mime:string){
     const sha=createHash('sha256').update(data).digest('hex'),old=this.rows().find(row=>!row.body.deleted&&row.sha256===sha&&same(row.body.scene,scene));
     if(old)return {...this.summary(old),duplicate:true};
-    const rows=this.rows().filter(row=>!row.body.deleted),unique=new Map(rows.map(row=>[row.sha256,row.body.bytes]));
+    const rows=this.rows(),unique=new Map(rows.map(row=>[row.sha256,row.body.bytes]));
     if(rows.length>=this.config.maxEntries||[...unique.values()].reduce((a,b)=>a+b,0)+(unique.has(sha)?0:data.length)>this.config.maxBytes)throw new Error('STICKER_LIBRARY_FULL');
     const body=bodySchema.parse({...metadata,scene,origin,scope:'conversation',mime,bytes:data.length,enabled:true,deleted:false,collectedAt:new Date().toISOString(),uses:0,lastUsedAt:null});
     const file=this.file(sha);try{writeFileSync(file,data,{flag:'wx',flush:true});}catch(error){if(!error||typeof error!=='object'||!('code'in error)||error.code!=='EEXIST')throw error;this.bytes({id:'',sha256:sha,version:1,body});}
@@ -67,7 +77,7 @@ export class QqStickerStore {
     const matches=this.rows().filter(row=>!row.body.deleted&&(row.id===target||row.body.name===target));if(matches.length!==1)throw new Error(matches.length?'STICKER_NAME_AMBIGUOUS':'STICKER_NOT_FOUND');const row=matches[0]!;
     const body=bodySchema.parse({...row.body,...(action==='global'?{scope:'global'}:action==='disable'?{enabled:false}:action==='enable'?{enabled:true}:action==='delete'?{deleted:true,enabled:false}:action==='rename'?{name:value}:{tags:value.split(/[,，、]/u).map(tag=>tag.trim()).filter(Boolean)})});
     this.db.prepare('UPDATE qq_stickers SET version=version+1,body=? WHERE id=?').run(JSON.stringify(body),row.id);
-    if(action==='delete'&&!this.rows().some(other=>!other.body.deleted&&other.sha256===row.sha256))unlinkSync(this.file(row.sha256));
+    // Soft deletion retains the original so owner restoration never invents missing bytes.
     return this.summary({...row,version:row.version+1,body});
   }
   revokeSource(scene:Conversation,messageId:string){for(const row of this.rows())if(!row.body.deleted&&row.body.enabled&&same(row.body.scene,scene)&&row.body.origin.messageId===messageId)this.db.prepare('UPDATE qq_stickers SET version=version+1,body=? WHERE id=?').run(JSON.stringify({...row.body,enabled:false}),row.id);}

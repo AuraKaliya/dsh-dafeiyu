@@ -1,0 +1,10 @@
+import type {ManagementModule} from '@dafeiyu/contracts';
+import {managementDefinition as qq} from '@dafeiyu/qq/management';
+import {managementDefinition as bilibili} from '@dafeiyu/bilibili/management';
+import {managementDefinition as media} from '@dafeiyu/media/management';
+import {managementDefinition as activity} from '@dafeiyu/activity/management';
+import {managementDefinition as memory} from '@dafeiyu/memory/management';
+import {managementDefinitions as host} from '@dafeiyu/host/management';
+import {managementDefinitions as core} from '@dafeiyu/core/management';
+export const managementModules:readonly ManagementModule[]=[memory,qq,bilibili,media,...host,activity,...core];
+if(new Set(managementModules.map(module=>module.id)).size!==managementModules.length)throw new Error('MANAGEMENT_MODULE_DUPLICATE');

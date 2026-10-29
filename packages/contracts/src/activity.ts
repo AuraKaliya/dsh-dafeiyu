@@ -12,13 +12,14 @@ export const ActivityTriggerSchema=z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('condition'),event:z.enum(['task-settled','memory-pending','resource-restored']),key:z.string().min(1).max(2000)}),
 ]);
 export const ActivityConfigSchema=z.strictObject({
+  idleAfterMs:z.number().int().min(0).max(86400000).default(60000),
   tickMs:z.number().int().min(50).max(60000).default(5000),minIntervalMs:z.number().int().min(60000).max(86400000).default(60000),
-  maxPlans:z.number().int().min(1).max(1000).default(100),maxConcurrent:z.number().int().min(1).max(4).default(1),
-  maxActiveMs:z.number().int().min(100).max(3600000).default(300000),dailyActiveMs:z.number().int().min(100).max(86400000).default(3600000),
+  maxPlans:z.number().int().min(1).max(1000).default(100),maxConcurrent:z.literal(1).default(1),
+  roundTokens:z.number().int().min(1).max(100000000).default(100000),roundDurationMs:z.number().int().min(1).max(86400000).default(900000),
   backoffBaseMs:z.number().int().min(1000).max(3600000).default(60000),maxBackoffMs:z.number().int().min(1000).max(86400000).default(3600000),
   timeZone:ActivityTimeZoneSchema.default('Asia/Shanghai'),quiet:z.array(QuietWindowSchema).max(8).default([]),
   explorationPolicy:ExtensionIdSchema.default('activity-explore'),maintenancePolicy:ExtensionIdSchema.default('activity-maintenance'),
-  maintenance:z.boolean().default(false),
+  maintenance:z.boolean().default(false),plans:z.boolean().default(true),exploration:z.boolean().default(true),allowedCapabilities:z.array(z.enum(['bilibili','media','dsh-tools'])).max(3).default(['bilibili','media']),
 }).refine(value=>value.maxBackoffMs>=value.backoffBaseMs,'Invalid backoff range');
 /** Serialized anchor is a locator; core must resolve and verify its durable record. */
 export const ActivityAnchorSchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),runId:z.uuid(),operationId:z.uuid(),scope:ExecutionScopeSchema,

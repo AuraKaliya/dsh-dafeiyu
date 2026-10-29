@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/media",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -13,12 +13,13 @@
     "./store": {
       "types": "./lib/store.d.ts",
       "default": "./lib/store.js"
-    }
+    },
+    "./management": "./lib/management-definition.js"
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.24.0",
-    "@dafeiyu/core": "0.24.0",
-    "@dafeiyu/journal": "0.24.0",
+    "@dafeiyu/contracts": "0.25.0",
+    "@dafeiyu/core": "0.25.0",
+    "@dafeiyu/journal": "0.25.0",
     "zod": "4.4.3"
   },
   "peerDependencies": {

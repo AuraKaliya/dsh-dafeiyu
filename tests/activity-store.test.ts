@@ -89,9 +89,9 @@ test('editing cancels queued occurrences and a late acceptance cannot reactivate
 });
 
 test('unknown effects block future wakes and completed usage is charged only once',async()=>{
-  const f=await fixture({dailyActiveMs:1000});try{const plan=f.create(),occurrence=f.store.issue(plan.id,base)!;const event=complete(f.store,occurrence,base,base+1000,true);
+  const f=await fixture({roundDurationMs:1000});try{const plan=f.create(),occurrence=f.store.issue(plan.id,base)!;const event=complete(f.store,occurrence,base,base+1000,true);
     f.store.runEvent(event);assert.equal(f.store.get(plan.id).status,'blocked');assert.equal(f.store.used(base),1000);assert.equal(f.store.issue(plan.id,base+60000),null);
-    const second=f.create({requestId:'another'});assert.equal(f.store.issue(second.id,base+60000),null);
+    f.store.rounds.settle(occurrence.id,{tokens:12,knownTokens:12},1000,base+1000);const second=f.create({requestId:'another'});assert.equal(f.store.issue(second.id,base+60000),null);
   }finally{f.close();}
 });
 
@@ -102,9 +102,9 @@ test('unexpected schemas, identity changes and all-day quiet configuration fail 
   assert.throws(()=>new ActivityStore(join(f.root,'missing.sqlite'),f.identity),/INITIALIZATION_REQUIRED|SCHEMA_UNSUPPORTED/);
 });
 
-test('creating another plan cannot bypass the global minimum wake interval',async()=>{
+test('activities continue within a round and the interval starts after round completion',async()=>{
   const f=await fixture();try{const first=f.create(),second=f.create({requestId:'second'}),occurrence=f.store.issue(first.id,base)!;
-    complete(f.store,occurrence,base,base+1000);assert.equal(f.store.issue(second.id,base+1000),null);assert.ok(f.store.issue(second.id,base+60000));
+    complete(f.store,occurrence,base,base+1000);f.store.rounds.settle(occurrence.id,{tokens:10,knownTokens:10},1000,base+1000);f.store.rounds.end('rest',base+1000);assert.equal(f.store.issue(second.id,base+60000),null);assert.ok(f.store.issue(second.id,base+61000));
   }finally{f.close();}
 });
 

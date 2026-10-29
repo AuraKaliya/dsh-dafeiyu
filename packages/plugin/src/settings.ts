@@ -1,8 +1,9 @@
-import {ContextAssemblySchema,ContextBudgetSchema} from '@dafeiyu/contracts';
+import {MediaPluginConfigSchema} from '@dafeiyu/media';
+import {ActivityConfigSchema,ContextAssemblySchema,ContextBudgetSchema} from '@dafeiyu/contracts';
 import { readFileSync,statSync } from 'node:fs';
 import { dirname,resolve } from 'node:path';
 import { z } from 'zod';
-import { QqBatchConfigSchema,QqStickersConfigSchema } from '@dafeiyu/qq';
+import { QqBatchConfigSchema,QqStickersConfigSchema,QqReplyDelaySchema,loopbackURL } from '@dafeiyu/qq';
 import { BiliRetryPolicySchema } from '@dafeiyu/bilibili';
 import {PhaseTimeoutsSchema} from '@dafeiyu/contracts';
 
@@ -11,7 +12,7 @@ export const InstallationSettingsSchema=z.strictObject({
   schemaVersion:z.literal(1),dataDir:path,instanceName:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('dafeiyu'),
   foundationFile:path.optional(),
   dshTools:z.boolean().default(false),
-  context:ContextAssemblySchema.optional(),
+  context:ContextAssemblySchema.prefault({}),
   contextBudget:ContextBudgetSchema.omit({assembly:true}).optional(),
   growthMaxBytes:z.number().int().min(0).max(32000).optional(),
   localOwnerControl:z.boolean().default(false),
@@ -19,19 +20,20 @@ export const InstallationSettingsSchema=z.strictObject({
   phaseTimeouts:PhaseTimeoutsSchema.optional(),
   model:z.strictObject({auth:z.enum(['api-key','dsh-account']).optional(),model:z.string().trim().min(1).max(160),reasoningEffort:z.string().trim().min(1).max(40).optional(),
     credentialStore:path,baseURL:z.url().optional(),inlineTransport:z.record(z.string(),z.json()).optional()}),
-  qq:z.strictObject({botId:qq,ownerId:qq,tokenFile:path,httpURL:z.url(),wsURL:z.url(),
+  qq:z.strictObject({botId:qq,ownerId:qq,tokenFile:path,httpURL:z.url().refine(value=>{try{loopbackURL(value,'http:');return true;}catch{return false;}},'Plain loopback HTTP endpoint required'),wsURL:z.url().refine(value=>{try{loopbackURL(value,'ws:');return true;}catch{return false;}},'Plain loopback WebSocket endpoint required'),
     messageBatch:QqBatchConfigSchema.prefault({enabled:true}),stickers:QqStickersConfigSchema.prefault({}),
-    groupIds:z.array(qq).max(10).default([]),joinedGroups:z.boolean().default(false),replyDelay:z.boolean().default(true),naturalNames:z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
+    groupIds:z.array(qq).max(10).default([]),joinedGroups:z.boolean().default(false),replyDelay:QqReplyDelaySchema.prefault({}),historyWindowMs:z.number().int().min(1000).max(604800000).default(86400000),naturalNames:z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
     media:z.strictObject({cacheRoots:z.array(path).max(8).default([]),httpsHosts:z.array(z.string()).max(16).default([]),sendEnabled:z.boolean().default(false),voiceDirectives:z.boolean().default(false)}).optional()}).refine(value=>value.botId!==value.ownerId,'Bot and owner must differ'),
   bilibili:z.strictObject({capabilities:z.boolean().default(true),
     browser:z.strictObject({expectedUid:uid}).optional(),
-    requestPolicy:z.strictObject({minIntervalMs:z.number().int().min(100).max(60000).optional(),retry:BiliRetryPolicySchema.optional()}).optional(),
+    requestPolicy:z.strictObject({minIntervalMs:z.number().int().min(100).max(60000).optional(),timeoutMs:z.number().int().min(1000).max(60000).optional(),maxResponseBytes:z.number().int().min(1024).max(16777216).optional(),maxMediaReadBytes:z.number().int().min(1024).max(268435456).optional(),retry:BiliRetryPolicySchema.optional()}).optional(),
     session:z.strictObject({file:path,expectedUid:uid}).optional(),
     channel:z.strictObject({accountUid:uid,ownerUid:uid,sessionFile:path}).refine(value=>value.accountUid!==value.ownerUid,'Account and owner must differ').optional()}).optional(),
   media:z.record(z.string(),z.json()).optional(),
-  activity:z.strictObject({enabled:z.boolean().default(true),timeZone:z.string().default('Asia/Shanghai'),
-    dailyActiveMs:z.number().int().min(100).max(86400000).default(3600000)}).prefault({}),
+  activity:ActivityConfigSchema.extend({enabled:z.boolean().default(true)}).prefault({maintenance:true}),
 }).superRefine((value,ctx)=>{
+  if(value.media){const media=MediaPluginConfigSchema.safeParse(value.media);if(!media.success)for(const issue of media.error.issues)ctx.addIssue({code:'custom',path:['media',...issue.path],message:'Invalid media configuration'});}
+
   if(value.contextBudget&&value.contextBudget.outputReserveBytes>=value.contextBudget.requestMaxBytes)ctx.addIssue({code:'custom',path:['contextBudget','outputReserveBytes'],message:'Output reserve must fit within the request capacity'});
   if(value.contextBudget?.regions['memory:growth'])ctx.addIssue({code:'custom',path:['contextBudget','regions'],message:'Use growthMaxBytes for personality capacity'});
   if(value.bilibili?.browser&&!value.dshTools)ctx.addIssue({code:'custom',path:['dshTools'],message:'Bilibili browser reads require the desktop bridge'});
