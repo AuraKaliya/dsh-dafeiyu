@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大肥鱼管理中心 · 交互原型</title>
+<link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+<div class="reviewbar"><div><strong>大肥鱼管理中心</strong><span class="prototype-tag">功能规格原型 v4 · 示例数据</span></div><div class="review-controls"><label for="scenario">场景</label><select id="scenario"><option value="ready">正常运行</option><option value="new">首次装配</option><option value="offline">已停止</option></select><button id="theme" class="quiet" aria-label="切换深浅色">深色</button><button id="frame" class="quiet" aria-pressed="true">隐藏 DSH 外框</button></div></div>
+<div class="preview-note">左侧是 DSH 已有的设置导航。大肥鱼只使用右侧工作区；这里的操作不会连接账号、下载组件或修改真实数据。</div>
+<div class="stage">
+<div class="settings-frame" id="settings-frame">
+  <aside class="host-nav" aria-label="DSH 设置导航示意"><h2>设置</h2><div class="host-link">通用</div><div class="host-link">账户</div><div class="host-link">模型</div><div class="host-link">插件</div><div class="host-link selected" aria-current="page">大肥鱼管理中心</div><div class="host-nav-foot">DSH 现有设置框架<br><small>按官方源码尺寸示意</small></div></aside>
+  <main class="workspace" aria-label="大肥鱼管理中心工作区">
+    <header class="page-header"><div><span class="eyebrow">DAFEIYU</span><h1>大肥鱼管理中心</h1></div><button id="refresh" class="icon-button" title="重置原型" aria-label="重置原型">↻</button></header>
+    <nav class="tabs" role="tablist" aria-label="管理中心页面"><button role="tab" id="tab-overview" data-page="overview" aria-selected="true">总览</button><button role="tab" id="tab-persona" data-page="persona" aria-selected="false" tabindex="-1">人格与记忆</button><button role="tab" id="tab-capabilities" data-page="capabilities" aria-selected="false" tabindex="-1">能力</button><button role="tab" id="tab-tasks" data-page="tasks" aria-selected="false" tabindex="-1">任务与记录</button><button role="tab" id="tab-prompt" data-page="prompt" aria-selected="false" tabindex="-1">提示词预览</button><button role="tab" id="tab-runtime" data-page="runtime" aria-selected="false" tabindex="-1">运行</button></nav>
+    <div class="workbody" id="workbody"><section id="page" role="tabpanel" tabindex="0" aria-labelledby="tab-overview"></section></div>
+    <footer class="workspace-footer"><span><i class="dot muted-dot"></i> 示例实例 · 内容仅供设计讨论</span><span>配置与运行状态分别展示</span></footer>
+  </main>
+</div>
+</div>
+<dialog id="dialog" aria-labelledby="dialog-title"><form id="dialog-form"><div class="dialog-head"><h2 id="dialog-title"></h2><button type="button" id="dialog-close" class="icon-button" aria-label="关闭">×</button></div><div id="dialog-body"></div><div class="dialog-actions"><button type="button" id="dialog-cancel" class="secondary">取消</button><button type="submit" id="dialog-submit" class="primary">保存</button></div></form></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="design-pages.js"></script>
+<script src="panels.js"></script>
+<script src="prompt-layout.js"></script>
+<script src="prototype.js"></script>
+</body></html>

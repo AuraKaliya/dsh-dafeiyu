@@ -1,0 +1,31 @@
+{
+  "capturedAt": "2026-10-29T09:10:24.277Z",
+  "mode": "source-literals-only",
+  "dynamicPlaceholder": "【动态提示词】",
+  "sources": [
+    {
+      "path": "packages/core/src/harness-runtime.ts",
+      "sha256": "500e869d4873bee26e6c8f25a7d5b6529c41f0909be35637ee3e654661e76b54"
+    },
+    {
+      "path": "packages/core/src/runtime.ts",
+      "sha256": "f741fbff8567b68034e2bf33003e82141b23e7c57cec96fb7279cb70951ef82a"
+    },
+    {
+      "path": "packages/core/src/context-runtime.ts",
+      "sha256": "4c77f27a9839b94cdbb69f6b9179d71be4176194ad5ba267c5a0fe4bb4408950"
+    },
+    {
+      "path": "packages/core/src/native-runtime.ts",
+      "sha256": "85d09d40392df993f9e43a2e9493ce212745455e1c34b74ea3e05f4c69eacb48"
+    },
+    {
+      "path": "packages/contracts/src/qq-expression.ts",
+      "sha256": "5e6859d2b335111f9a0399e0931d0963346e185942f2bccf9db408d1dfc53e92"
+    },
+    {
+      "path": "packages/media/src/service.ts",
+      "sha256": "e3c0a5a45606e6c15328e67f572cf31759fda8692f10cf36dd055fe91b070544"
+    }
+  ]
+}

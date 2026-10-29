@@ -1,0 +1,231 @@
+{
+  "retrievedAt": "2026-10-29T06:45:43.598Z",
+  "repository": "https://github.com/deepseek-ai/deepseek-harness",
+  "license": "MIT",
+  "files": [
+    {
+      "localPath": "rc2/docs/web-styling.zh.md",
+      "upstreamPath": "docs/web-styling.zh.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/docs/web-styling.zh.md",
+      "sha256": "69f83f6103cd4a329a18cc478380a42ba8bf735dbfc70388891bc71a647a63cf"
+    },
+    {
+      "localPath": "rc2/LICENSE",
+      "upstreamPath": "LICENSE",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/LICENSE",
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+    },
+    {
+      "localPath": "rc2/packages/client/modules/README.zh.md",
+      "upstreamPath": "packages/client/modules/README.zh.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/modules/README.zh.md",
+      "sha256": "4290f59f22039ea4a33e2fae44d6b352fbbd43ea695b96547af7fd5791344e32"
+    },
+    {
+      "localPath": "rc2/packages/client/modules/src/client/manifest.ts",
+      "upstreamPath": "packages/client/modules/src/client/manifest.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/modules/src/client/manifest.ts",
+      "sha256": "dca304d22bda0d467b47dba653d245eaf335f3b225af24decd8a294e91840c6b"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings/package.json",
+      "upstreamPath": "packages/client/ui-settings/package.json",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/package.json",
+      "sha256": "4266a43fbce32d98b711d22f8ce0e90e9129fc7b74f44ff6107686582b5af81f"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings/README.zh.md",
+      "upstreamPath": "packages/client/ui-settings/README.zh.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/README.zh.md",
+      "sha256": "812febb973438d9bfa5180d81f9c8a621b37f06aa70e922010536e36473df158"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings/src/client/config-form-types.ts",
+      "upstreamPath": "packages/client/ui-settings/src/client/config-form-types.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/src/client/config-form-types.ts",
+      "sha256": "68384732dca9f586dffe0d3fa9b4e7b448ff23ca36f051840312f1e73fc6f75c"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings/src/client/config-form.ts",
+      "upstreamPath": "packages/client/ui-settings/src/client/config-form.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/src/client/config-form.ts",
+      "sha256": "2b5ef40f2bb06c1af50152d494aaf72c10b7127d563d86e7726b12342e3f8f5b"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings/src/client/contract/slots.ts",
+      "upstreamPath": "packages/client/ui-settings/src/client/contract/slots.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/src/client/contract/slots.ts",
+      "sha256": "2318031c951e80df0185be3fff1a55faf8d4932c2b36c16940d3ee33dce68060"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings/src/client/index.ts",
+      "upstreamPath": "packages/client/ui-settings/src/client/index.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/src/client/index.ts",
+      "sha256": "63d15aa09f92e3e3bd890178d5052aa3bcd73783b756d95d6cd0758ddd1b0508"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings/src/index.ts",
+      "upstreamPath": "packages/client/ui-settings/src/index.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/src/index.ts",
+      "sha256": "90887278a158d856584a71c889f743c327446c37bc2563d422af0e4cb3001b62"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-general/README.zh.md",
+      "upstreamPath": "packages/client/ui-settings-general/README.zh.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-general/README.zh.md",
+      "sha256": "ad4065e982da236937d7c27817ae9ed68fbce62b49ef0b4a45dbaeae801716da"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-general/src/client/chrome.module.css",
+      "upstreamPath": "packages/client/ui-settings-general/src/client/chrome.module.css",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-general/src/client/chrome.module.css",
+      "sha256": "b358ca8429afe83e3a025a770f10884c9eb270b1de3ed52c9754e8b2061baeea"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-general/src/client/chrome.tsx",
+      "upstreamPath": "packages/client/ui-settings-general/src/client/chrome.tsx",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-general/src/client/chrome.tsx",
+      "sha256": "5d2d9262ce0e4b4659f95e31813778fe5f64ba6381fdd17e2a21d0c4837a5b52"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-general/src/client/index.ts",
+      "upstreamPath": "packages/client/ui-settings-general/src/client/index.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-general/src/client/index.ts",
+      "sha256": "e48b77e65dcf8c6e09c7d37792907e998953bc180fce6cabcfa873d26fd307dc"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-general/src/client/SettingsRoot.module.css",
+      "upstreamPath": "packages/client/ui-settings-general/src/client/SettingsRoot.module.css",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-general/src/client/SettingsRoot.module.css",
+      "sha256": "886528a854b668db25c60cbc46ad982687142fcb02fda1f533dcbf491dc73513"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-general/src/client/SettingsRoot.tsx",
+      "upstreamPath": "packages/client/ui-settings-general/src/client/SettingsRoot.tsx",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-general/src/client/SettingsRoot.tsx",
+      "sha256": "01966a7299b66d16b2f80106c72dd1f37c541bbfe2d3a0397ca9edd96c21f466"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-shell/package.json",
+      "upstreamPath": "packages/client/ui-settings-shell/package.json",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-shell/package.json",
+      "sha256": "7454509f3ed3db6a9661b03b18784a483ceec12aecb839268270f2d050b32975"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-shell/src/client/index.ts",
+      "upstreamPath": "packages/client/ui-settings-shell/src/client/index.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-shell/src/client/index.ts",
+      "sha256": "7e03109af487014f2f460b747743b93788cacd237f2f3ea40e508282786c167f"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-shell/src/client/ShellCard.tsx",
+      "upstreamPath": "packages/client/ui-settings-shell/src/client/ShellCard.tsx",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-shell/src/client/ShellCard.tsx",
+      "sha256": "fd7cd8f0c63b881527dd206e3492407e8411d954e56aa94b22d8a110cacb13bb"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-settings-shell/tsdown.config.ts",
+      "upstreamPath": "packages/client/ui-settings-shell/tsdown.config.ts",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings-shell/tsdown.config.ts",
+      "sha256": "c91c9bf731f1ab5e640dd8c40df1b6eeada805eef7f713bc1d09f832f6be395a"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-slots/README.zh.md",
+      "upstreamPath": "packages/client/ui-slots/README.zh.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-slots/README.zh.md",
+      "sha256": "c257c13c0edc4d0963487a1ef75a357998a38b6ae41781549e28d5958c3b6a07"
+    },
+    {
+      "localPath": "rc2/packages/client/ui-theme/src/styles/design-platform.css",
+      "upstreamPath": "packages/client/ui-theme/src/styles/design-platform.css",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-theme/src/styles/design-platform.css",
+      "sha256": "809b20ae477324fdf5181a2d338655a19919cabbf1b0e60adc149908462c5a66"
+    },
+    {
+      "localPath": "rc2/packages/preset/agent-preset/skills/cordis-plugin-development/references/practices.md",
+      "upstreamPath": "packages/preset/agent-preset/skills/cordis-plugin-development/references/practices.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/preset/agent-preset/skills/cordis-plugin-development/references/practices.md",
+      "sha256": "5a61f4e0f754eded6116e55bbf72471fd9b128e138ea3faca120cda76701a042"
+    },
+    {
+      "localPath": "rc2/packages/preset/agent-preset/skills/cordis-plugin-development/references/ui-plugin.md",
+      "upstreamPath": "packages/preset/agent-preset/skills/cordis-plugin-development/references/ui-plugin.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/preset/agent-preset/skills/cordis-plugin-development/references/ui-plugin.md",
+      "sha256": "830a1710af97e3930ba5f29062e46ff78f7be3337995fbb20e85867f80339e23"
+    },
+    {
+      "localPath": "rc2/packages/preset/agent-preset/skills/cordis-plugin-development/references/user-actions.md",
+      "upstreamPath": "packages/preset/agent-preset/skills/cordis-plugin-development/references/user-actions.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/preset/agent-preset/skills/cordis-plugin-development/references/user-actions.md",
+      "sha256": "ecc7f1226536584d781af8f1f9dee30d7262943dada67bfd997eb7902b34a9be"
+    },
+    {
+      "localPath": "rc2/packages/preset/agent-preset/skills/cordis-plugin-development/SKILL.md",
+      "upstreamPath": "packages/preset/agent-preset/skills/cordis-plugin-development/SKILL.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/preset/agent-preset/skills/cordis-plugin-development/SKILL.md",
+      "sha256": "83561b4d4fed0dd8051b3e998c6f567a5676a43b7321eecd12c255f4c0478ecf"
+    },
+    {
+      "localPath": "rc2/packages/settings/README.zh.md",
+      "upstreamPath": "packages/settings/README.zh.md",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/settings/README.zh.md",
+      "sha256": "93823f41165099f51e609858a0024b1370991d51073fab005f52f629032991c9"
+    },
+    {
+      "localPath": "alpha2/packages/client/ui-settings/src/client/config-form-types.ts",
+      "upstreamPath": "packages/client/ui-settings/src/client/config-form-types.ts",
+      "commit": "f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/client/ui-settings/src/client/config-form-types.ts",
+      "sha256": "68384732dca9f586dffe0d3fa9b4e7b448ff23ca36f051840312f1e73fc6f75c"
+    },
+    {
+      "localPath": "alpha2/packages/client/ui-settings/src/client/contract/slots.ts",
+      "upstreamPath": "packages/client/ui-settings/src/client/contract/slots.ts",
+      "commit": "f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/client/ui-settings/src/client/contract/slots.ts",
+      "sha256": "2318031c951e80df0185be3fff1a55faf8d4932c2b36c16940d3ee33dce68060"
+    },
+    {
+      "localPath": "alpha2/packages/client/ui-settings-general/src/client/SettingsRoot.module.css",
+      "upstreamPath": "packages/client/ui-settings-general/src/client/SettingsRoot.module.css",
+      "commit": "f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/client/ui-settings-general/src/client/SettingsRoot.module.css",
+      "sha256": "ea8346a804eceae7b17da4f3adb7a8312126f47d7efa167adfa561b050f48a45"
+    },
+    {
+      "localPath": "development.zh.md",
+      "upstreamPath": "docs/development.zh.md",
+      "commit": "f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/docs/development.zh.md",
+      "sha256": "6f12f3d6c136d880ff322f490b4f5ab0fc34c18b28d1eede890805cb35861b96"
+    }
+  ]
+}
