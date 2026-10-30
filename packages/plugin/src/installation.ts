@@ -1,4 +1,4 @@
-import { existsSync,mkdirSync,readFileSync,writeFileSync,renameSync,readdirSync } from 'node:fs';
+﻿import { existsSync,mkdirSync,readFileSync,writeFileSync,renameSync,readdirSync } from 'node:fs';
 import { dirname,join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash,randomUUID } from 'node:crypto';
@@ -68,14 +68,14 @@ export interface InstallationMigration{code:'INSTALL_MIGRATED'|'INSTALL_CURRENT'
 export function migrateInstallation(settingsFile:string):InstallationMigration{
   const settings=readInstallationSettings(settingsFile),core=join(settings.dataDir,'core'),file=join(core,'bilibili.sqlite');
   if(!existsSync(file))return {code:'INSTALL_NO_STORE',version:0,backup:null};
-  const profile=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)}).parse(JSON.parse(readFileSync(join(core,'host-profile.json'),'utf8')));
+  const profile=z.object({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)}).parse(JSON.parse(readFileSync(join(core,'host-profile.json'),'utf8')));
   const backup=join(settings.dataDir,'backups','bilibili-v'+Date.now()+'.sqlite'),result=migrateBiliStorage(file,profile,{backup});
   return result.migrated?{code:'INSTALL_MIGRATED',version:result.version,backup:result.backup??backup}:{code:'INSTALL_CURRENT',version:result.version,backup:null};
 }
 export function prepareInstallation(settingsFile:string,options:InstallationOptions={}) {
   const settings=readInstallationSettings(settingsFile),root=settings.dataDir,metaFile=join(root,'installation.json');
   const biliStore=join(root,'core','bilibili.sqlite');
-  if(existsSync(biliStore)){try{const profile=z.strictObject({agentId:z.string(),profileId:z.string()}).parse(JSON.parse(readFileSync(join(root,'core','host-profile.json'),'utf8')));if(inspectBiliMigration(biliStore,profile).state==='upgradable')throw new Error('INSTALL_MIGRATION_REQUIRED');}catch(error){if(error instanceof Error&&error.message==='INSTALL_MIGRATION_REQUIRED')throw error;}}
+  if(existsSync(biliStore)){try{const profile=z.object({agentId:z.string(),profileId:z.string()}).parse(JSON.parse(readFileSync(join(root,'core','host-profile.json'),'utf8')));if(inspectBiliMigration(biliStore,profile).state==='upgradable')throw new Error('INSTALL_MIGRATION_REQUIRED');}catch(error){if(error instanceof Error&&error.message==='INSTALL_MIGRATION_REQUIRED')throw error;}}
   checkInstallationFiles(settings,options.scripted);
   let meta:InstallationMetadata;
   if(existsSync(metaFile)){
