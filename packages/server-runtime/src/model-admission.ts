@@ -20,6 +20,18 @@ export function raceCall<T>(operation:Promise<T>,signal:AbortSignal):Promise<T>{
       error=>{signal.removeEventListener('abort',onAbort);reject(error);});
   });
 }
+
+/**
+ * A generator blocked inside next() queues return() behind that read. Bound cleanup so
+ * settlement and the call gate are not held by a transport that ignores cancellation.
+ */
+export async function closeIterator(iterator:AsyncIterator<unknown>|undefined,timeoutMs=250):Promise<void>{
+  if(!iterator?.return)return;
+  let closing:Promise<unknown>;
+  try{closing=Promise.resolve(iterator.return());}catch{return;}
+  closing.catch(()=>{});
+  await Promise.race([closing,new Promise<void>(resolve=>{const timer=setTimeout(resolve,Math.max(1,timeoutMs));timer.unref();})]);
+}
 export interface ParentModelAdmissionOptions {
   readonly profileId:string;
   readonly maximumCallMs:number;
@@ -81,7 +93,7 @@ export function installParentModelAdmission(ctx:Context,budget:SharedModelBudget
       }
     }catch(caught){error??=runtimeCode(caught,'RUNTIME_STREAM_FAILED');throw new Error(error);}
     finally{
-      try{if(!drained)await iterator?.return?.();}
+      try{if(!drained)await closeIterator(iterator);}
       finally{
         if(!complete||invalid||finish==='error'||finish==='aborted')usage=null;
         await budget.settle({authorizationId:budget.authorizationId,owner,callId,reservationId:permit.reservationId,usage,finish,durationMs:Math.max(0,Date.now()-started),error});
