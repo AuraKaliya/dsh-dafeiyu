@@ -4,6 +4,7 @@ import type { ExecutionInput,ExecutionView,PersonaSnapshot,PendingMessage,Contex
 import type { BoundAction } from './capability-registry.js';
 import type { Json } from '@dafeiyu/contracts';
 import type { ExecutionToolReceipt,SourceDependency } from '@dafeiyu/contracts';
+import type { RunLeaseControl } from './run-scheduler.js';
 import type { ExecutionEvidence,NativeContext } from './execution-evidence.js';
 
 export interface NativeAction {
@@ -15,6 +16,8 @@ export interface TaskExecutionFrame {
   readonly handoff?:import('@dafeiyu/contracts').ContextHandoff;
   /** Program-issued identity for model-call admission; never derives from model text. */
   readonly work?:WorkCallContext;
+  /** Optional run-level admission handle that can yield at agent step boundaries. */
+  readonly lease?:RunLeaseControl;
   refreshContexts?():Promise<void>;
   contextPlan?():Json;
   contextAudit?(data:Record<string,Json>):void;

@@ -138,6 +138,11 @@ export class RunScheduler {
     });
   }
 
+  async acquireHandle(lease: RunLease): Promise<RunLeaseHandle> {
+    const release = await this.acquire(lease);
+    return new RunLeaseHandle(this, lease, release);
+  }
+
   get status() {
     const interactiveWaiting = this.queue.filter(item => item.lease.class === INTERACTIVE).length;
     return {
@@ -323,3 +328,42 @@ export class RunScheduler {
     }
   }
 }
+
+export interface RunLeaseControl {
+  /** Release and reacquire at a safe boundary only when interactive work is waiting. */
+  yieldIfContended(): Promise<void>;
+  close(): void;
+}
+
+/**
+ * Owns one run admission while allowing a step-boundary yield. The lease is released
+ * before reacquisition, so waiting interactive work can take the slot first.
+ */
+export class RunLeaseHandle implements RunLeaseControl {
+  private release: (() => void) | undefined;
+  private closed = false;
+  constructor(private readonly scheduler: RunScheduler, private readonly lease: RunLease, release: () => void) {
+    this.release = release;
+  }
+  async yieldIfContended(): Promise<void> {
+    if (this.closed || !this.release) return;
+    if (this.lease.class === 'interactive') return;
+    if (this.scheduler.status.foregroundWaiting === 0) return;
+    this.release();
+    this.release = undefined;
+    const next = await this.scheduler.acquire(this.lease);
+    if (this.closed) {
+      next();
+      return;
+    }
+    this.release = next;
+  }
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    const release = this.release;
+    this.release = undefined;
+    release?.();
+  }
+}
+

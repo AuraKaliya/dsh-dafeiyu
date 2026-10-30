@@ -65,6 +65,7 @@ export class NativeRuntime {
     if(owned.handle.agent.status!=='idle')throw new Error('SESSION_BUSY');owned.frame=frame;
     const disposers:(()=>void)[]=[];
     try{
+      if(frame.lease)disposers.push(owned.scope.on('agent/pre-step',async(_payload,next)=>{frame.guard();await frame.lease!.yieldIfContended();frame.guard();return next();}));
       owned.compaction.begin({id:frame.view.runId,route:frame.view.scope.scopeKey,sessionId:frame.sessionId,inputKind:'dafeiyu-execution',inputSourceId:frame.view.runId},owned.handle.agent);
       disposers.push(owned.scope.tools.restrict({allow:[]}));
       if(frame.prepare)disposers.push(await frame.prepare(owned.scope,owned.handle.agent));

@@ -130,6 +130,28 @@ test('a long-waiting background task eventually outranks a fresh owner task',asy
   (await owner)();
 });
 
+test('run lease handle releases and reacquires at a step boundary when chat is waiting',async()=>{
+  const scheduler=new RunScheduler(1,{interactiveReserve:0});
+  const handle=await scheduler.acquireHandle(lease('task-a','owner-task','task:a'));
+  assert.equal(scheduler.status.active,1);
+
+  let chatGranted=false;
+  const chat=scheduler.acquire(lease('chat-a','interactive','qq:group:1')).then(release=>{chatGranted=true;return release;});
+  await tick();
+  assert.equal(chatGranted,false,'the task still holds the only slot before the boundary');
+
+  const yielding=handle.yieldIfContended();
+  await tick();
+  assert.equal(chatGranted,true,'the task releases the slot at the step boundary');
+  const releaseChat=await chat;
+  releaseChat();
+  await yielding;
+  assert.equal(scheduler.status.active,1,'the task reacquires after chat yields');
+
+  handle.close();
+  assert.equal(scheduler.status.active,0);
+});
+
 test('boolean leases remain compatible for old callers',async()=>{
   const scheduler=new RunScheduler(1,{interactiveReserve:0});
   const release=await scheduler.acquire(true,'qq:group:1');

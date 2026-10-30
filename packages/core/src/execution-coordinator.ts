@@ -588,7 +588,7 @@ export class ExecutionCoordinator {
   private async process(id:string):Promise<void>{
     const scheduled=this.d.store.get(id),cls=this.workClass(scheduled);
     const scope=scheduled.definition.scope;
-    const release=await this.d.scheduler.acquire({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
+    const releaseLease=await this.d.scheduler.acquireHandle({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
     try{if(!this.d.accepting()||this.failure)return;let run=this.d.store.get(id);if(!['accepted','queued'].includes(run.state))return;
       const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);let runPersona:RunPersona|undefined,trialInputs:readonly ExecutionInput[]=[];
       try{
@@ -660,7 +660,7 @@ export class ExecutionCoordinator {
         this.d.store.appendExecutionEvent(id,'task.stage',{phase:'execution',deadlineAt:new Date(Date.parse(run.updatedAt)+this.d.turnTimeoutMs).toISOString()});this.flushEvents();
         let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
         const frame:TaskExecutionFrame={mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,
-          work:{workItemId:`task:${scheduled.definition.taskId}`,runId:run.id,scopeKey:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,targetVersion:run.definition.intentVersion,stage:'execution'},
+          work:{workItemId:`task:${scheduled.definition.taskId}`,runId:run.id,scopeKey:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,targetVersion:run.definition.intentVersion,stage:'execution'},lease:releaseLease,
           handoff,refreshContexts:async()=>{if(contextUsed)await refreshContexts();contextUsed=true;},contextPlan:()=>lastPlan,
           contextAudit:data=>{this.d.store.appendExecutionEvent(id,'context.admitted',data);this.flushEvents();},
           program:z.json().parse({...z.record(z.string(),z.json()).parse(program),handoff}),contexts,evidence,
@@ -685,7 +685,7 @@ export class ExecutionCoordinator {
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
       }finally{const settledState=this.d.store.get(id).state;if(['completed','waiting','failed','cancelled','interrupted'].includes(settledState))this.d.experience()?.settle(id,settledState);this.evidence.delete(id);{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting','failed'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
-    }finally{release();}
+    }finally{releaseLease.close();}
   }
   private previousContinuity(run:StoredRun,access:PersonaAccess,foundationHash:string){const memory=this.d.memory();if(!memory)return null;
     for(const previous of this.d.store.list(['completed','waiting']).reverse()){
