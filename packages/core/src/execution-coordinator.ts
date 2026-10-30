@@ -564,7 +564,15 @@ export class ExecutionCoordinator {
     return run;
   }
   recover():void{this.d.store.recover();this.d.store.nativeDeliveries.recover();for(const request of this.d.store.pendingRequests())if(savedSchema.safeParse(request.payload).success)this.accept(request.id);this.flushEvents();}
-  activate():void{for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
+  activate():void{this.resumeSegments();for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
+  /** A continued segment without a child is resumed from its durable checkpoint request. */
+  private resumeSegments(){const active=new Set(this.d.store.list(['accepted','queued','running','waiting']).map(run=>run.definition.parentRunId).filter(Boolean));
+    for(const run of this.d.store.list(['continued'])){if(run.definition.scope.kind!=='task'||active.has(run.id)||!run.definition.taskId)continue;const ids=this.d.store.checkpoints(run.id),last=ids.at(-1);if(!last)continue;
+      let body:any;try{body=this.d.store.readCheckpoint(run.id,last);}catch{continue;}if(!body||typeof body!=='object'||!body.request)continue;
+      try{const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),task=this.repository().readState(this.d.agentId,run.definition.taskId);
+        if(task.status!=='active'||task.epoch!==run.definition.intentVersion)continue;
+        this.submit(String(body.producer??(saved.origin.kind==='native'?saved.origin.producerId:'unknown')),ExecutionRequestSchema.parse({...body.request,requestId:runtimeHash(['segment',run.id,last]),expectedVersion:task.version}),{kind:'continuation',parentRunId:run.id,checkpointId:last},run.id,last,this.motivation(run),body.messageSource?MessageTaskSourceSchema.parse(body.messageSource):undefined);
+      }catch{/* keep the durable checkpoint for a later activation */}}}
   feedbackSourceForRun(runId:string):{inboundId:string;taskId:string;intentVersion:number}|null {
     try{const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
       if(!source||!run.definition.taskId)return null;
@@ -592,7 +600,8 @@ export class ExecutionCoordinator {
     return motivation==='explicit-task'||motivation==='mixed'?'owner-task':motivation==='self-exploration'?'background':'autonomy';
   }
 
-  private segmentDepth(run:StoredRun){let depth=0,current:StoredRun|undefined=run;while(current?.definition.parentRunId&&depth<64){depth++;current=this.d.store.get(current.definition.parentRunId);}return depth;}  private async process(id:string):Promise<void>{
+
+  private rootRun(run:StoredRun){let current:StoredRun=run;for(let step=0;step<64&&current.definition.parentRunId;step+=1)current=this.d.store.get(current.definition.parentRunId);return current.id;}  private segmentDepth(run:StoredRun){let depth=0,current:StoredRun|undefined=run;while(current?.definition.parentRunId&&depth<64){depth++;current=this.d.store.get(current.definition.parentRunId);}return depth;}  private async process(id:string):Promise<void>{
     const scheduled=this.d.store.get(id),cls=this.workClass(scheduled);
     const scope=scheduled.definition.scope;
     const releaseLease=await this.d.scheduler.acquireHandle({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
@@ -679,8 +688,8 @@ export class ExecutionCoordinator {
         if(segmentYield){
           const current=this.d.store.get(id),task=repository.readState(this.d.agentId,current.definition.taskId!);
           if(task.status==='active'&&task.epoch===current.definition.intentVersion&&this.segmentDepth(current)<8){
-            const checkpointId=this.d.store.checkpoint(id,{kind:'segment',reason:segmentYield.reason}),continued=this.d.store.transition(id,current.version,'continued');
-            this.submit(request.producer,ExecutionRequestSchema.parse({requestId:runtimeHash(['segment',id,checkpointId]),taskId:task.id,expectedVersion:task.version,policyId:current.definition.policyId,...(saved.input.inputRefs?{inputRefs:saved.input.inputRefs}:{})}),{kind:'continuation',parentRunId:id,checkpointId},id,checkpointId,this.motivation(current));
+            const depth=this.segmentDepth(current),child=ExecutionRequestSchema.parse({requestId:runtimeHash(['segment',id,'pending']),taskId:task.id,expectedVersion:task.version,policyId:current.definition.policyId,...(saved.input.inputRefs?{inputRefs:saved.input.inputRefs}:{}),...(saved.input.data?{data:saved.input.data}:{})}),checkpointId=this.d.store.checkpoint(id,{kind:'segment',reason:segmentYield.reason,rootRunId:this.rootRun(current),depth,segment:depth+1,producer:request.producer,request:child,messageSource:saved.messageSource??null}),continued=this.d.store.transition(id,current.version,'continued');
+            this.submit(request.producer,{...child,requestId:runtimeHash(['segment',id,checkpointId])},{kind:'continuation',parentRunId:id,checkpointId},id,checkpointId,this.motivation(current),saved.messageSource);
             this.d.store.appendExecutionEvent(continued.id,'segment.continued',{checkpointId});this.flushEvents();return;
           }
         }

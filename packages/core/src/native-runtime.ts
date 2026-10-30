@@ -13,7 +13,7 @@ import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { CompactionRuntime } from './compaction-runtime.js';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { z } from 'zod';
-import {bytesOverBudget} from './segment-budget.js';
+import {assertSegmentBudget,bytesOverBudget} from './segment-budget.js';
 import {BILI_READING_ACTIONS,BILI_READING_STAGE,CAPABILITY_CONTEXT,HarnessRuntime} from './harness-runtime.js';
 export const EXECUTION_MESSAGE_SOURCE='dafeiyu-execution' as const;
 
@@ -82,7 +82,7 @@ export class NativeRuntime {
       let budgetYieldReason:string|null=null;
       if(frame.toolStage==='bili-reading'){
         const audit=frame.contextAudit;
-        frame.contextAudit=data=>{audit?.(data);const capacity=(data as {capacity?:{bytes?:number}}|undefined)?.capacity;if(!budgetYieldReason&&typeof capacity?.bytes==='number'&&bytesOverBudget(capacity.bytes,32000))budgetYieldReason='hard-token-budget';};
+        frame.contextAudit=data=>{audit?.(data);const capacity=(data as {capacity?:{bytes?:number}}|undefined)?.capacity;if(!budgetYieldReason&&typeof capacity?.bytes==='number'){assertSegmentBudget(capacity.bytes,32000);}};
         disposers.push(owned.scope.on('agent/pre-step',async(_payload,next)=>{frame.guard();if(budgetYieldReason)throw new Error('SEGMENT_YIELD');return next();}));
       }
       let result:Awaited<ReturnType<typeof runAgentTurn>>;

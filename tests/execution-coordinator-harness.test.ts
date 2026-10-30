@@ -191,10 +191,16 @@ test('a yielded segment hands off to a child run instead of completing', async (
   });
   try {
     const producer = coordinator.producer('fixture');
-    const { run } = producer.submitTask({ requestId: randomUUID(), title: '长任务', goal: '读完再汇报', policyId: 'fixture-task' });
+    const { run } = producer.submitTask({ requestId: randomUUID(), title: '长任务', goal: '读完再汇报', policyId: 'fixture-task', data: { toolStage: 'bili-reading' } });
     const id = (run as unknown as { id: string }).id;
     coordinator.activate();
     assert.equal(await waitTerminal(store, id), 'continued');
+    const checkpointId = store.checkpoints(id).at(-1)!;
+    const checkpoint = store.readCheckpoint(id, checkpointId) as { kind?: string; rootRunId?: string; depth?: number; segment?: number };
+    assert.equal(checkpoint.kind, 'segment');
+    assert.equal(checkpoint.rootRunId, id);
+    assert.equal(checkpoint.depth, 0);
+    assert.equal(checkpoint.segment, 1);
     const parent = store.get(id), child = store.list().find(candidate => candidate.definition.parentRunId === id);
     assert.ok(child, 'expected a child segment');
     assert.equal(child!.definition.taskId, parent.definition.taskId);

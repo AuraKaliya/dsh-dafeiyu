@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { ConversationSchema } from './conversation.js';
+import { ToolStageSchema } from './execution.js';
+import type { ToolStage } from './execution.js';
 import { PersonaRequestIdSchema } from './persona.js';
 import type { InboundMessage } from './index.js';
 import { MediaVoiceEvidenceSchema } from './media.js';
@@ -7,7 +9,7 @@ import type { MediaVoiceEvidence } from './media.js';
 import type { ExecutionContext } from './execution.js';
 import type { Conversation } from './conversation.js';
 
-export const MessageTaskSubmitSchema=z.strictObject({requestId:PersonaRequestIdSchema,title:z.string().trim().min(1).max(200).optional(),kind:z.enum(['explicit-task','self-exploration']).default('explicit-task'),goal:z.string().trim().min(1).max(2000).optional(),voiceExposureId:z.uuid().optional()})
+export const MessageTaskSubmitSchema=z.strictObject({requestId:PersonaRequestIdSchema,title:z.string().trim().min(1).max(200).optional(),kind:z.enum(['explicit-task','self-exploration']).default('explicit-task'),goal:z.string().trim().min(1).max(2000).optional(),voiceExposureId:z.uuid().optional(),toolStage:ToolStageSchema.optional()})
   .refine(value=>value.kind==='self-exploration'?value.goal!==undefined&&value.voiceExposureId===undefined:value.goal===undefined,'Explicit goals must come from the real message');
 export const MessageInstructionSubmitSchema=z.strictObject({requestId:MessageTaskSubmitSchema.shape.requestId,title:MessageTaskSubmitSchema.shape.title,kind:z.literal('explicit-task').optional(),voiceExposureId:MessageTaskSubmitSchema.shape.voiceExposureId});
 export const MessageExplorationSubmitSchema=z.strictObject({requestId:MessageTaskSubmitSchema.shape.requestId,title:MessageTaskSubmitSchema.shape.title,goal:MessageTaskSubmitSchema.shape.goal.unwrap()});
@@ -22,6 +24,7 @@ export type MessageTaskSource=z.infer<typeof MessageTaskSourceSchema>;
 export interface MessageTaskBinding {id:string;pluginId:string;channelExtensionId:string;channel:string;account:string;ownerId:string;policyId:string;version:string;
   explorationResources?:readonly Conversation[];
   expressionPolicy?:{id:string;version:number};
+  toolStage?:ToolStage;
   autoDeliver?:boolean;
   voice?:{version:string;resolve(context:ExecutionContext,message:InboundMessage,exposureId:string):{text:string;evidence:MediaVoiceEvidence};current(message:InboundMessage,evidence:MediaVoiceEvidence):boolean};
   classify(message:InboundMessage):{kind:'submit'|'cancel'|'revise'|'resolve'|'none';text:string};active():boolean;}

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 
 /**
  * Per-request budget for a long reading task. The program decides before the
@@ -46,4 +46,9 @@ export function segmentBudgetDecision(input: SegmentBudgetInput): SegmentBudgetR
 export const BYTES_PER_TOKEN = 4;
 export function bytesOverBudget(bytes: number, hardTokens: number) {
     return bytes > hardTokens * BYTES_PER_TOKEN;
+}
+
+/** Enforce the limit before the request is sent; the caller turns the throw into a segment yield. */
+export function assertSegmentBudget(bytes: number, hardTokens: number) {
+    if (bytesOverBudget(bytes, hardTokens)) throw new Error('SEGMENT_YIELD');
 }
