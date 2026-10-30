@@ -16,12 +16,12 @@ export interface BoundedReadingView {
 
 const clip = (text: string, limit: number) => Array.from(text).slice(0, limit).join('');
 
-export function boundedReadingView(records: readonly BiliReadingRecord[], limit = 8): BoundedReadingView {
+export function boundedReadingView(records: readonly BiliReadingRecord[], limit = 8, total = records.length): BoundedReadingView {
     const bounded = Math.max(1, Math.min(8, Math.trunc(limit)));
     const ordered = [...records];
     const open = ordered.find(record => record.status !== 'closed') ?? null;
     return {
-        total: ordered.length,
+        total,
         open: open ? { bvid: open.bvid, title: open.title, nextStep: open.nextStep === null ? null : clip(open.nextStep, 200) } : null,
         recent: ordered.slice(0, bounded).map(record => ({
             bvid: record.bvid,

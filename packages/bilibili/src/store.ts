@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
 import { PersonaSourceRefSchema,PersonaRequestIdSchema,MediaSourceDescriptionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema,BiliReadingRecordSchema,BiliReadingIndexSchema } from '@dafeiyu/contracts';
 import type { ResourceProof,ExecutionContext,MediaSourceDescription,PersonaSourceRef,Json } from '@dafeiyu/contracts';
+import { boundedReadingView } from './reading-view.js';
 import { BILI_SCENE,BvidSchema } from './config.js';
 import { BiliDiagnostics,initializeBiliDiagnostics } from './diagnostics.js';
 
@@ -103,6 +104,7 @@ export class BiliStore {
     this.db.prepare('INSERT INTO bili_reading_history(owner,bvid,version,body,fingerprint,created_at) VALUES(?,?,?,?,?,?)').run(owner,record.bvid,version,JSON.stringify(record),fingerprint,Date.now());
     this.db.prepare('INSERT INTO bili_reading_receipts(owner,request_id,bvid,version) VALUES(?,?,?,?)').run(owner,id,record.bvid,version);
     return record;});}
+  readingView(context:ExecutionContext,limit=8){const owner=biliOwner(context),total=Number(this.db.prepare('SELECT count(*) AS n FROM bili_reading WHERE owner=?').get(owner)?.n ?? 0),rows=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? ORDER BY updated_at DESC LIMIT ?').all(owner,Math.max(1,Math.min(8,limit))),records=rows.flatMap(row=>{try{return [BiliReadingRecordSchema.parse(JSON.parse(String(row.body)))];}catch{return [];}});return boundedReadingView(records,Math.max(1,Math.min(8,limit)),total);}
   readingSummary(context:ExecutionContext,limit=8){const owner=biliOwner(context),total=Number(this.db.prepare('SELECT count(*) AS n FROM bili_reading WHERE owner=?').get(owner)?.n ?? 0),rows=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? ORDER BY updated_at DESC LIMIT ?').all(owner,Math.max(1,Math.min(8,limit))),records=rows.flatMap(row=>{try{return [BiliReadingRecordSchema.parse(JSON.parse(String(row.body)))];}catch{return [];}}),recent=records.map(record=>({bvid:record.bvid,title:record.title,status:record.status,conclusion:record.conclusion===null?null:Array.from(record.conclusion).slice(0,300).join('')})),highlights=records.filter(record=>record.conclusion!==null).slice(0,8).map(record=>({bvid:record.bvid,reason:Array.from(record.conclusion!).slice(0,200).join('')})),open=records.find(record=>record.status!=='closed');return BiliReadingIndexSchema.parse({total,recent,highlights,next:open?.nextStep??null});}
   close(){this.db.close();}
 }

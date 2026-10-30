@@ -100,6 +100,10 @@ test('the reading index stays bounded as a task accumulates videos', async () =>
     assert.equal(summary.total, 20);
     assert.equal(summary.recent.length, 8);
     assert.ok(JSON.stringify(summary).length < 4096, 'index must stay small: ' + JSON.stringify(summary).length);
+    const view = f.store.readingView(f.first);
+    assert.equal(view.total, 20);
+    assert.equal(view.recent.length, 8);
+    assert.ok(JSON.stringify(view).length < 4096);
   } finally { f.store.close(); }
 });
 
