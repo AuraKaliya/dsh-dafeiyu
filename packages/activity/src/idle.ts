@@ -17,7 +17,7 @@ export class IdleWorkStore {
 export class IdleActivity {
   private readonly port;
   constructor(private readonly ctx:Context,private readonly store:ActivityStore){this.port=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'self-exploration',basis:['owner-enabled-idle-activity']}});}
-  receive(event:ExecutionLifecycle){if(event.type!=='run.running'||event.origin.kind!=='continuation')return;const work=this.store.idle.pending();if(!work||!work.runs.includes(event.origin.parentRunId)||work.runs.includes(event.runId))return;work.runs.push(event.runId);work.activeSince=Date.parse(event.at);work.paused=false;this.store.idle.save(work);}
+  receive(event:ExecutionLifecycle){if(event.type==='run.continued'){const work=this.store.idle.pending();if(work?.runs.includes(event.runId)&&work.activeSince!==null){work.elapsedMs+=Math.max(0,Date.parse(event.at)-work.activeSince);work.activeSince=null;this.store.idle.save(work);}return;}if(event.type!=='run.running'||event.origin.kind!=='continuation')return;const work=this.store.idle.pending();if(!work||!work.runs.includes(event.origin.parentRunId)||work.runs.includes(event.runId))return;work.runs.push(event.runId);work.activeSince=Date.parse(event.at);work.paused=false;this.store.idle.save(work);}
   control(now:number,foreground:boolean){const work=this.store.idle.pending();if(!work)return false;
     const runId=work.runs.at(-1);if(!this.store.config.exploration&&!runId){this.finish(work,now,true);return false;}if(!runId){if(foreground)return true;const accepted=this.port.submitTask(work.request);work.runs.push(accepted.run.id);work.activeSince=now;this.store.idle.save(work);return true;}
     const ref=this.port.restoreRun(runId),status=this.port.status(ref);

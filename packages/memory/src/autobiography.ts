@@ -41,7 +41,7 @@ export class Autobiography implements ExperienceMemoryPort {
       this.db.prepare('INSERT INTO memory_episode_events VALUES(?,?,?,?)').run(value.id,value.episodeId,body,personaDigest(JSON.parse(body)));
     });
   }
-  settle(id:string,state:string){z.uuid().parse(id);z.enum(['completed','waiting','failed','cancelled','interrupted']).parse(state);
+  settle(id:string,state:string){z.uuid().parse(id);z.enum(['continued','completed','waiting','failed','cancelled','interrupted']).parse(state);
     this.db.prepare('UPDATE memory_episodes SET state=? WHERE id=? AND agent_id=?').run(state,id,this.agentId);}
   private episode(scope:ExecutionScope,id:string){
     if(scope.agentId!==this.agentId)throw new Error('SCOPE_DENIED');

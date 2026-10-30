@@ -9,22 +9,25 @@ import type { BiliReadingRecord } from '@dafeiyu/contracts';
  */
 export interface BoundedReadingView {
     readonly total: number;
-    readonly open: { bvid: string; title: string; nextStep: string | null } | null;
-    readonly recent: readonly { bvid: string; title: string; status: BiliReadingRecord['status']; conclusion: string | null }[];
+    readonly closed: number;
+    readonly open: { bvid: string; version:number; title: string; nextStep: string | null } | null;
+    readonly recent: readonly { bvid: string; version:number; title: string; status: BiliReadingRecord['status']; conclusion: string | null }[];
     readonly reopen: readonly string[];
 }
 
 const clip = (text: string, limit: number) => Array.from(text).slice(0, limit).join('');
 
-export function boundedReadingView(records: readonly BiliReadingRecord[], limit = 8, total = records.length): BoundedReadingView {
+export function boundedReadingView(records: readonly BiliReadingRecord[], limit = 8, total = records.length,closed=records.filter(record=>record.status==='closed').length): BoundedReadingView {
     const bounded = Math.max(1, Math.min(8, Math.trunc(limit)));
     const ordered = [...records];
     const open = ordered.find(record => record.status !== 'closed') ?? null;
     return {
         total,
-        open: open ? { bvid: open.bvid, title: open.title, nextStep: open.nextStep === null ? null : clip(open.nextStep, 200) } : null,
+        closed,
+        open: open ? { bvid: open.bvid, version:open.version??1, title: open.title, nextStep: open.nextStep === null ? null : clip(open.nextStep, 200) } : null,
         recent: ordered.slice(0, bounded).map(record => ({
             bvid: record.bvid,
+            version: record.version??1,
             title: clip(record.title, 160),
             status: record.status,
             conclusion: record.conclusion === null ? null : clip(record.conclusion, 300),

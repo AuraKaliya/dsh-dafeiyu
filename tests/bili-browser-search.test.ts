@@ -49,6 +49,18 @@ test('browser search rejects a page outside the search origin', async () => {
   await assert.rejects(readBiliBrowser(request(), '42', call, new AbortController().signal, clock()), /BILI_BROWSER_REDIRECT/);
 });
 
+test('an explicit empty search is distinct from a page that has not loaded',async()=>{
+  const url='https://search.bilibili.com/all?keyword=%E5%85%BB%E9%B1%BC&order=click&page=1';
+  const call=(empty:boolean):BrowserToolCall=>async(name,args)=>{
+    if(name==='dsh_browser_open')return {url,challenge:{blocked:false}};
+    if(isIdentity(args))return result({url,ids:['42']});
+    return result({title:'搜索结果',text:'没有相关结果',truncated:false,items:[],empty});
+  };
+  assert.deepEqual((await readBiliBrowser(request(),'42',call(true),new AbortController().signal,clock())).items,[]);
+  await assert.rejects(readBiliBrowser(request(),'42',call(false),new AbortController().signal,clock()),/CONTENT_UNAVAILABLE/);
+  await assert.rejects(readBiliBrowser(request({page:2}),'42',call(true),new AbortController().signal,clock()),/REDIRECT/);
+});
+
 test('browser discovery returns per-title candidates instead of one aggregate title', async () => {
   const url = 'https://www.bilibili.com/v/popular/all';
   const call: BrowserToolCall = async (name, args) => {

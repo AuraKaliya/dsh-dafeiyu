@@ -114,6 +114,7 @@ export class DafeiyuService extends Service {
   phaseTimeouts(){return this.config.phaseTimeouts;}
   registerHarnessSection(name:string){return this.runtime.registerHarnessSection(name);}
   originRecallScope(view:import('@dafeiyu/contracts').ExecutionView,owner:string){return this.executions?.originRecallScope(view,owner)??null;}
+  taskContextScope(view:import('@dafeiyu/contracts').ExecutionView,owner:string,scene:Conversation){return this.executions?.taskContextScope(view,owner,scene)??null;}
   originRecallCurrent(runId:string,scene:Conversation,stamp:string){return this.executions?.originRecallCurrent(runId,scene,stamp)??false;}
   contextBudget(){return this.config.context;}
   inspectContextRequest(options:import('@deepseek-ai/dsh-llm').GenerateOptions,maximum:number,reserve:number,known?:import('@deepseek-ai/dsh-llm').LlmResolvedModelInfo){return inspectRequestCapacity(this.ctx,options,maximum,reserve,known);}
@@ -689,3 +690,4 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 export * from './storage-status.js';
+export * from './runtime-migration.js';

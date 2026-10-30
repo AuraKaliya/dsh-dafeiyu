@@ -10,7 +10,7 @@ import {z} from 'zod';
 const visibleFailure=z.object({kind:z.literal('error'),error:z.object({message:z.string()})});
 const contextFailures:Readonly<Record<string,string>>={'Required context exceeds budget':'REQUIRED_CONTEXT_CAPACITY','Required context unavailable':'REQUIRED_CONTEXT_UNAVAILABLE',
   'Required context contributor missing':'REQUIRED_CONTEXT_PROVIDER_MISSING','Context request budget exceeded':'CONTEXT_REQUEST_CAPACITY'};
-export function safeRunFailure(message:string):string{return contextFailures[message]??(['SOURCE_VALIDATION_FAILED','PERSISTENCE_FAILED','MODEL_INCOMPLETE','DELIVERY_RENDER_TIMEOUT','SESSION_COMPACTION_ACTIVE',
+export function safeRunFailure(message:string):string{return contextFailures[message]??(['SOURCE_VALIDATION_FAILED','SOURCE_STALE','PERSISTENCE_FAILED','MODEL_INCOMPLETE','DELIVERY_RENDER_TIMEOUT','SESSION_COMPACTION_ACTIVE',
   'CONTEXT_REQUEST_CAPACITY','MODEL_CONTEXT_CAPACITY','PERSONA_CONTEXT_CAPACITY','REQUIRED_CONTEXT_CAPACITY','REQUIRED_CONTEXT_UNAVAILABLE','REQUIRED_CONTEXT_PROVIDER_MISSING','NATIVE_CONTEXT_SNAPSHOT_MISMATCH','CONTEXT_PREPARE_TIMEOUT'].includes(message)?message:'MODEL_INCOMPLETE');}
 export function turnFailureCode(value:unknown):string{const parsed=visibleFailure.safeParse(value);return parsed.success?safeRunFailure(parsed.data.error.message):'MODEL_INCOMPLETE';}
 

@@ -37,10 +37,27 @@ const id=z.union([NumberIdSchema,z.number().int().positive().safe().transform(St
 export function browserBindingMatches(request:BiliBrowserRequest,value:BiliBrowserResult,expectedUid:string|null):boolean{
   const url=request.section==='discover'?(request.feed==='popular'?'https://www.bilibili.com/v/popular/all':'https://www.bilibili.com/'):request.section==='search'?null:`https://www.bilibili.com/video/${request.bvid??`av${request.aid}`}/`;
   const bvidMatches=request.section==='search'?true:request.aid===undefined?value.bvid===(request.bvid??null):value.bvid===null||BvidSchema.safeParse(value.bvid).success;
-  const urlMatches=url===null?/^https:\/\/search\.bilibili\.com\//.test(value.url):value.url===url;
+  let urlMatches=value.url===url;
+  if(url===null){try{const target=new URL(value.url);urlMatches=target.origin==='https://search.bilibili.com'&&['/all','/all/'].includes(target.pathname)
+    &&target.searchParams.get('keyword')===request.keyword&&(target.searchParams.get('order')??'totalrank')===(request.order??'totalrank')
+    &&Number(target.searchParams.get('page')??1)===(request.page??1)&&value.keyword===request.keyword&&value.order===(request.order??'totalrank')&&value.page===(request.page??1);
+  }catch{return false;}}
   return value.accountUid===expectedUid&&bvidMatches&&value.section===request.section&&urlMatches&&!(request.section==='discover'&&value.feed!==(request.feed??'home'));
 }
 export class BiliClient {
+  private readonly materials=new Map<string,{value:unknown;at:number;bytes:number}>();
+  private materialHits=0;
+  get cacheStats(){return {entries:this.materials.size,bytes:[...this.materials.values()].reduce((sum,row)=>sum+row.bytes,0),hits:this.materialHits};}
+  async material(key:string,ttlMs:number,read:()=>Promise<unknown>,signal:AbortSignal,guard:()=>void,cacheable:(value:unknown)=>boolean=()=>true):Promise<unknown>{
+    guard();signal.throwIfAborted();const stamp=this.accountStamp(),id=stamp+':'+key,old=this.materials.get(id);
+    if(old&&Date.now()-old.at<ttlMs){this.materialHits++;return structuredClone(old.value);}
+    const value=await read();guard();signal.throwIfAborted();if(this.accountStamp()!==stamp)throw new Error('BILI_SESSION_CHANGED');
+    const bytes=Buffer.byteLength(JSON.stringify(value));
+    if(cacheable(value)&&bytes<=this.config.maxResponseBytes){
+      this.materials.delete(id);while(this.materials.size&&(this.materials.size>=32||this.cacheStats.bytes+bytes>16*1024**2))this.materials.delete(this.materials.keys().next().value!);
+      this.materials.set(id,{value:structuredClone(value),at:Date.now(),bytes});
+    }return value;
+  }
   private readonly context=new AsyncLocalStorage<{taskId:string|null;runId:string;operationId:string}>();
   constructor(readonly config:BiliConfig,private readonly store:BiliStore,private readonly transport:HttpTransport=nativeTransport){}
   withContext<T>(context:{taskId:string|null;runId:string;operationId:string},work:()=>T):T{return this.context.run({taskId:context.taskId,runId:context.runId,operationId:context.operationId},work);}
@@ -59,6 +76,12 @@ export class BiliClient {
     try{await this.slot(record.id,signal,guard,true);record.sentAt=Date.now();record.networkSent=null;const value=BiliBrowserResultSchema.parse(await port.read(request,signal));guard();signal.throwIfAborted();
       if(!browserBindingMatches(request,value,this.config.browser.expectedUid))throw new Error('BILI_BROWSER_BINDING_MISMATCH');
       if(request.section==='frame'&&(!value.frame||request.positionMs===undefined||Math.abs(value.frame.positionMs-request.positionMs)>500||value.frame.positionMs>=value.frame.durationMs))throw new Error('BILI_BROWSER_BINDING_MISMATCH');
+      if(request.section==='frames'){
+        const points=request.pointsMs??[],seen=new Set<number>();
+        for(const frame of value.frames??[]){const point=frame.requestedMs??points.find(point=>Math.abs(point-frame.positionMs)<=500);
+          if(point===undefined||!points.includes(point)||seen.has(point)||Math.abs(point-frame.positionMs)>500||frame.positionMs>=frame.durationMs)throw new Error('BILI_BROWSER_BINDING_MISMATCH');seen.add(point);}
+        for(const failure of value.frameErrors??[]){if(!points.includes(failure.positionMs)||seen.has(failure.positionMs))throw new Error('BILI_BROWSER_BINDING_MISMATCH');seen.add(failure.positionMs);}
+      }
       record.outcome='success';return value;
     }catch(error){record.errorCode=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_READ_FAILED';record.kind=record.networkSent!==false?'response':'local';
       if(record.errorCode==='BILI_BROWSER_CHALLENGE'||['BILI_BROWSER_ACCOUNT_MISMATCH','BILI_BROWSER_BINDING_MISMATCH'].includes(record.errorCode)){record.kind=record.errorCode==='BILI_BROWSER_CHALLENGE'?'verification':'login';const retry=this.store.diagnostics.failure(record.endpoint,record.kind,Date.now(),this.config.retry,null);record.retryAt=retry.at;record.waitSource=retry.source;}

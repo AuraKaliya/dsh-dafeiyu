@@ -46,6 +46,23 @@ test('coalesced late intervals produce one durable occurrence and clock rollback
   }finally{f.close();}
 });
 
+test('an internal reading handoff accounts elapsed time once and attaches the next segment',async()=>{
+  const f=await fixture();try{
+    const plan=f.create(),occurrence=f.store.issue(plan.id,base)!,parent=randomUUID(),child=randomUUID();
+    f.store.acknowledge(occurrence.id,parent,base);
+    assert.throws(()=>f.store.attachResume(occurrence.id,parent,child,base),/ACTIVITY_RESUME_CONFLICT/);
+    f.store.runEvent({id:randomUUID(),occurrenceId:occurrence.id,runId:parent,state:'running',at:iso(base),unknownEffects:false});
+    const handoff={id:randomUUID(),occurrenceId:occurrence.id,runId:parent,state:'continued',at:iso(base+1000),unknownEffects:false};
+    f.store.runEvent(handoff);f.store.runEvent(handoff);
+    assert.equal(f.store.used(base),1000);assert.equal(f.store.occurrence(occurrence.id).state,'accepted');
+    assert.equal(f.store.occurrence(occurrence.id).startedAt,null);
+    f.store.attachResume(occurrence.id,parent,child,base+1200);
+    f.store.runEvent({id:randomUUID(),occurrenceId:occurrence.id,runId:child,state:'running',at:iso(base+1200),unknownEffects:false});
+    f.store.runEvent({id:randomUUID(),occurrenceId:occurrence.id,runId:child,state:'completed',at:iso(base+2000),unknownEffects:false});
+    assert.equal(f.store.used(base),1800);assert.equal(f.store.occurrence(occurrence.id).state,'completed');
+  }finally{f.close();}
+});
+
 test('skip and run-once policies do not replay each missed period',async()=>{
   const f=await fixture();try{const skipped=f.create({missed:'skip'});assert.equal(f.store.issue(skipped.id,base+10*60000),null);assert.equal(f.store.get(skipped.id).nextDue,base+11*60000);
     const once=f.create({requestId:'once',missed:'run-once'});const occurrence=f.store.issue(once.id,base+10*60000)!;assert.equal(f.store.get(once.id).status,'exhausted');

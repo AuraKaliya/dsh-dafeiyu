@@ -20,7 +20,7 @@ const updateSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVers
   timeZone:ActivityScheduleBodySchema.shape.timeZone.optional(),goal:ActivityScheduleBodySchema.shape.goal.optional(),anchor:ActivityScheduleBodySchema.shape.anchor.optional(),
   basis:ActivityScheduleBodySchema.shape.basis.optional(),configHash:ActivityScheduleBodySchema.shape.configHash.optional()})
   .refine(v=>[v.state,v.trigger,v.missed,v.quiet,v.timeZone,v.goal,v.anchor].some(value=>value!==undefined),'Empty activity update');
-const runEventSchema=z.strictObject({id:z.uuid(),occurrenceId:PersonaRequestIdSchema,runId:z.uuid(),state:z.enum(['running','completed','waiting','failed','cancelled','interrupted']),
+const runEventSchema=z.strictObject({id:z.uuid(),occurrenceId:PersonaRequestIdSchema,runId:z.uuid(),state:z.enum(['running','continued','completed','waiting','failed','cancelled','interrupted']),
   at:z.iso.datetime({offset:true}),unknownEffects:z.boolean()});
 function canonical(value:unknown):string {
   const parsed=z.json().parse(value);if(parsed===null||typeof parsed!=='object')return JSON.stringify(parsed);
@@ -191,7 +191,7 @@ export class ActivityStore {
       const requestId=activityHash(['resume',id,parentRunId]);return this.request(`resume:${id}`,requestId,activityHash([id,parentRunId]),parse,
         ()=>({kind:'resume-intent' as const,requestId,parentRunId,checkpointId,taskVersion,at:this.clock(now)}));});}
   attachResume(id:string,parentRunId:string,runId:string,now:number){this.transaction(()=>{
-    const current=this.occurrence(id);if(current.runId===runId)return;if(current.runId!==parentRunId||current.state!=='waiting')throw new Error('ACTIVITY_RESUME_CONFLICT');
+    const current=this.occurrence(id);if(current.runId===runId)return;if(current.runId!==parentRunId||current.state!=='waiting'&&!(current.state==='accepted'&&this.db.prepare("SELECT 1 FROM activity_run_events WHERE occurrence_id=? AND json_extract(body,'$.runId')=? AND json_extract(body,'$.state')='continued'").get(id,parentRunId)))throw new Error('ACTIVITY_RESUME_CONFLICT');
     this.db.prepare("UPDATE activity_occurrences SET run_id=?,state='accepted',started_at=NULL,error=NULL,updated_at=? WHERE id=?").run(runId,this.clock(now),id);
   });}
   outbox(){return this.db.prepare("SELECT o.id FROM activity_outbox o JOIN activity_occurrences r ON r.id=o.id WHERE o.acknowledged=0 AND r.state='pending' ORDER BY o.rowid LIMIT 32").all().map(row=>this.occurrence(String(row.id)));}
@@ -216,11 +216,12 @@ export class ActivityStore {
     if(occurrence.state==='cancelled')return;
     if(event.state==='running'){this.db.prepare("UPDATE activity_occurrences SET state='running',started_at=coalesce(started_at,?),updated_at=? WHERE id=?").run(at,at,event.occurrenceId);return;}
     if(['completed','waiting','failed','blocked'].includes(occurrence.state))return;
-    let state:ActivityOccurrenceState=event.unknownEffects||event.state==='interrupted'?'blocked':event.state;
+    let state:ActivityOccurrenceState=event.unknownEffects||event.state==='interrupted'?'blocked':event.state==='continued'?'accepted':event.state;
     let code:string|null=event.unknownEffects?'OPERATION_UNCERTAIN':event.state==='interrupted'?'PROCESS_INTERRUPTED':null;
     if(occurrence.startedAt!==null){try{for(const slice of daySlices(occurrence.startedAt,at,this.config.timeZone))this.db.prepare('INSERT INTO activity_usage VALUES(?,?,?)').run(event.runId,slice.day,slice.milliseconds);}
       catch{state='blocked';code='ACTIVITY_DURATION_UNCERTAIN';}}
     this.db.prepare('UPDATE activity_occurrences SET state=?,error=?,updated_at=? WHERE id=?').run(state,code,at,event.occurrenceId);
+    if(event.state==='continued'&&state==='accepted')this.db.prepare('UPDATE activity_occurrences SET started_at=NULL WHERE id=?').run(event.occurrenceId);
     if(state==='blocked')this.db.prepare("UPDATE activity_schedules SET status='blocked',error=? WHERE id=?").run(code,plan.body.id);
     else if(state==='failed'){const failures=plan.failures+1,backoff=Math.min(this.config.maxBackoffMs,this.config.backoffBaseMs*2**Math.min(20,failures-1));
       this.db.prepare('UPDATE activity_schedules SET failures=?,not_before=max(not_before,?),error=? WHERE id=?').run(failures,at+backoff,'RUN_FAILED',plan.body.id);}

@@ -5,7 +5,8 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { BILI_APPLICATION_ID, biliHash } from '../packages/bilibili/lib/store.js';
+import { BiliStore,BILI_APPLICATION_ID,BILI_SCHEMA_VERSION, biliHash } from '../packages/bilibili/lib/store.js';
+import { legacyBiliStore } from './bili-migration-fixture.js';
 import { inspectBiliMigration, migrateBiliStorage } from '../packages/bilibili/lib/migration.js';
 import { testTempDir } from './test-temp.js';
 
@@ -15,14 +16,7 @@ const legacy = { schemaVersion: 1, bvid, title: '旧记录', author: '', status:
 
 async function v3Fixture() {
   const root = await mkdtemp(join(testTempDir(), 'bili-migration-')), file = join(root, 'bilibili.sqlite');
-  const db = new DatabaseSync(file);
-  db.exec(`CREATE TABLE bili_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
-    CREATE TABLE bili_reading(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);
-    INSERT INTO bili_metadata VALUES(1,'${JSON.stringify(identity)}');
-    INSERT INTO bili_reading VALUES('${bvid}','${JSON.stringify(legacy)}',1);
-    PRAGMA application_id=${BILI_APPLICATION_ID};
-    PRAGMA user_version=3;`);
-  db.close();
+  legacyBiliStore(file,identity,3,legacy);
   return { root, file, backup: join(root, 'backup.sqlite') };
 }
 
@@ -34,13 +28,13 @@ test('a v3 store is reported upgradable and migrates legacy records explicitly',
 
   const result = migrateBiliStorage(f.file, identity, { backup: f.backup });
   assert.equal(result.migrated, true);
-  assert.equal(result.version, 4);
+  assert.equal(result.version, BILI_SCHEMA_VERSION);
 
   const db = new DatabaseSync(f.file, { readOnly: true });
   try {
     assert.deepEqual(db.prepare('SELECT bvid,body FROM bili_reading_legacy').all().map(row => row.bvid), [bvid]);
     assert.equal(db.prepare('SELECT count(*) AS n FROM bili_reading').get()!.n, 0);
-    assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 4);
+    assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, BILI_SCHEMA_VERSION);
   } finally { db.close(); }
   assert.equal(inspectBiliMigration(f.file, identity).state, 'current');
 
@@ -54,6 +48,28 @@ test('an identity mismatch is rejected before any write', async () => {
   assert.throws(() => migrateBiliStorage(f.file, { agentId: 'other', profileId: 'test' }, { backup: f.backup }), /IDENTITY_MISMATCH/);
   assert.equal(await digest(f.file), before);
   assert.equal(inspectBiliMigration(f.file, identity).version, 3);
+});
+
+test('v4 scoped records and receipts survive v5 and only existing versions are backfilled',async()=>{
+  const root=await mkdtemp(join(testTempDir(),'bili-v4-')),file=join(root,'bili.sqlite'),backup=join(root,'backup.sqlite');
+  new BiliStore(file,identity,true).close();const db=new DatabaseSync(file);
+  try{
+    db.exec('DROP TABLE bili_reading_history; DROP TABLE bili_comment_cursors; PRAGMA user_version=4;');
+    db.prepare('INSERT INTO bili_reading VALUES(?,?,?,?,?)').run('owner-task',bvid,7,JSON.stringify(legacy),123);
+    db.prepare('INSERT INTO bili_reading_receipts VALUES(?,?,?,?)').run('owner-task','saved-request',bvid,7);
+  }finally{db.close();}
+  assert.equal(inspectBiliMigration(file,identity).state,'upgradable');
+  assert.equal(migrateBiliStorage(file,identity,{backup}).version,5);
+  const upgraded=new DatabaseSync(file,{readOnly:true});try{
+    assert.equal(upgraded.prepare('SELECT version FROM bili_reading').get()!.version,7);
+    assert.equal(upgraded.prepare('SELECT version FROM bili_reading_receipts').get()!.version,7);
+    const history=upgraded.prepare('SELECT version,body,fingerprint FROM bili_reading_history').all();
+    assert.equal(history.length,1);assert.equal(history[0]!.version,7);assert.equal(history[0]!.body,JSON.stringify(legacy));
+    assert.match(String(history[0]!.fingerprint),/^legacy:/);
+  }finally{upgraded.close();}
+  const before=await digest(file);
+  assert.throws(()=>migrateBiliStorage(file,{...identity,agentId:'wrong'},{backup}),/IDENTITY_MISMATCH/);
+  assert.equal(await digest(file),before);
 });
 
 test('the backup is a consistent pre-migration snapshot', async () => {
@@ -87,10 +103,10 @@ test('a v2 store without a reading table upgrades to v4 with an empty legacy tab
   db.close();
   assert.equal(inspectBiliMigration(f.file, identity).version, 2);
   const result = migrateBiliStorage(f.file, identity, { backup: f.backup });
-  assert.equal(result.version, 4);
+  assert.equal(result.version, BILI_SCHEMA_VERSION);
   const check = new DatabaseSync(f.file, { readOnly: true });
   try {
     assert.equal(check.prepare('SELECT count(*) AS n FROM bili_reading_legacy').get()!.n, 0);
-    assert.equal(check.prepare('PRAGMA user_version').get()!.user_version, 4);
+    assert.equal(check.prepare('PRAGMA user_version').get()!.user_version, BILI_SCHEMA_VERSION);
   } finally { check.close(); }
 });

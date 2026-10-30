@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { migrateInstallation, prepareInstallation } from '../packages/plugin/lib/installation.js';
-import { BILI_APPLICATION_ID } from '../packages/bilibili/lib/store.js';
+import { BILI_SCHEMA_VERSION } from '../packages/bilibili/lib/store.js';
+import { legacyBiliStore } from './bili-migration-fixture.js';
 import { testTempDir } from './test-temp.js';
 
 const profile = { agentId: 'fish', profileId: 'test' };
@@ -23,13 +24,7 @@ async function fixture() {
   }));
   await writeFile(join(core, 'host-profile.json'), JSON.stringify(profile));
   const store = join(core, 'bilibili.sqlite');
-  const db = new DatabaseSync(store);
-  db.exec(`CREATE TABLE bili_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
-    CREATE TABLE bili_reading(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);
-    INSERT INTO bili_metadata VALUES(1,'${JSON.stringify(profile)}');
-    PRAGMA application_id=${BILI_APPLICATION_ID};
-    PRAGMA user_version=3;`);
-  db.close();
+  legacyBiliStore(store,profile,3);
   return { root, data, settingsFile, store };
 }
 
@@ -39,7 +34,7 @@ test('the CLI migration entry upgrades an installed v3 store with a backup', asy
 
   const result = migrateInstallation(f.settingsFile);
   assert.equal(result.code, 'INSTALL_MIGRATED');
-  assert.equal(result.version, 4);
+  assert.equal(result.version, BILI_SCHEMA_VERSION);
   assert.ok(result.backup && existsSync(result.backup));
 
   assert.equal(migrateInstallation(f.settingsFile).code, 'INSTALL_CURRENT');

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { initializeCoreStorage,readFoundation } from '@dafeiyu/core';
 import { RUNTIME_SCHEMA_VERSION } from '@dafeiyu/core/runtime-store';
+import { inspectRuntimeMigration } from '@dafeiyu/core';
 import { initializeMemoryStorage } from '@dafeiyu/memory';
 import { MEMORY_SCHEMA_VERSION } from '@dafeiyu/memory/store';
 import { QqStore, QQ_SCHEMA_VERSION } from '@dafeiyu/qq';
@@ -60,9 +61,11 @@ export function inspectHost(config:PreparedHostConfig,coordination?:string,ownIn
   try{manifest=readManifest(config);if(manifest&&manifest.state!=='initialized')codes.push('HOST_INITIALIZATION_INCOMPLETE');}catch(error){codes.push(error instanceof Error?error.message:'HOST_PROFILE_MANIFEST_INVALID');}
   const stores=storageFiles(config).map(item=>{
     const concrete=physicalPath(item.file);if(concrete!==item.file&&!within(concrete,dirname(item.file)))codes.push('HOST_STORAGE_PATH_CHANGED');
-    const inspection=inspectStorage(item.file,item.kind,identity),biliMigration=item.kind==='bilibili'&&inspection.exists?inspectBiliMigration(item.file,identity):null;
-    if(inspection.activeOwner){codes.push('HOST_STORE_OWNED');occupied=true;}if(!inspection.supported||!inspection.integrity)codes.push(biliMigration?.state==='upgradable'?'HOST_STORAGE_UPGRADABLE':'HOST_STORAGE_UNSUPPORTED');if(!inspection.identityMatches)codes.push('HOST_PROFILE_IDENTITY_MISMATCH');
-    if(inspection.exists&&target[item.kind]!==undefined&&inspection.version!==target[item.kind]&&biliMigration?.state!=='upgradable')codes.push('HOST_STORAGE_INVALID');
+    const inspection=inspectStorage(item.file,item.kind,identity),migration=!inspection.exists?null:item.kind==='bilibili'?inspectBiliMigration(item.file,identity):item.kind==='runtime'?inspectRuntimeMigration(item.file,identity):null;
+    if(inspection.activeOwner||migration&&'activeOwner'in migration&&migration.activeOwner){codes.push('HOST_STORE_OWNED');occupied=true;}
+    if(!inspection.supported||!inspection.integrity)codes.push(migration?.state==='upgradable'&&migration.integrity?'HOST_STORAGE_UPGRADABLE':'HOST_STORAGE_UNSUPPORTED');
+    if(!(migration?.identityMatches??inspection.identityMatches))codes.push('HOST_PROFILE_IDENTITY_MISMATCH');
+    if(inspection.exists&&target[item.kind]!==undefined&&inspection.version!==target[item.kind]&&migration?.state!=='upgradable')codes.push('HOST_STORAGE_INVALID');
     if(!inspection.exists&&(manifest?.requiredStores.includes(item.name)||['journal','runtime'].includes(item.kind)||item.kind==='memory'&&config.plugins.some(p=>p.id==='memory'&&p.enabled)))codes.push('HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='activity'&&pluginConfig(config,'activity'))codes.push('HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='media'&&pluginConfig(config,'media'))codes.push('HOST_INITIALIZATION_REQUIRED');

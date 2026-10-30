@@ -16,6 +16,24 @@
 
 路径必须换成自己的配置文件和Node.js 24.13+。启动顺序为本机OneBot与QQ登录、DSH、启用大肥鱼。插件入口显示“运行中”不能证明QQ连接成功；使用 `node bin/dafeiyu.mjs status --settings <配置文件绝对路径>` 查看 `online`、`snapshot.phase` 和 `snapshot.services.qq`。`check`只检查配置及文件；`status`不发模型请求或平台消息。当前入口不会在依赖失败退出后自动重启，恢复依赖后需停用再启用。
 
+## 本地部署后的 profile 检查
+
+在源码工作区使用下面的检查入口。它默认只检查，不改文件；检查 `package.json` 的 BOM、JSON 语法，以及本地 `dsh-dafeiyu` 依赖声明、pnpm 锁与实际插件链接的一致性。
+
+```powershell
+node scripts/repair-dsh-profile.mjs --profile "$env:USERPROFILE/.dsh/profiles/desktop"
+```
+
+只修复 BOM 使用 `--repair`。需要把已安装插件链接和依赖锁对齐到 `package.json` 中已经声明的本地部署包时，先退出 DSH，再运行：
+
+```powershell
+node scripts/repair-dsh-profile.mjs --profile "$env:USERPROFILE/.dsh/profiles/desktop" --repair --align-plugin
+```
+
+修复会备份原文件及旧链接信息，BOM 修复保留其余 JSON 字节；目标包必须存在且声明为 `dsh-dafeiyu`。它不下载依赖、不迁移数据库，也不代表目标功能已验收。发现普通目录而非插件链接时会拒绝替换，避免删除目录内容。后续重新检查应返回 `ready: true`。
+
+不要用 Windows PowerShell 5.1 的 `Set-Content -Encoding UTF8` 写 profile JSON，它会添加 BOM。必须通过结构化 JSON 修改并输出 UTF-8 无 BOM；本工具会拒绝修复其他语法错误，不猜测或改写配置字段。
+
 ## 实例配置
 
 | 配置 | 必填 | 用途 |

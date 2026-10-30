@@ -25,6 +25,8 @@ export class ExecutionEvidence {
   private readonly runMemo=new Map<string,StoredRun>();
   private validationDepth=0;
   private invalidated=false;
+  private contextExpiry=Infinity;
+  private admissionCache:{dependencies:readonly SourceDependency[];epoch:string;until:number;valid:boolean}|undefined;
   private bound:ReturnType<ExecutionEvidence['binding']>|undefined;
   constructor(readonly run:StoredRun,private readonly store:RuntimeStore,private readonly memory:()=>ExecutionMemoryPort|undefined,
     private readonly personas:PersonaRuntime,private readonly registry:CapabilityRegistry,private readonly repository:TaskRepositoryPort,
@@ -43,7 +45,7 @@ export class ExecutionEvidence {
   private route(){if(this.run.definition.scope.kind!=='task')throw new Error('TASK_REQUIRED');return this.run.definition.scope.scopeKey;}
   private unavailable(reason:string):SourceDependency[]{return [{kind:'unavailable',agentId:this.base.view.scope.agentId,route:this.route(),reason}];}
   expose(value:readonly SourceDependency[]){this.admitted=unionDependencies(this.admitted,value);}
-  invalidate(){this.invalidated=true;}
+  invalidate(){this.invalidated=true;this.admissionCache=undefined;}
   exposed(){return structuredClone(this.admitted);}
   contextView():ContextEvidenceView{return {sourceItems:()=>this.contexts,nativeDependencies:()=>[],validateHistorical:dep=>this.validate([dep])};}
   sourceRefs(deps=this.admitted):PersonaSourceRef[]{return [...new Map(deps.filter((dep):dep is Extract<SourceDependency,{kind:'execution-source'}>=>dep.kind==='execution-source').map(dep=>[runtimeHash(dep.ref),dep.ref])).values()];}
@@ -51,6 +53,14 @@ export class ExecutionEvidence {
   private readOperation(id:string){const cached=this.validationDepth?this.operationMemo.get(id):undefined;if(cached)return cached;const value=this.store.operation(id);if(this.validationDepth)this.operationMemo.set(id,value);return value;}
   private readRun(id:string){const cached=this.validationDepth?this.runMemo.get(id):undefined;if(cached)return cached;const value=this.store.get(id);if(this.validationDepth)this.runMemo.set(id,value);return value;}
   readSources(read:()=>void):void{const outer=this.validationDepth++===0;try{read();}finally{this.validationDepth--;if(outer)this.clearValidation();}}
+  /** Coalesces repeated synchronous authority guards; every store/provider change invalidates it. */
+  validateAdmitted():boolean {
+    this.base.guard();const port=this.memory(),epoch=runtimeHash([this.store.validationEpoch(),port?.generation(this.access())??0,port?.resourceEpoch?.(this.access())??null]);
+    const prior=this.admissionCache;if(prior?.dependencies===this.admitted&&prior.epoch===epoch&&Date.now()<prior.until)return prior.valid;
+    this.contextExpiry=Infinity;const valid=this.validate(this.admitted);
+    const cached={dependencies:this.admitted,epoch,until:Math.min(Date.now()+2,this.contextExpiry),valid};this.admissionCache=cached;
+    queueMicrotask(()=>{if(this.admissionCache===cached)this.admissionCache=undefined;});return valid;
+  }
   validate(deps:readonly SourceDependency[]):boolean{if(this.invalidated)return false;const outer=this.validationDepth++===0;try{return deps.every(dep=>{const key=runtimeHash(dep),cached=this.validationMemo.get(key);if(cached!==undefined)return cached;if(this.checking.has(key)||this.checking.size>=128)return false;this.checking.add(key);
     try{const valid=this.valid(dep);this.validationMemo.set(key,valid);return valid;}catch{return false;}finally{this.checking.delete(key);}});}finally{this.validationDepth--;if(outer)this.clearValidation();}}
   private valid(dep:SourceDependency):boolean{
@@ -59,16 +69,19 @@ export class ExecutionEvidence {
     if(dep.kind==='execution-input'){const run=this.readRun(dep.runId),body=inputProof.safeParse(this.store.readInput(dep.runId,'native-program'));
       return run.definition.taskId===this.run.definition.taskId&&body.success&&body.data.epoch===run.definition.intentVersion&&runtimeHash(body.data)===dep.hash
         &&(!this.authorityRequired(run)||!!body.data.authorities?.length)&&(body.data.authorities??[]).every(anchor=>this.authorityValid(anchor))
-        &&body.data.sources.every(ref=>this.memory()?.validate(this.access(),ref))&&(!body.data.continuity||(()=>{const checkpoint=this.memory()?.checkpoint(this.access(),body.data.continuity.id,true);return !!checkpoint&&runtimeHash(checkpoint)===body.data.continuity.hash;})());}
+        &&body.data.sources.every(ref=>this.memory()?.validate(this.access(),ref))
+        &&(!body.data.continuity||(()=>{const checkpoint=this.memory()?.checkpoint(this.access(),body.data.continuity.id,true);return !!checkpoint&&runtimeHash(checkpoint)===body.data.continuity.hash;})());}
     if(dep.kind==='execution-operation'){const op=this.readOperation(dep.operationId),run=this.readRun(op.runId),body=this.store.readInput(op.runId,`operation-inputs:${op.id}`);
       return op.runId===dep.runId&&run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&!!op.outcome&&runtimeHash(op.outcome)===dep.hash
         &&body!==null&&runtimeHash(body)===dep.inputHash&&this.validate(dependencies.parse(body));}
     if(dep.kind==='context'){
       const record=contextRecord.safeParse(this.store.findContext(`context:${runtimeHash(dep)}`));if(!record.success||Date.parse(record.data.item.expiresAt)<=Date.now()||runtimeHash(this.dependency(record.data))!==runtimeHash(dep))return false;
+      this.contextExpiry=Math.min(this.contextExpiry,Date.parse(record.data.item.expiresAt));
       if(dep.owner==='memory'&&dep.region==='growth')return dep.id==='persona:availability'||this.personas.historical(this.access(),dep);
       if(dep.owner==='memory'&&dep.region==='execution')return this.memory()?.validateContext(this.access(),record.data.item)??false;
       if(dep.owner==='dsh-tools'&&dep.region==='capabilities')return true; // Immutable operational declarations; dispatch checks the current catalog separately.
-      return this.registry.contributors().some(entry=>entry.owner===dep.owner&&entry.context.id===dep.region&&entry.active()&&entry.context.validate(this.base.view,record.data.item));
+      return this.registry.contributors().some(entry=>entry.owner===dep.owner&&entry.context.id===dep.region&&entry.active()
+        &&(entry.context.validateHistorical?.(this.base.view,record.data.item)??entry.context.validate(this.base.view,record.data.item)));
     }
     return dep.kind==='ephemeral'&&dep.traceId===this.run.id;
   }

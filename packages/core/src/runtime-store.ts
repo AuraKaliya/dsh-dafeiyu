@@ -11,7 +11,7 @@ import { ownerAlive, ownerNonce } from '@dafeiyu/journal/owner-identity';
 import { NativeDeliveryStore } from './native-delivery-store.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
-export const RUNTIME_SCHEMA_VERSION = 1;
+export const RUNTIME_SCHEMA_VERSION = 2;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
@@ -83,6 +83,7 @@ export class RuntimeStore {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   private open():void{if(this.closed)throw new Error('RUNTIME_CLOSED');}
+  validationEpoch(){this.open();return runtimeHash([this.db.prepare('PRAGMA data_version').get(),this.db.prepare('SELECT total_changes() AS changes').get()]);}
   private transaction<T>(work:()=>T):T {this.open();this.db.exec('BEGIN IMMEDIATE');try{const result=work();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   private event(runId:string,type:string,data:Record<string,Json>={}):string {
     const value=eventSchema.parse({id:randomUUID(),runId,type,at:new Date().toISOString(),data});this.db.prepare('INSERT INTO runtime_outbox(id,body) VALUES(?,?)').run(value.id,JSON.stringify(value));return value.id;
@@ -98,6 +99,33 @@ export class RuntimeStore {
   request(id:string){this.open();uuidValue.parse(id);const row=this.db.prepare('SELECT * FROM execution_requests WHERE id=?').get(id);if(!row)throw new Error('REQUEST_NOT_FOUND');
     return {id,producer:string(row.producer),requestId:string(row.request_id),payload:jsonValue.parse(JSON.parse(string(row.body))),taskId:row.task_id===null?null:uuidValue.parse(row.task_id),runId:row.run_id===null?null:uuidValue.parse(row.run_id)};}
   findRequest(producer:string,requestId:string){this.open();const row=this.db.prepare('SELECT id FROM execution_requests WHERE producer=? AND request_id=?').get(producer,requestId);return row?this.request(string(row.id)):null;}
+  /** Checkpoint, terminal parent and accepted child are committed together before scheduling. */
+  handoffSegment(parentId:string,expectedVersion:number,input:{checkpointId:string;checkpoint:Json;producer:string;requestId:string;payload:Json;definition:RunDefinition;lineage:Json;resumeSources?:Json;resumeDependencies?:Json}):StoredRun {
+    const checkpointId=uuidValue.parse(input.checkpointId),definition=RunDefinitionSchema.parse(input.definition);
+    key.parse(input.producer);key.parse(input.requestId);const body=canonical(jsonValue.parse(input.payload)),fingerprint=runtimeHash(input.payload);
+    if(Buffer.byteLength(body)>128000)throw new Error('RUNTIME_INPUT_TOO_LARGE');
+    return this.transaction(()=>{
+      const parent=this.get(parentId),original=this.request(parent.requestKey);
+      if(input.producer!==original.producer||definition.parentRunId!==parentId||definition.taskId!==parent.definition.taskId
+        ||definition.intentVersion!==parent.definition.intentVersion||definition.policyId!==parent.definition.policyId
+        ||runtimeHash(definition.scope)!==runtimeHash(parent.definition.scope)||definition.origin.kind!=='continuation'
+        ||definition.origin.parentRunId!==parentId||definition.origin.checkpointId!==checkpointId)throw new Error('SEGMENT_BINDING_CONFLICT');
+      const prior=this.findRequest(input.producer,input.requestId);
+      if(prior){if(runtimeHash(prior.payload)!==fingerprint||!prior.runId)throw new Error('IDEMPOTENCY_CONFLICT');return this.get(prior.runId);}
+      if(!['running','interrupted'].includes(parent.state)||parent.version!==expectedVersion)throw new Error('VERSION_CONFLICT');
+      if(this.operations(parentId).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))throw new Error('SEGMENT_OPERATION_PENDING');
+      this.db.prepare('INSERT INTO run_checkpoints VALUES(?,?,?)').run(checkpointId,parentId,canonical(input.checkpoint));
+      this.transitionInside(parentId,expectedVersion,'continued');
+      const requestKey=randomUUID();
+      this.db.prepare('INSERT INTO execution_requests VALUES(?,?,?,?,?,?,NULL)').run(requestKey,input.producer,input.requestId,fingerprint,body,parent.definition.taskId);
+      const child=this.acceptInside(requestKey,definition);
+      this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(child.id,'segment-lineage',canonical(input.lineage));
+      if(input.resumeSources)this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(child.id,'segment-evidence',canonical(input.resumeSources));
+      if(input.resumeDependencies)this.db.prepare('INSERT INTO run_inputs VALUES(?,?,?)').run(child.id,'segment-dependencies',canonical(input.resumeDependencies));
+      this.event(parentId,'segment.continued',{checkpointId,childRunId:child.id});
+      return child;
+    });
+  }
   pendingRequests(){this.open();return this.db.prepare('SELECT id FROM execution_requests WHERE run_id IS NULL ORDER BY rowid').all().map(row=>this.request(string(row.id)));}
   bindTask(requestKey:string,taskId:string):void{z.uuid().parse(taskId);this.transaction(()=>{const request=this.request(requestKey);if(request.taskId&&request.taskId!==taskId)throw new Error('TASK_BINDING_CONFLICT');this.db.prepare('UPDATE execution_requests SET task_id=? WHERE id=? AND task_id IS NULL').run(taskId,requestKey);});}
   acceptRun(requestKey:string,raw:unknown):StoredRun {
@@ -137,7 +165,7 @@ export class RuntimeStore {
   session(keyValue:string):string {key.parse(keyValue);return this.transaction(()=>{const old=this.db.prepare('SELECT session_id FROM execution_sessions WHERE session_key=?').get(keyValue);if(old)return string(old.session_id);const id=`dafeiyu-task-${randomUUID()}`;this.db.prepare('INSERT INTO execution_sessions VALUES(?,?)').run(keyValue,id);return id;});}
   transition(id:string,expectedVersion:number,to:RunState,error:string|null=null):StoredRun{if(to==='running'||to==='completed')throw new Error('USE_DEDICATED_TRANSITION');return this.transaction(()=>this.transitionInside(id,expectedVersion,to,error));}
   private transitionInside(id:string,version:number,to:RunState,error:string|null=null):StoredRun {
-    const current=this.get(id),allowed:Partial<Record<RunState,readonly RunState[]>>={accepted:['queued','cancelled','failed'],queued:['running','cancelled','failed'],running:['waiting','cancelling','continued','completed','failed','interrupted'],cancelling:['waiting','cancelled','interrupted','failed'],waiting:['cancelled','interrupted']};
+    const current=this.get(id),allowed:Partial<Record<RunState,readonly RunState[]>>={accepted:['queued','cancelled','failed'],queued:['running','cancelled','failed'],running:['waiting','cancelling','continued','completed','failed','interrupted'],cancelling:['waiting','cancelled','interrupted','failed'],waiting:['cancelled','interrupted'],interrupted:['continued']};
     if(current.version!==version)throw new Error('VERSION_CONFLICT');if(!allowed[current.state]?.includes(to))throw new Error('RUN_TRANSITION_FORBIDDEN');
     if(error!==null&&!/^[A-Z0-9_]{1,100}$/.test(error))throw new Error('INVALID_ERROR_CODE');
     const pending=this.operations(id).filter(operation=>operation.state==='started');

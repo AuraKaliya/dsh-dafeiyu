@@ -9,7 +9,7 @@ const short = z.string().trim().min(1).max(2000);
 export const ExecutionLifecycleSchema = z.strictObject({
   id:z.uuid(), scope:ExecutionScopeSchema, runId:z.uuid(), taskEpoch:version,
   origin:RunOriginSchema, motivation:MotivationSchema,
-  type:z.enum(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed']),
+  type:z.enum(['run.running','run.continued','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed']),
   goal:z.string().max(2000), at:z.iso.datetime(),
   operations:z.array(z.strictObject({id:z.uuid(),action:z.string().max(100),
     status:z.enum(['started','succeeded','partial','failed','cancelled','unknown']),

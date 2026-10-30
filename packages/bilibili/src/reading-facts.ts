@@ -4,7 +4,7 @@ import type { BiliPage } from './store.js';
 
 export interface ReadingFacts {
     readonly watched: readonly { cid: string; startMs: number; endMs: number }[];
-    readonly commentCursor: { aid: string; parent: string | null; sort: 'time' | 'hot'; page: number; seen: string[] } | null;
+    readonly commentCursor: { aid: string; parent: string | null; sort: 'time' | 'hot'; page: number; seen: string[];token?:string } | null;
     readonly frames: readonly { positionMs: number; sourceKey: string | null }[];
     readonly sources: readonly string[];
     readonly title: string | null;
@@ -32,7 +32,8 @@ function value(page: BiliPage): Record<string, z.infer<typeof z.json>> {
  */
 export function readingFacts(pages: readonly BiliPage[], bvid: string): ReadingFacts {
     const data = pages.map(page => ({ page, body: value(page) }));
-    const video = data.find(entry => entry.page.kind === 'video' && entry.body.bvid === bvid);
+    const video = data.find(entry => entry.page.kind === 'video' && entry.body.bvid === bvid)
+      ?? data.find(entry=>entry.page.kind==='browser'&&entry.body.section==='video'&&entry.body.bvid===bvid);
     const aid = typeof video?.body.aid === 'string' ? video.body.aid : null;
     const matched = data.filter(entry => entry.body.bvid === bvid);
     const comments = data.filter(entry => {
@@ -44,14 +45,20 @@ export function readingFacts(pages: readonly BiliPage[], bvid: string): ReadingF
     const watched = matched.flatMap(entry => {
         if (entry.page.kind !== 'subtitles') return [];
         const cid = typeof entry.body.cid === 'string' ? entry.body.cid : null;
-        const range = z.object({ startMs: z.number().int().nonnegative(), endMs: z.number().int().positive() }).safeParse(entry.body.range);
-        return cid && range.success && range.data.endMs > range.data.startMs ? [{ cid, startMs: range.data.startMs, endMs: range.data.endMs }] : [];
-    });
+        const entries=z.array(z.object({startMs:z.number().nonnegative(),endMs:z.number().positive()})).safeParse(entry.body.entries);
+        return cid&&entries.success?entries.data.filter(range=>range.endMs>range.startMs).map(range=>({cid,startMs:Math.floor(range.startMs),endMs:Math.ceil(range.endMs)})):[];
+    }).slice(0,200);
 
-    const cursorSource = comments.at(-1), stable = cursorSource ? cursorOf(cursorSource.body) : null;
-    const commentCursor = aid && stable
+    const cursorSource = comments[0], stable = cursorSource ? cursorOf(cursorSource.body) : null;
+    let commentCursor:ReadingFacts['commentCursor'] = aid && stable
         ? { aid, parent: stable.parent ?? null, sort: stable.sort ?? 'hot' as const, page: stable.page ?? 1, seen: stable.seen ?? [] }
         : null;
+    if(cursorSource&&Object.hasOwn(cursorSource.body,'nextCursor')){
+      const next=cursorSource.body.nextCursor;
+      if(next===null)commentCursor=null;
+      else if(typeof next==='string'&&commentCursor)commentCursor={...commentCursor,page:commentCursor.page+1,seen:[],token:z.uuid().parse(next)};
+      else if(next&&typeof next==='object'&&!Array.isArray(next)){const parsed=cursor.safeParse(next);if(parsed.success)commentCursor={aid:parsed.data.aid,parent:parsed.data.parent??null,sort:parsed.data.sort??'hot',page:parsed.data.page??1,seen:parsed.data.seen??[]};}
+    }
 
     const frames = matched.flatMap(entry => {
         if (entry.page.kind !== 'browser' && entry.page.kind !== 'media') return [];
@@ -59,7 +66,7 @@ export function readingFacts(pages: readonly BiliPage[], bvid: string): ReadingF
         if (points.success) return points.data.filter(point => point.ok).map(point => ({ positionMs: point.positionMs, sourceKey: point.sourceKey }));
         const capture = z.object({ source: z.object({ key: z.string().max(200) }), positionMs: z.number().int().nonnegative() }).safeParse(entry.page.kind === 'browser' ? entry.body.capture : entry.body);
         return capture.success ? [{ positionMs: capture.data.positionMs, sourceKey: capture.data.source.key }] : [];
-    });
+    }).filter((frame,index,all)=>all.findIndex(other=>other.sourceKey===frame.sourceKey&&other.positionMs===frame.positionMs)===index).slice(0,32);
 
     const sources = [...new Set([...matched, ...comments].map(entry => 'page:' + entry.page.id))].sort();
     return {

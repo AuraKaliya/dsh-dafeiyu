@@ -117,7 +117,9 @@ export class CapabilityRegistry {
     const contextIds = new Set<string>();
     entry.contexts = (extension.contexts ?? []).map(context => {
       if(!/^[a-z][a-z0-9._-]{0,79}$/.test(context.id)||contextIds.has(context.id)||typeof context.prepare!=='function'||typeof context.validate!=='function')throw new Error('INVALID_CONTEXT_CONTRACT');
-      contextIds.add(context.id);return Object.freeze({id:context.id,prepare:context.prepare.bind(context),validate:context.validate.bind(context)});
+      if(context.validateHistorical!==undefined&&typeof context.validateHistorical!=='function')throw new Error('INVALID_CONTEXT_CONTRIBUTOR');
+      contextIds.add(context.id);return Object.freeze({id:context.id,prepare:context.prepare.bind(context),validate:context.validate.bind(context),
+        ...(context.validateHistorical?{validateHistorical:context.validateHistorical.bind(context)}:{})});
     });
     entry.actions = bound; entry.channels = keys;
     this.entries.set(metadata.id, entry);

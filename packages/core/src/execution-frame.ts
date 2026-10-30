@@ -20,6 +20,8 @@ export interface TaskExecutionFrame {
   readonly work?:WorkCallContext;
   /** Optional run-level admission handle that can yield at agent step boundaries. */
   readonly lease?:RunLeaseControl;
+  /** Program-owned reading budgets; limits apply to each dispatched request. */
+  readonly readingBudget?:{softTokens:number;hardTokens:number;maxCompletedUnits:number};
   refreshContexts?():Promise<void>;
   contextPlan?():Json;
   contextAudit?(data:Record<string,Json>):void;

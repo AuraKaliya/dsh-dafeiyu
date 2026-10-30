@@ -53,6 +53,7 @@ export const BiliCommentCursorSchema = z.strictObject({
     sort: z.enum(['time', 'hot']).default('hot'),
     page: z.number().int().min(1).max(1000).default(1),
     seen: z.array(platformId).max(500).default([]),
+    token: z.uuid().optional(),
 });
 
 export const BiliCommentItemSchema = z.strictObject({
@@ -70,7 +71,7 @@ export const BiliCommentPageSchema = z.strictObject({
     text: text(5000).optional(),
     cursor: BiliCommentCursorSchema,
     items: z.array(BiliCommentItemSchema).max(20),
-    nextCursor: BiliCommentCursorSchema.nullable(),
+    nextCursor: z.union([BiliCommentCursorSchema,z.uuid()]).nullable(),
     coverage,
 });
 
@@ -85,6 +86,8 @@ export const BiliFrameBatchRequestSchema = z.strictObject({
 
 export const BiliFramePointSchema = z.strictObject({
     positionMs: z.number().int().nonnegative(),
+    requestedMs: z.number().int().nonnegative().optional(),
+    source: z.strictObject({provider:z.literal('bilibili'),key:text(200)}).optional(),
     sourceKey: text(200).nullable().default(null),
     ok: z.boolean(),
     errorCode: code.nullable().default(null),

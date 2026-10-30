@@ -1,9 +1,9 @@
-﻿import { DatabaseSync } from 'node:sqlite';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import type { StorageIdentity } from '@dafeiyu/journal';
-import { BILI_APPLICATION_ID, BILI_SCHEMA_VERSION, biliHash } from './store.js';
+import { BILI_APPLICATION_ID, BILI_SCHEMA_VERSION, BILI_TABLES,biliHash } from './store.js';
 
 export type BiliMigrationState = 'missing' | 'current' | 'upgradable' | 'unsupported';
 export interface BiliMigrationInspection {
@@ -28,9 +28,15 @@ export function inspectBiliMigration(file: string, identity: StorageIdentity): B
             const row = db.prepare('SELECT body FROM bili_metadata WHERE id=1').get();
             identityMatches = !!row && biliHash(JSON.parse(String(row.body))) === biliHash(identity);
         } catch { /* A missing metadata table is reported as a mismatch, not as a write opportunity. */ }
-        const state: BiliMigrationState = applicationId !== BILI_APPLICATION_ID ? 'unsupported'
+        let layout=true;try{
+          for(const table of BILI_TABLES.filter(table=>!table.startsWith('bili_reading')&&table!=='bili_comment_cursors'))db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
+          if(version===3){const columns=db.prepare('PRAGMA table_info(bili_reading)').all().map(row=>row.name);layout=columns.length===3&&columns.includes('bvid')&&columns.includes('body')&&columns.includes('updated_at');}
+          if(version>=4){db.prepare('SELECT owner,bvid,version,body,updated_at FROM bili_reading LIMIT 0').all();db.prepare('SELECT owner,request_id,bvid,version FROM bili_reading_receipts LIMIT 0').all();}
+          if(version===BILI_SCHEMA_VERSION)for(const table of BILI_TABLES)db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();
+        }catch{layout=false;}
+        const state: BiliMigrationState = applicationId !== BILI_APPLICATION_ID||!layout ? 'unsupported'
             : version === BILI_SCHEMA_VERSION ? 'current'
-                : version === 2 || version === 3 ? 'upgradable' : 'unsupported';
+                : [2,3,4].includes(version) ? 'upgradable' : 'unsupported';
         return { exists: true, version, applicationId, integrity, identityMatches, state };
     } finally {
         db.close();
@@ -45,16 +51,16 @@ export interface BiliMigrationResult {
 }
 
 /**
- * Explicit v2/v3 -> v4 migration. Identity, integrity and version are checked
+ * Explicit v2/v3/v4 -> v5 migration. Identity, integrity and version are checked
  * before any write; the backup is taken before the transaction opens.
  */
 export function migrateBiliStorage(file: string, identity: StorageIdentity, options: { backup: string }): BiliMigrationResult {
     const before = inspectBiliMigration(file, identity);
-    if (before.state === 'current') return { state: 'current', migrated: false, version: before.version };
     if (before.state === 'missing') throw new Error('BILI_INITIALIZATION_REQUIRED');
     if (before.state === 'unsupported') throw new Error('BILI_MIGRATION_UNSUPPORTED');
     if (!before.integrity) throw new Error('BILI_MIGRATION_INTEGRITY_FAILED');
     if (!before.identityMatches) throw new Error('BILI_IDENTITY_MISMATCH');
+    if (before.state === 'current') return { state: 'current', migrated: false, version: before.version };
 
     mkdirSync(dirname(options.backup), { recursive: true });
     if (existsSync(options.backup)) throw new Error('BILI_MIGRATION_BACKUP_EXISTS');
@@ -74,13 +80,17 @@ export function migrateBiliStorage(file: string, identity: StorageIdentity, opti
         try {
             db.exec('CREATE TABLE IF NOT EXISTS bili_reading_legacy(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);');
             if (before.version === 3) {
-            db.exec('INSERT OR REPLACE INTO bili_reading_legacy(bvid,body,updated_at) SELECT bvid,body,updated_at FROM bili_reading;');
                 db.exec('INSERT OR REPLACE INTO bili_reading_legacy(bvid,body,updated_at) SELECT bvid,body,updated_at FROM bili_reading;');
                 db.exec('DROP TABLE bili_reading;');
             }
-            db.exec('CREATE TABLE bili_reading(owner TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(owner,bvid));');
-            db.exec('CREATE TABLE bili_reading_receipts(owner TEXT NOT NULL,request_id TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(owner,request_id));');
-            db.exec('CREATE TABLE bili_reading_history(owner TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,fingerprint TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(owner,bvid,version));');
+            db.exec('CREATE TABLE IF NOT EXISTS bili_reading(owner TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(owner,bvid));');
+            db.exec('CREATE TABLE IF NOT EXISTS bili_reading_receipts(owner TEXT NOT NULL,request_id TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(owner,request_id));');
+            db.exec('CREATE TABLE IF NOT EXISTS bili_reading_history(owner TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,fingerprint TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(owner,bvid,version));');
+            db.exec('CREATE TABLE IF NOT EXISTS bili_comment_cursors(id TEXT PRIMARY KEY,owner TEXT NOT NULL,hash TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(owner,hash));');
+            db.exec('CREATE INDEX IF NOT EXISTS bili_reading_updated ON bili_reading(owner,updated_at DESC);');
+            for(const row of db.prepare('SELECT owner,bvid,version,body,updated_at FROM bili_reading').all()){
+              db.prepare('INSERT OR IGNORE INTO bili_reading_history VALUES(?,?,?,?,?,?)').run(String(row.owner),String(row.bvid),Number(row.version),String(row.body),'legacy:'+biliHash(JSON.parse(String(row.body))),Number(row.updated_at));
+            }
             db.exec(`PRAGMA user_version=${BILI_SCHEMA_VERSION};`);
             db.exec('COMMIT');
         } catch (error) {

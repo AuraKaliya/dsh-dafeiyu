@@ -148,6 +148,13 @@ export class MediaStore {
   sourceForAsset(id:string){return this.source(this.asset(id).sourceId);}
   readReceipt(access:MediaAccess,key:string,input:unknown){this.check(access);const row=this.db.prepare('SELECT fingerprint,receipt FROM media_requests WHERE scope_key=? AND producer=? AND request_id=?').get(scopeKey(access.execution.view.scope),access.execution.producer,'read:'+key);
     if(!row)return null;if(row.fingerprint!==mediaHash(input))throw new Error('IDEMPOTENCY_CONFLICT');return z.uuid().parse(JSON.parse(String(row.receipt)));}
+  cachedRead(access:MediaAccess,input:unknown){this.check(access);
+    const rows=this.db.prepare("SELECT receipt FROM media_requests WHERE scope_key=? AND producer=? AND fingerprint=? AND request_id LIKE 'read:%' ORDER BY rowid DESC LIMIT 16")
+      .all(scopeKey(access.execution.view.scope),access.execution.producer,mediaHash(input));
+    for(const row of rows){const id=z.uuid().parse(JSON.parse(String(row.receipt)));try{this.exposure(access,id);return id;}catch{}}
+    return null;
+  }
+  reuseRead(access:MediaAccess,key:string,input:unknown,id:string){this.exposure(access,id);return this.atomic(()=>this.request(access,'read:'+key,input,v=>z.uuid().parse(v),()=>id));}
   recordExposure(access:MediaAccess,key:string,input:unknown,source:StoredMediaSource,value:Omit<MediaExposure,'schemaVersion'|'id'|'scope'|'taskEpoch'|'sourceId'|'sourceVersion'>){return this.atomic(()=>{
     const id=this.request(access,'read:'+key,input,v=>z.uuid().parse(v),()=>{
       const body=exposureSchema.parse({...value,schemaVersion:1,id:randomUUID(),scope:access.execution.view.scope,taskEpoch:access.execution.view.scope.kind==='task'?access.execution.intentVersion:null,sourceId:source.id,sourceVersion:source.version});
@@ -172,12 +179,13 @@ export class MediaStore {
   exposureByObservation(raw:unknown){const ref=PersonaSourceRefSchema.parse(raw);if(ref.kind!=='execution-source')return null;
     const row=this.db.prepare("SELECT request_id,receipt FROM media_requests WHERE scope_key=? AND producer='media' AND request_id LIKE 'observation:%' AND json_extract(receipt,'$.id')=?").get(ref.scopeKey,ref.id);
     if(!row||mediaHash(PersonaSourceRefSchema.parse(JSON.parse(String(row.receipt))))!==mediaHash(ref))return null;return this.exposureWitness(String(row.request_id).slice('observation:'.length));}
-  epoch(){return mediaHash([this.db.prepare('SELECT id,version,deleted FROM media_sources ORDER BY id').all(),this.db.prepare('SELECT id,version,state FROM media_assets ORDER BY id').all()]);}
+  epoch(){return mediaHash([this.db.prepare('PRAGMA data_version').get(),this.db.prepare('SELECT total_changes() AS changes').get()]);}
   private contentCurrent(ref:MediaAssetRef,seen=new Set<string>()):boolean {if(seen.has(ref.id)||seen.size>=32)return false;seen.add(ref.id);const asset=this.asset(ref.id),source=this.source(asset.sourceId);
     return !source.deleted&&source.version===asset.sourceVersion&&(asset.state==='ready'||asset.state==='evicted')&&asset.version===ref.version&&mediaHash(this.ref(asset))===mediaHash(ref)&&(!asset.parent||this.contentCurrent(asset.parent,seen));}
   exposureCurrent(id:string){try{const body=this.exposureRow(id),source=this.source(body.sourceId);if(source.deleted||source.version!==body.sourceVersion)return false;
-    return body.assets.every(ref=>{const asset=this.asset(ref.id);return this.contentCurrent(ref)&&asset.sourceId===source.id&&asset.sourceVersion===source.version;});}catch{return false;}}
-  validateExposure(proof:ResourceProof,current:(source:MediaSourceDescription)=>boolean){try{const body=this.exposureRow(proof.key);return this.exposureCurrent(body.id)&&mediaHash(proof)===mediaHash(this.exposureProof(body))&&current(this.source(body.sourceId).description);}catch{return false;}}
+    return body.assets.every(ref=>{const asset=this.asset(ref.id),origin=this.source(asset.sourceId);return this.contentCurrent(ref)&&mediaHash(origin.description.origin)===mediaHash(source.description.origin);});}catch{return false;}}
+  validateExposure(proof:ResourceProof,current:(source:MediaSourceDescription)=>boolean){try{const body=this.exposureRow(proof.key);return this.exposureCurrent(body.id)&&mediaHash(proof)===mediaHash(this.exposureProof(body))
+    &&current(this.source(body.sourceId).description)&&body.assets.every(ref=>current(this.sourceForAsset(ref.id).description));}catch{return false;}}
   abortJob(access:MediaAccess,id:string,code:string){if(!/^[A-Z0-9_]{1,100}$/.test(code))throw new Error('INVALID_INPUT');this.db.prepare("UPDATE media_jobs SET state='failed',error=? WHERE id=? AND scope_key=? AND operation_id=? AND state='running'").run(code,id,scopeKey(access.execution.view.scope),access.execution.operationId);}
   recover(){return this.atomic(()=>{const jobs=Number(this.db.prepare("UPDATE media_jobs SET state='interrupted',error='PROCESS_INTERRUPTED' WHERE state='running'").run().changes);
     this.db.prepare('UPDATE media_blobs SET present=0 WHERE present=3').run();

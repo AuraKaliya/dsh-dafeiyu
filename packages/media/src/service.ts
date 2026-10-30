@@ -63,7 +63,7 @@ export function validateImageObservations(observations:readonly {image:number}[]
   readonly config:z.output<typeof mediaConfigSchema>;
   readonly store:MediaStore;
   readonly files:MediaFiles;
-  readonly decoder:MediaDecoder;
+  readonly decoder:Pick<MediaDecoder,'inspect'|'image'|'audio'>;
   private readonly images:ScopedImages;
   private readonly analysis:MediaAnalysis;
   private readonly audio:AudioPipeline|undefined;
@@ -79,11 +79,11 @@ export function validateImageObservations(observations:readonly {image:number}[]
   private closing:Promise<void>|undefined;
   private finalCounts:{sources:number;assets:number;bytes:number;drafts:number;exports:number;jobs:Record<string,number>}|undefined;
   private reconciliation={settled:0,pending:0,conflicts:0};
-  constructor(ctx:Context,raw:Config,testBackends?:{audioWorker?:AudioWorker;ttsWorker?:AudioWorker}){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
+  constructor(ctx:Context,raw:Config,testBackends?:{audioWorker?:AudioWorker;ttsWorker?:AudioWorker;decoder?:Pick<MediaDecoder,'inspect'|'image'|'audio'>}){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
     if(ctx.get('attachments'))throw new Error('MEDIA_ATTACHMENTS_CONFLICT');
     this.store=new MediaStore(join(this.config.dataDir,'media.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore);
     this.files=new MediaFiles(join(this.config.dataDir,'media'),this.store,this.config.maxBytes,this.config.maxAssetBytes);
-    this.decoder=new MediaDecoder(new BoundedProcess(this.files.work),this.files.root,{ffmpeg:this.config.ffmpeg,ffprobe:this.config.ffprobe});
+    this.decoder=testBackends?.decoder??new MediaDecoder(new BoundedProcess(this.files.work),this.files.root,{ffmpeg:this.config.ffmpeg,ffprobe:this.config.ffprobe});
     this.images=new ScopedImages(ctx);this.analysis=new MediaAnalysis(ctx,this.images,join(this.config.dataDir,'media-analysis'));
     this.audio=this.config.audio?new AudioPipeline(this.files.work,this.config.audio,testBackends?.audioWorker,this.config.timeoutMs):undefined;
     this.documents=this.config.documents?new DocumentReader(this.files.work,this.files.root,this.config.documents):undefined;
@@ -123,24 +123,27 @@ export function validateImageObservations(observations:readonly {image:number}[]
     const declared=input.sources??[];
     if(!(input.assets?.length||declared.length))throw new Error('MEDIA_IMAGES_REQUIRED');
     if(!this.config.vision)throw new Error('MEDIA_VISION_NOT_CONFIGURED');
+    const signal=AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)]);
     let assets=input.assets??[];
     if(declared.length){
       assets=[];
-      for(const [index,ref] of declared.entries())assets.push(await this.acquireWithin(context,owner,{requestId:'images:'+mediaHash([input.requestId,index]),source:ref},AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)])));
+      for(const [index,ref] of declared.entries())assets.push(await this.acquireWithin(context,owner,{requestId:'images:'+mediaHash([input.requestId,index]),source:ref},signal));
     }
     const resolved=assets.map(asset=>this.store.sourceForAsset(asset.id)),description=resolved[0]!.description;
     if(new Set(resolved.map(source=>imageSetGroupKey(source.description))).size>1)throw new Error('MEDIA_IMAGE_SET_MIXED');
     const {provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
-    const fingerprint={input,assets:assets.map(asset=>asset.sha256),vision:VISION_ANALYSIS_VERSION,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
+    const {requestId:_requestId,...options}=input,fingerprint={options,assets:assets.map(asset=>asset.sha256),vision:VISION_ANALYSIS_VERSION,route:this.config.vision,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
     if(prior)return this.observed(context,access,this.store.exposure(access,prior));
-    const jobId=randomUUID();this.store.beginJob(access,jobId,fingerprint);const leases:string[]=[];const signal=AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)]);
+    const cached=this.store.cachedRead(access,fingerprint);if(cached){this.store.reuseRead(access,input.requestId,fingerprint,cached);return {...this.observed(context,access,this.store.exposure(access,cached)),cacheHit:true};}
+    const jobId=randomUUID();this.store.beginJob(access,jobId,fingerprint);const leases:string[]=[];
     try{
       const images:DecodedImage[]=[];
-      for(const asset of assets){access.guard();this.store.requireRef(access,asset);
+      for(const [index,asset] of assets.entries()){signal.throwIfAborted();access.guard();this.store.requireRef(access,asset);
         leases.push(this.store.lease(access,asset,'analysis',Date.now()+this.config.timeoutMs+60000));
         const file=await this.files.verified(asset),metadata=await this.decoder.inspect({file},signal);
         if(metadata.kind!=='image')throw new Error('MEDIA_MODE_MISMATCH');
-        images.push(await this.decoder.image({file},signal));
+        const decoded=await this.decoder.image({file},signal),frame=resolved[index]!.description.sourceFrame;
+        images.push({...decoded,...(frame?{requestedMs:frame.requestedMs??frame.positionMs,ptsMs:frame.positionMs}:{})});
         if(images.reduce((n,i)=>n+i.data.length,0)>this.images.imageLimits.maxMessageImageBytes)throw new Error('MEDIA_IMAGE_LIMIT');
       }
       const lease=this.images.grant(images,access.guard);
@@ -148,9 +151,10 @@ export function validateImageObservations(observations:readonly {image:number}[]
         const route={provider:this.config.vision.provider,model:this.config.vision.model,...(this.config.vision.reasoningEffort?{reasoningEffort:this.config.vision.reasoningEffort}:{})};
         const result=await this.analysis.run({route,instructions:visionInstructions+'\n'+browserFrameInstructions,input:{...imageAnalysisInput(images),outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:access.guard,parse:value=>visionResult.parse(value)},signal);
         validateImageObservations(result.observations,images.length);
-        const actual=lease.exposure(),coverage={acquiredBytes:assets.reduce((n,asset)=>n+asset.bytes,0),processed:images.map(()=>({kind:'image' as const,unit:'whole-image' as const,start:0,end:1})),exposed:true,gaps:['仅浏览器捕获的原始单帧JPEG，未听音轨，不代表完整视频',...result.gaps],completeness:'partial' as const};
-        const text='视觉模型推断（observations仅针对本次图像，未独立核实）：\n'+JSON.stringify({observations:result.observations,frames:images.map(i=>({width:i.width,height:i.height})),gaps:coverage.gaps});
-        const exposure=this.store.recordExposure(access,input.requestId,fingerprint,source,{assets,coverage,text,occurredAt:new Date().toISOString(),detail:{mode:input.mode,route,actual}});
+        const actual=lease.exposure(),frames=images.map((i,index)=>({image:index,source:resolved[index]!.description.ref,requestedMs:i.requestedMs,ptsMs:i.ptsMs,width:i.width,height:i.height}));
+        const coverage={acquiredBytes:assets.reduce((n,asset)=>n+asset.bytes,0),processed:images.map(i=>({kind:i.ptsMs===null?'image' as const:'frame' as const,unit:i.ptsMs===null?'whole-image' as const:'milliseconds' as const,start:i.ptsMs??0,end:i.ptsMs??1})),exposed:true,gaps:['仅附带图像；未听音轨，不代表完整视频',...result.gaps],completeness:'partial' as const};
+        const text='视觉模型推断（observations仅针对本次图像，未独立核实）：\n'+JSON.stringify({observations:result.observations,frames,gaps:coverage.gaps});
+        const exposure=this.store.recordExposure(access,input.requestId,fingerprint,source,{assets,coverage,text,occurredAt:new Date().toISOString(),detail:{mode:input.mode,route,actual,frames}});
         const observation=this.observed(context,access,exposure);this.store.finishJob(access,jobId,{exposureId:exposure.id},null);return observation;
       }finally{lease.close();}
     }catch(error){this.store.abortJob(access,jobId,failureCode(error));throw error;}finally{for(const lease of leases)this.store.releaseLease(lease,'analysis');}

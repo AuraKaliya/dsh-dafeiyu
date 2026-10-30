@@ -55,7 +55,8 @@ test('comment cursors carry position and dedupe ids instead of replaying page on
     nextCursor: { aid: '123', page: 3 },
   });
   assert.equal(page.items[0]!.rootId, null);
-  assert.equal(page.nextCursor!.page, 3);
+  assert.notEqual(typeof page.nextCursor,'string');
+  assert.equal(typeof page.nextCursor==='object'?page.nextCursor?.page:null,3);
 });
 
 test('frame batches reject duplicates and cap at six points', () => {

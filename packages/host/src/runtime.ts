@@ -203,7 +203,9 @@ export class ManagedHost {
   run(raw:unknown):Promise<HostRunResult>{if(!['ready','degraded'].includes(this.phase))throw new Error('HOST_NOT_READY');if(!this.memoryValue)throw new Error('HOST_TASK_REPOSITORY_REQUIRED');
     const work=this.performRun(raw).finally(()=>this.jobs.delete(work));this.jobs.add(work);return work;}
   private async performRun(raw:unknown):Promise<HostRunResult>{const request=ExecutionRequestSchema.parse(raw),port=this.core.executionProducer('host-cli');
-    const accepted=port.submitTask(request,'taskId'in request?port.openTask(request.taskId):undefined);await this.core.whenIdle();const status=port.status(accepted.run),text=await port.readResult(accepted.run);this.publish();return {taskId:accepted.task.id,runId:accepted.run.id,state:status.state,error:status.error,result:text};}
+    const accepted=port.submitTask(request,'taskId'in request?port.openTask(request.taskId):undefined);await this.core.whenIdle();let run=accepted.run;
+    for(let depth=0;depth<64;depth++){const child=port.continuation(run);if(!child)break;run=child;}
+    const status=port.status(run),text=await port.readResult(run);this.publish();return {taskId:accepted.task.id,runId:run.id,state:status.state,error:status.error,result:text};}
   whenClosed():Promise<void>{return this.finished;}
   close(_reason='requested'):Promise<void>{if(this.closing)return this.closing;this.closing=this.shutdown().finally(()=>this.finishClose());return this.closing;}
   private async shutdown(){

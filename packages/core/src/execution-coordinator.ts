@@ -1,6 +1,8 @@
-﻿import {withRunUsage} from './usage.js';
+import {withRunUsage} from './usage.js';
 import {TaskDispositionSchema} from '@dafeiyu/contracts';
 import {stageHandoff} from './context-handoff.js';
+import {readingStage} from './reading-stage.js';
+import {ExecutionToolReceiptSchema} from '@dafeiyu/contracts';
 import type {ExecutionView} from '@dafeiyu/contracts';
 import {admitNativeContexts,contextManifest,prepareWithin} from './context-plan.js';
 import { randomUUID } from 'node:crypto';
@@ -31,7 +33,7 @@ import { MediaReplyAuthoritySchema } from '@dafeiyu/contracts';
 import { mediaAuthorityBodySchema } from './media-authority.js';
 import { ExternalTaskAuthorizationSchema } from '@dafeiyu/contracts';
 import type { ExternalTaskAuthority,ExternalTaskAuthorization,ExternalTaskSource } from '@dafeiyu/contracts';
-import {CAPABILITY_OWNER,CAPABILITY_QUERY} from './harness-runtime.js';
+import {CAPABILITY_OWNER,CAPABILITY_QUERY,BILI_READING_ACTIONS} from './harness-runtime.js';
 const basicCapability=(action:BoundAction)=>action.owner===CAPABILITY_OWNER&&action.id===CAPABILITY_QUERY&&action.effects==='read'&&action.scope!=='task';
 
 export const ExecutionOptionsSchema=z.strictObject({profileId:ProducerSchema,createStore:z.boolean().default(false),
@@ -55,6 +57,7 @@ interface Dependencies {
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null;lease?:RunLeaseControl}
 type Request=z.output<typeof ExecutionRequestSchema>;
 const savedSchema=z.strictObject({kind:z.literal('execution'),input:ExecutionRequestSchema,origin:RunOriginSchema,parentRunId:z.uuid().nullable(),checkpointId:z.uuid().nullable(),motivation:MotivationSchema.optional(),messageSource:MessageTaskSourceSchema.optional()});
+const segmentLineageSchema=z.strictObject({rootRunId:z.uuid(),index:z.number().int().min(0).max(64),deadlineAt:z.number().int().positive(),toolStage:ToolStageSchema});
 
 /** Durable acceptance and authority; DSH remains the sole model loop. */
 export class ExecutionCoordinator {
@@ -86,6 +89,14 @@ export class ExecutionCoordinator {
     if(run.definition.origin.kind==='message')return [this.d.journal.get(run.definition.origin.inboundId).message.conversation];
     const request=this.d.store.request(run.requestKey),source=savedSchema.parse(request.payload).messageSource;if(source)this.validateMessageSource(source);
     return (source?.resources??this.policy(request.producer,run.definition.policyId).resources).map(scene=>({...scene}));}
+  taskContextScope(view:ExecutionView,owner:string,scene:Conversation){
+    const lease=this.contextLeases.get(view);if(!lease||lease.owner!==owner||lease.runId!==view.runId)return null;
+    const run=this.d.store.get(view.runId);if(run.definition.scope.kind!=='task'||!this.allowedResource(run,scene))return null;
+    const historyGuard=()=>{const current=this.d.store.get(view.runId),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
+      if(task.epoch!==run.definition.intentVersion||task.status!=='active'||!this.allowedResource(current,scene))throw new Error('SOURCE_STALE');};
+    const guard=()=>{view.signal.throwIfAborted();historyGuard();};
+    guard();return {scope:run.definition.scope,intentVersion:run.definition.intentVersion,expiresAt:new Date(this.lineage(run).deadlineAt+900000).toISOString(),guard,historyGuard};
+  }
   quoteReplySource(context:ExecutionContext,pluginId:string){this.authority(context,pluginId);const run=this.d.store.get(context.runId);
     if(run.definition.origin.kind==='message'){const item=this.d.journal.get(run.definition.origin.inboundId);return {key:item.id+':reply',target:item.message.conversation,inboundId:item.id};}
     const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;if(!source)throw new Error('MESSAGE_REQUIRED');this.validateMessageSource(source);
@@ -127,7 +138,7 @@ export class ExecutionCoordinator {
     if(input.kind==='explicit-task'&&(item.message.sender.id!==binding.ownerId||directive.kind!=='submit'))throw new Error('TASK_DIRECTIVE_REQUIRED');
     const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:binding.explorationResources??[])].map(scene=>[runtimeHash(scene),scene])).values()];
     const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{})});
-    const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:null]),title:input.kind==='explicit-task'?Array.from(directive.text).slice(0,80).join(''):'自主探索',goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId});
+    const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:null]),title:input.kind==='explicit-task'?Array.from(directive.text).slice(0,80).join(''):'自主探索',goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId,...(input.toolStage??binding.toolStage?{data:{toolStage:input.toolStage??binding.toolStage}}:{})});
     this.validateMessageSource(source);const accepted=this.submit(binding.id,request,undefined,null,null,{kind:input.kind,basis:[`message:${item.id}`]},source);
     return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:input.kind,sourceInboundId:item.id};
   }
@@ -150,6 +161,13 @@ export class ExecutionCoordinator {
     const structuralGuard=()=>{this.d.signal.throwIfAborted();this.validateMessageAncestors(run);const current=this.repository().readState(this.d.agentId,task.id);
       if(current.status!=='active'||current.epoch!==run.definition.intentVersion||runtimeHash(this.inputsFor(run))!==inputHash)throw new Error('SOURCE_STALE');};structuralGuard();
     const access=this.d.personas.access(run,inputs,this.d.signal,structuralGuard),evidence=this.evidenceFor(run,access);
+    // Rebuild provider leases after a process restart before checking persisted context proofs.
+    for(const contributor of this.d.registry.contributors().filter(entry=>entry.context.validateHistorical)){
+      await prepareWithin(async signal=>{
+        const leased=Object.freeze({...access.view,signal});this.contextLeases.set(leased,{runId:run.id,owner:contributor.owner});
+        try{return await contributor.context.prepare(leased);}finally{this.contextLeases.delete(leased);}
+      },this.d.signal,this.d.context.prepareTimeoutMs);
+    }
     const guard=()=>{structuralGuard();if(this.d.store.get(run.id).state!==run.state||run.state==='waiting'&&this.d.store.list().some(next=>next.definition.parentRunId===run.id)||!evidence.validate(proof)||run.state==='completed'&&this.d.memory()?.intent(access).blocking)throw new Error('SOURCE_STALE');const persona=this.d.store.personaBinding(run.id);if(persona.kind==='bound')this.d.personas.validateStored(run,persona.manifest,inputs,this.d.signal,structuralGuard);};guard();
     const intent=this.d.memory()?.intent(access),output=run.result?await this.d.runtime.readResult(run.result):(intent?.events.filter(event=>event.kind==='objection'&&event.blocking&&!intent.events.some(resolved=>resolved.resolves===event.id)).map(event=>`${event.category}：${event.reason}`).join('\n')||'任务处于等待状态，尚未完成。');guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=source.kind==='self-exploration',derivedInputComplete=!opaque;
     const wake=this.wakeOrigins(run)[0],operationalEvidence:import('@dafeiyu/contracts').NativeExpressionPacket['evidence']=wake?[{id:'WAKE',kind:'reported',text:JSON.stringify({kind:'scheduled-wake',goal:task.goal,dueAt:wake.dueAt,note:'由真实计划触发的新一次唤醒；只向原QQ会话整理本次安排，不把旧聊天当成新命令或补回复。'})}]:[];
@@ -157,6 +175,8 @@ export class ExecutionCoordinator {
     const visit=(dependencies:readonly SourceDependency[])=>{for(const dependency of dependencies){const key=runtimeHash(dependency);if(visited.has(key))continue;if(visited.size>=4096)throw new Error('CAPACITY_EXCEEDED');visited.add(key);
       if(dependency.kind==='execution-source')add(dependency.ref);
       else if(dependency.kind==='execution-input'){const body=z.object({sources:z.array(PersonaSourceRefSchema),continuity:z.object({id:z.uuid()}).nullable()}).parse(this.d.store.readInput(dependency.runId,'native-program'));body.sources.forEach(add);
+        const resumed=z.array(SourceDependencySchema).parse(this.d.store.readInput(dependency.runId,'segment-dependencies')??[]);
+        if(!evidence.validate(resumed))throw new Error('SOURCE_STALE');visit(resumed);
         if(body.continuity){const checkpoint=this.d.memory()?.checkpoint(access,body.continuity.id);if(!checkpoint)opaque=true;else checkpoint.dependencies.forEach(add);
           // A checkpoint's plain summary is not a full reconstruction of every derived input.
           derivedInputComplete=false;}}
@@ -181,6 +201,14 @@ export class ExecutionCoordinator {
         const body=z.object({item:z.object({text:z.string()})}).safeParse(this.d.store.findContext(`context:${runtimeHash(dependency)}`));let selected:ReturnType<typeof PersonaSourceRefSchema.safeParse>|undefined;
         if(body.success){try{selected=PersonaSourceRefSchema.safeParse(z.object({source:z.unknown()}).parse(JSON.parse(body.data.item.text)).source);}catch{/* Unsupported context cannot grant expression. */}}
         if(dependency.owner==='dsh-tools'&&dependency.region==='capabilities'){/* Operational declarations do not become world evidence. */}
+        else if(dependency.owner==='bilibili'&&dependency.region==='reading'&&body.success){
+          const current=z.object({item:ContextItemSchema}).safeParse(this.d.store.findContext(`context:${runtimeHash(dependency)}`));
+          const provider=this.d.registry.contributors().find(entry=>entry.owner==='bilibili'&&entry.context.id==='reading');
+          if(current.success&&provider?.context.validate(access.view,current.data.item)&&!operationalEvidence.some(item=>item.id==='READING')){
+            const progress=z.object({kind:z.literal('bilibili-reading-progress'),total:z.number().int().nonnegative(),closed:z.number().int().nonnegative()}).safeParse(JSON.parse(body.data.item.text));
+            if(progress.success)operationalEvidence.push({id:'READING',kind:'reported',text:JSON.stringify({...progress.data,note:'本任务阅读记录的程序状态；不代表完整观看视频或音轨。'})});
+          }opaque=true;derivedInputComplete=false;
+        }
         else if(dependency.owner==='memory-persona'&&dependency.region==='pending-experiences'){/* Scoped, time-stamped operational memory index. */}
         else if(dependency.owner==='memory-persona'&&dependency.region==='recent-state'&&body.success&&(()=>{try{return z.object({kind:z.literal('recent-self-state'),visibility:z.literal('shared-summary')}).safeParse(JSON.parse(body.data.item.text)).success;}catch{return false;}})()){/* Only a validated, independently reviewed self-summary may influence target expression. */}
         else if(dependency.owner==='memory'&&dependency.region==='growth'){/* Only reviewed self-memory views are supplied by the current growth provider. */}
@@ -410,6 +438,9 @@ export class ExecutionCoordinator {
         return port.resolveIntent({...this.d.personas.access(run,this.inputsFor(run),this.d.signal,guard),producer:`producer:${producer}`,operationId:run.id},input);},
       restoreRun:(id:string)=>{const run=this.d.store.get(id);if(this.d.store.request(run.requestKey).producer!==producer)throw new Error('SCOPE_DENIED');return this.ref(producer,run);},
       status:(ref:RunRef)=>this.status(this.resolve(producer,ref)),
+      continuation:(ref:RunRef)=>{const parent=this.resolve(producer,ref);if(parent.state!=='continued')return null;
+        const child=this.d.store.list().find(run=>run.definition.parentRunId===parent.id&&this.d.store.request(run.requestKey).producer===producer);
+        return child?this.ref(producer,child):null;},
       readResult:async(ref:RunRef)=>{const run=this.resolve(producer,ref);if(!['completed','waiting'].includes(run.state)||!run.result)return null;
         const guard=()=>{const task=this.repository().readState(this.d.agentId,run.definition.taskId!),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),policy=this.policy(producer,run.definition.policyId);
           if(saved.messageSource)this.validateMessageAncestors(run);
@@ -564,14 +595,22 @@ export class ExecutionCoordinator {
     return run;
   }
   recover():void{this.d.store.recover();this.d.store.nativeDeliveries.recover();for(const request of this.d.store.pendingRequests())if(savedSchema.safeParse(request.payload).success)this.accept(request.id);this.flushEvents();}
-  activate():void{this.resumeSegments();for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
+  activate():void{this.resumeSegments();this.resumeInterruptedReadings();for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
+  private resumeInterruptedReadings(){
+    for(const run of this.d.store.list(['interrupted'])){
+      const lineage=segmentLineageSchema.safeParse(this.d.store.readInput(run.id,'segment-lineage'));
+      if(run.error!=='PROCESS_INTERRUPTED'||!lineage.success||lineage.data.toolStage!=='bili-reading'||lineage.data.deadlineAt<=Date.now()||lineage.data.index>=7)continue;
+      if(this.d.store.operations(run.id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))continue;
+      try{this.continueSegment(run,'process-recovery');}catch(error){this.d.store.appendExecutionEvent(run.id,'segment.recovery.blocked',{code:safeCode(error)});}
+    }
+  }
   /** A continued segment without a child is resumed from its durable checkpoint request. */
-  private resumeSegments(){const active=new Set(this.d.store.list(['accepted','queued','running','waiting']).map(run=>run.definition.parentRunId).filter(Boolean));
+  private resumeSegments(){const active=new Set(this.d.store.list().map(run=>run.definition.parentRunId).filter(Boolean));
     for(const run of this.d.store.list(['continued'])){if(run.definition.scope.kind!=='task'||active.has(run.id)||!run.definition.taskId)continue;const ids=this.d.store.checkpoints(run.id),last=ids.at(-1);if(!last)continue;
-      let body:any;try{body=this.d.store.readCheckpoint(run.id,last);}catch{continue;}if(!body||typeof body!=='object'||!body.request)continue;
+      const decoded=z.object({producer:z.string(),request:ExecutionRequestSchema,messageSource:MessageTaskSourceSchema.nullable().optional()}).safeParse(this.d.store.readCheckpoint(run.id,last));if(!decoded.success)continue;const body=decoded.data;
       try{const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),task=this.repository().readState(this.d.agentId,run.definition.taskId);
         if(task.status!=='active'||task.epoch!==run.definition.intentVersion)continue;
-        this.submit(String(body.producer??(saved.origin.kind==='native'?saved.origin.producerId:'unknown')),ExecutionRequestSchema.parse({...body.request,requestId:runtimeHash(['segment',run.id,last]),expectedVersion:task.version}),{kind:'continuation',parentRunId:run.id,checkpointId:last},run.id,last,this.motivation(run),body.messageSource?MessageTaskSourceSchema.parse(body.messageSource):undefined);
+        this.submit(body.producer,ExecutionRequestSchema.parse({...body.request,requestId:runtimeHash(['segment',run.id,last]),expectedVersion:task.version}),{kind:'continuation',parentRunId:run.id,checkpointId:last},run.id,last,this.motivation(run),body.messageSource??saved.messageSource);
       }catch{/* keep the durable checkpoint for a later activation */}}}
   feedbackSourceForRun(runId:string):{inboundId:string;taskId:string;intentVersion:number}|null {
     try{const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
@@ -601,7 +640,47 @@ export class ExecutionCoordinator {
   }
 
 
-  private rootRun(run:StoredRun){let current:StoredRun=run;for(let step=0;step<64&&current.definition.parentRunId;step+=1)current=this.d.store.get(current.definition.parentRunId);return current.id;}  private segmentDepth(run:StoredRun){let depth=0,current:StoredRun|undefined=run;while(current?.definition.parentRunId&&depth<64){depth++;current=this.d.store.get(current.definition.parentRunId);}return depth;}  private async process(id:string):Promise<void>{
+  private lineage(run:StoredRun){
+    const existing=this.d.store.readInput(run.id,'segment-lineage');
+    if(existing)return segmentLineageSchema.parse(existing);
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),policy=this.policy(this.d.store.request(run.requestKey).producer,run.definition.policyId);
+    const declared=z.object({toolStage:ToolStageSchema.optional()}).safeParse(saved.input.data??{});
+    const task=this.repository().readState(this.d.agentId,run.definition.taskId!);
+    const value=segmentLineageSchema.parse({rootRunId:run.id,index:0,deadlineAt:Date.now()+this.d.turnTimeoutMs,
+      toolStage:readingStage(task.goal,policy.resources,declared.success?declared.data.toolStage:undefined)});
+    this.d.store.bindInput(run.id,'segment-lineage',value);return value;
+  }
+  private continueSegment(run:StoredRun,reason:string){
+    if(run.definition.scope.kind!=='task')throw new Error('TASK_REQUIRED');const route=run.definition.scope.scopeKey;
+    const task=this.repository().readState(this.d.agentId,run.definition.taskId!),lineage=this.lineage(run);
+    if(task.status!=='active'||task.epoch!==run.definition.intentVersion)throw new Error('TASK_NOT_ACTIVE');
+    if(Date.now()>=lineage.deadlineAt)throw new Error('TASK_TIME_BUDGET_EXHAUSTED');
+    if(lineage.index>=7)throw new Error('SEGMENT_LIMIT_REACHED');
+    const original=this.d.store.request(run.requestKey),saved=savedSchema.parse(original.payload),checkpointId=randomUUID();
+    if(saved.messageSource)this.validateMessageAncestors(run);
+    const data=z.record(z.string(),z.json()).safeParse(saved.input.data??{});
+    const requestId=runtimeHash(['reading-segment',run.id]);
+    const input=ExecutionRequestSchema.parse({requestId,taskId:task.id,expectedVersion:task.version,policyId:run.definition.policyId,inputRefs:saved.input.inputRefs,
+      data:{...(data.success?data.data:{}),toolStage:lineage.toolStage}});
+    const origin={kind:'continuation' as const,parentRunId:run.id,checkpointId};
+    const payload=savedSchema.parse({kind:'execution',input,origin,parentRunId:run.id,checkpointId,motivation:this.motivation(run),...(saved.messageSource?{messageSource:saved.messageSource}:{})});
+    const inherited=z.array(PersonaSourceRefSchema).parse(this.d.store.readInput(run.id,'segment-evidence')??[]);
+    const receipts=this.d.store.operations(run.id).flatMap(operation=>{
+      const receipt=ExecutionToolReceiptSchema.safeParse(this.d.store.readInput(run.id,'operation-receipt:'+operation.id));return receipt.success?receipt.data.sources:[];
+    });
+    const resumeSources=[...new Map([...inherited,...receipts,...(this.evidence.get(run.id)?.sourceRefs()??[])].map(ref=>[runtimeHash(ref),ref])).values()];
+    const operationDependencies=this.d.store.operations(run.id).flatMap(operation=>{
+      const receipt=ExecutionToolReceiptSchema.safeParse(this.d.store.readInput(run.id,'operation-receipt:'+operation.id));
+      return receipt.success?[SourceDependencySchema.parse({kind:'execution-operation',agentId:this.d.agentId,route,
+        runId:run.id,operationId:operation.id,hash:receipt.data.outcomeHash,inputHash:receipt.data.inputHash})]:[];
+    });
+    const resumeDependencies=[...new Map([...(this.evidence.get(run.id)?.exposed()??[]),...operationDependencies].map(dependency=>[runtimeHash(dependency),dependency])).values()];
+    if(resumeSources.length>512)throw new Error('SEGMENT_SOURCE_CAPACITY');
+    const child=this.d.store.handoffSegment(run.id,run.version,{checkpointId,checkpoint:{kind:'segment',reason,...lineage,segment:lineage.index+1,depth:lineage.index},
+      producer:original.producer,requestId,payload:z.json().parse(payload),definition:{...run.definition,origin,parentRunId:run.id},lineage:{...lineage,index:lineage.index+1},resumeSources:z.json().parse(resumeSources),resumeDependencies:z.json().parse(resumeDependencies)});
+    this.flushEvents();this.schedule(child);return child;
+  }
+  private async process(id:string):Promise<void>{
     const scheduled=this.d.store.get(id),cls=this.workClass(scheduled);
     const scope=scheduled.definition.scope;
     const releaseLease=await this.d.scheduler.acquireHandle({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
@@ -621,7 +700,8 @@ export class ExecutionCoordinator {
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
         const messageSignal=saved.messageSource?this.d.messageSignal?.(saved.messageSource.inboundId):run.definition.origin.kind==='message'?this.d.messageSignal?.(run.definition.origin.inboundId):undefined;
-        const signal=AbortSignal.any([this.d.signal,controller.signal,...(messageSignal?[messageSignal]:[]),...actions.map(action=>action.signal),...contributors.map(entry=>entry.signal),AbortSignal.timeout(this.d.turnTimeoutMs)]);
+        const lineage=this.lineage(run),remainingMs=lineage.deadlineAt-Date.now();if(remainingMs<=0)throw new Error('TASK_TIME_BUDGET_EXHAUSTED');
+        const signal=AbortSignal.any([this.d.signal,controller.signal,...(messageSignal?[messageSignal]:[]),...actions.map(action=>action.signal),...contributors.map(entry=>entry.signal),AbortSignal.timeout(remainingMs)]);
         const guard=()=>{signal.throwIfAborted();if(!repository.ready()||this.d.repository()!==repository)throw new Error('DEPENDENCY_UNAVAILABLE');
           if(saved.messageSource)this.validateMessageAncestors(run);
           const current=repository.readState(this.d.agentId,task.id);if(current.epoch!==task.epoch||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');
@@ -650,7 +730,10 @@ export class ExecutionCoordinator {
             const prepared=await prepareWithin(current=>{const leased=Object.freeze({...view,signal:current});this.contextLeases.set(leased,{runId:id,owner:contributor.owner});return contributor.context.prepare(leased);},signal,Math.max(0,Math.min(this.d.context.prepareTimeoutMs,deadline-Date.now())));guard();
             for(const item of z.array(ContextItemSchema).max(64).parse(prepared))if(contributor.context.validate(view,item))add(contributor.owner,contributor.context.id,item);else omitted++;
           }catch(error){signal.throwIfAborted();const region=contributor.owner+':'+contributor.context.id;if(this.d.context.regions?.[region]?.required)throw new Error('REQUIRED_CONTEXT_UNAVAILABLE');unavailable.push(region);}}
-          guard();runPersona!.guard();const admitted=admitNativeContexts(candidates,this.d.context.maxBytes,this.d.context.regions);contexts.splice(0,contexts.length,...admitted.contexts);
+          guard();runPersona!.guard();
+          if(lineage.toolStage==='bili-reading'&&contributors.some(entry=>entry.owner==='bilibili'&&entry.context.id==='reading')&&!candidates.some(row=>row.owner==='bilibili'&&row.region==='reading'))throw new Error('REQUIRED_CONTEXT_UNAVAILABLE');
+          const regions=lineage.toolStage==='bili-reading'?{...this.d.context.regions,'bilibili:reading':{maxBytes:6000,priority:350,required:true}}:this.d.context.regions;
+          const admitted=admitNativeContexts(candidates,this.d.context.maxBytes,regions);contexts.splice(0,contexts.length,...admitted.contexts);
           omitted+=admitted.packet.decisions.reduce((sum,row)=>sum+row.invalid+row.overBudget,0)+unavailable.length;
           lastPlan=z.json().parse({...contextManifest('exploration',admitted.packet),unavailable});
           this.d.store.bindInput(id,'context-plan:'+runtimeHash(lastPlan),lastPlan);evidence.setContexts(contexts);
@@ -660,23 +743,24 @@ export class ExecutionCoordinator {
         const wake=this.wakeOrigins(run)[0],wakeProvider=wake?this.wakes.get(wake.producerId):undefined;
         const work=access.motivation.kind==='maintenance'&&wake?WakeWorkSchema.parse(wakeProvider?.work?.(wake,task)):null;
         const runGoal=work?.goal??task.goal;
-        const intent=memory?.intent(access),program=z.json().parse({goal:runGoal,workflow:{taskAccepted:true,currentPhase:work?'memory-maintenance':'task-execution',taskId:task.id,runId:id,
+        const intent=memory?.intent(access),program=z.json().parse({goal:runGoal,workflow:{taskAccepted:true,currentPhase:work?'memory-maintenance':'task-execution',taskId:task.id,runId:id,timing:{deadlineAt:new Date(lineage.deadlineAt).toISOString(),remainingMs:Math.max(0,lineage.deadlineAt-Date.now()),segment:lineage.index},
           resultDelivery:saved.messageSource?{automatic:this.messageBindings.get(saved.messageSource.bindingId)?.autoDeliver===true,target:saved.messageSource.conversation,stage:'after-source-admission',candidate:'agent-final-answer',capabilities:this.d.channelDescription(saved.messageSource.inboundId)}:{automatic:false},
           note:'任务入口已完成受理。本轮由你完成目标判断、操作和最终表达。需要等待时调用dafeiyu_task_outcome；结束前用记忆工具留下本次经历的看法，再输出面向原会话的回答。程序只校验资料范围并执行已配置的交付。'},...(work?{work:{...work,taskId:task.id,toolArguments:{dafeiyu_memory_maintenance_status:{id:work.requestId},dafeiyu_memory_consolidate:{id:work.requestId},dafeiyu_memory_maintenance_result:{id:work.requestId}},backgroundTaskGoal:task.goal,
           note:'本轮只整理该请求已保存的经历，不执行背景任务。requestId是整理请求ID，不能用taskId替代。当前工具是维护阶段的授权子集，不表示其他阶段能力未安装。'}}:{}),inputs,operationalCapabilities,...(saved.input.data===undefined?{}:{providedData:{producer:request.producer,content:saved.input.data,note:'本轮提交的数据，不改变任务目标或授予额外权限'}}),motivation:access.motivation,intent:intent??null,
           trigger:trigger?redactJson(z.json().parse({conversation:trigger.message.conversation,messageId:trigger.message.id,occurredAt:trigger.message.occurredAt,replyTo:trigger.message.replyTo??null,mainText:messageMainText(trigger.message),wake:run.definition.origin.kind==='wake'?run.definition.origin:null,note:'仅为实际触发来源与资料，不改变任务目标或授予额外权限'})).value:null,
-          continuation:saved.parentRunId?{parentRunId:saved.parentRunId,checkpoint:this.d.store.readCheckpoint(saved.parentRunId,saved.checkpointId!),operations:this.d.store.operations(saved.parentRunId).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))}:null,
+          continuation:saved.parentRunId?{parentRunId:saved.parentRunId,checkpoint:this.d.store.readCheckpoint(saved.parentRunId,saved.checkpointId!),
+            operationCount:this.d.store.operations(saved.parentRunId).length,operations:this.d.store.operations(saved.parentRunId).slice(-8).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null})),
+            note:'完整回执保存在运行账本；已读视频与下一步以当前阅读工作视图为准，不重新执行已确认操作。'}:null,
           continuity:prior?{checkpointId:prior.id,previousRunId:prior.runId,sessionChanged:prior.sessionId!==sessionId,completedOperations:prior.completedOperations,unknownOperations:prior.unknownOperations,summary:prior.summary,gaps:prior.gaps}:null,
           gaps:[...(omitted?[`${omitted}项上下文未进入本轮，不能猜测其内容`]:[]),...(!prior?['未取得可核验接续检查点；不据此虚构过去']:[])]});
         const handoff=stageHandoff('exploration',runGoal,{taskId:task.id,runId:id,intentVersion:task.epoch},trigger?.message??null,{state:'running',continuation:prior?.id??null});
         if(handoff)this.d.store.bindInput(id,'stage-handoff',handoff);
-        evidence.recordInput(program,inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),prior?{id:prior.id,hash:runtimeHash(prior)}:null,this.wakeSources(run,task));
-        const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validate(evidence.exposed()))throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
+        evidence.recordInput(program,[...inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),...z.array(PersonaSourceRefSchema).parse(this.d.store.readInput(id,'segment-evidence')??[])],prior?{id:prior.id,hash:runtimeHash(prior)}:null,this.wakeSources(run,task));
+        const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validateAdmitted())throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
         let contextUsed=false;
-        this.d.store.appendExecutionEvent(id,'task.stage',{phase:'execution',deadlineAt:new Date(Date.parse(run.updatedAt)+this.d.turnTimeoutMs).toISOString()});this.flushEvents();
+        this.d.store.appendExecutionEvent(id,'task.stage',{phase:'execution',deadlineAt:new Date(lineage.deadlineAt).toISOString(),toolStage:lineage.toolStage,segment:lineage.index});this.flushEvents();
         let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
-        const declaredStage=ToolStageSchema.safeParse(z.object({toolStage:ToolStageSchema}).safeParse(saved.input.data??{}).success?(saved.input.data as {toolStage?:unknown}).toolStage:'general');
-        const frame:TaskExecutionFrame={mode:'task',toolStage:declaredStage.success?declaredStage.data:'general',sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,
+        const frame:TaskExecutionFrame={mode:'task',toolStage:lineage.toolStage,sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,
           work:{workItemId:`task:${scheduled.definition.taskId}`,runId:run.id,scopeKey:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,targetVersion:run.definition.intentVersion,stage:'execution'},lease:releaseLease,
           handoff,refreshContexts:async()=>{if(contextUsed)await refreshContexts();contextUsed=true;},contextPlan:()=>lastPlan,
           contextAudit:data=>{this.d.store.appendExecutionEvent(id,'context.admitted',data);this.flushEvents();},
@@ -685,14 +769,7 @@ export class ExecutionCoordinator {
           checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
         const result=await withRunUsage(receipt=>this.d.store.bindInput(frame.view.runId,'model-usage:'+receipt.id,receipt),()=>this.d.runtime.runExecution(frame));admittedGuard();
         const segmentYield=(result as {segmentYield?:{reason:string}}).segmentYield;
-        if(segmentYield){
-          const current=this.d.store.get(id),task=repository.readState(this.d.agentId,current.definition.taskId!);
-          if(task.status==='active'&&task.epoch===current.definition.intentVersion&&this.segmentDepth(current)<8){
-            const depth=this.segmentDepth(current),child=ExecutionRequestSchema.parse({requestId:runtimeHash(['segment',id,'pending']),taskId:task.id,expectedVersion:task.version,policyId:current.definition.policyId,...(saved.input.inputRefs?{inputRefs:saved.input.inputRefs}:{}),...(saved.input.data?{data:saved.input.data}:{})}),checkpointId=this.d.store.checkpoint(id,{kind:'segment',reason:segmentYield.reason,rootRunId:this.rootRun(current),depth,segment:depth+1,producer:request.producer,request:child,messageSource:saved.messageSource??null}),continued=this.d.store.transition(id,current.version,'continued');
-            this.submit(request.producer,{...child,requestId:runtimeHash(['segment',id,checkpointId])},{kind:'continuation',parentRunId:id,checkpointId},id,checkpointId,this.motivation(current),saved.messageSource);
-            this.d.store.appendExecutionEvent(continued.id,'segment.continued',{checkpointId});this.flushEvents();return;
-          }
-        }
+        if(segmentYield){this.continueSegment(this.d.store.get(id),segmentYield.reason);return;}
         if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
         this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.bindInput(id,'agent-result',result.resultRef);
         const decisions=this.d.store.operations(id).filter(op=>op.plugin===CAPABILITY_OWNER&&op.action==='dafeiyu_task_outcome'&&op.outcome?.status==='succeeded');
@@ -709,7 +786,11 @@ export class ExecutionCoordinator {
         if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
-        else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
+        else if(['queued','running','cancelling'].includes(run.state)){
+          const deadline=segmentLineageSchema.safeParse(this.d.store.readInput(id,'segment-lineage'));
+          const exhausted=!this.d.signal.aborted&&!entry.mode&&deadline.success&&Date.now()>=deadline.data.deadlineAt;
+          this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',exhausted?'TASK_TIME_BUDGET_EXHAUSTED':safeCode(error));
+        }
       }finally{const settledState=this.d.store.get(id).state;if(['continued','completed','waiting','failed','cancelled','interrupted'].includes(settledState))this.d.experience()?.settle(id,settledState);this.evidence.delete(id);{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting','failed'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
     }finally{releaseLease.close();}
   }
@@ -745,7 +826,9 @@ export class ExecutionCoordinator {
       this.d.store.bindInput(run.id,`operation-receipt:${operationId}`,receipt);if(value&&typeof value==='object')metadata.set(value,receipt);return value;
     };
     return {definition:action,metadata:value=>value&&typeof value==='object'?metadata.get(value):undefined,execute:async(raw,callId,toolSignal)=>{
-      guard();const input=action.validateInput(raw);
+      guard();
+      if(run.definition.scope.kind==='task'&&this.lineage(run).toolStage==='bili-reading'&&!BILI_READING_ACTIONS.has(action.id))throw new Error('SCOPE_DENIED');
+      const input=action.validateInput(raw);
       if(action.effects!=='read'&&this.d.store.list().filter(value=>runtimeHash(value.definition.scope)===runtimeHash(run.definition.scope)).some(value=>this.d.store.operations(value.id).some(operation=>operation.plugin===action.owner&&(operation.state==='unknown'||operation.outcome?.effects==='unknown'))))throw new Error('OPERATION_UNCERTAIN');
       if(action.effects!=='read'&&run.definition.parentRunId){let parentId:string|null=run.definition.parentRunId;
         const fingerprint=runtimeHash({action:action.id,plugin:action.owner,pluginVersion:action.pluginVersion,actionVersion:action.version,input});
@@ -830,7 +913,7 @@ export class ExecutionCoordinator {
     if(this.lifecycleObservers.size){
       const changed=event.type==='operation.succeeded'&&operation&&((operation.plugin==='memory-execution'&&['dafeiyu_execution_contribute','dafeiyu_execution_select'].includes(operation.action))||operation.plugin==='qq-capabilities'&&operation.action==='qq_observe_select'||operation.plugin==='bilibili'&&operation.action==='bili_observe_select');
       const type=changed?'evidence.changed':event.type;
-      if(['run.running','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed'].includes(type)){
+      if(['run.running','run.continued','run.completed','run.waiting','run.failed','run.cancelled','run.interrupted','evidence.changed'].includes(type)){
         const facts=z.object({goal:z.string(),epoch:z.number()}).safeParse(this.d.store.readInput(run.id,'task-facts'));
         const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),goal=facts.success?facts.data.goal:'goal'in saved.input?saved.input.goal:'';
         const operations=type==='run.running'?[]:this.d.store.operations(run.id);

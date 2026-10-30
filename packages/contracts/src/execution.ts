@@ -56,6 +56,7 @@ export interface TaskContextContributor {
   readonly id: string;
   prepare(view: ExecutionView): Promise<readonly ContextItem[]>;
   validate(view: ExecutionView, item: ContextItem): boolean;
+  validateHistorical?(view:ExecutionView,item:ContextItem):boolean;
 }
 export interface Extension {
   readonly protocolVersion:typeof API_VERSION; readonly id: string; readonly version: string; readonly agentId: string;

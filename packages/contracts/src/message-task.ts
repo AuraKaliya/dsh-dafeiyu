@@ -11,7 +11,7 @@ import type { Conversation } from './conversation.js';
 
 export const MessageTaskSubmitSchema=z.strictObject({requestId:PersonaRequestIdSchema,title:z.string().trim().min(1).max(200).optional(),kind:z.enum(['explicit-task','self-exploration']).default('explicit-task'),goal:z.string().trim().min(1).max(2000).optional(),voiceExposureId:z.uuid().optional(),toolStage:ToolStageSchema.optional()})
   .refine(value=>value.kind==='self-exploration'?value.goal!==undefined&&value.voiceExposureId===undefined:value.goal===undefined,'Explicit goals must come from the real message');
-export const MessageInstructionSubmitSchema=z.strictObject({requestId:MessageTaskSubmitSchema.shape.requestId,title:MessageTaskSubmitSchema.shape.title,kind:z.literal('explicit-task').optional(),voiceExposureId:MessageTaskSubmitSchema.shape.voiceExposureId});
+export const MessageInstructionSubmitSchema=z.strictObject({requestId:MessageTaskSubmitSchema.shape.requestId,title:MessageTaskSubmitSchema.shape.title,kind:z.literal('explicit-task').optional(),voiceExposureId:MessageTaskSubmitSchema.shape.voiceExposureId,toolStage:MessageTaskSubmitSchema.shape.toolStage});
 export const MessageExplorationSubmitSchema=z.strictObject({requestId:MessageTaskSubmitSchema.shape.requestId,title:MessageTaskSubmitSchema.shape.title,goal:MessageTaskSubmitSchema.shape.goal.unwrap()});
 export const MessageTaskStatusSchema=z.strictObject({taskId:z.uuid()});
 export const MessageTaskControlSchema=z.strictObject({requestId:PersonaRequestIdSchema,taskId:z.uuid(),expectedVersion:z.number().int().positive(),action:z.enum(['cancel','revise','resolve','resume']),objectionId:z.uuid().optional(),voiceExposureId:z.uuid().optional()})

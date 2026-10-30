@@ -46,7 +46,7 @@ async function harness(options: { runExecution?: (frame: any) => Promise<unknown
   const repository = taskRepository();
   const model = { provider: 'deepseek-official', model: 'deepseek-flash' };
   const memoryPort = options.blocking ? {
-    ready: () => true, acceptIntent: () => undefined, prepareContext: () => [],
+    ready: () => true, acceptIntent: () => undefined, prepareContext: () => [], generation:()=>0,
     intent: () => ({ blocking: true, requiredCapabilities: [], next: 'wait' }), validate: () => true,
   } : undefined;
   const personaRuntime = {
@@ -204,9 +204,19 @@ test('a yielded segment hands off to a child run instead of completing', async (
     const parent = store.get(id), child = store.list().find(candidate => candidate.definition.parentRunId === id);
     assert.ok(child, 'expected a child segment');
     assert.equal(child!.definition.taskId, parent.definition.taskId);
+    assert.deepEqual((store.readInput(child!.id,'segment-lineage') as {deadlineAt:number}).deadlineAt,(store.readInput(id,'segment-lineage') as {deadlineAt:number}).deadlineAt);
     assert.notEqual(child!.snapshot?.sessionId, parent.snapshot?.sessionId);
     assert.equal(store.nativeDeliveryCandidates().includes(id), false);
     coordinator.activate();
     assert.equal(await waitTerminal(store, child!.id), 'completed');
   } finally { store.close(); }
+});
+
+test('an expired root budget fails before any model call instead of renewing on entry',async()=>{
+  let calls=0;const {coordinator,store}=await harness({runExecution:async()=>{calls++;throw new Error('MUST_NOT_CALL');}});
+  try{const {run}=coordinator.producer('fixture').submitTask({requestId:randomUUID(),title:'已到期',goal:'B站阅读',policyId:'fixture-task'});
+    const id=(run as unknown as {id:string}).id;
+    store.bindInput(id,'segment-lineage',{rootRunId:id,index:0,deadlineAt:Date.now()-1,toolStage:'bili-reading'});
+    coordinator.activate();assert.equal(await waitTerminal(store,id),'failed');assert.equal(store.get(id).error,'TASK_TIME_BUDGET_EXHAUSTED');assert.equal(calls,0);
+  }finally{store.close();}
 });

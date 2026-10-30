@@ -11,6 +11,7 @@ import { dirname,join } from 'node:path';
 import { DeferredPluginChanges } from './deferred-plugins.js';
 import { readInstallationSettings } from './settings.js';
 import {readBiliBrowser} from './bili-browser.js';
+import type {BiliBrowserSession} from './bili-browser.js';
 import { z } from 'zod';
 import { DshBridgeRequestSchema,DshToolCatalogSchema,ExternalTaskAuthorizationSchema,DshCapabilityChangeSchema,redactJson,orderedDshCatalog,stableJson } from '@dafeiyu/contracts';
 import type { DshToolCatalog,Json } from '@dafeiyu/contracts';
@@ -28,6 +29,7 @@ const code=(error:unknown)=>error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(er
 /** Official Tools dispatch in a preset-bound DSH Agent. This Agent never calls a model. */
 export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:string){
   const handles=new Map<string,Promise<AgentHandle>>(),controllers=new Map<string,AbortController>(),jobs=new Set<Promise<void>>();
+  const biliSessions=new Map<string,BiliBrowserSession>();
   let closed=false;
   const owner=ctx.root,settings=readInstallationSettings(settingsFile),validations=new Map<string,(value:boolean)=>void>(),updating=new Set<string>();
   const changes=new DeferredPluginChanges(join(settings.dataDir,'dsh-plugin-changes'),async row=>{
@@ -79,11 +81,12 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
       if(message.type==='dsh.bili-read'){
         if(!settings.bilibili?.capabilities||!settings.bilibili.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');
         const h=await handle('bili:'+message.request.taskId);
+        let session=biliSessions.get(message.request.taskId);if(!session){session={};biliSessions.set(message.request.taskId,session);if(biliSessions.size>128)biliSessions.delete(biliSessions.keys().next().value!);}
         const value=await readBiliBrowser(message.request,settings.bilibili.browser.expectedUid,async(name,args,signal)=>{
           if(!['dsh_browser_open','dsh_browser_execute','dsh_browser_scroll'].includes(name))throw new Error('BILI_BROWSER_ACTION_DENIED');
           const result=await owner.agents.withInitiator(h.agent,()=>owner.tools.execute({callId:ToolCallId(randomUUID()),name,arguments:args,agent:h.agent,signal}));
           if(result.isError)throw new Error('BILI_BROWSER_READ_FAILED');return result.value;
-        },controller.signal);send(message.id,z.json().parse(value));return;
+        },controller.signal,undefined,session);send(message.id,z.json().parse(value));return;
       }
       const authorization=ExternalTaskAuthorizationSchema.parse(message.authorization);
       if(authorization.action.owner!=='dsh-tools'||authorization.action.id!=='dsh_tool_call'||authorization.source.kind==='owner-message'&&(authorization.source.senderId!==settings.qq.ownerId||authorization.source.conversation.account!==settings.qq.botId))throw new Error('DSH_AUTHORITY_INVALID');

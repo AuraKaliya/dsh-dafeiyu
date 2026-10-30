@@ -1,9 +1,10 @@
-﻿import {BiliBrowserRequestSchema,BiliBrowserResultSchema,BiliBrowserFrameSchema,redactContent} from '@dafeiyu/contracts';
+import {BiliBrowserRequestSchema,BiliBrowserResultSchema,BiliBrowserFrameSchema,redactContent} from '@dafeiyu/contracts';
 import type {BiliBrowserRequest,BiliBrowserResult,Json} from '@dafeiyu/contracts';
 import {setTimeout} from 'node:timers/promises';
 import {z} from 'zod';
 import {contentChallengeCheck} from './bili-page-check.js';
 export type BrowserToolCall=(name:string,args:Record<string,Json>,signal:AbortSignal)=>Promise<unknown>;
+export interface BiliBrowserSession {requestedUrl?:string;actualUrl?:string}
 /** Internal clock seam for deterministic tests; never accepted from model/tool arguments. */
 export interface BrowserReadinessClock {
   now():number;
@@ -17,14 +18,24 @@ const videoScript="(()=>{const title=document.querySelector('h1')?.innerText?.tr
 const discoverScript="(()=>{const items=new Map();for(const a of document.querySelectorAll('a[href]')){const u=new URL(a.href),m=/^\\/video\\/(BV[1-9A-HJ-NP-Za-km-z]{10})\\/?$/.exec(u.pathname),r=a.getBoundingClientRect(),title=(a.innerText||a.title||'').trim();if(u.hostname==='www.bilibili.com'&&m&&title&&r.width>0&&r.height>0&&!a.closest('header,footer,.bili-header,.b-footer-wrap')&&!items.has(m[1]))items.set(m[1],title.slice(0,160));}if(!items.size)return null;const entries=Array.from(items.entries()).slice(0,20),text=entries.map(([bvid,title])=>title+' https://www.bilibili.com/video/'+bvid+'/').join('\\n');return {title:'B站当前热门列表',text:text.slice(0,5000),truncated:items.size>20||text.length>5000,items:entries.map(([bvid,title])=>({bvid,title}))};})()";
 const frameScript=(positionMs:number)=>`(()=>{const v=document.querySelector('video'),title=document.querySelector('h1')?.innerText?.trim();if(!v||!title||!Number.isFinite(v.duration)||v.duration<=0||!v.videoWidth)return null;if(v.mediaKeys)return {error:'BILI_RESTRICTED_MEDIA'};const target=${positionMs}/1000;if(target>=v.duration)return {error:'BILI_BROWSER_POSITION_UNAVAILABLE'};const r=v.getBoundingClientRect();if(!r.width||!r.height)return null;if(Math.abs(v.currentTime-target)>0.35){v.pause();v.currentTime=target;return null;}if(v.seeking||v.readyState<2)return null;try{const c=document.createElement('canvas'),scale=Math.min(1,640/v.videoWidth,360/v.videoHeight);c.width=Math.max(1,Math.round(v.videoWidth*scale));c.height=Math.max(1,Math.round(v.videoHeight*scale));c.getContext('2d').drawImage(v,0,0,c.width,c.height);return {url:location.href,title:title.slice(0,300),text:'仅截取视频的一个实际解码画面，需通过媒体视觉工具阅读；未处理音轨。',truncated:true,frame:{dataUrl:c.toDataURL('image/jpeg',0.8),positionMs:Math.round(v.currentTime*1000),durationMs:Math.round(v.duration*1000)}};}catch{return {error:'BILI_BROWSER_FRAME_UNAVAILABLE'};}})()`;
 const homeDiscoverScript=discoverScript.replace("querySelectorAll('a[href]')","querySelectorAll('.bili-video-card__info--tit a[href]')").replace('B站当前热门列表','B站当前首页视频推荐');
-const searchScript="(()=>{const items=new Map();for(const a of document.querySelectorAll('a[href]')){let u;try{u=new URL(a.href);}catch{continue;}if(u.hostname!=='www.bilibili.com'||!u.pathname.startsWith('/video/'))continue;const bvid=u.pathname.slice(7).replace(/\\/$/,'');if(!/^BV[1-9A-HJ-NP-Za-km-z]{10}$/.test(bvid)||items.has(bvid))continue;const card=a.closest('.bili-video-card,.video-list-item')||a.parentElement;const title=(a.getAttribute('title')||card?.querySelector('.bili-video-card__info--tit,.title')?.innerText||a.innerText||'').trim();if(!title)continue;const author=(card?.querySelector('.bili-video-card__info--author,.up-name,.bili-video-card__info--owner')?.innerText||'').trim();items.set(bvid,{bvid,title:title.slice(0,160),author:author.slice(0,80)});}if(!items.size)return null;const list=Array.from(items.values());return{title:'B站搜索结果',text:'搜索页已加载 '+list.length+' 条',truncated:list.length>20,items:list.slice(0,20)};})()";
+const searchScript="(()=>{const items=new Map();for(const a of document.querySelectorAll('a[href]')){let u;try{u=new URL(a.href);}catch{continue;}if(u.hostname!=='www.bilibili.com'||!u.pathname.startsWith('/video/'))continue;const bvid=u.pathname.slice(7).replace(/\\/$/,'');if(!/^BV[1-9A-HJ-NP-Za-km-z]{10}$/.test(bvid)||items.has(bvid))continue;const card=a.closest('.bili-video-card,.video-list-item')||a.parentElement;const title=(a.getAttribute('title')||card?.querySelector('.bili-video-card__info--tit,.title')?.innerText||a.innerText||'').trim();if(!title)continue;const author=(card?.querySelector('.bili-video-card__info--author,.up-name,.bili-video-card__info--owner')?.innerText||'').trim();items.set(bvid,{bvid,title:title.slice(0,160),author:author.slice(0,80)});}if(!items.size){const e=document.querySelector('.search-empty,.search-empty-hint,.search-result-empty');if(!e||!e.getBoundingClientRect().height||!/没有找到|暂无|无相关|没有相关/.test(e.textContent||''))return null;return {title:'B站搜索结果',text:'页面明确提示没有相关结果',truncated:false,empty:true,items:[]};}const list=Array.from(items.values());return{title:'B站搜索结果',text:'搜索页已加载 '+list.length+' 条',truncated:list.length>20,items:list.slice(0,20)};})()";
 const commentsScript="(()=>{const host=document.querySelector('bili-comments'),root=host?.shadowRoot||document.querySelector('#comment');if(!root)return null;const parts=[];let ready=false;const walk=n=>{if(n.nodeType===1&&(['STYLE','SCRIPT','TEMPLATE','NOSCRIPT','SVG'].includes(n.tagName)||n.hidden))return;const start=parts.length;if(n.nodeType===3&&n.textContent.trim())parts.push(n.textContent.trim());for(const c of n.childNodes||[])walk(c);if(n.shadowRoot)walk(n.shadowRoot);if(n.nodeType===1&&n.matches('bili-comment-thread-renderer,.reply-item,.list-item')&&parts.length>start)ready=true;};walk(root);const text=parts.join('\\n');if(!ready||!text.trim())return null;return {title:(document.querySelector('h1')?.innerText||document.title).slice(0,300),text:text.slice(0,5000),truncated:text.length>5000};})()";
 function evaluated(raw:unknown):unknown{const value=z.object({ok:z.literal(true),value:z.string()}).parse(raw);return JSON.parse(value.value) as unknown;}
-export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:string,call:BrowserToolCall,signal:AbortSignal,clock:BrowserReadinessClock=readinessClock):Promise<BiliBrowserResult>{
+export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:string,call:BrowserToolCall,signal:AbortSignal,clock:BrowserReadinessClock=readinessClock,session?:BiliBrowserSession):Promise<BiliBrowserResult>{
   const input=BiliBrowserRequestSchema.parse(request);z.string().regex(/^[1-9]\d{0,19}$/).parse(expectedUid);signal.throwIfAborted();const url=input.section==='search'?`https://search.bilibili.com/all?keyword=${encodeURIComponent(input.keyword!)}&order=${input.order??'totalrank'}&page=${input.page??1}`:input.section==='discover'?(input.feed==='popular'?'https://www.bilibili.com/v/popular/all':'https://www.bilibili.com/'):`https://www.bilibili.com/video/${input.bvid??`av${input.aid}`}/`;
-  const opened=z.object({url:z.string(),challenge:z.object({blocked:z.boolean(),kind:z.string().max(40).optional()}).optional()}).parse(await call('dsh_browser_open',{url},signal));
+  let reused=false,currentUrl:string|undefined;
+  if(session?.requestedUrl===url&&session.actualUrl){
+    const current=z.object({url:z.string(),ids:z.array(z.string())}).parse(evaluated(await call('dsh_browser_execute',{script:identityScript},signal)));
+    if(current.ids.some(id=>id!==expectedUid))throw new Error('BILI_BROWSER_ACCOUNT_MISMATCH');
+    if(current.url===session.actualUrl&&current.ids.includes(expectedUid)){reused=true;currentUrl=current.url;}
+  }
+  const opened=z.object({url:z.string(),challenge:z.object({blocked:z.boolean(),kind:z.string().max(40).optional()}).optional()})
+    .parse(reused?{url:currentUrl}:await call('dsh_browser_open',{url},signal));
   let finalUrl=opened.url;
-  const verifyUrl=(value:string)=>{const actual=new URL(value);if(input.section==='search'){if(actual.origin!=='https://search.bilibili.com'||actual.pathname!=='/all')throw new Error('BILI_BROWSER_REDIRECT');finalUrl=value;return;}if(actual.origin!=='https://www.bilibili.com')throw new Error('BILI_BROWSER_REDIRECT');
+  const verifyUrl=(value:string)=>{const actual=new URL(value);if(input.section==='search'){
+    if(actual.origin!=='https://search.bilibili.com'||actual.pathname!=='/all'||actual.searchParams.get('keyword')!==input.keyword
+      ||(actual.searchParams.get('order')??'totalrank')!==(input.order??'totalrank')||Number(actual.searchParams.get('page')??1)!==(input.page??1))throw new Error('BILI_BROWSER_REDIRECT');
+    finalUrl=value;return;}if(actual.origin!=='https://www.bilibili.com')throw new Error('BILI_BROWSER_REDIRECT');
     if(input.section==='discover'){if(actual.pathname!==new URL(url).pathname)throw new Error('BILI_BROWSER_REDIRECT');finalUrl=value;return;}
     if(input.bvid){if(actual.pathname!==`/video/${input.bvid}/`)throw new Error('BILI_BROWSER_REDIRECT');finalUrl=value;return;}
     if(actual.pathname!==`/video/av${input.aid}`&&actual.pathname!==`/video/av${input.aid}/`&&!/^\/video\/BV[1-9A-HJ-NP-Za-km-z]{10}\/?$/.test(actual.pathname))throw new Error('BILI_BROWSER_REDIRECT');
@@ -43,10 +54,10 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
     if(state.ids.some(id=>id!==expectedUid))throw new Error('BILI_BROWSER_ACCOUNT_MISMATCH');
     return state.ids.length?true:null;
   },'BILI_BROWSER_IDENTITY_UNAVAILABLE');
-  const checkReportedChallenge=async()=>{if(!opened.challenge?.blocked)return;try{await waitReady(async()=>{
+  const checkReportedChallenge=async()=>{if(!opened.challenge?.blocked&&!reused)return;try{await waitReady(async()=>{
     const evidence=z.object({normalVideo:z.boolean(),widget:z.boolean(),outsideVerificationText:z.boolean(),contentVerificationText:z.boolean()}).parse(evaluated(await call('dsh_browser_execute',{script:contentChallengeCheck},readySignal)));
     if(evidence.widget||evidence.outsideVerificationText)throw new Error('BILI_BROWSER_CHALLENGE');
-    return evidence.normalVideo&&evidence.contentVerificationText?true:null;
+    return reused||evidence.normalVideo&&evidence.contentVerificationText?true:null;
   },'BILI_BROWSER_CHALLENGE');}catch{signal.throwIfAborted();throw new Error('BILI_BROWSER_CHALLENGE');}};
   await checkReportedChallenge();
   await verify();
@@ -54,8 +65,11 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
   if(input.section==='frames'){
     const points=input.pointsMs!,frames:z.infer<typeof BiliBrowserFrameSchema>[]=[],frameErrors:{positionMs:number;errorCode:string}[]=[];
     const resolved=()=>{const match=/^\/video\/(BV[1-9A-HJ-NP-Za-km-z]{10})\/?$/.exec(new URL(finalUrl).pathname);return match?.[1]??null;};
+    let batchTitle='';
     for(const [index,point] of points.entries()){
-      const remaining=Math.max(0,deadline-1500-clock.now()),budget=Math.max(750,Math.floor(remaining/Math.max(1,points.length-index))),stopAt=clock.now()+budget,pointSignal=AbortSignal.any([readySignal,AbortSignal.timeout(budget)]);
+      const remaining=Math.max(0,deadline-1500-clock.now());
+      if(remaining<=0){frameErrors.push(...points.slice(index).map(positionMs=>({positionMs,errorCode:'BILI_BROWSER_BATCH_TIMEOUT'})));break;}
+      const budget=Math.max(1,Math.floor(remaining/Math.max(1,points.length-index))),stopAt=Math.min(deadline-1500,clock.now()+budget),pointSignal=AbortSignal.any([readySignal,AbortSignal.timeout(budget)]);
       try{
         const value=await waitReady(async()=>{
           const raw=evaluated(await call('dsh_browser_execute',{script:frameScript(point)},pointSignal));if(raw===null)return null;
@@ -64,23 +78,25 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
           if(parsed.url!==finalUrl)throw new Error('BILI_BROWSER_PAGE_CHANGED');
           return parsed;
         },'BILI_BROWSER_POINT_TIMEOUT',stopAt);
-        frames.push(value.frame);
+        frames.push({...value.frame,requestedMs:point});batchTitle||=value.title;
       }catch(error){
-        const code=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_FRAME_UNAVAILABLE';
+        signal.throwIfAborted();const code=pointSignal.aborted?'BILI_BROWSER_POINT_TIMEOUT':error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_FRAME_UNAVAILABLE';
         frameErrors.push({positionMs:point,errorCode:code});
         if(code==='BILI_BROWSER_PAGE_CHANGED')break;
       }
     }
     await verify();await checkReportedChallenge();
-    return BiliBrowserResultSchema.parse({transport:'dsh-browser',accountUid:expectedUid,bvid:input.bvid??resolved(),section:'frames',url,title:'批量采样',text:'已捕获'+frames.length+'帧',truncated:frameErrors.length>0,observedAt:new Date().toISOString(),frames,frameErrors});
+    if(session){session.requestedUrl=url;session.actualUrl=finalUrl;}
+    return BiliBrowserResultSchema.parse({transport:'dsh-browser',accountUid:expectedUid,bvid:input.bvid??resolved(),section:'frames',url,title:batchTitle||input.bvid||'批量采样',text:'已捕获'+frames.length+'帧',reused,truncated:frameErrors.length>0,observedAt:new Date().toISOString(),frames,frameErrors});
   }
   const content=await waitReady(async()=>{
     const value=evaluated(await call('dsh_browser_execute',{script:input.section==='comments'?commentsScript:input.section==='search'?searchScript:input.section==='discover'?(input.feed==='popular'?discoverScript:homeDiscoverScript):input.section==='frame'?frameScript(input.positionMs!):videoScript},readySignal));if(value===null)return null;
     const failure=z.object({error:z.enum(['BILI_RESTRICTED_MEDIA','BILI_BROWSER_POSITION_UNAVAILABLE','BILI_BROWSER_FRAME_UNAVAILABLE'])}).safeParse(value);if(failure.success)throw new Error(failure.data.error);
-    const parsed=z.object({title:z.string().max(300),text:z.string().max(5000),truncated:z.boolean(),frame:BiliBrowserFrameSchema.optional(),items:z.array(z.object({bvid:z.string().regex(/^BV[1-9A-HJ-NP-Za-km-z]{10}$/),title:z.string().max(160),author:z.string().max(80).default('')})).max(20).optional()}).parse(value);if(input.section==='frame'&&!parsed.frame)throw new Error('BILI_BROWSER_FRAME_UNAVAILABLE');if(input.section==='search'&&!parsed.items?.length)return null;return(parsed.text.trim()||input.section==='search')?parsed:null;
+    const parsed=z.object({title:z.string().max(300),text:z.string().max(5000),truncated:z.boolean(),empty:z.boolean().optional(),frame:BiliBrowserFrameSchema.optional(),items:z.array(z.object({bvid:z.string().regex(/^BV[1-9A-HJ-NP-Za-km-z]{10}$/),title:z.string().max(160),author:z.string().max(80).default('')})).max(20).optional()}).parse(value);if(input.section==='frame'&&!parsed.frame)throw new Error('BILI_BROWSER_FRAME_UNAVAILABLE');if(input.section==='search'&&!parsed.items?.length&&parsed.empty!==true)return null;return(parsed.text.trim()||input.section==='search')?parsed:null;
   },'BILI_BROWSER_CONTENT_UNAVAILABLE');
   await verify();
   await checkReportedChallenge();
+  if(session){session.requestedUrl=url;session.actualUrl=finalUrl;}
   const resolvedBvid=()=>{const match=/^\/video\/(BV[1-9A-HJ-NP-Za-km-z]{10})\/?$/.exec(new URL(finalUrl).pathname);return match?.[1]??null;};
-  return BiliBrowserResultSchema.parse({transport:'dsh-browser',accountUid:expectedUid,bvid:input.bvid??resolvedBvid(),section:input.section,...(input.section==='discover'?{feed:input.feed??'home'}:{}),url,title:redactContent(content.title).value,text:redactContent(content.text).value,truncated:content.truncated,observedAt:new Date().toISOString(),...(content.frame?{frame:content.frame}:{}),...(input.section==='search'?{keyword:input.keyword,order:input.order??'totalrank',page:input.page??1,items:content.items??[]}:input.section==='discover'&&content.items?{items:content.items}:{})});
+  return BiliBrowserResultSchema.parse({transport:'dsh-browser',accountUid:expectedUid,bvid:input.bvid??resolvedBvid(),section:input.section,...(input.section==='discover'?{feed:input.feed??'home'}:{}),url,reused,title:redactContent(content.title).value,text:redactContent(content.text).value,truncated:content.truncated,observedAt:new Date().toISOString(),...(content.frame?{frame:content.frame}:{}),...(input.section==='search'?{keyword:input.keyword,order:input.order??'totalrank',page:input.page??1,items:content.items??[]}:input.section==='discover'&&content.items?{items:content.items}:{})});
 }

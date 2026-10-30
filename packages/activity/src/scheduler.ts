@@ -93,7 +93,7 @@ export class ActivityScheduler {
       if(event.type==='run.completed'&&plan.purpose==='maintenance'&&plan.maintenanceId&&this.memory?.inspect(plan.maintenanceId)?.state!=='completed')this.store.block(plan.id,'MEMORY_MAINTENANCE_INCOMPLETE',Date.parse(event.at));
       return;
     }
-    if(event.type!=='run.running'&&event.type!=='evidence.changed'&&event.scope.kind==='task')this.store.event({id:event.id,type:'task-settled',key:`task:${event.scope.taskId}`,
+    if(event.type!=='run.running'&&event.type!=='run.continued'&&event.type!=='evidence.changed'&&event.scope.kind==='task')this.store.event({id:event.id,type:'task-settled',key:`task:${event.scope.taskId}`,
       watermark:`${event.runId}:${event.type}`,occurredAt:event.at,origin:event.motivation.kind==='maintenance'?'maintenance':event.origin.kind==='wake'&&event.origin.producerId==='activity'?'activity':'primary',causedBy:event.runId});
   }
   notify(event:ActivityDomainEvent){return this.store.event(event);}

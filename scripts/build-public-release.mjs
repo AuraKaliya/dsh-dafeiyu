@@ -2,6 +2,7 @@ import {existsSync,lstatSync,readdirSync,readFileSync,writeFileSync,mkdirSync,co
 import {dirname,join,resolve,relative,sep} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomUUID,createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 
 const repository=resolve(fileURLToPath(new URL('..',import.meta.url)));
 const json=file=>JSON.parse(readFileSync(file,'utf8'));
@@ -65,7 +66,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   const manifest={name:'dsh-dafeiyu',version:plugin.version,type:'module',description:plugin.description,license:'MIT',
     main:'./runtime/plugin/lib/index.js',types:'./runtime/plugin/lib/index.d.ts',
     exports:{'.':{types:'./runtime/plugin/lib/index.d.ts',default:'./runtime/plugin/lib/index.js'},'./settings':'./runtime/plugin/lib/settings.js','./installation':'./runtime/plugin/lib/installation.js','./client':'./client.js','./package.json':'./package.json'},
-    bin:{dafeiyu:'./bin/dafeiyu.mjs'},files:['client.js','runtime','bin','examples','docs','cordis.patch.yml','README.md','LICENSE','NOTICE'],
+    bin:{dafeiyu:'./bin/dafeiyu.mjs'},files:['client.js','runtime','bin','examples','docs','release.json','cordis.patch.yml','README.md','LICENSE','NOTICE'],
     engines:{node:'>=24.13.0 <25',dsh:'>=0.2.1-rc.2 <0.3.0'},dsh:{...plugin.dsh,bundle:{patch:'./cordis.patch.yml'}},
     repository:{type:'git',url:'https://github.com/AuraKaliya/dsh-dafeiyu.git'},homepage:'https://github.com/AuraKaliya/dsh-dafeiyu#readme',
     keywords:['dsh','deepseek-harness','agent','memory','qq','bilibili'],dependencies,imports,dafeiyuPackages:versions};
@@ -87,12 +88,17 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     put(destination,'source/package.json',JSON.stringify(development,null,2)+'\n');
     for(const file of ['package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/build.mjs','scripts/generate-management.mjs','scripts/preview-management.mjs','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
     for(const file of files(join(repository,'scripts/testing')))put(destination,'source/'+portable(relative(repository,file)),readFileSync(file));
+    for(const file of ['repair-dsh-profile.mjs','repair-dsh-profile.d.mts'])put(destination,'source/scripts/'+file,readFileSync(join(repository,'scripts',file)));
     const selected=['management.test.ts','management-client.test.ts','activity-rounds.test.ts','activity-idle.test.ts','context-snapshots.test.ts','current-api.test.ts','current-storage.test.ts','autobiography.test.ts','plugin-startup.test.ts','test-temp.ts','smoke/host.test.ts','smoke/onebot.test.ts','tooling/test-selection.test.ts','tooling/test-storage.test.ts'];
     const visited=new Set();function testFile(path){if(visited.has(path))return;visited.add(path);const bytes=readFileSync(join(repository,'tests',path),'utf8');put(destination,'source/tests/'+path,bytes);
       for(const match of bytes.matchAll(/(?:from\s*|import\()\s*['"](\.\/[^'"]+)['"]/g)){const dependency=portable(join(dirname(path),match[1])).replace(/\.js$/,'.ts');if(existsSync(join(repository,'tests',dependency)))testFile(dependency);}}
+    selected.push('bili-reading-integration.test.ts','bili-reading-delivery.test.ts','bili-media-service.test.ts','bili-migration.test.ts','installation-migration.test.ts','segment-handoff-store.test.ts','native-reading-runtime.test.ts','bili-browser-search.test.ts','bili-browser-frames.test.ts','tooling/profile-repair.test.ts');
     selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }
+  let revision=null;try{revision=execFileSync('git',['rev-parse','HEAD'],{cwd:repository,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']}).trim();}catch{/* A source archive may have no Git metadata. */}
+  const contentHash=hash(JSON.stringify(files(destination).map(file=>[portable(relative(destination,file)),hash(readFileSync(file))]).sort((a,b)=>a[0].localeCompare(b[0]))));
+  put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:5,runtime:2}},null,2)+'\n');
   const inventory=files(destination).map(file=>({path:portable(relative(destination,file)),bytes:lstatSync(file).size,sha256:hash(readFileSync(file))}));
   return {directory:destination,version:plugin.version,files:inventory.length,bytes:inventory.reduce((sum,file)=>sum+file.bytes,0),inventory};
 }

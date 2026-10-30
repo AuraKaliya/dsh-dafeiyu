@@ -1,0 +1,41 @@
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync,mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { matchesSchema } from '@dafeiyu/journal';
+import { ownerAlive } from '@dafeiyu/journal/owner-identity';
+import { createStorageSchema } from './storage-schema.js';
+import { RUNTIME_APPLICATION_ID,RUNTIME_SCHEMA_VERSION,runtimeHash } from './runtime-store.js';
+import type { RuntimeIdentity } from './runtime-store.js';
+
+/** v2 records the continued-state and atomic-handoff semantics; SQL layout is unchanged. */
+export function inspectRuntimeMigration(file:string,identity:RuntimeIdentity){
+  if(!existsSync(file))return {state:'missing' as const,version:0,identityMatches:false,integrity:false,activeOwner:false};
+  const db=new DatabaseSync(file,{readOnly:true});try{
+    const version=Number(db.prepare('PRAGMA user_version').get()?.user_version),app=Number(db.prepare('PRAGMA application_id').get()?.application_id);
+    const integrity=db.prepare('PRAGMA integrity_check').get()?.integrity_check==='ok';
+    const known=app===RUNTIME_APPLICATION_ID&&[1,RUNTIME_SCHEMA_VERSION].includes(version)&&matchesSchema(db,createStorageSchema);
+    let identityMatches=false,activeOwner=false;
+    if(known){const row=db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();identityMatches=!!row&&runtimeHash(JSON.parse(String(row.body)))===runtimeHash(identity);
+      const owner=db.prepare('SELECT pid,nonce FROM runtime_ownership WHERE singleton=1').get();activeOwner=!!owner&&ownerAlive(Number(owner.pid),{nonce:String(owner.nonce)});}
+    return {state:!known?'unsupported' as const:version===RUNTIME_SCHEMA_VERSION?'current' as const:'upgradable' as const,version,integrity,identityMatches,activeOwner};
+  }finally{db.close();}
+}
+export function migrateRuntimeStorage(file:string,identity:RuntimeIdentity,backup:string){
+  const before=inspectRuntimeMigration(file,identity);
+  if(before.state==='missing')return {migrated:false,version:0,backup:null};
+  if(!before.integrity||before.state==='unsupported')throw new Error('RUNTIME_MIGRATION_UNSUPPORTED');
+  if(!before.identityMatches)throw new Error('RUNTIME_IDENTITY_MISMATCH');
+  if(before.activeOwner)throw new Error('RUNTIME_ALREADY_OWNED');
+  if(before.state==='current')return {migrated:false,version:before.version,backup:null};
+  if(existsSync(backup))throw new Error('RUNTIME_BACKUP_EXISTS');mkdirSync(dirname(backup),{recursive:true});
+  const db=new DatabaseSync(file);try{
+    db.prepare('VACUUM INTO ?').run(backup);
+    const copied=inspectRuntimeMigration(backup,identity);if(!copied.integrity||!copied.identityMatches)throw new Error('RUNTIME_BACKUP_INVALID');
+    db.exec('BEGIN IMMEDIATE');try{
+      const current=inspectRuntimeMigration(file,identity);if(current.activeOwner||!current.identityMatches||current.version!==before.version)throw new Error('RUNTIME_MIGRATION_CHANGED');
+      db.exec(`PRAGMA user_version=${RUNTIME_SCHEMA_VERSION};COMMIT;`);
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }finally{db.close();}
+  const after=inspectRuntimeMigration(file,identity);if(after.state!=='current'||!after.integrity||!after.identityMatches)throw new Error('RUNTIME_MIGRATION_VERIFY_FAILED');
+  return {migrated:true,version:after.version,backup};
+}
