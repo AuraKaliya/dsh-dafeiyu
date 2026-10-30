@@ -47,6 +47,7 @@ export function imageSetGroupKey(raw:unknown):string {
   const frame=z.object({durationMs:z.number().optional()}).safeParse(data.sourceFrame);
   return mediaHash({origin:data.origin??null,kind:data.kind??null,mime:data.mimeHint??null,duration:frame.success?frame.data.durationMs??null:null,rangeReadable:data.rangeReadable??false});
 }
+export const VISION_ANALYSIS_VERSION='1' as const;
 export class MediaService extends Service implements MediaPort {
   pendingEvents(){return pendingMediaEvents(this.config.dataDir);}
 
@@ -121,7 +122,7 @@ export class MediaService extends Service implements MediaPort {
     const resolved=assets.map(asset=>this.store.sourceForAsset(asset.id)),description=resolved[0]!.description;
     if(new Set(resolved.map(source=>imageSetGroupKey(source.description))).size>1)throw new Error('MEDIA_IMAGE_SET_MIXED');
     const {provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
-    const fingerprint={input,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
+    const fingerprint={input,assets:assets.map(asset=>asset.sha256),vision:VISION_ANALYSIS_VERSION,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
     if(prior)return this.observed(context,access,this.store.exposure(access,prior));
     const jobId=randomUUID();this.store.beginJob(access,jobId,fingerprint);const leases:string[]=[];const signal=AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)]);
     try{

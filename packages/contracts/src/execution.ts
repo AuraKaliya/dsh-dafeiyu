@@ -77,6 +77,12 @@ export interface ExtensionHandle {
   dispose():void;
 }
 
+export const ExecutionOutcomeSchema=z.discriminatedUnion('kind',[
+  z.strictObject({kind:z.literal('final')}),
+  z.strictObject({kind:z.literal('wait'),reason:z.string().min(1).max(100)}),
+  z.strictObject({kind:z.literal('segment-yield'),checkpointId:z.uuid(),reason:z.string().min(1).max(200)}),
+]);
+export type ExecutionOutcome=z.infer<typeof ExecutionOutcomeSchema>;
 export const ToolStageSchema=z.enum(['general','bili-reading']);
 export type ToolStage=z.infer<typeof ToolStageSchema>;
 export const ExtensionMetadataSchema = z.strictObject({ protocolVersion: z.literal(API_VERSION), id: ExtensionIdSchema,
