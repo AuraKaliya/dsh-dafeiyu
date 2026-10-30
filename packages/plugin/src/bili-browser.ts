@@ -33,10 +33,10 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
   if(opened.challenge?.blocked&&opened.challenge.kind!=='generic')throw new Error('BILI_BROWSER_CHALLENGE');
   // One shared budget after navigation. Poll only the existing DOM, never reload or retry an API request.
   const deadline=clock.now()+readinessMs,readySignal=AbortSignal.any([signal,AbortSignal.timeout(readinessMs)]);
-  const waitReady=async<T>(read:()=>Promise<T|null>,code:string):Promise<T>=>{
-    try{for(;;){signal.throwIfAborted();readySignal.throwIfAborted();if(clock.now()>=deadline)throw new Error(code);
-      const value=await read();signal.throwIfAborted();readySignal.throwIfAborted();if(clock.now()>=deadline)throw new Error(code);
-      if(value!==null)return value;await clock.wait(Math.min(pollMs,deadline-clock.now()),readySignal);
+  const waitReady=async<T>(read:()=>Promise<T|null>,code:string,stopAt:number=deadline):Promise<T>=>{
+    try{for(;;){signal.throwIfAborted();readySignal.throwIfAborted();if(clock.now()>=stopAt)throw new Error(code);
+      const value=await read();signal.throwIfAborted();readySignal.throwIfAborted();if(clock.now()>=stopAt)throw new Error(code);
+      if(value!==null)return value;await clock.wait(Math.max(1,Math.min(pollMs,stopAt-clock.now())),readySignal);
     }}catch(error){signal.throwIfAborted();if(readySignal.aborted)throw new Error(code);throw error;}
   };
   const verify=()=>waitReady(async()=>{const state=z.object({url:z.string(),ids:z.array(z.string().regex(/^[1-9]\d{0,19}$/)).max(20)}).parse(evaluated(await call('dsh_browser_execute',{script:identityScript},readySignal)));verifyUrl(state.url);
@@ -54,15 +54,16 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
   if(input.section==='frames'){
     const points=input.pointsMs!,frames:z.infer<typeof BiliBrowserFrameSchema>[]=[],frameErrors:{positionMs:number;errorCode:string}[]=[];
     const resolved=()=>{const match=/^\/video\/(BV[1-9A-HJ-NP-Za-km-z]{10})\/?$/.exec(new URL(finalUrl).pathname);return match?.[1]??null;};
-    for(const point of points){
+    for(const [index,point] of points.entries()){
+      const remaining=Math.max(0,deadline-1500-clock.now()),budget=Math.max(750,Math.floor(remaining/Math.max(1,points.length-index))),stopAt=clock.now()+budget,pointSignal=AbortSignal.any([readySignal,AbortSignal.timeout(budget)]);
       try{
         const value=await waitReady(async()=>{
-          const raw=evaluated(await call('dsh_browser_execute',{script:frameScript(point)},readySignal));
+          const raw=evaluated(await call('dsh_browser_execute',{script:frameScript(point)},pointSignal));if(raw===null)return null;
           const failure=z.object({error:z.enum(['BILI_RESTRICTED_MEDIA','BILI_BROWSER_POSITION_UNAVAILABLE','BILI_BROWSER_FRAME_UNAVAILABLE'])}).safeParse(raw);if(failure.success)throw new Error(failure.data.error);
           const parsed=z.object({url:z.string(),title:z.string().max(300),text:z.string().max(5000),truncated:z.boolean(),frame:BiliBrowserFrameSchema}).parse(raw);
           if(parsed.url!==finalUrl)throw new Error('BILI_BROWSER_PAGE_CHANGED');
           return parsed;
-        },'BILI_BROWSER_CONTENT_UNAVAILABLE');
+        },'BILI_BROWSER_POINT_TIMEOUT',stopAt);
         frames.push(value.frame);
       }catch(error){
         const code=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_FRAME_UNAVAILABLE';

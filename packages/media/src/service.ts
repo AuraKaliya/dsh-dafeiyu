@@ -110,11 +110,16 @@ export class MediaService extends Service implements MediaPort {
     }finally{cancel.abort();if(broker)await broker.close();if(lease)this.store.releaseLease(lease,'process');}
   }
   private async readImages(context:ExecutionContext,owner:string,input:Input){
-    const assets=input.assets??[];
-    if(!assets.length)throw new Error('MEDIA_IMAGES_REQUIRED');
+    const declared=input.sources??[];
+    if(!(input.assets?.length||declared.length))throw new Error('MEDIA_IMAGES_REQUIRED');
     if(!this.config.vision)throw new Error('MEDIA_VISION_NOT_CONFIGURED');
-    const sources=assets.map(asset=>this.store.sourceForAsset(asset.id)),description=sources[0]!.description;
-    if(new Set(sources.map(source=>imageSetGroupKey(source.description))).size>1)throw new Error('MEDIA_IMAGE_SET_MIXED');
+    let assets=input.assets??[];
+    if(declared.length){
+      assets=[];
+      for(const [index,ref] of declared.entries())assets.push(await this.acquireWithin(context,owner,{requestId:'images:'+mediaHash([input.requestId,index]),source:ref},AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)])));
+    }
+    const resolved=assets.map(asset=>this.store.sourceForAsset(asset.id)),description=resolved[0]!.description;
+    if(new Set(resolved.map(source=>imageSetGroupKey(source.description))).size>1)throw new Error('MEDIA_IMAGE_SET_MIXED');
     const {provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
     const fingerprint={input,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
     if(prior)return this.observed(context,access,this.store.exposure(access,prior));

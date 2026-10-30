@@ -48,3 +48,12 @@ test('frames from one batch group by provenance, not by their per-frame identity
   const otherOrigin = imageSetGroupKey({ ...base, origin: { ...origin, key: 'page:2' }, ref: { provider: 'bilibili', key: 'frame:3' } });
   assert.notEqual(first, otherOrigin);
 });
+
+test('image sets accept either assets or sources, never both', () => {
+  const source = { provider: 'bilibili', key: 'frame:1' };
+  const bySource = MediaReadSchema.parse({ requestId: randomUUID(), mode: 'images', sources: [source] });
+  assert.equal(bySource.sources?.length, 1);
+  rejects({ requestId: randomUUID(), mode: 'images', assets: [asset()], sources: [source] }, '');
+  rejects({ requestId: randomUUID(), mode: 'images' }, '');
+  rejects({ requestId: randomUUID(), mode: 'image', sources: [source] }, '');
+});

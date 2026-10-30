@@ -58,3 +58,19 @@ test('a page change stops reuse and reports the remaining points as failures', a
   assert.ok((value.frames?.length ?? 0) >= 1);
   assert.ok(value.frameErrors?.some(error => error.errorCode === 'BILI_BROWSER_PAGE_CHANGED'));
 });
+
+test('a point that never becomes ready times out without discarding earlier frames', async () => {
+  const call: BrowserToolCall = async (name, args) => {
+    if (name === 'dsh_browser_open') return { url: canonical, challenge: { blocked: false } };
+    if (isIdentity(args)) return result({ url: canonical, ids: ['42'] });
+    if (isFrame(args)) {
+      const at = Number(/const target=(\d+)\/1000/.exec(String(args.script))?.[1] ?? 0);
+      if (at === 62000) return result(null);
+      return result({ url: canonical, title: '标题', text: '一帧', truncated: true, frame: { dataUrl: jpeg, positionMs: at, durationMs: 180000 } });
+    }
+    return result({ title: '标题', text: '', truncated: false });
+  };
+  const value = await readBiliBrowser(request(), '42', call, new AbortController().signal, clock());
+  assert.deepEqual(value.frames?.map(frame => frame.positionMs), [12000, 112000]);
+  assert.ok(value.frameErrors?.some(error => error.positionMs === 62000 && error.errorCode === 'BILI_BROWSER_POINT_TIMEOUT'));
+});
