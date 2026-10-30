@@ -15,7 +15,7 @@ export const RUNTIME_SCHEMA_VERSION = 1;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
-export const RunStateSchema = z.enum(['accepted','queued','running','waiting','cancelling','completed','failed','cancelled','interrupted']);
+export const RunStateSchema = z.enum(['accepted','queued','running','waiting','cancelling','continued','completed','failed','cancelled','interrupted']);
 export type RunState = z.infer<typeof RunStateSchema>;
 export const RunDefinitionSchema = z.strictObject({ taskId: z.uuid().nullable(), origin: RunOriginSchema, scope: ExecutionScopeSchema,
   intentVersion: z.number().int().nonnegative(), policyId: key, parentRunId: z.uuid().nullable().default(null) }).superRefine((value, ctx) => {
@@ -137,7 +137,7 @@ export class RuntimeStore {
   session(keyValue:string):string {key.parse(keyValue);return this.transaction(()=>{const old=this.db.prepare('SELECT session_id FROM execution_sessions WHERE session_key=?').get(keyValue);if(old)return string(old.session_id);const id=`dafeiyu-task-${randomUUID()}`;this.db.prepare('INSERT INTO execution_sessions VALUES(?,?)').run(keyValue,id);return id;});}
   transition(id:string,expectedVersion:number,to:RunState,error:string|null=null):StoredRun{if(to==='running'||to==='completed')throw new Error('USE_DEDICATED_TRANSITION');return this.transaction(()=>this.transitionInside(id,expectedVersion,to,error));}
   private transitionInside(id:string,version:number,to:RunState,error:string|null=null):StoredRun {
-    const current=this.get(id),allowed:Partial<Record<RunState,readonly RunState[]>>={accepted:['queued','cancelled','failed'],queued:['running','cancelled','failed'],running:['waiting','cancelling','completed','failed','interrupted'],cancelling:['waiting','cancelled','interrupted','failed'],waiting:['cancelled','interrupted']};
+    const current=this.get(id),allowed:Partial<Record<RunState,readonly RunState[]>>={accepted:['queued','cancelled','failed'],queued:['running','cancelled','failed'],running:['waiting','cancelling','continued','completed','failed','interrupted'],cancelling:['waiting','cancelled','interrupted','failed'],waiting:['cancelled','interrupted']};
     if(current.version!==version)throw new Error('VERSION_CONFLICT');if(!allowed[current.state]?.includes(to))throw new Error('RUN_TRANSITION_FORBIDDEN');
     if(error!==null&&!/^[A-Z0-9_]{1,100}$/.test(error))throw new Error('INVALID_ERROR_CODE');
     const pending=this.operations(id).filter(operation=>operation.state==='started');

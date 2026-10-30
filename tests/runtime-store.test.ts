@@ -1,4 +1,4 @@
-import {foundationManifest} from '../packages/core/lib/persona-manifest.js';
+﻿import {foundationManifest} from '../packages/core/lib/persona-manifest.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -85,4 +85,14 @@ test('runtime preserves unknown schema files and canonical digests ignore object
   assert.equal(runtimeHash({b:[1,2],a:true}),runtimeHash({a:true,b:[1,2]}));const file=await path();const store=new RuntimeStore(file,identity,{create:true});store.close();
   const db=new DatabaseSync(file);db.exec('PRAGMA user_version=99');db.close();const before=await readFile(file);
   assert.throws(()=>new RuntimeStore(file,identity),/SCHEMA_UNSUPPORTED/);assert.deepEqual(await readFile(file),before);
+});
+
+test('a running segment can hand off as continued and stays out of final results',async()=>{
+  const file=await path(),store=new RuntimeStore(file,identity,{create:true});
+  try{const live=start(store),continued=store.transition(live.id,live.version,'continued');
+    assert.equal(continued.state,'continued');
+    assert.equal(store.nativeDeliveryCandidates().includes(live.id),false);
+    assert.throws(()=>store.transition(live.id,continued.version,'completed'),/DEDICATED|FORBIDDEN/);
+    assert.equal(store.list(['continued']).some(run=>run.id===live.id),true);
+  }finally{store.close();}
 });

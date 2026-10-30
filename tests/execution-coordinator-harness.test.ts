@@ -40,11 +40,15 @@ function taskRepository() {
   };
 }
 
-async function harness(options: { runExecution?: () => Promise<unknown> } = {}) {
+async function harness(options: { runExecution?: () => Promise<unknown>; blocking?: boolean } = {}) {
   const root = await mkdtemp(join(testTempDir(), 'coordinator-'));
   const store = new RuntimeStore(join(root, 'runtime.sqlite'), { agentId: 'fish', profileId: 'test' }, { create: true });
   const repository = taskRepository();
   const model = { provider: 'deepseek-official', model: 'deepseek-flash' };
+  const memoryPort = options.blocking ? {
+    ready: () => true, acceptIntent: () => undefined, prepareContext: () => [],
+    intent: () => ({ blocking: true, requiredCapabilities: [], next: 'wait' }), validate: () => true,
+  } : undefined;
   const personaRuntime = {
     prepare: (run: { id: string }, snapshot: { version: string }) => ({
       projectionKey: hash('projection'),
@@ -75,7 +79,7 @@ async function harness(options: { runExecution?: () => Promise<unknown> } = {}) 
     scheduler: { acquireHandle: async () => ({ close() {} }) },
     channelDescription: () => '', experience: () => undefined,
     options: { profileId: 'test', createStore: false, policies: [{ id: 'fixture-task', producers: ['fixture'], actions: [], allowLocalWrite: false, sourceRules: [], resources: [] }], maxPendingRuns: 100, maxConcurrentRuns: 2 },
-    repository: () => repository, personas: personaRuntime as never, memory: () => undefined,
+    repository: () => repository, personas: personaRuntime as never, memory: () => memoryPort as never,
     accepting: () => true, assertAccepting: () => undefined,
     persona: () => ({ version: foundation.version, hash: foundation.identity, fileIdentity: hash('file'), text: 'persona' }),
     model, turnTimeoutMs: 60_000,
@@ -116,6 +120,35 @@ test('an executor exception fails the run without leaving it running', async () 
     coordinator.activate();
     const state = await waitTerminal(store, (run as unknown as { id: string }).id);
     assert.equal(state, 'failed');
+  } finally {
+    store.close();
+  }
+});
+
+test('a blocking intent parks the run in waiting with a checkpoint', async () => {
+  const { coordinator, store } = await harness({ blocking: true });
+  try {
+    const producer = coordinator.producer('fixture');
+    const { run } = producer.submitTask({ requestId: randomUUID(), title: '等待确认', goal: '需要主人确认', policyId: 'fixture-task' });
+    coordinator.activate();
+    const id = (run as unknown as { id: string }).id;
+    const state = await waitTerminal(store, id);
+    assert.equal(state, 'waiting');
+  } finally {
+    store.close();
+  }
+});
+
+test('cancelling before the executor starts reaches cancelled without running', async () => {
+  const { coordinator, store } = await harness();
+  try {
+    const producer = coordinator.producer('fixture');
+    const { run } = producer.submitTask({ requestId: randomUUID(), title: '取消', goal: '取消路径', policyId: 'fixture-task' });
+    const id = (run as unknown as { id: string }).id;
+    producer.cancel(run, { requestId: randomUUID(), expectedVersion: store.get(id).version, reason: 'test-cancel' });
+    coordinator.activate();
+    const state = await waitTerminal(store, id);
+    assert.equal(state, 'cancelled');
   } finally {
     store.close();
   }
