@@ -57,7 +57,9 @@ export class DshRuntime {
   }
   registerHarnessSection(name:string){return this.harness.allowSection(name);}
   run(item:PendingMessage,persona:PersonaSnapshot,actions:readonly NativeAction[],signal:AbortSignal,channelDescription='当前接入提供文字消息。',allowEmpty:()=>boolean=()=>false):Promise<RunResult>{
-    return this.runConversation(item,persona,actions,signal,channelDescription,allowEmpty);
+    const work:WorkCallContext={workItemId:item.id,runId:item.id,scopeKey:item.route,class:'interactive',targetVersion:0,stage:'conversation'};
+    const unbind=workContexts.bindSession(item.sessionId,work);
+    return this.runConversation(item,persona,actions,signal,channelDescription,allowEmpty).finally(unbind);
   }
   runFrame(frame:TaskExecutionFrame):ReturnType<NativeRuntime['run']>;
   runFrame(frame:ConversationExecutionFrame):Promise<RunResult>;

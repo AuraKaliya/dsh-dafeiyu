@@ -14,7 +14,7 @@ import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import type { StoredRun } from './runtime-store.js';
 import type { DshRuntime } from './runtime.js';
 import type { CapabilityRegistry,BoundAction } from './capability-registry.js';
-import type { RunScheduler } from './run-scheduler.js';
+import type { RunLeaseControl,RunScheduler } from './run-scheduler.js';
 import type { NativeAction,TaskExecutionFrame } from './execution-frame.js';
 import { TaskReviewSchema,WakeWorkSchema } from '@dafeiyu/contracts';
 import { DshCapabilityChangeSchema } from '@dafeiyu/contracts';
@@ -52,7 +52,7 @@ interface Dependencies {
   progress?:(runId:string)=>Promise<Json>;
   media?:()=>import('@dafeiyu/contracts').MediaPort|undefined;
 }
-interface Active {controller:AbortController;mode:'cancel'|'pause'|'yield'|null}
+interface Active {controller:AbortController;mode:'cancel'|'pause'|null;lease?:RunLeaseControl}
 type Request=z.output<typeof ExecutionRequestSchema>;
 const savedSchema=z.strictObject({kind:z.literal('execution'),input:ExecutionRequestSchema,origin:RunOriginSchema,parentRunId:z.uuid().nullable(),checkpointId:z.uuid().nullable(),motivation:MotivationSchema.optional(),messageSource:MessageTaskSourceSchema.optional()});
 
@@ -565,13 +565,19 @@ export class ExecutionCoordinator {
   }
   recover():void{this.d.store.recover();this.d.store.nativeDeliveries.recover();for(const request of this.d.store.pendingRequests())if(savedSchema.safeParse(request.payload).success)this.accept(request.id);this.flushEvents();}
   activate():void{for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
+  feedbackSourceForRun(runId:string):{inboundId:string;taskId:string;intentVersion:number}|null {
+    try{const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
+      if(!source||!run.definition.taskId)return null;
+      return {inboundId:source.inboundId,taskId:run.definition.taskId,intentVersion:run.definition.intentVersion};}catch{return null;}
+  }
   private status(run:StoredRun){return {id:run.id,taskId:run.definition.taskId,state:run.state,version:run.version,result:run.result,error:run.error,
     checkpoints:this.d.store.checkpoints(run.id),operations:this.d.store.operations(run.id).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))};}
   private control(producer:string,run:StoredRun,raw:unknown,mode:'cancel'|'pause'|'yield'){
     const input=RunControlSchema.parse(raw),request=this.d.store.prepareRequest(`control:${producer}`,input.requestId,{kind:'control',runId:run.id,mode,...input});
     if(request.runId)return this.status(this.d.store.get(request.runId));
     const active=this.active.get(run.id);
-    if((mode==='pause'||mode==='yield')&&!active)throw new Error('RUN_NOT_RUNNING');
+    if(mode==='yield'){if(!active)throw new Error('RUN_NOT_RUNNING');active.lease?.requestYield();return this.status(run);}
+    if(mode==='pause'&&!active)throw new Error('RUN_NOT_RUNNING');
     const next=this.d.store.control(run.id,request.id,input.expectedVersion,active?'cancelling':'cancelled');
     if(active){active.mode=mode;active.controller.abort();}this.flushEvents();return this.status(next);
   }
@@ -590,7 +596,7 @@ export class ExecutionCoordinator {
     const scope=scheduled.definition.scope;
     const releaseLease=await this.d.scheduler.acquireHandle({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
     try{if(!this.d.accepting()||this.failure)return;let run=this.d.store.get(id);if(!['accepted','queued'].includes(run.state))return;
-      const controller=new AbortController(),entry:Active={controller,mode:null};this.active.set(id,entry);let runPersona:RunPersona|undefined,trialInputs:readonly ExecutionInput[]=[];
+      const controller=new AbortController(),entry:Active={controller,mode:null,lease:releaseLease};this.active.set(id,entry);let runPersona:RunPersona|undefined,trialInputs:readonly ExecutionInput[]=[];
       try{
         if(run.state==='accepted')run=this.d.store.transition(id,run.version,'queued');
         const request=this.d.store.request(run.requestKey),saved=savedSchema.parse(request.payload),policy=this.policy(request.producer,run.definition.policyId),repository=this.repository();
@@ -680,8 +686,8 @@ export class ExecutionCoordinator {
         if(waiting)this.d.store.waitWithResult(id,run.version,result.resultRef,memory?.intent(access).blocking?'TASK_OBJECTION_UNRESOLVED':decision?.requiredCapabilities.length?'TASK_CAPABILITY_CHANGE_PENDING':'TASK_WAITING');
         else this.d.store.complete(id,run.version,result.resultRef);
       }catch(error){run=this.d.store.get(id);
-        if((entry.mode==='pause'||entry.mode==='yield')&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
-          this.d.store.checkpoint(id,{kind:entry.mode==='yield'?'yielded':'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
+        if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
+          this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
       }finally{const settledState=this.d.store.get(id).state;if(['completed','waiting','failed','cancelled','interrupted'].includes(settledState))this.d.experience()?.settle(id,settledState);this.evidence.delete(id);{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting','failed'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}

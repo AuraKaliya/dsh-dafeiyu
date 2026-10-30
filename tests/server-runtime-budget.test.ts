@@ -75,6 +75,28 @@ test('cancelCall aborts one call and leaves the shared gate open',async()=>{
   assert.equal(budget.cancelCall(call.callId),false,'a settled call cannot be cancelled again');
 });
 
+test('a timed-out call with unknown usage does not close admission for other sessions',async()=>{
+  const authority=new FictionalBudgetAuthority(true),budget=new SharedModelBudget(authority);
+  const call={...runtimeCall(),deadline:Date.now()+20},permit=await budget.reserve(call,liveSignal());
+  await new Promise(resolve=>setTimeout(resolve,40));
+  assert.deepEqual(await budget.settle({...runtimeBill(call,permit),usage:null}),{unknown:true});
+  const next=runtimeCall(),nextPermit=await budget.reserve(next,liveSignal());
+  await budget.settle(runtimeBill(next,nextPermit));
+  assert.equal(authority.admitted.length,2,'local timeout must not stop unrelated admission');
+});
+
+test('a local timeout aborts only its own call signal and leaves the shared gate open',async()=>{
+  const authority=new FictionalBudgetAuthority(true),budget=new SharedModelBudget(authority);
+  const call=runtimeCall(),permit=await budget.reserve(call,liveSignal());
+  assert.equal(budget.callSignal(call.callId).aborted,false);
+  assert.equal(budget.cancelCall(call.callId),true);
+  assert.equal(budget.callSignal(call.callId).aborted,true);
+  await budget.settle({...runtimeBill(call,permit),usage:null});
+  const next=runtimeCall(),nextPermit=await budget.reserve(next,liveSignal());
+  await budget.settle(runtimeBill(next,nextPermit));
+  assert.equal(authority.admitted.length,2);
+});
+
 test('cancelRun only aborts calls carrying that program-issued run id',async()=>{
   const authority=new FictionalBudgetAuthority(),budget=new SharedModelBudget(authority);
   const call=runtimeCall(),permit=await budget.reserve(call,liveSignal(),{class:'owner-task',workItemId:'task-a',runId:'run-a'});

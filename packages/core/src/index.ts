@@ -362,12 +362,16 @@ export class DafeiyuService extends Service {
         evidence:[{id:'intent',kind:'inference',text:JSON.stringify({requestedPublicFeedback:input,note:'仅公开反馈草稿，不是完成事实。'})},...facts.map((operation,index)=>({id:'P'+index,kind:'reported' as const,text:JSON.stringify({action:operation.action,outcome:operation.outcome}).slice(0,8000)}))]},signal,()=>{guard();persona.guard();},this.config.context.requestMaxBytes-this.config.context.outputReserveBytes);
       guard();persona.guard();const reply:Reply={id:'qq-progress:'+context.operationId,conversation:item.message.conversation,sourceMessageId:item.message.id,text:result.text};
       const now=new Date(),kind=input.kind==='blocked'?'must-know':input.kind==='progress'?'worth-sharing':'progress';
+      const intentVersion=this.runStore?.get(context.runId).definition.intentVersion;
       let feedbackId:string|undefined;
       try{feedbackId=this.feedback.queue({workItemId:context.runId,route:item.route,kind,text:result.text,sourceEventId:context.operationId,
+        sourceMessageId:item.id,taskId:context.taskId!,runId:context.runId,...(intentVersion!==undefined?{intentVersion}:{}),
         ...(kind==='must-know'?{dueAt:now.toISOString()}:{}),...(kind==='worth-sharing'?{expiresAt:new Date(now.getTime()+15*60_000).toISOString()}:{})}).id;}catch{/* Feedback is an audit trail; it must not block an approved public notice. */}
+      const feedbackDeliveryId=feedbackId?`feedback:${feedbackId}:direct`:undefined;
+      if(feedbackId&&feedbackDeliveryId){try{if(this.feedback.claim(feedbackId,item.route,feedbackDeliveryId)===null)return {status:'unknown' as const,code:'FEEDBACK_ALREADY_CLAIMED'};}catch{return {status:'unknown' as const,code:'FEEDBACK_CLAIM_FAILED'};}}
       invoked=true;const receipt=await channel.capability.deliver(reply,signal,()=>{guard();persona.guard();});
       this.conversations.recordNotice(item,{text:result.text,deliveryId:reply.id,status:receipt.status,kind:'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{code:receipt.code})});
-      if(feedbackId&&receipt.status==='sent'){try{this.feedback.markSent(feedbackId,reply.id,item.route);}catch{/* The notice is still recorded above. */}}
+      if(feedbackId&&feedbackDeliveryId){try{this.feedback.settle(feedbackId,item.route,feedbackDeliveryId,receipt.status,receipt.status==='sent'?receipt.receiptId:undefined,receipt.status==='sent'?undefined:receipt.code);}catch{/* The notice is still recorded above. */}}
       return receipt;
       }catch{return {status:invoked?'unknown' as const:'not-sent' as const,code:invoked?'QQ_PROGRESS_RESULT_UNKNOWN':'QQ_PROGRESS_NOT_SENT'};}
     });
@@ -430,7 +434,22 @@ export class DafeiyuService extends Service {
       persona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),media:()=>this.mediaPort,mediaAccess:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),
     });
   }
-  async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;}
+  async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;this.migrateFeedback();}
+  private migrateFeedback():void{
+    for(const record of this.feedback.legacyPending()){
+      const source=this.executions?.feedbackSourceForRun(record.workItemId);
+      try{
+        if(source)this.feedback.attachSource(record.id,record.route,{sourceMessageId:source.inboundId,taskId:source.taskId,runId:record.workItemId,intentVersion:source.intentVersion});
+        else this.feedback.supersede(record.id,record.route);
+      }catch{this.feedback.supersede(record.id,record.route);}
+    }
+    for(const record of this.feedback.unknownRecords()){
+      const seen=this.journal.recentEvents(record.route,'notice.attempt',64).find(event=>
+        event.data.deliveryId===record.deliveryId&&event.data.status==='sent');
+      if(seen&&record.deliveryId)this.feedback.markSent(record.id,record.deliveryId,record.route,
+        typeof seen.data.receiptId==='string'?seen.data.receiptId:undefined);
+    }
+  }
   executionProducer(id:string,options?:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id,options);}
   bindWakeAuthority(provider:WakeAuthorityProvider){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindWake(provider);}
   bindExecutionLifecycle(owner:string,receive:(event:import('@dafeiyu/contracts').ExecutionLifecycle)=>void){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.bindLifecycle(owner,receive);}
@@ -441,23 +460,37 @@ export class DafeiyuService extends Service {
   bindActivityPressure(id:string,read:()=>number){if(this.activityPressureReaders.has(id))throw new Error('DUPLICATE_PROVIDER');this.activityPressureReaders.set(id,read);return ()=>{this.activityPressureReaders.delete(id);};}
   activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:(this.executions?.foregroundPending??0)+this.journal.list(['accepted','processing','reply-ready','sending']).length+[...this.activityPressureReaders.values()].reduce((sum,read)=>sum+Math.max(0,read()),0)};}
   feedbackLedger(){return this.feedback;}
+  private feedbackSourceCurrent(record:import('./feedback-ledger.js').FeedbackRecord):boolean {
+    if(!record.sourceMessageId)return false;
+    try{
+      const item=this.journal.get(record.sourceMessageId);
+      if(item.route!==record.route)return false;
+      if(this.journal.messageRecalled({agentId:this.config.agentId,route:record.route},record.sourceMessageId))return false;
+      if(record.taskId&&record.intentVersion!==undefined){
+        const task=this.repositoryPort?.readState(this.config.agentId,record.taskId);
+        if(!task||task.epoch!==record.intentVersion)return false;
+      }
+      return true;
+    }catch{return false;}
+  }
   async dispatchFeedback(now=Date.now()):Promise<number>{
     if(!this.executions)return 0;
     const dispatcher=this.feedbackDispatcher??=new FeedbackDispatcher({
       ledger:this.feedback,
       target:record=>{
-        const messageId=this.journal.latestMessageId(record.route);
-        if(!messageId)return null;
-        const item=this.journal.get(messageId),channel=this.conversations.deliveryChannel(item);
+        if(!record.sourceMessageId||!this.feedbackSourceCurrent(record))return null;
+        const item=this.journal.get(record.sourceMessageId),channel=this.conversations.deliveryChannel(item);
         return channel?{item,channel}:null;
       },
       deliver:async(record,target,deliveryId)=>{
+        let invoked=false;
         try{
           const signal=AbortSignal.any([this.controller.signal,target.channel.signal,AbortSignal.timeout(30_000)]);
-          const guard=()=>{signal.throwIfAborted();this.assertAccepting();if(this.conversations.deliveryChannel(target.item)?.identity!==target.channel.identity)throw new Error('SOURCE_STALE');};
+          const guard=()=>{signal.throwIfAborted();this.assertAccepting();if(!this.feedbackSourceCurrent(record)||this.conversations.deliveryChannel(target.item)?.identity!==target.channel.identity)throw new Error('SOURCE_STALE');};
           const reply:Reply={id:deliveryId,conversation:target.item.message.conversation,sourceMessageId:target.item.message.id,text:record.text};
+          invoked=true;
           return await this.conversations.enqueueTaskDelivery(record.route,()=>target.channel.capability.deliver(reply,signal,guard));
-        }catch{return {status:'not-sent' as const,code:'FEEDBACK_DISPATCH_FAILED'};}
+        }catch{return invoked?{status:'unknown' as const,code:'FEEDBACK_DELIVERY_UNKNOWN'}:{status:'not-sent' as const,code:'FEEDBACK_DISPATCH_FAILED'};}
       },
       sent:(record,target,result,deliveryId)=>{
         this.conversations.recordNotice(target.item,{text:record.text,deliveryId,status:'sent',kind:record.kind==='must-know'?'failure':'progress',

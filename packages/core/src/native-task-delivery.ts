@@ -77,10 +77,13 @@ export class NativeTaskDelivery {
     try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,noticeId,persona.text,persona.items,
       {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:failed?'向原会话说明这次卡在哪里、已经做到什么、接下来怎么办。':'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,failure,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。不要说任务已完成或结果已发送；不要输出内部错误码。'})}]},signal,()=>{guard();persona.guard();},32000);
       let feedbackId:string|undefined;
-      try{feedbackId=this.host.feedback?.queue({workItemId:runId,route:source.item.route,kind:'must-know',text:result.text,dueAt:new Date().toISOString()}).id;}catch{/* Status delivery remains authoritative if the ledger write fails. */}
+      try{feedbackId=this.host.feedback?.queue({workItemId:runId,route:source.item.route,kind:'must-know',text:result.text,dueAt:new Date().toISOString(),
+        sourceMessageId:source.item.id,taskId:source.taskId,runId,intentVersion:this.host.store.get(runId).definition.intentVersion}).id;}catch{/* Status delivery remains authoritative if the ledger write fails. */}
+      const feedbackDeliveryId=feedbackId?`feedback:${feedbackId}:direct`:undefined;
+      if(feedbackId&&feedbackDeliveryId){try{if(this.host.feedback?.claim(feedbackId,source.item.route,feedbackDeliveryId)===null)return {status:'unknown' as const,code:'FEEDBACK_ALREADY_CLAIMED'};}catch{return {status:'unknown' as const,code:'FEEDBACK_CLAIM_FAILED'};}}
       const receipt=await this.host.enqueue(source.item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'task-status:'+noticeId,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text:result.text},signal,()=>{guard();persona.guard();});});
       this.host.notice({item:source.item,text:result.text,deliveryId:'task-status:'+noticeId,status:receipt.status,kind:failed?'failure':'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{code:receipt.code})});
-      if(feedbackId&&receipt.status==='sent'){try{this.host.feedback?.markSent(feedbackId,'task-status:'+noticeId,source.item.route);}catch{/* The sent notice above is still the continuity record. */}}
+      if(feedbackId&&feedbackDeliveryId){try{this.host.feedback?.settle(feedbackId,source.item.route,feedbackDeliveryId,receipt.status,receipt.status==='sent'?receipt.receiptId:undefined,receipt.status==='sent'?undefined:receipt.code);}catch{/* The sent notice above is still the continuity record. */}}
       invoked=true;this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status});this.host.flush();return z.json().parse(receipt);
     }catch{
       if(invoked)return {status:'unknown',code:'STATUS_EVENT_FAILED'};

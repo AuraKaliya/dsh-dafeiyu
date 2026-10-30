@@ -55,6 +55,11 @@ export class SharedModelBudget {
   }
   /** Global stop: authorization end, unknown settlement, or host shutdown. */
   cancelBudget(code='RUNTIME_BUDGET_CANCELLED'):void { this.cancel(code); }
+  /** Abort signal for the admitted call's local timeout/cancel (not the whole budget). */
+  callSignal(callId:string):AbortSignal {
+    const record=this.calls.get(callId);
+    return record?.abort.signal??AbortSignal.abort(new Error('RUNTIME_CALL_NOT_RESERVED'));
+  }
   /** Abort one admitted call without closing admission for other work. */
   cancelCall(callId:string,code='RUNTIME_CALL_CANCELLED'):boolean {
     const record=this.calls.get(callId);
@@ -139,7 +144,10 @@ export class SharedModelBudget {
       // No admission guard, deadline check or caller abort signal may prevent this accounting operation.
       const result=z.strictObject({unknown:z.boolean()}).parse(await this.authority.settle(settlement));
       const unknown=result.unknown||settlement.usage===null||settlement.usage.inputTokens>record.request.inputBound||settlement.usage.outputTokens>record.request.outputBound;
-      record.state=unknown?'unknown':'settled';if(unknown)this.cancel('RUNTIME_USAGE_UNKNOWN');return {unknown};
+      record.state=unknown?'unknown':'settled';
+      // A locally cancelled call may have unknown usage; the operator chose to keep other
+      // sessions running. A settlement unknown that was not a local cancellation still stops.
+      if(unknown&&!cancelled)this.cancel('RUNTIME_USAGE_UNKNOWN');return {unknown};
     }catch(error){record.state='unknown';this.cancel('RUNTIME_SETTLEMENT_UNCERTAIN');throw new Error(runtimeCode(error));}
     finally{record.cleanup();record.release();}
   }

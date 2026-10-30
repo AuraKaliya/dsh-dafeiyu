@@ -16,8 +16,9 @@ export class FictionalBudgetAuthority implements ModelBudgetAuthority {
   readonly kind='offline-test';readonly authorizationId='fictional-budget-only';readonly route=runtimeRoute;
   readonly admitted:ModelBudgetRequest[]=[];readonly settled:ModelBudgetSettlement[]=[];
   remaining=60000;held=0;unknown=false;failSettlement=false;
+  constructor(private readonly allowLocalUnknown=false){}
   guard(){if(this.unknown)throw new Error('FIXTURE_UNKNOWN_COST');if(this.held)throw new Error('FIXTURE_RESERVED');}
   remainingMs(){return this.remaining;}
   async reserve(input:ModelBudgetRequest,signal:AbortSignal){signal.throwIfAborted();this.guard();this.admitted.push(structuredClone(input));this.held++;return {reservationId:randomUUID(),dispatchPermit:randomUUID()};}
-  async settle(input:ModelBudgetSettlement){if(this.failSettlement)throw new Error('FIXTURE_SETTLEMENT_LOST');this.settled.push(structuredClone(input));this.held--;this.unknown=input.usage===null;return {unknown:this.unknown};}
+  async settle(input:ModelBudgetSettlement){if(this.failSettlement)throw new Error('FIXTURE_SETTLEMENT_LOST');this.settled.push(structuredClone(input));this.held--;this.unknown=input.usage===null&&!this.allowLocalUnknown;return {unknown:this.unknown};}
 }

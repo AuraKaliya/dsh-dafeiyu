@@ -5,13 +5,18 @@ import type {Journal,NewEvent} from '@dafeiyu/journal';
 import {CORE_VERSION} from './version.js';
 
 export type FeedbackKind = 'must-know' | 'worth-sharing' | 'progress';
-export type FeedbackState = 'pending' | 'sending' | 'sent' | 'expired' | 'superseded';
+export type FeedbackState = 'pending' | 'sending' | 'sent' | 'unknown' | 'expired' | 'superseded';
 
 export interface FeedbackInput {
   readonly workItemId: string;
   readonly route: string;
   readonly kind: FeedbackKind;
   readonly text: string;
+  /** Original inbound message; latest message is never a substitute for this. */
+  readonly sourceMessageId?: string;
+  readonly taskId?: string;
+  readonly runId?: string;
+  readonly intentVersion?: number;
   /** For must-know: when silence becomes a broken promise. */
   readonly dueAt?: string;
   /** For worth-sharing/progress: after this the item is no longer worth saying. */
@@ -32,14 +37,20 @@ const inputSchema = z.strictObject({
   route: z.string().min(1).max(2000),
   kind: z.enum(['must-know', 'worth-sharing', 'progress']),
   text: z.string().min(1).max(4000),
+  sourceMessageId: z.string().min(1).max(300).optional(),
+  taskId: z.uuid().optional(),
+  runId: z.uuid().optional(),
+  intentVersion: z.number().int().nonnegative().optional(),
   dueAt: z.iso.datetime({offset: true}).optional(),
   expiresAt: z.iso.datetime({offset: true}).optional(),
   sourceEventId: z.uuid().optional(),
 });
 const queuedSchema = inputSchema.extend({id: z.uuid(), createdAt: z.iso.datetime({offset: true})});
-const terminalSchema = z.strictObject({feedbackId: z.uuid(), deliveryId: z.string().min(1).max(300).optional()});
+const terminalSchema = z.strictObject({feedbackId: z.uuid(), deliveryId: z.string().min(1).max(300).optional(), receiptId: z.string().min(1).max(300).optional()});
 const sendingSchema = z.strictObject({feedbackId: z.uuid(), deliveryId: z.string().min(1).max(300), attempt: z.number().int().positive()});
 const releasedSchema = z.strictObject({feedbackId: z.uuid(), reason: z.string().min(1).max(120), attempt: z.number().int().positive()});
+const unknownSchema = z.strictObject({feedbackId: z.uuid(), deliveryId: z.string().min(1).max(300), code: z.string().min(1).max(120)});
+const sourceSchema = z.strictObject({feedbackId: z.uuid(), sourceMessageId: z.string().min(1).max(300), taskId: z.uuid().optional(), runId: z.uuid().optional(), intentVersion: z.number().int().nonnegative().optional()});
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -55,7 +66,7 @@ export class FeedbackLedger {
     const input = inputSchema.parse({...raw, text: redactContent(raw.text).value.slice(0, 4000)});
     if (!input.text) throw new Error('FEEDBACK_EMPTY');
     if (input.kind === 'must-know' && !input.dueAt) throw new Error('FEEDBACK_DUE_REQUIRED');
-    const existing = this.pending(input.route).find(item =>
+    const existing = this.pending(input.route, this.now(), true).find(item => (item.state === 'pending' || item.state === 'sending') &&
       item.workItemId === input.workItemId && item.kind === input.kind && hash(item.text) === hash(input.text));
     if (existing) return existing;
     const record: FeedbackRecord = {
@@ -67,6 +78,10 @@ export class FeedbackLedger {
       route: input.route,
       kind: input.kind,
       text: input.text,
+      ...(input.sourceMessageId ? {sourceMessageId: input.sourceMessageId} : {}),
+      ...(input.taskId ? {taskId: input.taskId} : {}),
+      ...(input.runId ? {runId: input.runId} : {}),
+      ...(input.intentVersion !== undefined ? {intentVersion: input.intentVersion} : {}),
       ...(input.dueAt ? {dueAt: input.dueAt} : {}),
       ...(input.expiresAt ? {expiresAt: input.expiresAt} : {}),
       ...(input.sourceEventId ? {sourceEventId: input.sourceEventId} : {}),
@@ -83,6 +98,10 @@ export class FeedbackLedger {
         kind: record.kind,
         text: record.text,
         createdAt: record.createdAt,
+        ...(record.sourceMessageId ? {sourceMessageId: record.sourceMessageId} : {}),
+        ...(record.taskId ? {taskId: record.taskId} : {}),
+        ...(record.runId ? {runId: record.runId} : {}),
+        ...(record.intentVersion !== undefined ? {intentVersion: record.intentVersion} : {}),
         ...(record.dueAt ? {dueAt: record.dueAt} : {}),
         ...(record.expiresAt ? {expiresAt: record.expiresAt} : {}),
         ...(record.sourceEventId ? {sourceEventId: record.sourceEventId} : {}),
@@ -107,10 +126,28 @@ export class FeedbackLedger {
           state: 'pending',
           createdAt: data.createdAt,
           attempts: 0,
+          ...(data.sourceMessageId ? {sourceMessageId: data.sourceMessageId} : {}),
+          ...(data.taskId ? {taskId: data.taskId} : {}),
+          ...(data.runId ? {runId: data.runId} : {}),
+          ...(data.intentVersion !== undefined ? {intentVersion: data.intentVersion} : {}),
           ...(data.dueAt ? {dueAt: data.dueAt} : {}),
           ...(data.expiresAt ? {expiresAt: data.expiresAt} : {}),
           ...(data.sourceEventId ? {sourceEventId: data.sourceEventId} : {}),
         });
+        continue;
+      }
+      const source = sourceSchema.safeParse(event.data);
+      if (source.success && event.type === 'feedback.source') {
+        const record = records.get(source.data.feedbackId);
+        if (record) records.set(record.id, {...record, sourceMessageId: source.data.sourceMessageId,
+          ...(source.data.taskId ? {taskId: source.data.taskId} : {}), ...(source.data.runId ? {runId: source.data.runId} : {}),
+          ...(source.data.intentVersion !== undefined ? {intentVersion: source.data.intentVersion} : {})});
+        continue;
+      }
+      const unknown = unknownSchema.safeParse(event.data);
+      if (unknown.success && event.type === 'feedback.unknown') {
+        const record = records.get(unknown.data.feedbackId);
+        if (record) records.set(record.id, {...record, state: 'unknown', deliveryId: unknown.data.deliveryId});
         continue;
       }
       const sending = sendingSchema.safeParse(event.data);
@@ -155,12 +192,44 @@ export class FeedbackLedger {
   }
 
   /** Claim one pending record for delivery. The returned attempt is 1-based. */
-  beginSend(id: string, route: string, deliveryId: string): number {
+  claim(id: string, route: string, deliveryId: string): number | null {
     const record = this.pending(route, this.now(), true).find(item => item.id === id);
-    if (!record || record.state !== 'pending') throw new Error('FEEDBACK_NOT_PENDING');
+    if (!record || record.state !== 'pending') return null;
     const attempt = record.attempts + 1;
     this.append(randomUUID(), {route, traceId: id, operationId: id, type: 'feedback.sending', data: {feedbackId: id, deliveryId, attempt}});
     return attempt;
+  }
+
+  beginSend(id: string, route: string, deliveryId: string): number {
+    const attempt = this.claim(id, route, deliveryId);
+    if (attempt === null) throw new Error('FEEDBACK_NOT_PENDING');
+    return attempt;
+  }
+
+  /** Settle a claimed delivery by its actual outcome. unknown never returns to pending. */
+  settle(id: string, route: string, deliveryId: string, outcome: 'sent' | 'not-sent' | 'unknown', receiptId?: string, code?: string): void {
+    if (outcome === 'sent') this.markSent(id, deliveryId, route, receiptId);
+    else if (outcome === 'not-sent') this.release(id, route, code ?? 'NOT_SENT');
+    else this.markUnknown(id, deliveryId, route, code ?? 'DELIVERY_UNKNOWN');
+  }
+
+  markUnknown(id: string, deliveryId: string, route: string, code: string): void {
+    this.append(randomUUID(), {route, traceId: id, operationId: id, type: 'feedback.unknown',
+      data: {feedbackId: id, deliveryId, code: code.slice(0, 120)}});
+  }
+
+  attachSource(id: string, route: string, source: {sourceMessageId: string; taskId?: string; runId?: string; intentVersion?: number}): void {
+    this.append(randomUUID(), {route, traceId: id, operationId: id, type: 'feedback.source',
+      data: {feedbackId: id, sourceMessageId: source.sourceMessageId, ...(source.taskId ? {taskId: source.taskId} : {}),
+        ...(source.runId ? {runId: source.runId} : {}), ...(source.intentVersion !== undefined ? {intentVersion: source.intentVersion} : {})}});
+  }
+
+  legacyPending(): FeedbackRecord[] {
+    return this.routes().flatMap(route => this.pending(route)).filter(record => !record.sourceMessageId);
+  }
+
+  unknownRecords(): FeedbackRecord[] {
+    return this.routes().flatMap(route => this.pending(route, this.now(), true)).filter(record => record.state === 'unknown');
   }
 
   /** A definite not-sent result returns the obligation to pending for a later attempt. */
@@ -171,8 +240,8 @@ export class FeedbackLedger {
       data: {feedbackId: id, reason: reason.slice(0, 120), attempt: Math.max(1, record.attempts)}});
   }
 
-  markSent(id: string, deliveryId: string, route: string): void {
-    this.terminal(id, route, 'feedback.sent', {feedbackId: id, deliveryId});
+  markSent(id: string, deliveryId: string, route: string, receiptId?: string): void {
+    this.terminal(id, route, 'feedback.sent', {feedbackId: id, deliveryId, ...(receiptId ? {receiptId} : {})});
   }
 
   expire(id: string, route: string): void {

@@ -330,7 +330,9 @@ export class RunScheduler {
 }
 
 export interface RunLeaseControl {
-  /** Release and reacquire at a safe boundary only when interactive work is waiting. */
+  /** Ask for a cooperative step-boundary release (no abort). */
+  requestYield(): void;
+  /** Release and reacquire at a safe boundary only when interactive work is waiting or requested. */
   yieldIfContended(): Promise<void>;
   close(): void;
 }
@@ -342,13 +344,16 @@ export interface RunLeaseControl {
 export class RunLeaseHandle implements RunLeaseControl {
   private release: (() => void) | undefined;
   private closed = false;
+  private requested = false;
   constructor(private readonly scheduler: RunScheduler, private readonly lease: RunLease, release: () => void) {
     this.release = release;
   }
+  requestYield(): void { this.requested = true; }
   async yieldIfContended(): Promise<void> {
     if (this.closed || !this.release) return;
     if (this.lease.class === 'interactive') return;
-    if (this.scheduler.status.foregroundWaiting === 0) return;
+    if (!this.requested && this.scheduler.status.foregroundWaiting === 0) return;
+    this.requested = false;
     this.release();
     this.release = undefined;
     const next = await this.scheduler.acquire(this.lease);
@@ -361,6 +366,7 @@ export class RunLeaseHandle implements RunLeaseControl {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.requested = false;
     const release = this.release;
     this.release = undefined;
     release?.();

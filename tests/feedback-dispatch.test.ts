@@ -39,6 +39,33 @@ test('feedback dispatcher sends due must-know while chat is active and defers wo
   }
 });
 
+test('an unknown delivery is parked for reconciliation and never auto-retried',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'dafeiyu-feedback-unknown-'));
+  const journal=new Journal(join(root,'journal.sqlite'));
+  try{
+    const ledger=new FeedbackLedger(journal,'agent-dispatch',()=>1000);
+    const route='["agent-dispatch","qq","1","group","2"]';
+    const record=ledger.queue({workItemId:'task-1',route,kind:'must-know',text:'结果不明的反馈',dueAt:'1970-01-01T00:00:00.500Z'});
+    let calls=0;
+    const dispatcher=new FeedbackDispatcher({
+      ledger,
+      target:()=>({} as FeedbackTarget),
+      deliver:async()=>{calls++;return {status:'unknown',code:'TRANSPORT_UNKNOWN'};},
+      sent:()=>{},
+      pressure:()=>({interactiveActive:0,interactiveWaiting:0}),
+    });
+    assert.equal(await dispatcher.dispatch(1000),0);
+    assert.equal(calls,1);
+    assert.equal(ledger.pending(route).length,0);
+    assert.equal(ledger.unknownRecords()[0]?.id,record.id);
+    assert.equal(await dispatcher.dispatch(1000),0);
+    assert.equal(calls,1,'unknown must not be auto-retried');
+  }finally{
+    journal.close();
+    rmSync(root,{recursive:true,force:true});
+  }
+});
+
 test('a definite not-sent result returns to pending and stops after three attempts',async()=>{
   const root=mkdtempSync(join(tmpdir(),'dafeiyu-feedback-retry-'));
   const journal=new Journal(join(root,'journal.sqlite'));

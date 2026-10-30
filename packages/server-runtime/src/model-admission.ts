@@ -10,6 +10,16 @@ import { RuntimeIdentitySchema,runtimeCode } from './types.js';
 
 const installed=new WeakSet<object>();
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
+/** Race an actual in-flight read against the per-call cancel signal (timeout or explicit cancel). */
+export function raceCall<T>(operation:Promise<T>,signal:AbortSignal):Promise<T>{
+  signal.throwIfAborted();
+  return new Promise<T>((resolve,reject)=>{
+    const onAbort=()=>reject(new Error('RUNTIME_CALL_CANCELLED'));
+    signal.addEventListener('abort',onAbort,{once:true});
+    operation.then(value=>{signal.removeEventListener('abort',onAbort);resolve(value);},
+      error=>{signal.removeEventListener('abort',onAbort);reject(error);});
+  });
+}
 export interface ParentModelAdmissionOptions {
   readonly profileId:string;
   readonly maximumCallMs:number;
@@ -55,11 +65,14 @@ export function installParentModelAdmission(ctx:Context,budget:SharedModelBudget
       reasoningEffort:effort,requestHash:hash(body),sessionHash:hash(String(request.sessionId??'')),inputBound:route.contextWindow,outputBound:output,requestBytes:bytes,purpose:request.purpose??'task'},request.signal,options.leaseFor?.(leaseRequest));
     let usage:ExecutorUsage|null=null,finish:ExecutorSettlement['finish']='interrupted',error:string|null=null,complete=false,invalid=false;
     let iterator:AsyncIterator<StreamChunk>|undefined,drained=false;
+    const callSignal=budget.callSignal(callId);
     try{
-      request.signal.throwIfAborted();options.guard?.();
+      request.signal.throwIfAborted();callSignal.throwIfAborted();options.guard?.();
       iterator=budget.dispatchStep(callId,()=>next()[Symbol.asyncIterator]());
       while(true){
-        const item=await budget.dispatchStep(callId,()=>iterator!.next());
+        // Race the actual in-flight read, not just a pre-step check: a timeout may fire while
+        // iterator.next() is blocked. The finally block closes the iterator and settles.
+        const item=await raceCall(budget.dispatchStep(callId,()=>iterator!.next()),callSignal);
         if(item.done){drained=true;break;}
         const chunk=item.value;
         if(chunk.type==='usage'){try{usage=normalizeExecutorUsage(chunk.usage);}catch{usage=null;invalid=true;error='RUNTIME_USAGE_INVALID';}}

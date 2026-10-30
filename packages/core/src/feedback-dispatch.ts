@@ -37,16 +37,17 @@ export class FeedbackDispatcher {
       const target=this.ports.target(record);
       if(!target)continue;
       const deliveryId=`feedback:${record.id}:${record.attempts+1}`;
+      let claimed:number|null;
       try{
-        this.ports.ledger.beginSend(record.id,record.route,deliveryId);
+        claimed=this.ports.ledger.claim(record.id,record.route,deliveryId);
       }catch{continue;}
+      if(claimed===null)continue;
       const result=await this.ports.deliver(record,target,deliveryId);
+      this.ports.ledger.settle(record.id,record.route,deliveryId,result.status,
+        result.status==='sent'?result.receiptId:undefined,result.status==='sent'?undefined:result.code);
       if(result.status==='sent'){
-        this.ports.ledger.markSent(record.id,deliveryId,record.route);
         this.ports.sent(record,target,result,deliveryId);
         sent++;
-      }else{
-        this.ports.ledger.release(record.id,record.route,result.status==='not-sent'?result.code:'DELIVERY_UNKNOWN');
       }
     }
     return sent;

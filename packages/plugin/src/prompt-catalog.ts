@@ -8,7 +8,7 @@ export const promptCatalog=[
     "text": "在一段有意义的交流、探索或工作结束或暂停时，用dafeiyu_memory_reflect留下自己的看法、疑问或后续打算。普通闲聊可以简短，未形成判断也如实记录。不把外部工具报告当成自己的偏好；回顾已保存的反思后，需要时用记忆工具修订自我认识。内部经历笔记与面向对方的回答分开。",
     "condition": "QQ 对话",
     "source": "packages/core/src/runtime.ts",
-    "sourceHash": "05cb37acd2b8de536ee211df41651f17df4793a9e3ec09b0814a990010610192"
+    "sourceHash": "6c71b504f55a438cb0a654193a04d6b3c8808609f7d0d645db1e25bb3152d0ee"
   },
   {
     "id": "dafeiyu-execution-rules",

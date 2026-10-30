@@ -37,6 +37,43 @@ test('feedback ledger keeps must-know, worth-sharing and progress separate',asyn
   }
 });
 
+test('claim is exclusive and unknown is parked for reconciliation instead of pending',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'dafeiyu-feedback-claim-'));
+  const journal=new Journal(join(root,'journal.sqlite'));
+  try{
+    const ledger=new FeedbackLedger(journal,'agent-feedback',()=>3_000);
+    const route='["agent-feedback","qq","1","group","2"]';
+    const record=ledger.queue({workItemId:'task-1',route,kind:'must-know',text:'只能发一次的反馈',dueAt:'1970-01-01T00:00:02.500Z',sourceMessageId:'inbox-1',taskId:'00000000-0000-4000-8000-000000000001',runId:'00000000-0000-4000-8000-000000000002',intentVersion:1});
+    assert.equal(ledger.claim(record.id,route,'feedback:direct'),1);
+    assert.equal(ledger.claim(record.id,route,'feedback:dispatcher'),null,'a second sender must not own the same record');
+    ledger.settle(record.id,route,'feedback:direct','unknown',undefined,'TRANSPORT_UNKNOWN');
+    assert.equal(ledger.pending(route).length,0);
+    assert.equal(ledger.unknownRecords()[0]?.id,record.id);
+    assert.equal(ledger.claim(record.id,route,'feedback:retry'),null,'unknown is not claimable again');
+    ledger.settle(record.id,route,'feedback:direct','sent','receipt-1');
+    assert.equal(ledger.unknownRecords().length,0);
+  }finally{
+    journal.close();
+    rmSync(root,{recursive:true,force:true});
+  }
+});
+
+test('legacy pending feedback can be attached to its original source',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'dafeiyu-feedback-source-'));
+  const journal=new Journal(join(root,'journal.sqlite'));
+  try{
+    const ledger=new FeedbackLedger(journal,'agent-feedback',()=>3_000);
+    const route='["agent-feedback","qq","1","group","2"]';
+    const record=ledger.queue({workItemId:'run-1',route,kind:'must-know',text:'旧反馈',dueAt:'1970-01-01T00:00:02.500Z'});
+    assert.equal(ledger.legacyPending()[0]?.id,record.id);
+    ledger.attachSource(record.id,route,{sourceMessageId:'inbox-1',taskId:'00000000-0000-4000-8000-000000000001',runId:'00000000-0000-4000-8000-000000000003',intentVersion:1});
+    assert.equal(ledger.legacyPending().length,0);
+    assert.equal(ledger.pending(route)[0]?.sourceMessageId,'inbox-1');
+  }finally{
+    journal.close();
+    rmSync(root,{recursive:true,force:true});
+  }
+});
 test('must-know feedback requires a due time',()=>{
   const root=mkdtempSync(join(tmpdir(),'dafeiyu-feedback-'));
   const journal=new Journal(join(root,'journal.sqlite'));
