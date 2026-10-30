@@ -63,3 +63,18 @@ test('the backup copy preserves the pre-migration bytes', async () => {
   assert.equal(await digest(f.backup), before);
   assert.notEqual(await digest(f.file), before);
 });
+
+test('a v2 store without a reading table upgrades to v4 with an empty legacy table', async () => {
+  const f = await v3Fixture();
+  const db = new DatabaseSync(f.file);
+  db.exec('DROP TABLE bili_reading; PRAGMA user_version=2;');
+  db.close();
+  assert.equal(inspectBiliMigration(f.file, identity).version, 2);
+  const result = migrateBiliStorage(f.file, identity, { backup: f.backup });
+  assert.equal(result.version, 4);
+  const check = new DatabaseSync(f.file, { readOnly: true });
+  try {
+    assert.equal(check.prepare('SELECT count(*) AS n FROM bili_reading_legacy').get()!.n, 0);
+    assert.equal(check.prepare('PRAGMA user_version').get()!.user_version, 4);
+  } finally { check.close(); }
+});

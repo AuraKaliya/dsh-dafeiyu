@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+﻿import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -63,8 +63,9 @@ export function migrateBiliStorage(file: string, identity: StorageIdentity, opti
     try {
         db.exec('PRAGMA busy_timeout=5000;BEGIN IMMEDIATE');
         try {
+            db.exec('CREATE TABLE IF NOT EXISTS bili_reading_legacy(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);');
             if (before.version === 3) {
-                db.exec('CREATE TABLE bili_reading_legacy(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);');
+            db.exec('INSERT OR REPLACE INTO bili_reading_legacy(bvid,body,updated_at) SELECT bvid,body,updated_at FROM bili_reading;');
                 db.exec('INSERT OR REPLACE INTO bili_reading_legacy(bvid,body,updated_at) SELECT bvid,body,updated_at FROM bili_reading;');
                 db.exec('DROP TABLE bili_reading;');
             }
