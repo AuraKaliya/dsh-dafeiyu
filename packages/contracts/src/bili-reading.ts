@@ -65,6 +65,8 @@ export const BiliCommentItemSchema = z.strictObject({
 });
 
 export const BiliCommentPageSchema = z.strictObject({
+    gap: code.nullable().default(null),
+    text: text(5000).optional(),
     cursor: BiliCommentCursorSchema,
     items: z.array(BiliCommentItemSchema).max(20),
     nextCursor: BiliCommentCursorSchema.nullable(),
