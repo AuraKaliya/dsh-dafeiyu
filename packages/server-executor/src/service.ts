@@ -10,7 +10,7 @@ import { mkdirSync,readFileSync,realpathSync,statSync,writeFileSync } from 'node
 import { isAbsolute,join,relative,resolve,sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { ExternalTaskAuthorizationSchema,PersonaRequestIdSchema,PersonaSourceRefSchema,ResourceProofSchema,ServiceGate } from '@dafeiyu/contracts';
+import { ExternalTaskAuthorizationSchema,PersonaRequestIdSchema,PersonaSourceRefSchema,ResourceProofSchema,ServiceGate,workContexts } from '@dafeiyu/contracts';
 import type { ActionCapability,ActionOutcome,Conversation,ExecutionContext,ExecutionScope,ExternalTaskAuthorization,Json,PersonaSourceRef,ResourceProof,ResourceTargetView } from '@dafeiyu/contracts';
 import { StandingAuthorityFile,StandingAuthoritySchema } from '@dafeiyu/server-bootstrap';
 import type { StandingTaskPermission } from '@dafeiyu/server-bootstrap';
@@ -79,7 +79,7 @@ export class ServerExecutorService extends Service {
   private readonly now:()=>number;
   private readonly run:typeof runExecutorNode;
   private readonly pending=new Set<Promise<unknown>>();
-  private readonly active=new Map<string,{scope:ExecutorTaskScope;controller:AbortController}>();
+  private readonly active=new Map<string,{scope:ExecutorTaskScope;controller:AbortController;unbind?:()=>void}>();
   private closing:Promise<void>|undefined;
   private closed=false;
   private finalCounts:Record<string,number>|undefined;
@@ -126,7 +126,10 @@ export class ServerExecutorService extends Service {
     {runId:authorization.runId,operationId:authorization.operationId,authorizationHash:authority.hash},this.now());
     if(!prepared.created){const job=prepared.job;if(job.receipt?.output){try{return this.pageOutcome(context,job,{section:'metadata',offset:0,limit:1000},true);}catch{return this.jobOutcome(job,true,true);}}
       return this.jobOutcome(job,true);}
-    let job=prepared.job;const controller=new AbortController();this.active.set(job.id,{scope,controller});
+    let job=prepared.job;const controller=new AbortController();
+    const unbind=workContexts.bindJob(job.id,{workItemId:`task:${authorization.taskId}`,runId:authorization.runId,scopeKey:authorization.scope.scopeKey,
+      class:authorization.motivation.kind==='self-exploration'?'background':'owner-task',targetVersion:authorization.intentVersion,stage:'executor'});
+    this.active.set(job.id,{scope,controller,unbind});
     const signal=AbortSignal.any([context.signal,controller.signal]),nonce=randomBytes(32).toString('hex'),nonceHash=digest(Buffer.from(nonce));
     const deadline=this.now()+Math.min(settings.maxExecutionMs,standing?.maxExecutionMs??settings.maxExecutionMs);
     let result:ExecutorNodeRunResult|undefined,profile:ExecutorProfilePermission|undefined;
@@ -151,7 +154,7 @@ export class ServerExecutorService extends Service {
     }catch(error){try{job=this.store.get(job.id,scope);if(!job.receipt){const gap=executorError(error,'EXECUTOR_ADAPTER_FAILED');
         this.store.seal(job.id,scope,job.version,{state:job.state==='prepared'?(signal.aborted?'cancelled':'failed'):'unknown',effects:job.state==='prepared'?'none':'unknown',sessionId:null,exit:null,output:null,gaps:[gap]},this.now());}}
       catch{return {status:'unknown',effects:'unknown',completeness:'unknown',data:{jobId:job.id,state:'unknown'},sources:[],receipts:[],errorCode:'EXECUTOR_RECEIPT_PERSIST_FAILED'};}
-    }finally{this.active.delete(job.id);}
+    }finally{this.active.get(job.id)?.unbind?.();this.active.delete(job.id);}
     job=this.store.get(job.id,scope);
     // A durable receipt survives cancellation. Revoked authority cannot expose a new page or turn it into a successful action.
     try{authority.guard();this.checkMaterials(context,sources);return job.receipt?.output?this.pageOutcome(context,job,{section:'metadata',offset:0,limit:1000},true):this.jobOutcome(job,true);}
@@ -248,7 +251,7 @@ export class ServerExecutorService extends Service {
   recover(){const result=this.store.recover(this.now());this.gate.recovered();return result;}
   activate(){this.gate.activate();}
   quiesce(){this.gate.quiesce();}
-  cancelRunning(){this.quiesce();for(const [id,value]of this.active){this.store.requestCancel(id,value.scope,'EXECUTOR_HOST_STOPPED',this.now());value.controller.abort(new Error('EXECUTOR_HOST_STOPPED'));}}
+  cancelRunning(){this.quiesce();for(const [id,value]of this.active){this.store.requestCancel(id,value.scope,'EXECUTOR_HOST_STOPPED',this.now());value.unbind?.();value.controller.abort(new Error('EXECUTOR_HOST_STOPPED'));}}
   async whenIdle(){while(this.pending.size)await Promise.allSettled([...this.pending]);}
   get lifecycleState(){return this.gate.state;}
   get health(){return {lifecycle:this.gate.state,active:this.active.size,counts:this.finalCounts??this.store.counts(),mode:this.config.mode};}
