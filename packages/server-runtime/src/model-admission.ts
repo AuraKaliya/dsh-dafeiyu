@@ -32,6 +32,12 @@ export async function closeIterator(iterator:AsyncIterator<unknown>|undefined,ti
   closing.catch(()=>{});
   await Promise.race([closing,new Promise<void>(resolve=>{const timer=setTimeout(resolve,Math.max(1,timeoutMs));timer.unref();})]);
 }
+/** Propagate the local call signal into the request consumed by the transport, when mutable. */
+export function bindCallSignal<T extends {signal?:AbortSignal}>(request:T,signal:AbortSignal):AbortSignal{
+  const combined=AbortSignal.any([...(request.signal?[request.signal]:[]),signal]);
+  try{request.signal=combined;}catch{/* A frozen framework request keeps its original signal. */}
+  return combined;
+}
 export interface ParentModelAdmissionOptions {
   readonly profileId:string;
   readonly maximumCallMs:number;
@@ -78,6 +84,7 @@ export function installParentModelAdmission(ctx:Context,budget:SharedModelBudget
     let usage:ExecutorUsage|null=null,finish:ExecutorSettlement['finish']='interrupted',error:string|null=null,complete=false,invalid=false;
     let iterator:AsyncIterator<StreamChunk>|undefined,drained=false;
     const callSignal=budget.callSignal(callId);
+    bindCallSignal(request as {signal?:AbortSignal},callSignal);
     try{
       request.signal.throwIfAborted();callSignal.throwIfAborted();options.guard?.();
       iterator=budget.dispatchStep(callId,()=>next()[Symbol.asyncIterator]());
