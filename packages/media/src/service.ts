@@ -48,7 +48,16 @@ export function imageSetGroupKey(raw:unknown):string {
   return mediaHash({origin:data.origin??null,kind:data.kind??null,mime:data.mimeHint??null,duration:frame.success?frame.data.durationMs??null:null,rangeReadable:data.rangeReadable??false});
 }
 export const VISION_ANALYSIS_VERSION='1' as const;
-export class MediaService extends Service implements MediaPort {
+
+/** One vision request carries every image with its own requested/actual time, never only the first frame. */
+export function imageAnalysisInput(images:readonly DecodedImage[]){
+  return {images:images.map((image,index)=>({image:index,width:image.width,height:image.height,requestedMs:image.requestedMs,ptsMs:image.ptsMs})),coverage:'only-attached-images' as const};
+}
+/** Observations must cover each image exactly once; duplicates or out-of-range indices are rejected. */
+export function validateImageObservations(observations:readonly {image:number}[],count:number){
+  if(observations.length!==count)throw new Error('MEDIA_ANALYSIS_INVALID');const seen=new Set<number>();
+  for(const observation of observations){if(!Number.isInteger(observation.image)||observation.image<0||observation.image>=count||seen.has(observation.image))throw new Error('MEDIA_ANALYSIS_INVALID');seen.add(observation.image);}
+}export class MediaService extends Service implements MediaPort {
   pendingEvents(){return pendingMediaEvents(this.config.dataDir);}
 
   readonly config:z.output<typeof mediaConfigSchema>;
@@ -137,8 +146,8 @@ export class MediaService extends Service implements MediaPort {
       const lease=this.images.grant(images,access.guard);
       try{
         const route={provider:this.config.vision.provider,model:this.config.vision.model,...(this.config.vision.reasoningEffort?{reasoningEffort:this.config.vision.reasoningEffort}:{})};
-        const result=await this.analysis.run({route,instructions:visionInstructions+'\n'+browserFrameInstructions,input:{images:images.map((i,index)=>({image:index,width:i.width,height:i.height,requestedMs:i.requestedMs,ptsMs:i.ptsMs})),coverage:'only-attached-images',outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:access.guard,parse:value=>visionResult.parse(value)},signal);
-        if(result.observations.length!==images.length)throw new Error('MEDIA_ANALYSIS_INVALID');
+        const result=await this.analysis.run({route,instructions:visionInstructions+'\n'+browserFrameInstructions,input:{...imageAnalysisInput(images),outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:access.guard,parse:value=>visionResult.parse(value)},signal);
+        validateImageObservations(result.observations,images.length);
         const actual=lease.exposure(),coverage={acquiredBytes:assets.reduce((n,asset)=>n+asset.bytes,0),processed:images.map(()=>({kind:'image' as const,unit:'whole-image' as const,start:0,end:1})),exposed:true,gaps:['仅浏览器捕获的原始单帧JPEG，未听音轨，不代表完整视频',...result.gaps],completeness:'partial' as const};
         const text='视觉模型推断（observations仅针对本次图像，未独立核实）：\n'+JSON.stringify({observations:result.observations,frames:images.map(i=>({width:i.width,height:i.height})),gaps:coverage.gaps});
         const exposure=this.store.recordExposure(access,input.requestId,fingerprint,source,{assets,coverage,text,occurredAt:new Date().toISOString(),detail:{mode:input.mode,route,actual}});
@@ -168,7 +177,7 @@ export class MediaService extends Service implements MediaPort {
       const lease=this.images.grant(images,p.access.guard);
       try{const route={provider:this.config.vision.provider,model:this.config.vision.model,...(this.config.vision.reasoningEffort?{reasoningEffort:this.config.vision.reasoningEffort}:{})};
         const browserFrame=p.source.description.ref.provider==='bilibili'&&p.source.description.ref.key.startsWith('frame:');
-        const result=await this.analysis.run({route,instructions:visionInstructions+(browserFrame?'\n'+browserFrameInstructions:''),input:{images:images.map((i,index)=>({image:index,width:i.width,height:i.height,requestedMs:i.requestedMs,ptsMs:i.ptsMs})),coverage:'only-attached-images',outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:p.access.guard,parse:value=>visionResult.parse(value)},p.signal);
+        const result=await this.analysis.run({route,instructions:visionInstructions+(browserFrame?'\n'+browserFrameInstructions:''),input:{...imageAnalysisInput(images),outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:p.access.guard,parse:value=>visionResult.parse(value)},p.signal);
         if(result.observations.length!==images.length||new Set(result.observations.map(o=>o.image)).size!==images.length||result.observations.some(o=>o.image>=images.length))throw new Error('MEDIA_ANALYSIS_INVALID');
         const actual=lease.exposure(),coverage={acquiredBytes:p.broker?.coverage.transferredBytes??p.parent?.bytes??0,processed:images.map(i=>({kind:i.ptsMs===null?'image' as const:'frame' as const,unit:i.ptsMs===null?'whole-image' as const:'milliseconds' as const,start:i.ptsMs??0,end:i.ptsMs??1})),exposed:true,
           gaps:[...(metadata.kind==='video'?['仅采样画面，未听音轨，不代表看完整视频']:images.every(image=>image.mime==='image/jpeg')?['仅浏览器捕获的原始单帧JPEG，未听音轨，不代表完整视频']:['仅归一化首帧；细节可能缩减']),...result.gaps],completeness:'partial' as const};

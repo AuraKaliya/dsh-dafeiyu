@@ -3,7 +3,7 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 
 import { MediaReadSchema } from '../packages/contracts/lib/media.js';
-import { imageSetGroupKey } from '../packages/media/lib/service.js';
+import { imageAnalysisInput, imageSetGroupKey, validateImageObservations } from '../packages/media/lib/service.js';
 
 const asset = (over: Record<string, unknown> = {}) => ({
   schemaVersion: 1 as const, id: randomUUID(), version: 1, kind: 'image' as const,
@@ -56,4 +56,23 @@ test('image sets accept either assets or sources, never both', () => {
   rejects({ requestId: randomUUID(), mode: 'images', assets: [asset()], sources: [source] }, '');
   rejects({ requestId: randomUUID(), mode: 'images' }, '');
   rejects({ requestId: randomUUID(), mode: 'image', sources: [source] }, '');
+});
+
+test('one image-set request carries every frame with its own requested and actual time', () => {
+  const images = [
+    { data: Buffer.alloc(4), width: 8, height: 8, requestedMs: 12000, ptsMs: 12000 },
+    { data: Buffer.alloc(4), width: 8, height: 8, requestedMs: 62000, ptsMs: 62040 },
+    { data: Buffer.alloc(4), width: 8, height: 8, requestedMs: 112000, ptsMs: 112000 },
+  ] as never[];
+  const input = imageAnalysisInput(images);
+  assert.deepEqual(input.images.map(image => image.image), [0, 1, 2]);
+  assert.deepEqual(input.images.map(image => image.requestedMs), [12000, 62000, 112000]);
+  assert.equal(input.coverage, 'only-attached-images');
+});
+
+test('observations must cover each image exactly once', () => {
+  assert.doesNotThrow(() => validateImageObservations([{ image: 0 }, { image: 1 }, { image: 2 }], 3));
+  assert.throws(() => validateImageObservations([{ image: 0 }, { image: 0 }], 2), /MEDIA_ANALYSIS_INVALID/);
+  assert.throws(() => validateImageObservations([{ image: 0 }, { image: 5 }], 2), /MEDIA_ANALYSIS_INVALID/);
+  assert.throws(() => validateImageObservations([{ image: 0 }], 2), /MEDIA_ANALYSIS_INVALID/);
 });
