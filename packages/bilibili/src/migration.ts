@@ -57,7 +57,16 @@ export function migrateBiliStorage(file: string, identity: StorageIdentity, opti
     if (!before.identityMatches) throw new Error('BILI_IDENTITY_MISMATCH');
 
     mkdirSync(dirname(options.backup), { recursive: true });
-    copyFileSync(file, options.backup);
+    if (existsSync(options.backup)) throw new Error('BILI_MIGRATION_BACKUP_EXISTS');
+    // A single-file copy loses committed pages still in the WAL; VACUUM INTO is a consistent snapshot.
+    const snapshot = new DatabaseSync(file, { readOnly: true });
+    try {
+        snapshot.exec(`VACUUM INTO '${options.backup.replace(/'/g, "''")}'`);
+    } finally {
+        snapshot.close();
+    }
+    const backupState = inspectBiliMigration(options.backup, identity);
+    if (backupState.state === 'missing' || backupState.state === 'unsupported' || !backupState.integrity || !backupState.identityMatches || backupState.version !== before.version) throw new Error('BILI_MIGRATION_VERIFY_FAILED');
 
     const db = new DatabaseSync(file);
     try {

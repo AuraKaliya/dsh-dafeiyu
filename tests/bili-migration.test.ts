@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -56,12 +56,28 @@ test('an identity mismatch is rejected before any write', async () => {
   assert.equal(inspectBiliMigration(f.file, identity).version, 3);
 });
 
-test('the backup copy preserves the pre-migration bytes', async () => {
+test('the backup is a consistent pre-migration snapshot', async () => {
   const f = await v3Fixture();
   const before = await digest(f.file);
-  migrateBiliStorage(f.file, identity, { backup: f.backup });
-  assert.equal(await digest(f.backup), before);
+  const result = migrateBiliStorage(f.file, identity, { backup: f.backup });
+  assert.equal(result.backup, f.backup);
+  const backup = inspectBiliMigration(f.backup, identity);
+  assert.equal(backup.version, 3);
+  assert.equal(backup.integrity, true);
+  assert.equal(backup.identityMatches, true);
+  const db = new DatabaseSync(f.backup, { readOnly: true });
+  try { assert.equal(db.prepare('SELECT count(*) AS n FROM bili_reading').get()!.n, 1); } finally { db.close(); }
   assert.notEqual(await digest(f.file), before);
+});
+
+test('committed WAL pages are included in the backup', async () => {
+  const f = await v3Fixture();
+  const db = new DatabaseSync(f.file);
+  db.exec('PRAGMA journal_mode=WAL; UPDATE bili_reading SET updated_at=123456789;');
+  db.close();
+  migrateBiliStorage(f.file, identity, { backup: f.backup });
+  const backup = new DatabaseSync(f.backup, { readOnly: true });
+  try { assert.equal(backup.prepare('SELECT updated_at FROM bili_reading').get()!.updated_at, 123456789); } finally { backup.close(); }
 });
 
 test('a v2 store without a reading table upgrades to v4 with an empty legacy table', async () => {

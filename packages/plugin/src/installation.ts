@@ -69,6 +69,7 @@ export function migrateInstallation(settingsFile:string):InstallationMigration{
   const settings=readInstallationSettings(settingsFile),core=join(settings.dataDir,'core'),file=join(core,'bilibili.sqlite');
   if(!existsSync(file))return {code:'INSTALL_NO_STORE',version:0,backup:null};
   const profile=z.object({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)}).parse(JSON.parse(readFileSync(join(core,'host-profile.json'),'utf8')));
+  const hostFile=join(settings.dataDir,'configuration','host.json');if(existsSync(hostFile)){const prepared=loadHostConfig(hostFile);if(inspectHost(prepared).occupied)throw new Error('HOST_STORE_OWNED');}
   const backup=join(settings.dataDir,'backups','bilibili-v'+Date.now()+'.sqlite'),result=migrateBiliStorage(file,profile,{backup});
   return result.migrated?{code:'INSTALL_MIGRATED',version:result.version,backup:result.backup??backup}:{code:'INSTALL_CURRENT',version:result.version,backup:null};
 }
