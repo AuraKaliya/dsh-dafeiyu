@@ -59,6 +59,7 @@ async function harness(options: { runExecution?: (frame: any) => Promise<unknown
       },
       items: [],
       guard: () => undefined,
+      dispose: () => undefined,
     }),
     access: (run: any, inputs: any, signal: AbortSignal, guard: () => void) => (personaRuntime as any).enrich({
       view: Object.freeze({ runId: run.id, taskId: run.definition.taskId, scope: run.definition.scope, origin: run.definition.origin, signal }),
@@ -177,4 +178,29 @@ test('the declared tool stage reaches the execution frame', async () => {
     await waitTerminal(plain.store, (run as unknown as { id: string }).id);
     assert.equal(frames[1]?.toolStage, 'general');
   } finally { plain.store.close(); }
+});
+
+test('a yielded segment hands off to a child run instead of completing', async () => {
+  let calls = 0;
+  const { coordinator, store } = await harness({
+    runExecution: async (frame: any) => {
+      calls += 1;
+      const resultRef = { sessionId: frame.sessionId, messageSeq: calls, turnEndSeq: calls + 1, textHash: hash('result' + calls) };
+      return calls === 1 ? { text: '', resultRef, segmentYield: { reason: 'hard-limit' } } : { text: 'done', resultRef };
+    },
+  });
+  try {
+    const producer = coordinator.producer('fixture');
+    const { run } = producer.submitTask({ requestId: randomUUID(), title: '长任务', goal: '读完再汇报', policyId: 'fixture-task' });
+    const id = (run as unknown as { id: string }).id;
+    coordinator.activate();
+    assert.equal(await waitTerminal(store, id), 'continued');
+    const parent = store.get(id), child = store.list().find(candidate => candidate.definition.parentRunId === id);
+    assert.ok(child, 'expected a child segment');
+    assert.equal(child!.definition.taskId, parent.definition.taskId);
+    assert.notEqual(child!.snapshot?.sessionId, parent.snapshot?.sessionId);
+    assert.equal(store.nativeDeliveryCandidates().includes(id), false);
+    coordinator.activate();
+    assert.equal(await waitTerminal(store, child!.id), 'completed');
+  } finally { store.close(); }
 });

@@ -591,7 +591,8 @@ export class ExecutionCoordinator {
     const motivation=this.motivation(run).kind;
     return motivation==='explicit-task'||motivation==='mixed'?'owner-task':motivation==='self-exploration'?'background':'autonomy';
   }
-  private async process(id:string):Promise<void>{
+
+  private segmentDepth(run:StoredRun){let depth=0,current:StoredRun|undefined=run;while(current?.definition.parentRunId&&depth<64){depth++;current=this.d.store.get(current.definition.parentRunId);}return depth;}  private async process(id:string):Promise<void>{
     const scheduled=this.d.store.get(id),cls=this.workClass(scheduled);
     const scope=scheduled.definition.scope;
     const releaseLease=await this.d.scheduler.acquireHandle({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
@@ -623,7 +624,7 @@ export class ExecutionCoordinator {
         const access=this.d.personas.access(run,inputs,signal,guard),evidence=this.evidenceFor(run,access);
         memory?.acceptIntent({...access,producer:`producer:${request.producer}`});
         const prior=this.previousContinuity(run,access,persona.version);
-        const sessionId=this.d.store.session(runtimeHash({task:task.id,epoch:task.epoch,authorityVersion,inputHash,registryVersion,policyId:run.definition.policyId,motivation:access.motivation.kind,persona:runPersona.projectionKey,executionHistory:1}));
+        const sessionId=this.d.store.session(runtimeHash({task:task.id,epoch:task.epoch,authorityVersion,inputHash,registryVersion,policyId:run.definition.policyId,motivation:access.motivation.kind,persona:runPersona.projectionKey,executionHistory:1,...(run.definition.parentRunId?{continuationParent:run.definition.parentRunId}:{})}));
         this.d.store.bindInput(id,'task-facts',{goal:task.goal,epoch:task.epoch});
         run=this.d.store.start(id,run.version,{sessionId,personaVersion:persona.version,model:this.d.model,registryVersion,authorityVersion,
           inputs:inputs.map(input=>({id:input.id,version:input.version,hash:runtimeHash([input.contentHash,input.proofHash]),scopeKey:input.scopeKey}))},{...runPersona.manifest,continuityCheckpointId:prior?.id??null});
@@ -674,6 +675,15 @@ export class ExecutionCoordinator {
           audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
           checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
         const result=await withRunUsage(receipt=>this.d.store.bindInput(frame.view.runId,'model-usage:'+receipt.id,receipt),()=>this.d.runtime.runExecution(frame));admittedGuard();
+        const segmentYield=(result as {segmentYield?:{reason:string}}).segmentYield;
+        if(segmentYield){
+          const current=this.d.store.get(id),task=repository.readState(this.d.agentId,current.definition.taskId!);
+          if(task.status==='active'&&task.epoch===current.definition.intentVersion&&this.segmentDepth(current)<8){
+            const checkpointId=this.d.store.checkpoint(id,{kind:'segment',reason:segmentYield.reason}),continued=this.d.store.transition(id,current.version,'continued');
+            this.submit(request.producer,ExecutionRequestSchema.parse({requestId:runtimeHash(['segment',id,checkpointId]),taskId:task.id,expectedVersion:task.version,policyId:current.definition.policyId,...(saved.input.inputRefs?{inputRefs:saved.input.inputRefs}:{})}),{kind:'continuation',parentRunId:id,checkpointId},id,checkpointId,this.motivation(current));
+            this.d.store.appendExecutionEvent(continued.id,'segment.continued',{checkpointId});this.flushEvents();return;
+          }
+        }
         if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);
         this.d.store.bindInput(id,'result-sources',evidence.exposed());this.d.store.bindInput(id,'agent-result',result.resultRef);
         const decisions=this.d.store.operations(id).filter(op=>op.plugin===CAPABILITY_OWNER&&op.action==='dafeiyu_task_outcome'&&op.outcome?.status==='succeeded');

@@ -26,7 +26,7 @@ import { reviewTask } from './task-review.js';
 import {HarnessRuntime} from './harness-runtime.js';
 
 interface OwnedSession {handle:AgentHandle;scope:Context;persona:PersonaSnapshot;context:ContextRuntime;compaction:CompactionRuntime;lastRequest?:GenerateOptions}
-export interface RunResult { readonly text: string; readonly sources: SourceRef[]; readonly resultRef?:import('./runtime-store.js').RunResultRef }
+export interface RunResult { readonly text: string; readonly sources: SourceRef[]; readonly resultRef?:import('./runtime-store.js').RunResultRef; readonly segmentYield?:{readonly reason:string} }
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
   constructor(readonly sources: SourceRef[],readonly code='MODEL_INCOMPLETE') { super('DSH turn failed; consult visible evidence'); }
