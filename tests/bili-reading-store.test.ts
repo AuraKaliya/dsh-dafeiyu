@@ -84,3 +84,17 @@ test('the same save request returns one record version', async () => {
     assert.equal(next.version, 2);
   } finally { f.store.close(); }
 });
+
+test('the reading index stays bounded as a task accumulates videos', async () => {
+  const f = await fixture();
+  try {
+    const suffixes = ['11', '22', '33', '44', '55', '66', '77', '88', '99', 'AA', 'BB', 'CC', 'DD', 'EE', 'FF', 'GG', 'HH', 'JJ', 'KK', 'LL'];
+    for (const [index, suffix] of suffixes.entries()) {
+      f.store.saveReading(f.first, randomUUID(), record({ bvid: 'BV1xNpFedE' + suffix, title: '视频' + index, updatedAt: new Date(Date.now() - index * 1000).toISOString() }));
+    }
+    const summary = f.store.readingSummary(f.first);
+    assert.equal(summary.total, 20);
+    assert.equal(summary.recent.length, 8);
+    assert.ok(JSON.stringify(summary).length < 4096, 'index must stay small: ' + JSON.stringify(summary).length);
+  } finally { f.store.close(); }
+});
