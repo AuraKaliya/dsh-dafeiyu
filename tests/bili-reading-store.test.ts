@@ -71,17 +71,21 @@ test('closed records need a conclusion or a recorded gap', async () => {
   } finally { f.store.close(); }
 });
 
-test('the same save request returns one record version', async () => {
+test('a replayed save returns the original receipt and changed parameters conflict', async () => {
   const f = await fixture();
   try {
     const requestId = randomUUID();
     const first = f.store.saveReading(f.first, requestId, record());
-    const repeat = f.store.saveReading(f.first, requestId, record({ nextStep: '不应写入' }));
+    const repeat = f.store.saveReading(f.first, requestId, record());
     assert.equal(repeat.version, first.version);
-    assert.equal(f.store.reading(f.first, bvid)!.nextStep, '继续读评论区');
+    assert.equal(repeat.conclusion, first.conclusion);
+    assert.throws(() => f.store.saveReading(f.first, requestId, record({ nextStep: '不应写入' })), /BILI_READING_REQUEST_CONFLICT/);
 
     const next = f.store.saveReading(f.first, randomUUID(), record({ nextStep: '看评论' }));
     assert.equal(next.version, 2);
+    const replay = f.store.saveReading(f.first, requestId, record());
+    assert.equal(replay.version, first.version);
+    assert.equal(replay.nextStep, first.nextStep);
   } finally { f.store.close(); }
 });
 

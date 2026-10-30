@@ -71,6 +71,7 @@ export function migrateBiliStorage(file: string, identity: StorageIdentity, opti
             }
             db.exec('CREATE TABLE bili_reading(owner TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(owner,bvid));');
             db.exec('CREATE TABLE bili_reading_receipts(owner TEXT NOT NULL,request_id TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(owner,request_id));');
+            db.exec('CREATE TABLE bili_reading_history(owner TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,fingerprint TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(owner,bvid,version));');
             db.exec(`PRAGMA user_version=${BILI_SCHEMA_VERSION};`);
             db.exec('COMMIT');
         } catch (error) {

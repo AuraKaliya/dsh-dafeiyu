@@ -13,6 +13,14 @@ export interface ReadingFacts {
 
 const frame = z.object({ positionMs: z.number().int().nonnegative(), sourceKey: z.string().max(200).nullable() });
 
+const cursor = z.object({ aid: z.string(), parent: z.string().nullable().optional(), sort: z.enum(['time', 'hot']).optional(), page: z.number().int().min(1).optional(), seen: z.array(z.string()).optional() });
+const framePoint = z.object({ positionMs: z.number().int().nonnegative(), sourceKey: z.string().max(200).nullable(), ok: z.boolean(), errorCode: z.string().nullable().optional() });
+function cursorOf(body: Record<string, z.infer<typeof z.json>>) {
+    const parsed = cursor.safeParse(body.cursor);
+    if (parsed.success) return parsed.data;
+    const legacy = cursor.safeParse({ aid: body.aid, page: body.page, parent: body.parent, sort: body.sort });
+    return legacy.success ? legacy.data : null;
+}
 function value(page: BiliPage): Record<string, z.infer<typeof z.json>> {
     const parsed = z.record(z.string(), z.json()).safeParse(page.data);
     return parsed.success ? parsed.data : {};
@@ -27,7 +35,11 @@ export function readingFacts(pages: readonly BiliPage[], bvid: string): ReadingF
     const video = data.find(entry => entry.page.kind === 'video' && entry.body.bvid === bvid);
     const aid = typeof video?.body.aid === 'string' ? video.body.aid : null;
     const matched = data.filter(entry => entry.body.bvid === bvid);
-    const comments = data.filter(entry => entry.page.kind === 'comments' && aid !== null && entry.body.aid === aid);
+    const comments = data.filter(entry => {
+        if (entry.page.kind !== 'comments') return false;
+        const cursor = cursorOf(entry.body);
+        return aid !== null && cursor?.aid === aid;
+    });
 
     const watched = matched.flatMap(entry => {
         if (entry.page.kind !== 'subtitles') return [];
@@ -36,14 +48,15 @@ export function readingFacts(pages: readonly BiliPage[], bvid: string): ReadingF
         return cid && range.success && range.data.endMs > range.data.startMs ? [{ cid, startMs: range.data.startMs, endMs: range.data.endMs }] : [];
     });
 
-    const cursorSource = comments.at(-1);
-    const cursorPage = cursorSource && typeof cursorSource.body.page === 'number' ? cursorSource.body.page : null;
-    const commentCursor = aid && cursorPage !== null
-        ? { aid, parent: typeof cursorSource!.body.parent === 'string' ? cursorSource!.body.parent : null, sort: 'hot' as const, page: cursorPage, seen: [] }
+    const cursorSource = comments.at(-1), stable = cursorSource ? cursorOf(cursorSource.body) : null;
+    const commentCursor = aid && stable
+        ? { aid, parent: stable.parent ?? null, sort: stable.sort ?? 'hot' as const, page: stable.page ?? 1, seen: stable.seen ?? [] }
         : null;
 
     const frames = matched.flatMap(entry => {
         if (entry.page.kind !== 'browser' && entry.page.kind !== 'media') return [];
+        const points = z.array(framePoint).safeParse(entry.body.points);
+        if (points.success) return points.data.filter(point => point.ok).map(point => ({ positionMs: point.positionMs, sourceKey: point.sourceKey }));
         const capture = z.object({ source: z.object({ key: z.string().max(200) }), positionMs: z.number().int().nonnegative() }).safeParse(entry.page.kind === 'browser' ? entry.body.capture : entry.body);
         return capture.success ? [{ positionMs: capture.data.positionMs, sourceKey: capture.data.source.key }] : [];
     });
