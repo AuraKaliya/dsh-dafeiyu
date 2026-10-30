@@ -172,9 +172,10 @@ export class ActivityScheduler {
     if(automatic){this.timer=setInterval(()=>{void this.tick();},this.store.config.tickMs);void this.tick();}}
   stop(){this.started=false;if(this.timer)clearInterval(this.timer);this.timer=undefined;}
   tick():Promise<void>{if(this.pending)return this.pending;if(!this.started||this.closed||!this.ready()||!this.dependenciesReady()||!this.ctx.dafeiyu.accepting)return Promise.resolve();
-    const work=Promise.resolve().then(()=>{
+    const work=Promise.resolve().then(async()=>{
       if(!this.started||this.closed||!this.ready()||!this.ctx.dafeiyu.accepting)return;
-      const now=this.now();this.importMemory(now);this.controlActive(now);const idleBusy=this.idle.control(now,this.pressure());this.settleRounds(now);if(this.pressure()||idleBusy)return;
+      const now=this.now();try{await this.ctx.dafeiyu.dispatchFeedback?.(now);}catch{/* Feedback dispatch cannot stop activity scheduling. */}
+      this.importMemory(now);this.controlActive(now);const idleBusy=this.idle.control(now,this.pressure());this.settleRounds(now);if(this.pressure()||idleBusy)return;
       this.dispatch(now);
       for(const id of this.store.due(now)){const plan=this.store.get(id);const source=this.source(plan);if(source.state==='pending')continue;
         if(source.state==='stale'){this.store.block(id,source.code??'SOURCE_STALE',now);this.retireOwnedTask(plan);continue;}

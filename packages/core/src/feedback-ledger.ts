@@ -5,7 +5,7 @@ import type {Journal,NewEvent} from '@dafeiyu/journal';
 import {CORE_VERSION} from './version.js';
 
 export type FeedbackKind = 'must-know' | 'worth-sharing' | 'progress';
-export type FeedbackState = 'pending' | 'sent' | 'expired' | 'superseded';
+export type FeedbackState = 'pending' | 'sending' | 'sent' | 'expired' | 'superseded';
 
 export interface FeedbackInput {
   readonly workItemId: string;
@@ -23,6 +23,7 @@ export interface FeedbackRecord extends FeedbackInput {
   readonly id: string;
   readonly state: FeedbackState;
   readonly createdAt: string;
+  readonly attempts: number;
   readonly deliveryId?: string;
 }
 
@@ -37,6 +38,8 @@ const inputSchema = z.strictObject({
 });
 const queuedSchema = inputSchema.extend({id: z.uuid(), createdAt: z.iso.datetime({offset: true})});
 const terminalSchema = z.strictObject({feedbackId: z.uuid(), deliveryId: z.string().min(1).max(300).optional()});
+const sendingSchema = z.strictObject({feedbackId: z.uuid(), deliveryId: z.string().min(1).max(300), attempt: z.number().int().positive()});
+const releasedSchema = z.strictObject({feedbackId: z.uuid(), reason: z.string().min(1).max(120), attempt: z.number().int().positive()});
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -59,6 +62,7 @@ export class FeedbackLedger {
       id: randomUUID(),
       state: 'pending',
       createdAt: new Date(this.now()).toISOString(),
+      attempts: 0,
       workItemId: input.workItemId,
       route: input.route,
       kind: input.kind,
@@ -87,7 +91,7 @@ export class FeedbackLedger {
     return record;
   }
 
-  pending(route: string, at = this.now()): FeedbackRecord[] {
+  pending(route: string, at = this.now(), includeNonPending = false): FeedbackRecord[] {
     const records = new Map<string, FeedbackRecord>();
     for (const event of this.journal.events(route)) {
       if (event.type === 'feedback.queued') {
@@ -102,10 +106,26 @@ export class FeedbackLedger {
           text: data.text,
           state: 'pending',
           createdAt: data.createdAt,
+          attempts: 0,
           ...(data.dueAt ? {dueAt: data.dueAt} : {}),
           ...(data.expiresAt ? {expiresAt: data.expiresAt} : {}),
           ...(data.sourceEventId ? {sourceEventId: data.sourceEventId} : {}),
         });
+        continue;
+      }
+      const sending = sendingSchema.safeParse(event.data);
+      if (sending.success && event.type === 'feedback.sending') {
+        const record = records.get(sending.data.feedbackId);
+        if (record) records.set(record.id, {...record, state: 'sending', deliveryId: sending.data.deliveryId, attempts: Math.max(record.attempts, sending.data.attempt)});
+        continue;
+      }
+      const released = releasedSchema.safeParse(event.data);
+      if (released.success && event.type === 'feedback.released') {
+        const record = records.get(released.data.feedbackId);
+        if (record) {
+          const {deliveryId:_deliveryId, ...rest} = record;
+          records.set(record.id, {...rest, state: 'pending', attempts: Math.max(record.attempts, released.data.attempt)});
+        }
         continue;
       }
       const parsed = terminalSchema.safeParse(event.data);
@@ -116,18 +136,39 @@ export class FeedbackLedger {
       else if (event.type === 'feedback.expired') records.set(record.id, {...record, state: 'expired'});
       else if (event.type === 'feedback.superseded') records.set(record.id, {...record, state: 'superseded'});
     }
-    return [...records.values()]
-      .filter(record => record.state === 'pending')
-      .filter(record => !record.expiresAt || Date.parse(record.expiresAt) > at)
+    const values = [...records.values()].filter(record => !record.expiresAt || Date.parse(record.expiresAt) > at)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    return includeNonPending ? values : values.filter(record => record.state === 'pending');
   }
 
   due(route: string, at = this.now()): FeedbackRecord[] {
     return this.pending(route, at).filter(record => record.kind === 'must-know' && record.dueAt !== undefined && Date.parse(record.dueAt) <= at);
   }
 
+  /** Routes with persisted conversation events; feedback targets are conversation routes. */
+  routes(): string[] {
+    return this.journal.eventRoutes();
+  }
+
   worthSharing(route: string, at = this.now()): FeedbackRecord[] {
     return this.pending(route, at).filter(record => record.kind === 'worth-sharing');
+  }
+
+  /** Claim one pending record for delivery. The returned attempt is 1-based. */
+  beginSend(id: string, route: string, deliveryId: string): number {
+    const record = this.pending(route, this.now(), true).find(item => item.id === id);
+    if (!record || record.state !== 'pending') throw new Error('FEEDBACK_NOT_PENDING');
+    const attempt = record.attempts + 1;
+    this.append(randomUUID(), {route, traceId: id, operationId: id, type: 'feedback.sending', data: {feedbackId: id, deliveryId, attempt}});
+    return attempt;
+  }
+
+  /** A definite not-sent result returns the obligation to pending for a later attempt. */
+  release(id: string, route: string, reason: string): void {
+    const record = this.pending(route, this.now(), true).find(item => item.id === id);
+    if (!record) return;
+    this.append(randomUUID(), {route, traceId: id, operationId: id, type: 'feedback.released',
+      data: {feedbackId: id, reason: reason.slice(0, 120), attempt: Math.max(1, record.attempts)}});
   }
 
   markSent(id: string, deliveryId: string, route: string): void {

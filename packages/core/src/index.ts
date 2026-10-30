@@ -39,6 +39,7 @@ import type { ExecutionOptions } from './execution-coordinator.js';
 import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import { RunScheduler } from './run-scheduler.js';
 import { FeedbackLedger } from './feedback-ledger.js';
+import { FeedbackDispatcher } from './feedback-dispatch.js';
 import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
@@ -216,6 +217,7 @@ export class DafeiyuService extends Service {
   private runStore:RuntimeStore|undefined;
   private scheduler:RunScheduler|undefined;
   private feedback:FeedbackLedger;
+  private feedbackDispatcher:FeedbackDispatcher|undefined;
   private executionRecovered=false;
   private conversationRuns:ConversationRuns|undefined;
 
@@ -439,6 +441,32 @@ export class DafeiyuService extends Service {
   bindActivityPressure(id:string,read:()=>number){if(this.activityPressureReaders.has(id))throw new Error('DUPLICATE_PROVIDER');this.activityPressureReaders.set(id,read);return ()=>{this.activityPressureReaders.delete(id);};}
   activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:(this.executions?.foregroundPending??0)+this.journal.list(['accepted','processing','reply-ready','sending']).length+[...this.activityPressureReaders.values()].reduce((sum,read)=>sum+Math.max(0,read()),0)};}
   feedbackLedger(){return this.feedback;}
+  async dispatchFeedback(now=Date.now()):Promise<number>{
+    if(!this.executions)return 0;
+    const dispatcher=this.feedbackDispatcher??=new FeedbackDispatcher({
+      ledger:this.feedback,
+      target:record=>{
+        const messageId=this.journal.latestMessageId(record.route);
+        if(!messageId)return null;
+        const item=this.journal.get(messageId),channel=this.conversations.deliveryChannel(item);
+        return channel?{item,channel}:null;
+      },
+      deliver:async(record,target,deliveryId)=>{
+        try{
+          const signal=AbortSignal.any([this.controller.signal,target.channel.signal,AbortSignal.timeout(30_000)]);
+          const guard=()=>{signal.throwIfAborted();this.assertAccepting();if(this.conversations.deliveryChannel(target.item)?.identity!==target.channel.identity)throw new Error('SOURCE_STALE');};
+          const reply:Reply={id:deliveryId,conversation:target.item.message.conversation,sourceMessageId:target.item.message.id,text:record.text};
+          return await this.conversations.enqueueTaskDelivery(record.route,()=>target.channel.capability.deliver(reply,signal,guard));
+        }catch{return {status:'not-sent' as const,code:'FEEDBACK_DISPATCH_FAILED'};}
+      },
+      sent:(record,target,result,deliveryId)=>{
+        this.conversations.recordNotice(target.item,{text:record.text,deliveryId,status:'sent',kind:record.kind==='must-know'?'failure':'progress',
+          ...(result.status==='sent'?{receiptId:result.receiptId}:{})});
+      },
+      pressure:()=>({interactiveActive:this.scheduler?.status.interactiveActive??0,interactiveWaiting:this.scheduler?.status.interactiveWaiting??0}),
+    });
+    return dispatcher.dispatch(now);
+  }
   executionAuthority(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authority(context,pluginId);}
   authorizeExternalTask(context:ExecutionContext,pluginId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.authorizeExternalTask(context,pluginId);}
   externalTaskSourceCurrent(authorization:unknown,pluginId:string):boolean{return this.executions?.externalTaskSourceCurrent(authorization,pluginId)??false;}

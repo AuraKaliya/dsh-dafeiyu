@@ -170,6 +170,11 @@ export class Journal {
     return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.type')=? ORDER BY seq DESC LIMIT ?")
       .all(route,type,count).map(row=>({...JSON.parse(text(row.body)),seq:Number(row.seq)}) as EventRecord).reverse();
   }
+  /** Distinct conversation routes with persisted events, for program-side dispatchers. */
+  eventRoutes():string[] {
+    return this.db.prepare("SELECT DISTINCT route FROM events WHERE json_extract(body,'$.visibility.kind')='conversation' ORDER BY route")
+      .all().map(row=>text(row.route));
+  }
   /** Authorization predicates are evaluated inside the SQL query, including persisted visibility. */
   private scopePredicate(): string {
     return "route=? AND json_extract(body,'$.agentId')=? AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.visibility.route')=?";
