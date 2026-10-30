@@ -147,6 +147,7 @@ export class SharedModelBudget {
       record.state=unknown?'unknown':'settled';
       // A locally cancelled call may have unknown usage; the operator chose to keep other
       // sessions running. A settlement unknown that was not a local cancellation still stops.
+      if(unknown&&cancelled)this.authority.acceptLocalUnknown?.('RUNTIME_CALL_CANCELLED');
       if(unknown&&!cancelled)this.cancel('RUNTIME_USAGE_UNKNOWN');return {unknown};
     }catch(error){record.state='unknown';this.cancel('RUNTIME_SETTLEMENT_UNCERTAIN');throw new Error(runtimeCode(error));}
     finally{record.cleanup();record.release();}

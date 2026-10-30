@@ -21,4 +21,5 @@ export class FictionalBudgetAuthority implements ModelBudgetAuthority {
   remainingMs(){return this.remaining;}
   async reserve(input:ModelBudgetRequest,signal:AbortSignal){signal.throwIfAborted();this.guard();this.admitted.push(structuredClone(input));this.held++;return {reservationId:randomUUID(),dispatchPermit:randomUUID()};}
   async settle(input:ModelBudgetSettlement){if(this.failSettlement)throw new Error('FIXTURE_SETTLEMENT_LOST');this.settled.push(structuredClone(input));this.held--;this.unknown=input.usage===null&&!this.allowLocalUnknown;return {unknown:this.unknown};}
+  acceptLocalUnknown(){this.unknown=false;}
 }

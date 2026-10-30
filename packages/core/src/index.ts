@@ -40,6 +40,7 @@ import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import { RunScheduler } from './run-scheduler.js';
 import { FeedbackLedger } from './feedback-ledger.js';
 import { FeedbackDispatcher } from './feedback-dispatch.js';
+import { feedbackSourceCurrent } from './feedback-source.js';
 import { ConversationRuns } from './conversation-run.js';
 import { readFoundation } from './foundation.js';
 import { PersonaRuntime } from './persona-runtime.js';
@@ -443,11 +444,16 @@ export class DafeiyuService extends Service {
         else this.feedback.supersede(record.id,record.route);
       }catch{this.feedback.supersede(record.id,record.route);}
     }
+    this.reconcileFeedback();
+  }
+  private reconcileFeedback():void{
     for(const record of this.feedback.unknownRecords()){
       const seen=this.journal.recentEvents(record.route,'notice.attempt',64).find(event=>
         event.data.deliveryId===record.deliveryId&&event.data.status==='sent');
-      if(seen&&record.deliveryId)this.feedback.markSent(record.id,record.deliveryId,record.route,
-        typeof seen.data.receiptId==='string'?seen.data.receiptId:undefined);
+      if(seen&&record.deliveryId){
+        const receipt=typeof seen.data.receiptId==='string'?seen.data.receiptId:undefined;
+        this.feedback.markSent(record.id,record.deliveryId,record.route,receipt);
+      }
     }
   }
   executionProducer(id:string,options?:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.producer(id,options);}
@@ -461,24 +467,16 @@ export class DafeiyuService extends Service {
   activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:(this.executions?.foregroundPending??0)+this.journal.list(['accepted','processing','reply-ready','sending']).length+[...this.activityPressureReaders.values()].reduce((sum,read)=>sum+Math.max(0,read()),0)};}
   feedbackLedger(){return this.feedback;}
   private feedbackSourceCurrent(record:import('./feedback-ledger.js').FeedbackRecord):boolean {
-    if(!record.sourceMessageId)return false;
-    try{
-      const item=this.journal.get(record.sourceMessageId);
-      if(item.route!==record.route)return false;
-      if(this.journal.messageRecalled({agentId:this.config.agentId,route:record.route},record.sourceMessageId))return false;
-      if(record.taskId&&record.intentVersion!==undefined){
-        const task=this.repositoryPort?.readState(this.config.agentId,record.taskId);
-        if(!task||task.epoch!==record.intentVersion)return false;
-      }
-      return true;
-    }catch{return false;}
+    if(!this.repositoryPort)return false;
+    return feedbackSourceCurrent(record,{journal:this.journal,repository:this.repositoryPort,agentId:this.config.agentId});
   }
   async dispatchFeedback(now=Date.now()):Promise<number>{
     if(!this.executions)return 0;
+    this.reconcileFeedback();
     const dispatcher=this.feedbackDispatcher??=new FeedbackDispatcher({
       ledger:this.feedback,
       target:record=>{
-        if(!record.sourceMessageId||!this.feedbackSourceCurrent(record))return null;
+        if(!record.sourceMessageId||!this.feedbackSourceCurrent(record)){this.feedback.supersede(record.id,record.route);return null;}
         const item=this.journal.get(record.sourceMessageId),channel=this.conversations.deliveryChannel(item);
         return channel?{item,channel}:null;
       },

@@ -26,6 +26,12 @@ export interface ModelBudgetAuthority {
   reserve(input:ModelBudgetRequest,signal:AbortSignal):Promise<ExecutorPermit>;
   /** Must accept accounting after execution cancellation or revocation. */
   settle(input:ModelBudgetSettlement):Promise<{unknown:boolean}>;
+  /**
+   * Optional deployment policy: a locally cancelled call with unknown usage may be
+   * accepted so unrelated sessions continue. Without it, the authority's guard may
+   * still stop later calls after an unknown settlement.
+   */
+  acceptLocalUnknown?(code:string):void;
 }
 
 export interface RuntimeCallRecord {

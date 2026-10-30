@@ -76,7 +76,7 @@ test('cancelCall aborts one call and leaves the shared gate open',async()=>{
 });
 
 test('a timed-out call with unknown usage does not close admission for other sessions',async()=>{
-  const authority=new FictionalBudgetAuthority(true),budget=new SharedModelBudget(authority);
+  const authority=new FictionalBudgetAuthority(),budget=new SharedModelBudget(authority);
   const call={...runtimeCall(),deadline:Date.now()+20},permit=await budget.reserve(call,liveSignal());
   await new Promise(resolve=>setTimeout(resolve,40));
   assert.deepEqual(await budget.settle({...runtimeBill(call,permit),usage:null}),{unknown:true});
