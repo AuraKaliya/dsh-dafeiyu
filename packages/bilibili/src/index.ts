@@ -1,4 +1,4 @@
-export { BiliConfigSchema,BiliPluginConfigSchema,BILI_SCENE } from './config.js';
+﻿export { BiliConfigSchema,BiliPluginConfigSchema,BILI_SCENE } from './config.js';
 export { BiliStore,BILI_APPLICATION_ID,BILI_SCHEMA_VERSION,BILI_TABLES } from './store.js';
 export { BiliRetryPolicySchema } from './diagnostics.js';
 export { BiliService,BILI_ACTIONS } from './service.js';
@@ -11,4 +11,5 @@ export const name='dafeiyu-bilibili';
 export const inject=['dafeiyu'];
 export function apply(ctx:Context,config:Config){new BiliService(ctx,config);}
 
+export * from './migration.js';
 export * from './storage-status.js';

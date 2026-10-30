@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+import { BILI_APPLICATION_ID, biliHash } from '../packages/bilibili/lib/store.js';
+import { inspectBiliMigration, migrateBiliStorage } from '../packages/bilibili/lib/migration.js';
+import { testTempDir } from './test-temp.js';
+
+const identity = { agentId: 'fish', profileId: 'test' } as const;
+const bvid = 'BV1xNpFedEwH';
+const legacy = { schemaVersion: 1, bvid, title: '旧记录', author: '', status: 'checkpoint', watched: [], commentCursor: null, frames: [], sources: [], conclusion: null, gaps: [], nextStep: '继续', updatedAt: '2026-01-01T00:00:00.000Z' };
+
+async function v3Fixture() {
+  const root = await mkdtemp(join(testTempDir(), 'bili-migration-')), file = join(root, 'bilibili.sqlite');
+  const db = new DatabaseSync(file);
+  db.exec(`CREATE TABLE bili_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
+    CREATE TABLE bili_reading(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);
+    INSERT INTO bili_metadata VALUES(1,'${JSON.stringify(identity)}');
+    INSERT INTO bili_reading VALUES('${bvid}','${JSON.stringify(legacy)}',1);
+    PRAGMA application_id=${BILI_APPLICATION_ID};
+    PRAGMA user_version=3;`);
+  db.close();
+  return { root, file, backup: join(root, 'backup.sqlite') };
+}
+
+const digest = async (file: string) => createHash('sha256').update(await readFile(file)).digest('hex');
+
+test('a v3 store is reported upgradable and migrates legacy records explicitly', async () => {
+  const f = await v3Fixture();
+  assert.deepEqual(inspectBiliMigration(f.file, identity), { exists: true, version: 3, applicationId: BILI_APPLICATION_ID, integrity: true, identityMatches: true, state: 'upgradable' });
+
+  const result = migrateBiliStorage(f.file, identity, { backup: f.backup });
+  assert.equal(result.migrated, true);
+  assert.equal(result.version, 4);
+
+  const db = new DatabaseSync(f.file, { readOnly: true });
+  try {
+    assert.deepEqual(db.prepare('SELECT bvid,body FROM bili_reading_legacy').all().map(row => row.bvid), [bvid]);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM bili_reading').get()!.n, 0);
+    assert.equal(db.prepare('PRAGMA user_version').get()!.user_version, 4);
+  } finally { db.close(); }
+  assert.equal(inspectBiliMigration(f.file, identity).state, 'current');
+
+  const again = migrateBiliStorage(f.file, identity, { backup: f.backup });
+  assert.equal(again.migrated, false);
+});
+
+test('an identity mismatch is rejected before any write', async () => {
+  const f = await v3Fixture();
+  const before = await digest(f.file);
+  assert.throws(() => migrateBiliStorage(f.file, { agentId: 'other', profileId: 'test' }, { backup: f.backup }), /IDENTITY_MISMATCH/);
+  assert.equal(await digest(f.file), before);
+  assert.equal(inspectBiliMigration(f.file, identity).version, 3);
+});
+
+test('the backup copy preserves the pre-migration bytes', async () => {
+  const f = await v3Fixture();
+  const before = await digest(f.file);
+  migrateBiliStorage(f.file, identity, { backup: f.backup });
+  assert.equal(await digest(f.backup), before);
+  assert.notEqual(await digest(f.file), before);
+});

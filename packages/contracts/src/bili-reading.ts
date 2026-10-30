@@ -99,6 +99,7 @@ export const BiliFrameBatchResultSchema = z.strictObject({
 /** Per-video reading record: program records facts and progress, the persona records judgement. */
 export const BiliReadingRecordSchema = z.strictObject({
     schemaVersion: z.literal(1),
+    version: z.number().int().positive().default(1),
     bvid,
     aid: platformId.nullable().default(null),
     title: text(160),
