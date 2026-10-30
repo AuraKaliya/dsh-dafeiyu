@@ -21,7 +21,7 @@ export class IdleActivity {
   control(now:number,foreground:boolean){const work=this.store.idle.pending();if(!work)return false;
     const runId=work.runs.at(-1);if(!this.store.config.exploration&&!runId){this.finish(work,now,true);return false;}if(!runId){if(foreground)return true;const accepted=this.port.submitTask(work.request);work.runs.push(accepted.run.id);work.activeSince=now;this.store.idle.save(work);return true;}
     const ref=this.port.restoreRun(runId),status=this.port.status(ref);
-    if(status.state==='running'&&foreground&&!work.paused){work.paused=true;this.store.idle.save(work);this.port.pause(ref,{requestId:'idle-pause:'+runId,expectedVersion:status.version,reason:'前台交互优先'});return true;}
+    if(status.state==='running'&&foreground&&!work.paused){work.paused=true;this.store.idle.save(work);this.port.yield(ref,{requestId:'idle-yield:'+runId,expectedVersion:status.version,reason:'前台交互让出，空闲后自动继续'});return true;}
     if(status.state==='waiting'&&status.error===null&&!work.paused){if(work.activeSince!==null){work.elapsedMs+=Math.max(0,now-work.activeSince);work.activeSince=null;this.store.idle.save(work);}return true;}
     if(status.state==='waiting'&&work.paused){if(work.activeSince!==null){work.elapsedMs+=Math.max(0,now-work.activeSince);work.activeSince=null;this.store.idle.save(work);}if(foreground)return true;
       const checkpoint=status.checkpoints.at(-1);if(!checkpoint){this.finish(work,now,true);return false;}const task=this.port.openTask(status.taskId!),state=this.port.taskState(task);

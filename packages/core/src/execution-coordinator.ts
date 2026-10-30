@@ -52,7 +52,7 @@ interface Dependencies {
   progress?:(runId:string)=>Promise<Json>;
   media?:()=>import('@dafeiyu/contracts').MediaPort|undefined;
 }
-interface Active {controller:AbortController;mode:'cancel'|'pause'|null}
+interface Active {controller:AbortController;mode:'cancel'|'pause'|'yield'|null}
 type Request=z.output<typeof ExecutionRequestSchema>;
 const savedSchema=z.strictObject({kind:z.literal('execution'),input:ExecutionRequestSchema,origin:RunOriginSchema,parentRunId:z.uuid().nullable(),checkpointId:z.uuid().nullable(),motivation:MotivationSchema.optional(),messageSource:MessageTaskSourceSchema.optional()});
 
@@ -422,6 +422,7 @@ export class ExecutionCoordinator {
         if(proof&&!this.evidence.get(run.id)?.validate(z.array(SourceDependencySchema).parse(proof)))throw new Error('SOURCE_STALE');return text;},
       cancel:(ref:RunRef,input:unknown)=>this.control(producer,this.resolve(producer,ref),input,'cancel'),
       pause:(ref:RunRef,input:unknown)=>this.control(producer,this.resolve(producer,ref),input,'pause'),
+      yield:(ref:RunRef,input:unknown)=>this.control(producer,this.resolve(producer,ref),input,'yield'),
       resume:(ref:TaskRef,raw:unknown)=>{this.d.assertAccepting();const input=ResumeRunSchema.parse(raw);
         if(this.resolveTask(producer,ref)!==input.taskId)throw new Error('SCOPE_DENIED');const parent=this.d.store.get(input.parentRunId);
         if(this.d.store.request(parent.requestKey).producer!==producer||parent.definition.taskId!==input.taskId)throw new Error('SCOPE_DENIED');
@@ -566,11 +567,11 @@ export class ExecutionCoordinator {
   activate():void{for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
   private status(run:StoredRun){return {id:run.id,taskId:run.definition.taskId,state:run.state,version:run.version,result:run.result,error:run.error,
     checkpoints:this.d.store.checkpoints(run.id),operations:this.d.store.operations(run.id).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))};}
-  private control(producer:string,run:StoredRun,raw:unknown,mode:'cancel'|'pause'){
+  private control(producer:string,run:StoredRun,raw:unknown,mode:'cancel'|'pause'|'yield'){
     const input=RunControlSchema.parse(raw),request=this.d.store.prepareRequest(`control:${producer}`,input.requestId,{kind:'control',runId:run.id,mode,...input});
     if(request.runId)return this.status(this.d.store.get(request.runId));
     const active=this.active.get(run.id);
-    if(mode==='pause'&&!active)throw new Error('RUN_NOT_RUNNING');
+    if((mode==='pause'||mode==='yield')&&!active)throw new Error('RUN_NOT_RUNNING');
     const next=this.d.store.control(run.id,request.id,input.expectedVersion,active?'cancelling':'cancelled');
     if(active){active.mode=mode;active.controller.abort();}this.flushEvents();return this.status(next);
   }
@@ -679,8 +680,8 @@ export class ExecutionCoordinator {
         if(waiting)this.d.store.waitWithResult(id,run.version,result.resultRef,memory?.intent(access).blocking?'TASK_OBJECTION_UNRESOLVED':decision?.requiredCapabilities.length?'TASK_CAPABILITY_CHANGE_PENDING':'TASK_WAITING');
         else this.d.store.complete(id,run.version,result.resultRef);
       }catch(error){run=this.d.store.get(id);
-        if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
-          this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
+        if((entry.mode==='pause'||entry.mode==='yield')&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
+          this.d.store.checkpoint(id,{kind:entry.mode==='yield'?'yielded':'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state))this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',safeCode(error));
       }finally{const settledState=this.d.store.get(id).state;if(['completed','waiting','failed','cancelled','interrupted'].includes(settledState))this.d.experience()?.settle(id,settledState);this.evidence.delete(id);{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting','failed'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}

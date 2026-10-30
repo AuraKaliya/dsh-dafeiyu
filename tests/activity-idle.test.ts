@@ -14,3 +14,25 @@ test('idle activity uses one ordinary task and a running activity is not interru
     const controller=new IdleActivity(ctx,store);assert.equal(controller.start(0),true);assert.equal(controller.control(1,false),true);assert.equal(controller.control(100,false),true);assert.equal(rounds.current()?.endedAt,null);state='completed';assert.equal(controller.control(200,false),false);assert.equal(submits,1);assert.equal(rounds.list()[0]?.knownTokens,2);assert.equal(rounds.list()[0]?.reason,'token-budget');
   }finally{db.close();}
 });
+
+test('idle activity yields the run on foreground pressure instead of user-pausing it',()=>{
+  const db=new DatabaseSync(':memory:');
+  try{
+    createRoundSchema(db);createIdleSchema(db);
+    const rounds=new ActivityRounds(db,{roundTokens:100,roundDurationMs:60000},60000),idle=new IdleWorkStore(db),runId=randomUUID(),taskId=randomUUID();
+    let yields=0,state='running';
+    const store={rounds,idle,config:ActivityConfigSchema.parse({}),admitIdle:(work:Parameters<IdleWorkStore['save']>[0],now:number)=>{idle.save(work);rounds.admit('idle:'+work.id,now);}} as unknown as ActivityStore;
+    const ctx={dafeiyu:{managementUsage:()=>({tokens:1,knownTokens:1,calls:1}),executionProducer:()=>({
+      submitTask:()=>({run:{id:runId},task:{id:taskId}}),
+      restoreRun:()=>({id:runId}),
+      status:()=>({state,taskId,error:null,version:1,checkpoints:[]}),
+      yield:(_ref:unknown,input:{reason:string})=>{yields++;assert.match(input.reason,/自动继续/);},
+      pause:()=>assert.fail('foreground pressure must yield, not user-pause'),
+    })}} as unknown as Context;
+    const controller=new IdleActivity(ctx,store);
+    assert.equal(controller.start(0),true);
+    assert.equal(controller.control(1,false),true);
+    assert.equal(controller.control(2,true),true);
+    assert.equal(yields,1);
+  }finally{db.close();}
+});
