@@ -31,7 +31,13 @@ D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\<最新 UUID>
 D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\27eb02c8-bec5-4d7a-afbf-301367bd8274
 ```
 
-profile 已指向 v10 候选，但当前 DSH 进程仍持有旧 v9 模块缓存（运行中的 Host 命令仍是 `...attention-v9-20261030-1930`）。需要一次完整 DSH 重启才能加载 v10。
+v10 已在本机运行：Host PID `42760`，profile 指向
+
+```text
+D:\DSH\DaFeiYu-Local\deployment\packages\dsh-dafeiyu-0.25.0-attention-v10-20261030-201548
+```
+
+QQ online（3 个有效群），phase degraded 仅因 B 站匿名 HTTP 诊断暂停；B 站 health 已分别显示 HTTP/Browser 状态。
 
 已用 `npm run deploy:prepare` 生成并校验一个干净候选：
 
