@@ -8,6 +8,12 @@ import { BiliRetryPolicySchema } from '@dafeiyu/bilibili';
 import {PhaseTimeoutsSchema} from '@dafeiyu/contracts';
 
 const path=z.string().trim().min(1).max(4096),uid=z.string().regex(/^[1-9][0-9]{0,19}$/),qq=z.string().regex(/^[1-9][0-9]{4,14}$/);
+const OneBotServiceSchema=z.strictObject({
+  command:path,cwd:path.optional(),args:z.array(z.string().max(1024)).max(32).default([]),
+  env:z.record(z.string().max(128),z.string().max(4096)).optional(),
+  webui:z.strictObject({url:z.url(),passwordFile:path}).optional(),
+  startTimeoutMs:z.number().int().min(1000).max(120000).default(45000),
+});
 export const InstallationSettingsSchema=z.strictObject({
   schemaVersion:z.literal(1),dataDir:path,instanceName:z.string().regex(/^[a-z][a-z0-9._-]{0,79}$/).default('dafeiyu'),
   foundationFile:path.optional(),
@@ -21,6 +27,7 @@ export const InstallationSettingsSchema=z.strictObject({
   model:z.strictObject({auth:z.enum(['api-key','dsh-account']).optional(),model:z.string().trim().min(1).max(160),reasoningEffort:z.string().trim().min(1).max(40).optional(),
     credentialStore:path,baseURL:z.url().optional(),inlineTransport:z.record(z.string(),z.json()).optional()}),
   qq:z.strictObject({botId:qq,ownerId:qq,tokenFile:path,httpURL:z.url().refine(value=>{try{loopbackURL(value,'http:');return true;}catch{return false;}},'Plain loopback HTTP endpoint required'),wsURL:z.url().refine(value=>{try{loopbackURL(value,'ws:');return true;}catch{return false;}},'Plain loopback WebSocket endpoint required'),
+    service:OneBotServiceSchema.optional(),
     messageBatch:QqBatchConfigSchema.prefault({enabled:true}),stickers:QqStickersConfigSchema.prefault({}),
     groupIds:z.array(qq).max(10).default([]),joinedGroups:z.boolean().default(false),replyDelay:QqReplyDelaySchema.prefault({}),historyWindowMs:z.number().int().min(1000).max(604800000).default(86400000),naturalNames:z.array(z.string().min(2).max(32)).max(16).default(['大肥鱼']),
     media:z.strictObject({cacheRoots:z.array(path).max(8).default([]),httpsHosts:z.array(z.string()).max(16).default([]),sendEnabled:z.boolean().default(false),voiceDirectives:z.boolean().default(false)}).optional()}).refine(value=>value.botId!==value.ownerId,'Bot and owner must differ'),
@@ -64,6 +71,7 @@ export function readInstallationSettings(file:string):InstallationSettings {
   const parsed=InstallationSettingsSchema.safeParse(raw);if(!parsed.success)throw new SettingsError([...new Set(parsed.error.issues.map(issue=>issue.path.join('.')||'settings'))]);
   const settings=parsed.data,base=dirname(resolve(file)),absolute=(value:string)=>resolve(base,value);
   settings.dataDir=absolute(settings.dataDir);settings.model.credentialStore=absolute(settings.model.credentialStore);settings.qq.tokenFile=absolute(settings.qq.tokenFile);
+  if(settings.qq.service){settings.qq.service.command=absolute(settings.qq.service.command);if(settings.qq.service.cwd)settings.qq.service.cwd=absolute(settings.qq.service.cwd);if(settings.qq.service.webui)settings.qq.service.webui.passwordFile=absolute(settings.qq.service.webui.passwordFile);}
   if(settings.qq.media)settings.qq.media.cacheRoots=settings.qq.media.cacheRoots.map(absolute);
   if(settings.foundationFile)settings.foundationFile=absolute(settings.foundationFile);
   if(settings.bilibili?.session)settings.bilibili.session.file=absolute(settings.bilibili.session.file);

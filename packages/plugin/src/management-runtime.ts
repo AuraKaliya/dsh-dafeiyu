@@ -7,6 +7,8 @@ import type {Context} from '@deepseek-ai/cordis';
 import {readInstallationSettings} from './settings.js';
 import {managementJson} from '@dafeiyu/contracts';
 import type {Json} from '@dafeiyu/contracts';
+import {OneBotCapability} from './onebot-capability.js';
+import type {CapabilityStatus} from './onebot-capability.js';
 
 export const ONEBOT_RETRY_DELAYS_MS=[2_000,5_000,15_000,30_000,60_000] as const;
 
@@ -38,14 +40,24 @@ export class ManagementRuntime {
   private pending=new Map<string,{resolve:(value:Json)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
   private state='stopped';private code:string|null=null;private busy=false;private disposed=false;
   private retryTimer:ReturnType<typeof setTimeout>|undefined;private retryAttempt=0;
+  private capability:OneBotCapability|undefined;
+  private capabilityStatus:CapabilityStatus={id:'qq',state:'pending',owned:false,pid:null,code:null,message:null};
   constructor(private readonly ctx:Context,private readonly config:{settingsFile:string;nodePath:string}){}
-  status(){return {state:this.state,code:this.code,pid:this.child?.pid??null,retryAttempt:this.retryAttempt};}
+  status(){
+    let activity:{enabled:boolean;exploration:boolean;maintenance:boolean;plans:boolean}|null=null;
+    try{const settings=readInstallationSettings(this.config.settingsFile);activity={enabled:settings.activity.enabled,exploration:settings.activity.exploration,maintenance:settings.activity.maintenance,plans:settings.activity.plans};}catch{/* configuration is reported separately */}
+    const activityCapability:CapabilityStatus|undefined=activity?{id:'activity',state:activity.enabled?'pending':'disabled',owned:false,pid:null,code:activity.enabled?null:'ACTIVITY_DISABLED_BY_USER',message:activity.enabled?'自主活动已启用，等待 Host 就绪':'自主活动已由配置关闭'}:undefined;
+    return {state:this.state,code:this.code,pid:this.child?.pid??null,retryAttempt:this.retryAttempt,capabilities:[this.capabilityStatus,...(activityCapability?[activityCapability]:[])],activity};
+  }
   async control(action:'start'|'stop'|'restart'|'status'){if(action==='status')return this.child&&this.state==='running'?{...this.status(),host:await this.call('runtime','status',null)}:this.status();
     if(this.disposed||this.busy)throw new Error('MANAGEMENT_RUNTIME_BUSY');this.busy=true;try{if(action!=='start')await this.stop();if(action!=='stop'){try{await this.start();}catch(error){this.code=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'INSTALL_START_FAILED';this.scheduleRetry();}}return this.status();}finally{this.busy=false;}}
   private scheduleRetry(){if(this.disposed||this.state==='stopping'||this.retryTimer||this.retryAttempt>=ONEBOT_RETRY_DELAYS_MS.length)return;
-    const delay=ONEBOT_RETRY_DELAYS_MS[this.retryAttempt++]!;this.state='failed';this.retryTimer=setTimeout(()=>{this.retryTimer=undefined;void this.start().catch(()=>this.scheduleRetry());},delay);this.retryTimer.unref();}
+    const delay=ONEBOT_RETRY_DELAYS_MS[this.retryAttempt++]!;if(this.capability?.status().state!=='waiting-login')this.state='failed';this.retryTimer=setTimeout(()=>{this.retryTimer=undefined;void this.start().catch(()=>this.scheduleRetry());},delay);this.retryTimer.unref();}
   private async start(){if(this.child)throw new Error('MANAGEMENT_ALREADY_STARTED');const settings=readInstallationSettings(this.config.settingsFile);this.state='starting';this.code=null;
-    await waitForOneBot(settings);
+    this.capability??=new OneBotCapability(settings.qq);
+    try{await this.capability.ensureReady();this.capabilityStatus=this.capability.status();}
+    catch(error){this.capabilityStatus=this.capability.status();if(this.capabilityStatus.state==='waiting-login')this.state='waiting';throw error;}
+    this.capabilityStatus=this.capability.status();
     const bridge=settings.dshTools?await import('./bridge-parent.js'):null;
     const child=spawn(this.config.nodePath,[fileURLToPath(new URL('../bin/dafeiyu.mjs',import.meta.url)),'start','--settings',this.config.settingsFile],{windowsHide:true,env:{...process.env,DAFEIYU_DSH_BRIDGE:settings.dshTools?'1':''},stdio:['ignore','ignore','ignore','ipc']});this.child=child;
     this.closed=new Promise(resolve=>{let ended=false;const finish=()=>{if(ended)return;ended=true;if(this.state!=='stopping'){this.state='failed';this.code??='INSTALL_PROCESS_EXITED';}else this.state='stopped';this.child=undefined;for(const pending of this.pending.values()){clearTimeout(pending.timer);pending.reject(new Error('MANAGEMENT_PROCESS_CLOSED'));}this.pending.clear();resolve();if(this.state==='failed')this.scheduleRetry();};child.once('close',finish);child.once('error',()=>{this.code='INSTALL_NODE_UNAVAILABLE';finish();});});
@@ -54,6 +66,7 @@ export class ManagementRuntime {
       if(value.code==='INSTALL_READY'){this.state='running';this.retryAttempt=0;}else if(typeof value.code==='string'&&/^[A-Z_0-9]{1,100}$/.test(value.code)&&value.code!=='INSTALL_STOPPED')this.code=value.code;});
     try{this.bridgeClose=bridge?bridge.attachDshBridge(this.ctx,child,this.config.settingsFile):undefined;}catch(error){await this.stop();throw error;}}
   private async stop(){if(this.retryTimer){clearTimeout(this.retryTimer);this.retryTimer=undefined;}this.retryAttempt=0;const child=this.child;if(child){this.state='stopping';if(child.connected)child.send({type:'stop'});let timer:ReturnType<typeof setTimeout>|undefined;try{await Promise.race([this.closed,new Promise<void>(resolve=>{timer=setTimeout(resolve,40000);})]);if(this.child){child.kill();await this.closed;}}finally{if(timer)clearTimeout(timer);}}
+    await this.capability?.stop();this.capability=undefined;this.capabilityStatus={id:'qq',state:'stopped',owned:false,pid:null,code:null,message:null};
     await this.bridgeClose?.();this.bridgeClose=undefined;}
   call(module:string,action:string,input:Json):Promise<Json>{const child=this.child;if(!child?.connected||this.state!=='running')return Promise.reject(new Error('MANAGEMENT_RUNTIME_OFFLINE'));
     const id=randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);reject(new Error('MANAGEMENT_RESULT_UNKNOWN'));},15000);this.pending.set(id,{resolve,reject,timer});child.send({type:'management.request',id,module,action,input},error=>{if(error){clearTimeout(timer);this.pending.delete(id);reject(new Error('MANAGEMENT_SEND_FAILED'));}});});}
