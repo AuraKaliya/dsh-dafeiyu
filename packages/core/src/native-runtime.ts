@@ -13,6 +13,7 @@ import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { CompactionRuntime } from './compaction-runtime.js';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { z } from 'zod';
+import {bytesOverBudget} from './segment-budget.js';
 import {BILI_READING_ACTIONS,BILI_READING_STAGE,CAPABILITY_CONTEXT,HarnessRuntime} from './harness-runtime.js';
 export const EXECUTION_MESSAGE_SOURCE='dafeiyu-execution' as const;
 
@@ -78,7 +79,16 @@ export class NativeRuntime {
       const input=createUserMessage({source:{kind:'dafeiyu-execution',form:'notice',summary:'大肥鱼内部任务输入',taskId:frame.view.taskId,runId:frame.view.runId,inputId:randomUUID(),originKind:frame.view.origin.kind},
         content:[{type:'text',text:JSON.stringify(frame.program??{goal:frame.goal,inputs:frame.inputs})}]});
       owned.compaction.expectInput(input);
-      const result=await runAgentTurn(this.ctx,owned.handle.agent,input,frame.view.signal,()=>owned!.compaction.seal());frame.guard();
+      let budgetYieldReason:string|null=null;
+      if(frame.toolStage==='bili-reading'){
+        const audit=frame.contextAudit;
+        frame.contextAudit=data=>{audit?.(data);const capacity=(data as {capacity?:{bytes?:number}}|undefined)?.capacity;if(!budgetYieldReason&&typeof capacity?.bytes==='number'&&bytesOverBudget(capacity.bytes,32000))budgetYieldReason='hard-token-budget';};
+        disposers.push(owned.scope.on('agent/pre-step',async(_payload,next)=>{frame.guard();if(budgetYieldReason)throw new Error('SEGMENT_YIELD');return next();}));
+      }
+      let result:Awaited<ReturnType<typeof runAgentTurn>>;
+      try{result=await runAgentTurn(this.ctx,owned.handle.agent,input,frame.view.signal,()=>owned!.compaction.seal());}
+      catch(error){if(!budgetYieldReason)throw error;frame.guard();const seq=owned.handle.agent.session.seq;return {text:'',resultRef:{sessionId:frame.sessionId,messageSeq:seq,turnEndSeq:seq,textHash:createHash('sha256').update('').digest('hex')},segmentYield:{reason:budgetYieldReason}};}
+      frame.guard();
       if(owned.lastRequest)owned.compaction.guard(owned.lastRequest);
       frame.checkpoint?.(frame.sessionId,Number(owned.handle.agent.session.seq),owned.compaction.exposedDependencies(),result.text);
       return {text:result.text,resultRef:{sessionId:frame.sessionId,messageSeq:result.messageSeq,turnEndSeq:result.turnEndSeq,textHash:createHash('sha256').update(result.text).digest('hex')}};

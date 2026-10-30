@@ -41,3 +41,9 @@ export function segmentBudgetDecision(input: SegmentBudgetInput): SegmentBudgetR
     if (input.inputTokens >= softTokens) return { decision: 'compact-then-send', hardTokens, softTokens, reason: 'above-soft' };
     return { decision: 'send', hardTokens, softTokens, reason: 'within-soft' };
 }
+
+/** Conservative bytes-per-token used only to compare measured request bytes with a token budget. */
+export const BYTES_PER_TOKEN = 4;
+export function bytesOverBudget(bytes: number, hardTokens: number) {
+    return bytes > hardTokens * BYTES_PER_TOKEN;
+}
