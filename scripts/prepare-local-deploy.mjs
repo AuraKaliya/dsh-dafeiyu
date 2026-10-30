@@ -24,6 +24,6 @@ mkdirSync(target, { recursive: true });
 cpSync(release, target, { recursive: true, filter: source => !source.split(/[\\/]/).includes('node_modules') });
 symlinkSync(nodeModules, join(target, 'node_modules'), 'junction');
 const quote = value => `'${String(value).replaceAll("'", "''")}'`;
-writeFileSync(join(target, 'cordis.patch.yml'), `- insert:\n    - id: dsh-dafeiyu\n      name: dsh-dafeiyu\n      config:\n        settingsFile: ${quote(settings)}\n        nodePath: ${quote(node)}\n`, 'utf8');
+writeFileSync(join(target, 'cordis.patch.yml'), `- insert:\n    - id: dsh-dafeiyu\n      name: dsh-dafeiyu\n      config:\n        settingsFile: ${quote(settings)}\n        nodePath: ${quote(node)}\n        startOnLoad: true\n`, 'utf8');
 const files = (function count(directory){let total=0;for(const entry of readdirSync(directory,{withFileTypes:true})){if(entry.isSymbolicLink())continue;total+=entry.isDirectory()?count(join(directory,entry.name)):1;}return total;})(target);
 console.log(JSON.stringify({ target, release, settings, node, nodeModules, version: manifest.version, files }));
