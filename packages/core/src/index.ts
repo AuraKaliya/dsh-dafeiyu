@@ -487,7 +487,7 @@ export class DafeiyuService extends Service {
     }
   }
   async dispatchFeedback(now=Date.now()):Promise<number>{
-    if(!this.executions)return 0;
+    if(!this.executions||!this.repositoryPort)return 0;
     await this.reconcileFeedback();
     const dispatcher=this.feedbackDispatcher??=new FeedbackDispatcher({
       ledger:this.feedback,
