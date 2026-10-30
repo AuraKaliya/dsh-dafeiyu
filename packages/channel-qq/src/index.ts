@@ -4,7 +4,7 @@ import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { API_VERSION, conversationKey,TaskResultAnchorSchema,messageParts,QQ_EXPRESSION_DEFAULTS,QQ_SEQUENCE_INSTRUCTIONS } from '@dafeiyu/contracts';
-import type { Conversation, DeliveryResult, ExtensionHandle, Reply,TaskResultAnchor,ReplyMediaManifest,InboundMessage } from '@dafeiyu/contracts';
+import type { Conversation, DeliveryResult, ExtensionHandle, Reply,TaskResultAnchor,ReplyMediaManifest,InboundMessage,FeedbackReceiptLookup } from '@dafeiyu/contracts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import WebSocket from 'ws';
@@ -167,6 +167,7 @@ export class QqChannel extends Service {
       if(this.config.stickers.enabled)this.stickers=new QqStickers(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store.stickers,allowed:scene=>this.allowed(scene)});
     } catch (error) {this.progress?.dispose();this.stickers?.close();this.media?.close();this.tasks?.close();this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
     ctx.effect(()=>ctx.dafeiyu.bindActivityPressure('qq',()=>this.stopped?0:this.batches.count()));
+    ctx.effect(()=>ctx.dafeiyu.bindFeedbackReceipts({lookup:async input=>this.feedbackReceipt(input)}),'qq.feedback-receipts');
     ctx.effect(() => () => this.close(), 'qq.close');
   }
   private observation(type: Parameters<ExtensionHandle['observe']>[0]['type'], code: string, conversation?: Conversation): void {
@@ -390,6 +391,19 @@ export class QqChannel extends Service {
     return this.deliver({...reply,taskResult:anchor},signal,authority,writeWindow);}
   deliveryStatus(replyId:string){if(!this.stopped)return this.store.mediaDelivery.progress(replyId)??this.store.delivery.progress(replyId);
     const db=new DatabaseSync(resolve(this.config.dataDir,'qq.sqlite'),{readOnly:true});try{return new QqMediaDeliveryLedger(db).progress(replyId)??new QqDeliveryLedger(db).progress(replyId);}finally{db.close();}}
+  feedbackReceipt(input:FeedbackReceiptLookup):{state:'sent'|'not-sent'|'unknown';receiptId?:string}{
+    try{
+      const progress=this.deliveryStatus(input.deliveryId);
+      if(!progress)return {state:'unknown'};
+      if(progress.state==='sent'){
+        const parts='segments'in progress?progress.segments:progress.parts;
+        const receipt=parts.find(part=>part.state==='sent'&&part.receipt)?.receipt;
+        return {state:'sent',...(receipt?{receiptId:receipt}:{})};
+      }
+      if(progress.state==='ready')return {state:'not-sent'};
+      return {state:'unknown'};
+    }catch{return {state:'unknown'};}
+  }
   private async checkDelivery(reply: Reply, signal: AbortSignal): Promise<void> {
     if (this.stopped || this.state!=='online') throw new Error('CHANNEL_OFFLINE');
     const conversation = reply.conversation;

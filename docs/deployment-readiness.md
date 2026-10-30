@@ -51,6 +51,14 @@ acceptLocalUnknown?(code: string): void;
 - 渠道交付是否记录 `deliveryId`/receipt；
 - 是否有外部回执查询或人工对账流程。
 
+支持查询的渠道应实现 `FeedbackReceiptPort.lookup({feedbackId,route,deliveryId})`，并在 Core 启动后调用：
+
+```ts
+const unbind = core.bindFeedbackReceipts(port);
+```
+
+返回 `sent` 会补记送达；`not-sent` 会回到 pending 重试；`unknown` 或查询失败会继续停泊。QQ 当前的 `QqDeliveryLedger.progress(replyId)` 已保存分段状态和 receipt，部署层可据此实现该端口。
+
 ### 2.3 配置与隐私
 
 - `dataDir` 必须在安装包外，首次使用独立空目录；
