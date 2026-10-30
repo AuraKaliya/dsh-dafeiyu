@@ -7,7 +7,7 @@ import { HostConfigSchema,DSH_TOOL_ACTIONS } from '@dafeiyu/contracts';
 import { loadHostConfig,initializeProfile,inspectHost,ManagedHost,pluginConfig,BILI_OWNER_NATIVE_ACTIONS } from '@dafeiyu/host';
 import type { HostRuntimeOptions } from '@dafeiyu/host';
 import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS,QQ_STICKER_ACTIONS,QQ_PROGRESS_ACTIONS } from '@dafeiyu/qq';
-import { BILI_ACTIONS } from '@dafeiyu/bilibili';
+import { BILI_ACTIONS,inspectBiliMigration,migrateBiliStorage } from '@dafeiyu/bilibili';
 import { BiliOwnerStore,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE,biliOwnerScene,createBiliOwnerProductionPorts } from '@dafeiyu/bilibili/channel';
 import { BILI_OWNER_AUTH_HASH } from '@dafeiyu/bilibili/channel/production-config';
 import { ACTIVITY_ACTIONS } from '@dafeiyu/activity';
@@ -63,8 +63,19 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
     persona:{fixedFile:foundationFile,kind:options.scripted?'test':'formal',...(settings.growthMaxBytes===undefined?{}:{growthRegion:{maxBytes:settings.growthMaxBytes}})},...(settings.taskTimeoutMs||settings.phaseTimeouts?{runtime:{...(settings.taskTimeoutMs?{turnTimeoutMs:settings.taskTimeoutMs}:{}),...(settings.phaseTimeouts?{phaseTimeouts:settings.phaseTimeouts}:{})}}:{}),context:{compactionInputTokens:48000,...settings.contextBudget,assembly:settings.context??{},regions:{'memory:qq-expression':{maxBytes:6000,priority:420},...settings.contextBudget?.regions}},plugins,authorityPolicies:policies})));
 }
 
+export interface InstallationMigration{code:'INSTALL_MIGRATED'|'INSTALL_CURRENT'|'INSTALL_NO_STORE';version:number;backup:string|null}
+/** Explicit v2/v3 -> v4 migration for the installed Bilibili store. Never runs implicitly. */
+export function migrateInstallation(settingsFile:string):InstallationMigration{
+  const settings=readInstallationSettings(settingsFile),core=join(settings.dataDir,'core'),file=join(core,'bilibili.sqlite');
+  if(!existsSync(file))return {code:'INSTALL_NO_STORE',version:0,backup:null};
+  const profile=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)}).parse(JSON.parse(readFileSync(join(core,'host-profile.json'),'utf8')));
+  const backup=join(settings.dataDir,'backups','bilibili-v'+Date.now()+'.sqlite'),result=migrateBiliStorage(file,profile,{backup});
+  return result.migrated?{code:'INSTALL_MIGRATED',version:result.version,backup:result.backup??backup}:{code:'INSTALL_CURRENT',version:result.version,backup:null};
+}
 export function prepareInstallation(settingsFile:string,options:InstallationOptions={}) {
   const settings=readInstallationSettings(settingsFile),root=settings.dataDir,metaFile=join(root,'installation.json');
+  const biliStore=join(root,'core','bilibili.sqlite');
+  if(existsSync(biliStore)){try{const profile=z.strictObject({agentId:z.string(),profileId:z.string()}).parse(JSON.parse(readFileSync(join(root,'core','host-profile.json'),'utf8')));if(inspectBiliMigration(biliStore,profile).state==='upgradable')throw new Error('INSTALL_MIGRATION_REQUIRED');}catch(error){if(error instanceof Error&&error.message==='INSTALL_MIGRATION_REQUIRED')throw error;}}
   checkInstallationFiles(settings,options.scripted);
   let meta:InstallationMetadata;
   if(existsSync(metaFile)){

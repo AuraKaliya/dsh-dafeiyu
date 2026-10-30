@@ -6,15 +6,17 @@ import {readInstallationSettings,checkInstallationFiles,SettingsError} from '../
 const args=process.argv.slice(2),mode=args[0];
 const report=value=>{console.log(JSON.stringify(value));if(process.connected)process.send(value);};
 if(!mode||['--help','-h'].includes(mode)){
-  report({name:'大肥鱼',commands:['check --settings <file>','init --settings <file>','start --settings <file>','status --settings <file>']});
+  report({name:'大肥鱼',commands:['check --settings <file>','init --settings <file>','migrate --settings <file>','start --settings <file>','status --settings <file>']});
 }else{
   try{
-    if(!['check','init','start','status'].includes(mode)||args.length!==3||args[1]!=='--settings')throw new Error('INSTALL_ARGUMENT_INVALID');
+    if(!['check','init','migrate','start','status'].includes(mode)||args.length!==3||args[1]!=='--settings')throw new Error('INSTALL_ARGUMENT_INVALID');
     const major=Number(process.versions.node.split('.')[0]),minor=Number(process.versions.node.split('.')[1]);if(major!==24||minor<13)throw new Error('INSTALL_NODE_24_REQUIRED');
     const file=resolve(args[2]),settings=readInstallationSettings(file);
     if(mode==='start'&&settings.dshTools&&!process.connected)throw new Error('INSTALL_DSH_DESKTOP_REQUIRED');
     if(mode==='start'&&settings.dshTools&&process.env.DAFEIYU_DSH_BRIDGE!=='1')throw new Error('INSTALL_DSH_RELOAD_REQUIRED');
-    if(mode==='check'){
+    if(mode==='migrate'){
+      const {migrateInstallation}=await import('../lib/installation.js');report(migrateInstallation(file));
+    }else if(mode==='check'){
       checkInstallationFiles(settings);report({code:'INSTALL_CONFIGURATION_VALID',connectivity:'not-tested',modelCalls:0});
     }else{
       process.env.DSH_HOME=join(settings.dataDir,'core','dsh-home');
