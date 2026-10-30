@@ -1,8 +1,9 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 
 import { MediaReadSchema } from '../packages/contracts/lib/media.js';
+import { imageSetGroupKey } from '../packages/media/lib/service.js';
 
 const asset = (over: Record<string, unknown> = {}) => ({
   schemaVersion: 1 as const, id: randomUUID(), version: 1, kind: 'image' as const,
@@ -36,4 +37,14 @@ test('other read modes cannot smuggle an asset set', () => {
   const single = MediaReadSchema.parse({ requestId: randomUUID(), mode: 'image', source: { provider: 'bilibili', key: 'frame:1' } });
   assert.equal(single.mode, 'image');
   assert.equal(single.assets, undefined);
+});
+
+test('frames from one batch group by provenance, not by their per-frame identity', () => {
+  const origin = { provider: 'bilibili', key: 'page:1', version: 1, hash: 'a'.repeat(64), roots: [] };
+  const base = { origin, kind: 'image', mimeHint: 'image/jpeg', rangeReadable: false, sourceFrame: { positionMs: 12000, durationMs: 180000 } };
+  const first = imageSetGroupKey({ ...base, ref: { provider: 'bilibili', key: 'frame:1' }, name: 'frame-12000.jpg' });
+  const second = imageSetGroupKey({ ...base, ref: { provider: 'bilibili', key: 'frame:2' }, name: 'frame:62000.jpg', sourceFrame: { positionMs: 62000, durationMs: 180000 } });
+  assert.equal(first, second);
+  const otherOrigin = imageSetGroupKey({ ...base, origin: { ...origin, key: 'page:2' }, ref: { provider: 'bilibili', key: 'frame:3' } });
+  assert.notEqual(first, otherOrigin);
 });

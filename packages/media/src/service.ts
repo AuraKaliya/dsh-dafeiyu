@@ -1,4 +1,4 @@
-import {RELEASE_VERSION} from '@dafeiyu/contracts';
+﻿import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import {API_VERSION} from '@dafeiyu/contracts';
 import {pendingMediaEvents} from './storage-status.js';
 import { Service } from '@deepseek-ai/cordis';
@@ -40,6 +40,13 @@ type Input=z.output<typeof MediaReadSchema>;
 type Prepared={input:DecoderInput;access:MediaAccess;source:StoredMediaSource;parent:MediaAssetRef|null;broker:MediaRangeBroker|null;signal:AbortSignal};
 declare module '@deepseek-ai/cordis' {interface Context {dafeiyuMedia:MediaService}}
 
+
+/** Frames from one batch differ by key, name and position; group by their shared provenance instead. */
+export function imageSetGroupKey(raw:unknown):string {
+  const value=z.record(z.string(),z.json()).safeParse(raw),data=value.success?value.data:{};
+  const frame=z.object({durationMs:z.number().optional()}).safeParse(data.sourceFrame);
+  return mediaHash({origin:data.origin??null,kind:data.kind??null,mime:data.mimeHint??null,duration:frame.success?frame.data.durationMs??null:null,rangeReadable:data.rangeReadable??false});
+}
 export class MediaService extends Service implements MediaPort {
   pendingEvents(){return pendingMediaEvents(this.config.dataDir);}
 
@@ -107,7 +114,7 @@ export class MediaService extends Service implements MediaPort {
     if(!assets.length)throw new Error('MEDIA_IMAGES_REQUIRED');
     if(!this.config.vision)throw new Error('MEDIA_VISION_NOT_CONFIGURED');
     const sources=assets.map(asset=>this.store.sourceForAsset(asset.id)),description=sources[0]!.description;
-    if(sources.some(source=>mediaHash(source.description)!==mediaHash(description)))throw new Error('MEDIA_IMAGE_SET_MIXED');
+    if(new Set(sources.map(source=>imageSetGroupKey(source.description))).size>1)throw new Error('MEDIA_IMAGE_SET_MIXED');
     const {provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
     const fingerprint={input,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
     if(prior)return this.observed(context,access,this.store.exposure(access,prior));
