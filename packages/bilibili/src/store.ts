@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { createHash,randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
-import { PersonaSourceRefSchema,MediaSourceDescriptionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema,BiliReadingRecordSchema,BiliReadingIndexSchema } from '@dafeiyu/contracts';
+import { PersonaSourceRefSchema,PersonaRequestIdSchema,MediaSourceDescriptionSchema,ResourceProofSchema,ExecutionScopeSchema,RunOriginSchema,BiliReadingRecordSchema,BiliReadingIndexSchema } from '@dafeiyu/contracts';
 import type { ResourceProof,ExecutionContext,MediaSourceDescription,PersonaSourceRef,Json } from '@dafeiyu/contracts';
 import { BILI_SCENE,BvidSchema } from './config.js';
 import { BiliDiagnostics,initializeBiliDiagnostics } from './diagnostics.js';
@@ -89,7 +89,7 @@ export class BiliStore {
   recover(){return Number(this.db.prepare("UPDATE bili_requests SET state='interrupted',error='BILI_PROCESS_INTERRUPTED' WHERE state='pending'").run().changes);}
   get counts(){return {pages:Number(this.db.prepare('SELECT count(*) AS n FROM bili_pages').get()?.n),requests:Number(this.db.prepare('SELECT count(*) AS n FROM bili_requests').get()?.n),pending:Number(this.db.prepare("SELECT count(*) AS n FROM bili_requests WHERE state='pending'").get()?.n)};}
   reading(context:ExecutionContext,bvid:string){const owner=biliOwner(context),row=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? AND bvid=?').get(owner,BvidSchema.parse(bvid));return row?BiliReadingRecordSchema.parse(JSON.parse(String(row.body))):null;}
-  saveReading(context:ExecutionContext,requestId:string,value:unknown){const owner=biliOwner(context),id=z.uuid().parse(requestId);return this.atomic(()=>{
+  saveReading(context:ExecutionContext,requestId:string,value:unknown){const owner=biliOwner(context),id=PersonaRequestIdSchema.parse(requestId);return this.atomic(()=>{
     const receipt=this.db.prepare('SELECT bvid FROM bili_reading_receipts WHERE owner=? AND request_id=?').get(owner,id);
     if(receipt){const row=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? AND bvid=?').get(owner,String(receipt.bvid));if(!row)throw new Error('IDEMPOTENCY_STALE');return BiliReadingRecordSchema.parse(JSON.parse(String(row.body)));}
     const base=BiliReadingRecordSchema.parse({...z.record(z.string(),z.json()).parse(value),updatedAt:new Date().toISOString()}),prior=this.db.prepare('SELECT version FROM bili_reading WHERE owner=? AND bvid=?').get(owner,base.bvid),version=(prior?Number(prior.version):0)+1,record={...base,version};

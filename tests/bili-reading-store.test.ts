@@ -98,3 +98,12 @@ test('the reading index stays bounded as a task accumulates videos', async () =>
     assert.ok(JSON.stringify(summary).length < 4096, 'index must stay small: ' + JSON.stringify(summary).length);
   } finally { f.store.close(); }
 });
+
+test('reading saves accept the persona request id format used by tools', async () => {
+  const f = await fixture();
+  try {
+    const saved = f.store.saveReading(f.first, 'reading-1', record({ title: '工具请求' }));
+    assert.equal(saved.title, '工具请求');
+    assert.equal(f.store.reading(f.first, bvid)!.title, '工具请求');
+  } finally { f.store.close(); }
+});

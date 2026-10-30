@@ -1,4 +1,4 @@
-import { readFileSync,lstatSync } from 'node:fs';
+﻿import { readFileSync,lstatSync } from 'node:fs';
 import { createHash,randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { setTimeout } from 'node:timers/promises';
@@ -11,6 +11,7 @@ import type { HttpTransport,HttpResponse } from './http.js';
 import { parseRetryAfter } from './diagnostics.js';
 import type { BiliAttempt,BiliFailureKind } from './diagnostics.js';
 import { BiliBrowserResultSchema } from '@dafeiyu/contracts';
+import type { BiliBrowserResult } from '@dafeiyu/contracts';
 import type { BiliBrowserPort,BiliBrowserRequest } from '@dafeiyu/contracts';
 
 const page=z.number().int().min(1).max(1000),size=z.number().int().min(1).max(20);
@@ -31,6 +32,14 @@ export function wbiQuery(params:Readonly<Record<string,string|number>>,img:strin
   const raw=stem(img)+stem(sub),key=MIXIN.map(n=>raw[n]).join('').slice(0,32),all={...params,wts:seconds},query=Object.entries(all).sort(([a],[b])=>a<b?-1:1).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(String(v).replace(/[!'()*]/g,''))).join('&');return query+'&w_rid='+createHash('md5').update(query+key).digest('hex');}
 const headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36',Referer:'https://www.bilibili.com/',Accept:'application/json'};
 const id=z.union([NumberIdSchema,z.number().int().positive().safe().transform(String)]);
+
+/** One shared rule for every browser section; search pages are not video pages. */
+export function browserBindingMatches(request:BiliBrowserRequest,value:BiliBrowserResult,expectedUid:string|null):boolean{
+  const url=request.section==='discover'?(request.feed==='popular'?'https://www.bilibili.com/v/popular/all':'https://www.bilibili.com/'):request.section==='search'?null:`https://www.bilibili.com/video/${request.bvid??`av${request.aid}`}/`;
+  const bvidMatches=request.section==='search'?true:request.aid===undefined?value.bvid===(request.bvid??null):value.bvid===null||BvidSchema.safeParse(value.bvid).success;
+  const urlMatches=url===null?/^https:\/\/search\.bilibili\.com\//.test(value.url):value.url===url;
+  return value.accountUid===expectedUid&&bvidMatches&&value.section===request.section&&urlMatches&&!(request.section==='discover'&&value.feed!==(request.feed??'home'));
+}
 export class BiliClient {
   private readonly context=new AsyncLocalStorage<{taskId:string|null;runId:string;operationId:string}>();
   constructor(readonly config:BiliConfig,private readonly store:BiliStore,private readonly transport:HttpTransport=nativeTransport){}
@@ -48,9 +57,7 @@ export class BiliClient {
     if(!this.config.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');
     const record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint:request.section==='discover'?'discover':request.section==='comments'?'comments':'video',transport:'dsh-browser',auth:'configured-session',origin:'task',taskId:request.taskId,runId:request.runId,operationId:request.operationId,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
     try{await this.slot(record.id,signal,guard,true);record.sentAt=Date.now();record.networkSent=null;const value=BiliBrowserResultSchema.parse(await port.read(request,signal));guard();signal.throwIfAborted();
-      const url=request.section==='discover'?(request.feed==='popular'?'https://www.bilibili.com/v/popular/all':'https://www.bilibili.com/'):`https://www.bilibili.com/video/${request.bvid??`av${request.aid}`}/`;
-      const bvidMatches=request.aid===undefined?value.bvid===(request.bvid??null):value.bvid===null||BvidSchema.safeParse(value.bvid).success;
-      if(value.accountUid!==this.config.browser.expectedUid||!bvidMatches||value.section!==request.section||value.url!==url||request.section==='discover'&&value.feed!==(request.feed??'home'))throw new Error('BILI_BROWSER_BINDING_MISMATCH');
+      if(!browserBindingMatches(request,value,this.config.browser.expectedUid))throw new Error('BILI_BROWSER_BINDING_MISMATCH');
       if(request.section==='frame'&&(!value.frame||request.positionMs===undefined||Math.abs(value.frame.positionMs-request.positionMs)>500||value.frame.positionMs>=value.frame.durationMs))throw new Error('BILI_BROWSER_BINDING_MISMATCH');
       record.outcome='success';return value;
     }catch(error){record.errorCode=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_READ_FAILED';record.kind=record.networkSent!==false?'response':'local';
