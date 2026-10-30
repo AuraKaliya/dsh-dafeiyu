@@ -12,7 +12,7 @@
 | 全量测试 | `npm test` | 269/269 通过（60 个测试文件） |
 | 构建/类型源码编译 | `npm run check` | 269/269 通过（同一套构建测试） |
 | 短冒烟 | `npm run test:smoke` | 3/3 通过 |
-| 公开发布包 | `npm run build:release` | 986 个文件，7,046,116 字节 |
+| 公开发布包 | `npm run build:release` | 986 个文件，7,047,085 字节 |
 | 发布包隐私/内容检查 | `node scripts/check-public-release.mjs <release>` | `passed:true`，无 findings |
 | 发布包 npm 清单 | `npm pack --dry-run --json` | 600 个条目，包名 `dsh-dafeiyu@0.25.0` |
 | 发布包入口导入 | 使用仓库 `node_modules` 临时 junction 导入 | `{"ok":true,"exports":["Config","apply","inject","name"]}`；导入后已移除 junction |
@@ -28,15 +28,15 @@ D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\<最新 UUID>
 本次候选发布：
 
 ```text
-D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\bc16daa2-ff08-4b3e-a751-66e4c70918dc
+D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\27eb02c8-bec5-4d7a-afbf-301367bd8274
 ```
 
-当前本机运行实例仍是 `dsh-dafeiyu-0.25.0-attention-v9-20261030-1930`；本候选尚未安装到该实例。
+profile 已指向 v10 候选，但当前 DSH 进程仍持有旧 v9 模块缓存（运行中的 Host 命令仍是 `...attention-v9-20261030-1930`）。需要一次完整 DSH 重启才能加载 v10。
 
 已用 `npm run deploy:prepare` 生成并校验一个干净候选：
 
 ```text
-D:\DSH\DaFeiYu-Local\deployment\packages\dsh-dafeiyu-0.25.0-attention-v10-20261030-201437
+D:\DSH\DaFeiYu-Local\deployment\packages\dsh-dafeiyu-0.25.0-attention-v10-20261030-201548
 ```
 
 `node bin/dafeiyu.mjs check` 返回 `INSTALL_CONFIGURATION_VALID`，无真实模型/平台调用。
