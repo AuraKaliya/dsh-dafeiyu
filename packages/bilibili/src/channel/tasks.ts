@@ -1,4 +1,4 @@
-import {API_VERSION} from '@dafeiyu/contracts';
+﻿import {API_VERSION} from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { z } from 'zod';
@@ -19,7 +19,7 @@ export class BiliOwnerTasks {
   constructor(private readonly ctx:Context,private readonly config:{accountUid:string;ownerUid:string;agentId:string;policyId:string;version:string;deliverResults:boolean;explorationResources:readonly Conversation[]},private readonly current:()=>boolean,private readonly admitting:()=>boolean){
     this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'bili-owner-tasks',version:'1',agentId:config.agentId,requires:['execution.message-task.v1','memory.execution.v1',...(config.deliverResults?['memory.native-expression.v1','delivery.task-result.v1']:[])],provides:['bilibili.owner-tasks.v1'],lifecycleReady:()=>!this.closed,actions:this.actions()});
     try{this.unbind=ctx.dafeiyu.bindMessageTasks({id:'bili-owner-tasks',pluginId:'bili-owner-tasks',channelExtensionId:BILI_OWNER_EXTENSION,channel:'bilibili',account:this.config.accountUid,ownerId:this.config.ownerUid,
-      policyId:config.policyId,version:config.version,autoDeliver:config.deliverResults,explorationResources:config.explorationResources,classify:biliOwnerTaskDirective,active:()=>!this.closed&&this.current()});}
+      policyId:config.policyId,version:config.version,autoDeliver:config.deliverResults,toolStage:'bili-reading',explorationResources:config.explorationResources,classify:biliOwnerTaskDirective,active:()=>!this.closed&&this.current()});}
     catch(error){this.handle.dispose();throw error;}}
   private access(context:ExecutionContext,write:boolean){this.ctx.dafeiyu.executionAuthority(context,'bili-owner-tasks');
     if(write&&!this.admitting())throw new Error('BILI_OWNER_TASK_ADMISSION_CLOSED');
