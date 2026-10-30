@@ -1,8 +1,6 @@
-﻿import {withRunUsage} from './usage.js';
+import {withRunUsage} from './usage.js';
 import {TaskDispositionSchema} from '@dafeiyu/contracts';
 import {stageHandoff} from './context-handoff.js';
-import {readingSegmentDecision} from './segment-policy.js';
-import type {SegmentCheckpoint} from './segment-policy.js';
 import type {ExecutionView} from '@dafeiyu/contracts';
 import {admitNativeContexts,contextManifest,prepareWithin} from './context-plan.js';
 import { randomUUID } from 'node:crypto';
@@ -686,21 +684,6 @@ export class ExecutionCoordinator {
         run=this.d.store.get(id);
         this.d.store.appendExecutionEvent(id,'task.stage',{phase:waiting?'waiting':'delivery',decision:decision??{next:'complete',reason:'Agent returned its final response'},at:new Date().toISOString()});
         if(waiting)this.d.store.waitWithResult(id,run.version,result.resultRef,memory?.intent(access).blocking?'TASK_OBJECTION_UNRESOLVED':decision?.requiredCapabilities.length?'TASK_CAPABILITY_CHANGE_PENDING':'TASK_WAITING');
-        if(!waiting&&decision?.next!=='complete'&&run.definition.scope.kind==='task'&&this.d.repository()){
-          // Reading segments: finish the segment, hand the bounded checkpoints to the next run.
-          try{
-            const task=this.repository().readState(this.d.agentId,run.definition.scope.taskId);
-            const ids=this.d.store.checkpoints(id),bodies=ids.flatMap(checkpointId=>{try{return [this.d.store.readCheckpoint(id,checkpointId)];}catch{return [];}});
-            const checkpoints:SegmentCheckpoint[]=bodies.map(body=>{const value=z.record(z.string(),z.json()).safeParse(body);return {kind:value.success&&typeof value.data.kind==='string'?value.data.kind:'',nextStep:value.success&&typeof value.data.nextStep==='string'?value.data.nextStep:null};});
-            const segments=Math.max(0,this.d.store.list().filter(previous=>previous.definition.taskId===task.id).length-1);
-            const verdict=readingSegmentDecision({checkpoints,task:{status:task.status,epoch:task.epoch},intentVersion:run.definition.intentVersion,segments});
-            if(verdict.next==='continue'){
-              const checkpointId=ids[verdict.checkpointId!]!,saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),producer=this.d.store.request(run.requestKey).producer;
-              this.submit(producer,ExecutionRequestSchema.parse({requestId:runtimeHash(['reading-segment',id,checkpointId]),taskId:task.id,expectedVersion:task.version,policyId:run.definition.policyId,...(saved.input.inputRefs?{inputRefs:saved.input.inputRefs}:{})}),{kind:'continuation',parentRunId:id,checkpointId},id,checkpointId,this.motivation(run));
-              this.d.store.appendExecutionEvent(id,'segment.continued',{checkpointId,reason:verdict.reason});this.flushEvents();
-            }
-          }catch{ /* A segment decision never blocks this run from completing. */ }
-        }
         else this.d.store.complete(id,run.version,result.resultRef);
       }catch(error){run=this.d.store.get(id);
         if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
