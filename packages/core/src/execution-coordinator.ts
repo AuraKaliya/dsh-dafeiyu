@@ -1,4 +1,4 @@
-import {withRunUsage} from './usage.js';
+﻿import {withRunUsage} from './usage.js';
 import {TaskDispositionSchema} from '@dafeiyu/contracts';
 import {stageHandoff} from './context-handoff.js';
 import type {ExecutionView} from '@dafeiyu/contracts';
@@ -620,7 +620,7 @@ export class ExecutionCoordinator {
           if(this.d.memory()!==memory||memory&&!memory.ready()||actions.some(action=>!action.active())||contributors.some(entry=>!entry.active()))throw new Error('DEPENDENCY_UNAVAILABLE');};
         this.d.experience()?.begin({id:run.id,scope:run.definition.scope,origin:run.definition.origin,goal:task.goal,at:run.createdAt});
         runPersona=this.d.personas.prepare(run,persona,this.d.model,inputs,signal,guard);
-        const evidence=this.evidence.get(id)!,access=this.d.personas.access(run,inputs,signal,guard);
+        const access=this.d.personas.access(run,inputs,signal,guard),evidence=this.evidenceFor(run,access);
         memory?.acceptIntent({...access,producer:`producer:${request.producer}`});
         const prior=this.previousContinuity(run,access,persona.version);
         const sessionId=this.d.store.session(runtimeHash({task:task.id,epoch:task.epoch,authorityVersion,inputHash,registryVersion,policyId:run.definition.policyId,motivation:access.motivation.kind,persona:runPersona.projectionKey,executionHistory:1}));

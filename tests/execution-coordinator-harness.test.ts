@@ -1,14 +1,17 @@
 ﻿import assert from 'node:assert/strict';
 import test from 'node:test';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { RuntimeStore } from '../packages/core/lib/runtime-store.js';
+import { ContextBudgetSchema } from '@dafeiyu/contracts';
+import { RuntimeStore, runtimeHash } from '../packages/core/lib/runtime-store.js';
 import { ExecutionCoordinator } from '../packages/core/lib/execution-coordinator.js';
 import { testTempDir } from './test-temp.js';
 
 const terminal = ['completed', 'waiting', 'failed', 'cancelled', 'interrupted'];
+const hash = (seed: string) => createHash('sha256').update(seed).digest('hex');
+const foundation = { version: hash('foundation'), identity: hash('identity') };
 
 /** Minimal TaskRepositoryPort: one active task per create, versions advance on update. */
 function taskRepository() {
@@ -41,18 +44,42 @@ async function harness(options: { runExecution?: () => Promise<unknown> } = {}) 
   const root = await mkdtemp(join(testTempDir(), 'coordinator-'));
   const store = new RuntimeStore(join(root, 'runtime.sqlite'), { agentId: 'fish', profileId: 'test' }, { create: true });
   const repository = taskRepository();
+  const model = { provider: 'deepseek-official', model: 'deepseek-flash' };
+  const personaRuntime = {
+    prepare: (run: { id: string }, snapshot: { version: string }) => ({
+      projectionKey: hash('projection'),
+      manifest: {
+        schemaVersion: 1, agentId: 'fish', runId: run.id, foundationHash: snapshot.version, foundationIdentity: foundation.identity,
+        stageRevision: 0, selectionVersion: 0, stageStatus: 'empty', omittedCandidates: 0, entries: [], continuityCheckpointId: null,
+        policyVersion: hash('policy'), modelRouteHash: runtimeHash(model),
+      },
+      items: [],
+      guard: () => undefined,
+    }),
+    access: (run: any, inputs: any, signal: AbortSignal, guard: () => void) => (personaRuntime as any).enrich({
+      view: Object.freeze({ runId: run.id, taskId: run.definition.taskId, scope: run.definition.scope, origin: run.definition.origin, signal }),
+      guard, motivation: { kind: 'explicit-task', basis: ['fixture'] },
+    }, run),
+    enrich: (access: unknown) => access,
+  };
   const coordinator = new ExecutionCoordinator({
-    agentId: 'fish', store, journal: new Proxy({}, { get: (_target, key) => key === 'get' ? (() => { throw new Error('NO_JOURNAL'); }) : key === 'list' || key === 'executionEvents' ? (() => []) : key === 'messageRecalled' ? (() => false) : (() => undefined) }) as never,
-    runtime: { runExecution: options.runExecution ?? (async () => ({ text: 'done', resultRef: { sessionId: 's1', messageSeq: 1, turnEndSeq: 2, textHash: 'h' } })) },
+    agentId: 'fish', store,
+    journal: new Proxy({}, {
+      get: (_target, key) => key === 'get' ? (() => { throw new Error('NO_JOURNAL'); })
+        : key === 'list' || key === 'executionEvents' ? (() => [])
+          : key === 'messageRecalled' ? (() => false)
+            : (() => undefined),
+    }) as never,
+    runtime: { runExecution: options.runExecution ?? (async (frame: { sessionId: string }) => ({ text: 'done', resultRef: { sessionId: frame.sessionId, messageSeq: 1, turnEndSeq: 2, textHash: hash('result') } })) },
     registry: { actions: () => [], contributors: () => [] },
     scheduler: { acquireHandle: async () => ({ close() {} }) },
     channelDescription: () => '', experience: () => undefined,
     options: { profileId: 'test', createStore: false, policies: [{ id: 'fixture-task', producers: ['fixture'], actions: [], allowLocalWrite: false, sourceRules: [], resources: [] }], maxPendingRuns: 100, maxConcurrentRuns: 2 },
-    repository: () => repository, personas: { access: () => ({}), items: () => [] }, memory: () => undefined,
+    repository: () => repository, personas: personaRuntime as never, memory: () => undefined,
     accepting: () => true, assertAccepting: () => undefined,
-    persona: () => ({ version: 'fixture', hash: 'h', fileIdentity: 'f', text: 'persona' }),
-    model: { provider: 'deepseek-official', model: 'deepseek-flash' }, turnTimeoutMs: 60_000,
-    context: { requestMaxBytes: 1_000_000, outputReserveBytes: 16_000, regions: {} },
+    persona: () => ({ version: foundation.version, hash: foundation.identity, fileIdentity: hash('file'), text: 'persona' }),
+    model, turnTimeoutMs: 60_000,
+    context: ContextBudgetSchema.parse({}),
     signal: new AbortController().signal,
   } as never);
   return { coordinator, store, repository };
@@ -75,8 +102,20 @@ test('a submitted task run reaches a terminal state and never stays running', as
     coordinator.activate();
     const state = await waitTerminal(store, (run as unknown as { id: string }).id);
     assert.notEqual(state, 'running', 'a run that left the executor must not stay running');
-    assert.ok(terminal.includes(state), 'state=' + state + ' error=' + String(store.get((run as unknown as { id: string }).id).error));
-    assert.ok(terminal.includes(state), `unexpected state ${state}`);
+    assert.equal(state, 'completed', 'state=' + state + ' error=' + String(store.get((run as unknown as { id: string }).id).error));
+  } finally {
+    store.close();
+  }
+});
+
+test('an executor exception fails the run without leaving it running', async () => {
+  const { coordinator, store } = await harness({ runExecution: async () => { throw new Error('BOOM'); } });
+  try {
+    const producer = coordinator.producer('fixture');
+    const { run } = producer.submitTask({ requestId: randomUUID(), title: '读取失败', goal: '观察失败路径', policyId: 'fixture-task' });
+    coordinator.activate();
+    const state = await waitTerminal(store, (run as unknown as { id: string }).id);
+    assert.equal(state, 'failed');
   } finally {
     store.close();
   }
