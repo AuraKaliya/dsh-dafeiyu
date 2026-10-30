@@ -103,6 +103,14 @@ export class DafeiyuService extends Service {
       return !!binding?.provider.sources&&sources.every(source=>binding.provider.sources!.validate(scope,source));
     }catch{return false;}
   }
+  /** Program-only: persist a bounded checkpoint for the current task run. */
+  checkpointRun(context:ExecutionContext,body:unknown):string {
+    if(context.scope.kind!=='task')throw new Error('CHECKPOINT_TASK_REQUIRED');
+    const store=this.runStore;if(!store)throw new Error('DEPENDENCY_UNAVAILABLE');
+    const run=store.get(context.runId),scope=run.definition.scope;
+    if(scope.kind!=='task'||scope.taskId!==context.scope.taskId||scope.agentId!==this.config.agentId)throw new Error('CHECKPOINT_SCOPE_MISMATCH');
+    return store.checkpoint(context.runId,body);
+  }
   phaseTimeouts(){return this.config.phaseTimeouts;}
   registerHarnessSection(name:string){return this.runtime.registerHarnessSection(name);}
   originRecallScope(view:import('@dafeiyu/contracts').ExecutionView,owner:string){return this.executions?.originRecallScope(view,owner)??null;}
