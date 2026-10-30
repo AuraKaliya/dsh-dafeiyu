@@ -9,12 +9,12 @@
 
 | 检查 | 命令 | 结果 |
 |---|---|---|
-| 全量测试 | `npm test` | 261/261 通过（60 个测试文件） |
-| 构建/类型源码编译 | `npm run check` | 261/261 通过（同一套构建测试） |
+| 全量测试 | `npm test` | 268/268 通过（60 个测试文件） |
+| 构建/类型源码编译 | `npm run check` | 268/268 通过（同一套构建测试） |
 | 短冒烟 | `npm run test:smoke` | 3/3 通过 |
-| 公开发布包 | `npm run build:release` | 983 个文件，7,029,860 字节 |
+| 公开发布包 | `npm run build:release` | 986 个文件，7,044,987 字节 |
 | 发布包隐私/内容检查 | `node scripts/check-public-release.mjs <release>` | `passed:true`，无 findings |
-| 发布包 npm 清单 | `npm pack --dry-run --json` | 598 个条目，包名 `dsh-dafeiyu@0.25.0` |
+| 发布包 npm 清单 | `npm pack --dry-run --json` | 600 个条目，包名 `dsh-dafeiyu@0.25.0` |
 | 发布包入口导入 | 使用仓库 `node_modules` 临时 junction 导入 | `{"ok":true,"exports":["Config","apply","inject","name"]}`；导入后已移除 junction |
 
 最新发布目录：
@@ -24,6 +24,14 @@ D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\<最新 UUID>
 ```
 
 `.runtime/` 不是发布物，部署时应重新 `npm run build:release` 或使用已复制到部署机的包。
+
+本次候选发布：
+
+```text
+D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\a4949333-3f98-4657-b4cf-dd14cb9eeb05
+```
+
+当前本机运行实例仍是 `dsh-dafeiyu-0.25.0-attention-v9-20261030-1930`；本候选尚未安装到该实例。
 
 ## 2. 部署前必须实现/确认
 
@@ -78,6 +86,12 @@ const unbind = core.bindFeedbackReceipts(port);
 5. 单调用超时后其他会话继续（依赖 2.1）；
 6. 反馈自动派发的 must-know/worth-sharing 与 unknown 停泊；
 7. 进程重启后的未完成发送/unknown 状态。
+
+### 2.5 调度与定时器边界
+
+- 普通插件 Host 目前只启用 Core 的运行级 RunLease/Conversation 调度，**没有安装** `server-runtime` 的 `installModelAdmission`；调用级排序、共享预算和取消隔离不能视为已生效。要启用必须走 `server-runtime` production 启动路径并绑定真实 `ModelBudgetAuthority`。
+- 反馈自动派发已改为 Core 独立 30 秒 tick，不再依赖 `activity.enabled`；Activity 只负责探索/维护。
+- B 站 `health` 现在包含独立的 `diagnostic.http` / `diagnostic.browser` 状态；`degraded` 只表示至少一条通道被诊断暂停。
 
 ## 3. 发布包结构
 
