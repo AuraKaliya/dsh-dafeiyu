@@ -14,7 +14,7 @@ export function feedbackSourceCurrent(record:FeedbackRecord,ports:FeedbackSource
   try{
     const item=ports.journal.get(record.sourceMessageId);
     if(item.route!==record.route)return false;
-    if(ports.journal.messageRecalled({agentId:ports.agentId,route:record.route},record.sourceMessageId))return false;
+    if(ports.journal.messageRecalled({agentId:ports.agentId,route:record.route},item.message.id))return false;
     if(record.taskId&&record.intentVersion!==undefined){
       const task=ports.repository.readState(ports.agentId,record.taskId);
       if(task.epoch!==record.intentVersion)return false;
