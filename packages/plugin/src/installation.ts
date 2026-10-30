@@ -34,11 +34,12 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   const resources=bili?.capabilities?[BILI_PUBLIC_SCENE]:[];
   const enabledMediaActions=settings.qq.media?.sendEnabled?MEDIA_ACTIONS:mediaActions;
   const stickerActions=settings.qq.stickers.enabled?[...QQ_STICKER_ACTIONS]:[];
+  const {service:oneBotService,...qqHostConfig}=settings.qq;
   const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...QQ_PROGRESS_ACTIONS,...stickerActions,...(settings.dshTools?DSH_TOOL_ACTIONS:[]),...(activity?ACTIVITY_ACTIONS:[]),...(bili?.capabilities?[...BILI_ACTIONS,...(bili.browser?['bili_browser_read']:[])]:[]),...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
   const conversation=[...memoryActions,...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...(settings.dshTools?['dsh_tool_list']:[]),...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
   const plugins:unknown[]=[{id:options.scripted?'model-scripted':'model-deepseek',required:true,config:options.scripted?{}:{credentialStore:settings.model.credentialStore,...(settings.model.auth?{auth:settings.model.auth}:{}),...(settings.model.baseURL?{baseURL:settings.model.baseURL}:{}),...(settings.model.inlineTransport?{inlineTransport:settings.model.inlineTransport}:{})}},
     {id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true,config:{context:{},maintenance:{}}},
-    {id:'qq',required:true,config:{...settings.qq,joinedGroups:undefined,capabilities:{enabled:true},tasks:{enabled:true,policyId:'qq-task',deliverResults:true,explorationResources:resources},...(settings.media?{media:{enabled:true,...settings.qq.media}}:{}),groupSync:{enabled:true,mode:settings.qq.joinedGroups?'joined':'allowlist'}}}];
+    {id:'qq',required:true,config:{...qqHostConfig,joinedGroups:undefined,capabilities:{enabled:true},tasks:{enabled:true,policyId:'qq-task',deliverResults:true,explorationResources:resources},...(settings.media?{media:{enabled:true,...settings.qq.media}}:{}),groupSync:{enabled:true,mode:settings.qq.joinedGroups?'joined':'allowlist'}}}];
   if(activity)plugins.push({id:'activity',required:true,config:Object.fromEntries(Object.entries(settings.activity).filter(([key])=>key!=='enabled'))});
   if(settings.media){const media=structuredClone(settings.media),base=dirname(settingsFile),absolute=(value:unknown)=>typeof value==='string'?resolve(base,value):value;
     for(const key of ['ffmpeg','ffprobe'])if(media[key])media[key]=absolute(media[key]) as string;
