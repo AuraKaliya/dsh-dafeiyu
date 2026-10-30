@@ -291,14 +291,24 @@ export class ConversationCoordinator {
       if (!notice.text.trim() || !notice.deliveryId.trim()) return;
       const text = redactContent(notice.text).value.slice(0, 4000);
       if (!text) return;
-      const duplicate = this.journal.recentEvents(item.route,'notice.sent',64).some(event => event.data.deliveryId === notice.deliveryId);
+      const textHash = createHash('sha256').update(text).digest('hex');
+      const duplicate = this.journal.recentEvents(item.route, 'notice.attempt', 64).some(event => {
+        const data = event.data;
+        return data.deliveryId === notice.deliveryId
+          && data.status === notice.status
+          && data.textHash === textHash
+          && (data.receiptId ?? null) === (notice.receiptId ?? null)
+          && (data.code ?? null) === (notice.code ?? null);
+      });
       if (duplicate) return;
-      this.journal.append(this.event(item, 'notice.sent', {
+      this.journal.append(this.event(item, 'notice.attempt', {
         text,
+        textHash,
         deliveryId: notice.deliveryId,
         status: notice.status,
         kind: notice.kind,
         ...(notice.receiptId ? { receiptId: notice.receiptId } : {}),
+        ...(notice.code ? { code: notice.code } : {}),
       }));
     } catch {
       // Delivery state remains authoritative; a continuity record must not turn a completed send into unknown.
@@ -312,4 +322,6 @@ export interface SentNotice {
   readonly status: 'sent' | 'not-sent' | 'unknown';
   readonly kind: 'progress' | 'result' | 'failure';
   readonly receiptId?: string;
+  /** Transport reason for not-sent/unknown; never part of a sent body. */
+  readonly code?: string;
 }

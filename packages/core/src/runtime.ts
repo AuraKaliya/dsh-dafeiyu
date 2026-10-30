@@ -7,10 +7,10 @@ import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-session-persistence';
 import type {} from '@deepseek-ai/dsh-system-prompt';
 import type {} from '@deepseek-ai/dsh-tools';
-import type { ActionCapability, Json, PendingMessage, PersonaSnapshot, SourceRef } from '@dafeiyu/contracts';
+import type { ActionCapability, Json, PendingMessage, PersonaSnapshot, SourceRef, WorkCallContext } from '@dafeiyu/contracts';
 import { ContextRuntime } from './context-runtime.js';
 import type { ContextCoordinator } from './context.js';
-import {messageDisplayText} from '@dafeiyu/contracts';
+import {messageDisplayText,workContexts} from '@dafeiyu/contracts';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
@@ -62,7 +62,12 @@ export class DshRuntime {
   runFrame(frame:TaskExecutionFrame):ReturnType<NativeRuntime['run']>;
   runFrame(frame:ConversationExecutionFrame):Promise<RunResult>;
   runFrame(frame:ExecutionFrame):ReturnType<NativeRuntime['run']>|Promise<RunResult>{
-    return frame.mode==='task'?this.native.run(frame):this.runConversation(frame.item,frame.persona,frame.actions,frame.signal,frame.channelDescription,frame.allowEmpty??(()=>false));
+    const work:WorkCallContext=frame.mode==='task'
+      ? frame.work ?? {workItemId:frame.view.runId,runId:frame.view.runId,scopeKey:String(frame.view.scope.kind==='task'?frame.view.scope.scopeKey:frame.view.scope.route),class:'owner-task',targetVersion:0,stage:'execution'}
+      : {workItemId:frame.item.id,runId:frame.item.id,scopeKey:frame.item.route,class:'interactive',targetVersion:0,stage:'conversation'};
+    const unbind=workContexts.bindSession(frame.mode==='task'?frame.sessionId:frame.item.sessionId,work);
+    const run=frame.mode==='task'?this.native.run(frame):this.runConversation(frame.item,frame.persona,frame.actions,frame.signal,frame.channelDescription,frame.allowEmpty??(()=>false));
+    return Promise.resolve(run).finally(unbind) as ReturnType<NativeRuntime['run']>|Promise<RunResult>;
   }
   private async runConversation(item:PendingMessage,persona:PersonaSnapshot,actions:readonly NativeAction[],signal:AbortSignal,channelDescription:string,allowEmpty:()=>boolean):Promise<RunResult>{
     signal.throwIfAborted();

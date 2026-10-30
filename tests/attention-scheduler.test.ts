@@ -81,6 +81,40 @@ test('owner tasks are background work with an ordering bonus, not interactive fo
   (await background)();
 });
 
+test('owner tasks win at equal non-zero wait, and long-waiting background still overtakes',async()=>{
+  let now=1_000;
+  const scheduler=new RunScheduler(1,{interactiveReserve:0,now:()=>now});
+  const releaseHolder=await scheduler.acquire(lease('holder','interactive'));
+  const order:string[]=[];
+  const background=scheduler.acquire(lease('bg','background')).then(release=>{order.push('background');return release;});
+  const owner=scheduler.acquire(lease('owner','owner-task')).then(release=>{order.push('owner');return release;});
+  now=2_000;
+  releaseHolder();
+  await tick();
+  assert.deepEqual(order,['owner'],'owner weight applies to equal waiting time');
+  (await owner)();
+  (await background)();
+});
+
+test('already-served owner work does not keep beating fresh background work',async()=>{
+  let now=0;
+  const scheduler=new RunScheduler(1,{interactiveReserve:0,now:()=>now});
+  const first=await scheduler.acquire(lease('owner','owner-task'));
+  now=5_000;
+  first();
+  assert.equal(scheduler.servedMs('owner'),5_000);
+
+  const releaseHolder=await scheduler.acquire(lease('holder','interactive'));
+  const order:string[]=[];
+  const background=scheduler.acquire(lease('bg','background')).then(release=>{order.push('background');return release;});
+  const owner=scheduler.acquire(lease('owner','owner-task')).then(release=>{order.push('owner');return release;});
+  releaseHolder();
+  await tick();
+  assert.deepEqual(order,['background'],'service history is subtracted from the owner score');
+  (await background)();
+  (await owner)();
+});
+
 test('a long-waiting background task eventually outranks a fresh owner task',async()=>{
   let now=0;
   const scheduler=new RunScheduler(1,{interactiveReserve:0,now:()=>now});

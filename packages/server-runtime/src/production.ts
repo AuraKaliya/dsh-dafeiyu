@@ -4,6 +4,7 @@ import type {} from '@dafeiyu/qq';
 import type { HostRuntimeOptions,PreparedHostConfig } from '@dafeiyu/host';
 import type { WindowsProcessControlOptions,WindowsHostProof } from '@dafeiyu/server-executor/windows-process';
 import { ExecutorRouteSchema } from '@dafeiyu/server-executor/protocol';
+import { workContexts } from '@dafeiyu/contracts';
 import type { ModelBudgetAuthority } from './types.js';
 import { SharedModelBudget } from './shared-budget.js';
 import { installParentModelAdmission,validateParentModelAdmission } from './model-admission.js';
@@ -54,7 +55,13 @@ export async function createProductionRuntime(config:PreparedHostConfig,options:
   const {pluginConfig,loadHostConfig}=await import('@dafeiyu/host');
   const settings=pluginConfig(config,'server-executor'),model=pluginConfig(config,'model-deepseek');
   if(!settings||!model)throw new Error('RUNTIME_PRODUCTION_PROFILE_REQUIRED');
-  const budget=new SharedModelBudget(options.authority),route=config.config.modelRoutes.chat;
+  const budget=new SharedModelBudget(options.authority,{leaseFor:request=>{
+    const jobId=request.owner.kind==='executor'?request.owner.jobId:undefined;
+    const work=workContexts.resolveJob(jobId);
+    if(work)return {class:work.class,workItemId:work.workItemId};
+    if(jobId)workContexts.noteUnbound({...(request.purpose?{purpose:request.purpose}:{})});
+    return jobId?{class:'interactive',workItemId:`unbound-job:${jobId}`}:undefined;
+  }}),route=config.config.modelRoutes.chat;
   if(settings.budgetAuthorizationId!==budget.authorizationId||route.provider!==budget.route.provider||route.model!==budget.route.model||(route.reasoningEffort??null)!==budget.route.reasoningEffort||JSON.stringify(ExecutorRouteSchema.parse(settings.route))!==JSON.stringify(budget.route))throw new Error('RUNTIME_PROFILE_BUDGET_MISMATCH');
   if(resolve(settings.command.nodePath).toLowerCase()!==resolve(options.windows.nodePath).toLowerCase()||settings.command.nodeHash!==options.windows.nodeHash)throw new Error('RUNTIME_PROCESS_PROGRAM_MISMATCH');
   if(!Number.isSafeInteger(options.maximumCallMs)||options.maximumCallMs<1||options.maximumCallMs>3600000||!Number.isSafeInteger(options.drainTimeoutMs)||options.drainTimeoutMs<1||options.drainTimeoutMs>3600000)throw new Error('RUNTIME_TIMEOUT_INVALID');
@@ -70,7 +77,13 @@ export async function createProductionRuntime(config:PreparedHostConfig,options:
       mounted=true;disposed=false;ctx.effect(()=>()=>{disposed=true;},'dafeiyu.server-runtime.host-lifetime');
       await validateParentModelAdmission(ctx,budget);
       installParentModelAdmission(ctx,budget,{profileId:config.config.profileId,maximumCallMs:options.maximumCallMs,guard,cancelActive:code=>cancelManagedModelWork(ctx,code),
-        leaseFor:({purpose})=>({class:purpose==='compaction'||purpose==='session-title'?'background':'interactive'})});
+        leaseFor:({purpose,sessionId})=>{
+          const work=workContexts.resolveSession(sessionId);
+          if(work)return {class:work.class,workItemId:work.workItemId};
+          if(purpose==='compaction'||purpose==='session-title')return {class:'background',workItemId:`internal:${purpose}`};
+          workContexts.noteUnbound({...(sessionId?{sessionId}:{ }),...(purpose?{purpose}:{})});
+          return {class:'interactive',workItemId:`unbound:${sessionId??purpose??'unknown'}`};
+        }});
     },
   };
   return {budget,parentProof:processControl.parentEvidence(),hostOptions:Object.freeze(hostOptions),close:host=>lifetime.close(host)};

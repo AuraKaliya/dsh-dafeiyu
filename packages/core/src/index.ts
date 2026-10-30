@@ -364,7 +364,7 @@ export class DafeiyuService extends Service {
       try{feedbackId=this.feedback.queue({workItemId:context.runId,route:item.route,kind,text:result.text,sourceEventId:context.operationId,
         ...(kind==='must-know'?{dueAt:now.toISOString()}:{}),...(kind==='worth-sharing'?{expiresAt:new Date(now.getTime()+15*60_000).toISOString()}:{})}).id;}catch{/* Feedback is an audit trail; it must not block an approved public notice. */}
       invoked=true;const receipt=await channel.capability.deliver(reply,signal,()=>{guard();persona.guard();});
-      this.conversations.recordNotice(item,{text:result.text,deliveryId:reply.id,status:receipt.status,kind:'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{})});
+      this.conversations.recordNotice(item,{text:result.text,deliveryId:reply.id,status:receipt.status,kind:'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{code:receipt.code})});
       if(feedbackId&&receipt.status==='sent'){try{this.feedback.markSent(feedbackId,reply.id,item.route);}catch{/* The notice is still recorded above. */}}
       return receipt;
       }catch{return {status:invoked?'unknown' as const:'not-sent' as const,code:invoked?'QQ_PROGRESS_RESULT_UNKNOWN':'QQ_PROGRESS_NOT_SENT'};}
@@ -424,7 +424,7 @@ export class DafeiyuService extends Service {
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
       channel:item=>this.conversations.deliveryChannel(item),
       enqueue:(route,work)=>this.conversations.enqueueTaskDelivery(route,work),acquire:()=>this.scheduler!.acquire({workItemId:'native-delivery',route:'',class:'interactive',maxDurationMs:this.config.deliveryTimeoutMs,preemptible:true}),
-      notice:notice=>this.conversations.recordNotice(notice.item,{text:notice.text,deliveryId:notice.deliveryId,status:notice.status,kind:notice.kind,...(notice.receiptId?{receiptId:notice.receiptId}:{})}),
+      notice:notice=>this.conversations.recordNotice(notice.item,{text:notice.text,deliveryId:notice.deliveryId,status:notice.status,kind:notice.kind,...(notice.receiptId?{receiptId:notice.receiptId}:{}),...(notice.code?{code:notice.code}:{})}),
       persona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),media:()=>this.mediaPort,mediaAccess:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),
     });
   }

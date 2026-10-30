@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
-import type { ExecutionInput,ExecutionView,PersonaSnapshot,PendingMessage,ContextItem } from '@dafeiyu/contracts';
+import type { ExecutionInput,ExecutionView,PersonaSnapshot,PendingMessage,ContextItem,WorkCallContext } from '@dafeiyu/contracts';
 import type { BoundAction } from './capability-registry.js';
 import type { Json } from '@dafeiyu/contracts';
 import type { ExecutionToolReceipt,SourceDependency } from '@dafeiyu/contracts';
@@ -13,6 +13,8 @@ export interface NativeAction {
 }
 export interface TaskExecutionFrame {
   readonly handoff?:import('@dafeiyu/contracts').ContextHandoff;
+  /** Program-issued identity for model-call admission; never derives from model text. */
+  readonly work?:WorkCallContext;
   refreshContexts?():Promise<void>;
   contextPlan?():Json;
   contextAudit?(data:Record<string,Json>):void;

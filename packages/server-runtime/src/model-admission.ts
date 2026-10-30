@@ -16,7 +16,7 @@ export interface ParentModelAdmissionOptions {
   /** Cancels the actual owners' work controllers, including isolated analysis contexts. */
   readonly cancelActive:(code:string)=>void;
   /** Optional call-level lease; absent keeps the gate FIFO. */
-  readonly leaseFor?:(request:{readonly purpose?:string})=>CallLease|undefined;
+  readonly leaseFor?:(request:{readonly purpose?:string;readonly sessionId?:string})=>CallLease|undefined;
   readonly guard?:()=>void;
 }
 
@@ -50,8 +50,9 @@ export function installParentModelAdmission(ctx:Context,budget:SharedModelBudget
     const body=JSON.stringify({provider:request.provider,model:request.model,system:request.system??null,messages:request.messages,tools:request.tools??[],maxTokens:output,purpose:request.purpose??null,reasoningEffort:effort,temperature:request.temperature??null,stop:request.stop??null});
     const bytes=Buffer.byteLength(body);if(bytes>route.maxRequestBytes)throw new Error('RUNTIME_REQUEST_TOO_LARGE');
     const callId=randomUUID(),started=Date.now(),owner={kind:'host' as const,profileId};
+    const leaseRequest={...(request.purpose!==undefined?{purpose:request.purpose}:{}),...(request.sessionId!==undefined?{sessionId:String(request.sessionId)}:{})};
     const permit=await budget.reserve({authorizationId:budget.authorizationId,owner,deadline:started+options.maximumCallMs,callId,provider:request.provider,model:request.model,
-      reasoningEffort:effort,requestHash:hash(body),sessionHash:hash(String(request.sessionId??'')),inputBound:route.contextWindow,outputBound:output,requestBytes:bytes,purpose:request.purpose??'task'},request.signal,options.leaseFor?.(request.purpose===undefined?{}:{purpose:request.purpose}));
+      reasoningEffort:effort,requestHash:hash(body),sessionHash:hash(String(request.sessionId??'')),inputBound:route.contextWindow,outputBound:output,requestBytes:bytes,purpose:request.purpose??'task'},request.signal,options.leaseFor?.(leaseRequest));
     let usage:ExecutorUsage|null=null,finish:ExecutorSettlement['finish']='interrupted',error:string|null=null,complete=false,invalid=false;
     let iterator:AsyncIterator<StreamChunk>|undefined,drained=false;
     try{

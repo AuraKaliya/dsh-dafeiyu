@@ -3,6 +3,7 @@ import { ConversationSchema } from './conversation.js';
 import { MediaAttachmentSchema } from './media.js';
 import type { Conversation } from './conversation.js';
 export * from './conversation.js';
+export * from './work-context.js';
 export * from './redaction.js';
 export * from './history.js';
 export * from './context.js';

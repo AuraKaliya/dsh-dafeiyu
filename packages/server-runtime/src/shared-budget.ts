@@ -17,12 +17,19 @@ interface ActiveRecord {
   completed:{hash:string;promise:Promise<{unknown:boolean}>}|null;
 }
 
+export interface SharedModelBudgetOptions {
+  /** Map a program-owned call request to a call lease; absent keeps the gate FIFO. */
+  readonly leaseFor?:(request:ModelBudgetRequest)=>CallLease|undefined;
+  readonly gate?:ModelCallGate;
+}
+
 /** Shared parent/child admission, never a second balance, authorization, lease or execution clock. */
 export class SharedModelBudget {
   readonly authorizationId:string;
   readonly route:Readonly<ModelBudgetAuthority['route']>;
   private readonly authority:ModelBudgetAuthority;
-  private readonly gate=new ModelCallGate();
+  private readonly gate:ModelCallGate;
+  private readonly leaseFor?:SharedModelBudgetOptions['leaseFor'];
   private readonly dispatch=new AsyncLocalStorage<string>();
   private readonly seen=new Set<string>();
   private readonly reservations=new Set<string>();
@@ -30,8 +37,9 @@ export class SharedModelBudget {
   private readonly cancellations=new Set<(code:string)=>void>();
   private interrupted:string|undefined;
 
-  constructor(authority:ModelBudgetAuthority){
+  constructor(authority:ModelBudgetAuthority,options:SharedModelBudgetOptions={}){
     this.authority=authority;this.authorizationId=RuntimeIdentitySchema.parse(authority.authorizationId);
+    this.gate=options.gate??new ModelCallGate();this.leaseFor=options.leaseFor;
     this.route=Object.freeze(ExecutorRouteSchema.parse(authority.route));
     if(!['acceptance','operations','offline-test'].includes(authority.kind)||typeof authority.guard!=='function'||typeof authority.remainingMs!=='function'||typeof authority.reserve!=='function'||typeof authority.settle!=='function')throw new Error('RUNTIME_BUDGET_AUTHORITY_REQUIRED');
     authority.onStop?.(code=>this.cancel(code));
@@ -57,7 +65,7 @@ export class SharedModelBudget {
     const route=this.route;
     if(request.provider!==route.provider||request.model!==route.model||request.reasoningEffort!==route.reasoningEffort||request.inputBound!==route.contextWindow||request.outputBound>route.maxOutputTokens||request.requestBytes>route.maxRequestBytes)throw new Error('RUNTIME_ROUTE_CHANGED');
     if(this.seen.has(request.callId))throw new Error('RUNTIME_CALL_REPLAY');this.seen.add(request.callId);
-    const deadline=Math.min(request.deadline,Date.now()+this.remainingMs()),release=await this.gate.acquire(signal,deadline,lease);
+    const deadline=Math.min(request.deadline,Date.now()+this.remainingMs()),release=await this.gate.acquire(signal,deadline,lease??this.leaseFor?.(request));
     let owned=false;
     try {
       signal.throwIfAborted();this.assertReady();

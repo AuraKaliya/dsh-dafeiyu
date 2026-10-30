@@ -580,9 +580,12 @@ export class ExecutionCoordinator {
     const work=previous.then(()=>this.process(run.id)).catch(()=>{this.failure='PERSISTENCE_FAILED';}).finally(()=>{this.queued.delete(run.id);if(this.taskQueues.get(taskId)===work)this.taskQueues.delete(taskId);});
     this.queued.set(run.id,work);this.taskQueues.set(taskId,work);
   }
+  private workClass(run:StoredRun):'owner-task'|'background'|'autonomy'{
+    const motivation=this.motivation(run).kind;
+    return motivation==='explicit-task'||motivation==='mixed'?'owner-task':motivation==='self-exploration'?'background':'autonomy';
+  }
   private async process(id:string):Promise<void>{
-    const scheduled=this.d.store.get(id),motivation=this.motivation(scheduled).kind;
-    const cls:'owner-task'|'background'|'autonomy'=motivation==='explicit-task'||motivation==='mixed'?'owner-task':motivation==='self-exploration'?'background':'autonomy';
+    const scheduled=this.d.store.get(id),cls=this.workClass(scheduled);
     const scope=scheduled.definition.scope;
     const release=await this.d.scheduler.acquire({workItemId:`task:${scheduled.definition.taskId}`,route:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,maxDurationMs:this.d.turnTimeoutMs,preemptible:true});
     try{if(!this.d.accepting()||this.failure)return;let run=this.d.store.get(id);if(!['accepted','queued'].includes(run.state))return;
@@ -656,6 +659,7 @@ export class ExecutionCoordinator {
         this.d.store.appendExecutionEvent(id,'task.stage',{phase:'execution',deadlineAt:new Date(Date.parse(run.updatedAt)+this.d.turnTimeoutMs).toISOString()});this.flushEvents();
         let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
         const frame:TaskExecutionFrame={mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,
+          work:{workItemId:`task:${scheduled.definition.taskId}`,runId:run.id,scopeKey:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,targetVersion:run.definition.intentVersion,stage:'execution'},
           handoff,refreshContexts:async()=>{if(contextUsed)await refreshContexts();contextUsed=true;},contextPlan:()=>lastPlan,
           contextAudit:data=>{this.d.store.appendExecutionEvent(id,'context.admitted',data);this.flushEvents();},
           program:z.json().parse({...z.record(z.string(),z.json()).parse(program),handoff}),contexts,evidence,
@@ -750,7 +754,8 @@ export class ExecutionCoordinator {
     const input=z.strictObject({proposal:z.string().trim().min(1).max(16000)}).parse(raw),run=this.d.store.get(context.runId),task=this.repository().readState(this.d.agentId,context.taskId!);
     const guard=()=>{this.authority(context,CAPABILITY_OWNER);if(this.repository().readState(this.d.agentId,task.id).epoch!==task.epoch)throw new Error('SOURCE_STALE');};
     const all=this.d.store.operations(run.id).filter(op=>op.id!==context.operationId),operations=all.slice(-32).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??'unknown',effects:op.outcome?.effects??'unknown',completeness:op.outcome?.completeness??'unknown',data:JSON.stringify(op.outcome?.data??null).slice(0,1500),coverage:'bounded-reported-output'}));
-    const frame:TaskExecutionFrame={mode:'task',sessionId:run.snapshot!.sessionId,view:{runId:run.id,taskId:task.id,scope:context.scope,origin:context.origin,signal:context.signal},persona:this.d.persona(),personaItems:this.d.personas.current(run.id)?.items??[],goal:task.goal,inputs:this.inputsFor(run),actions:[],guard,...this.d.context,reviewTimeoutMs:this.d.reviewTimeoutMs??60000};
+    const frame:TaskExecutionFrame={mode:'task',sessionId:run.snapshot!.sessionId,view:{runId:run.id,taskId:task.id,scope:context.scope,origin:context.origin,signal:context.signal},persona:this.d.persona(),personaItems:this.d.personas.current(run.id)?.items??[],goal:task.goal,inputs:this.inputsFor(run),actions:[],guard,...this.d.context,reviewTimeoutMs:this.d.reviewTimeoutMs??60000,
+      work:{workItemId:`task:${task.id}`,runId:run.id,scopeKey:context.scope.scopeKey,class:this.workClass(run),targetVersion:run.definition.intentVersion,stage:'review'}};
     const reviewed=await this.d.runtime.reviewExecution(frame,{text:input.proposal},z.json().parse({operations,omittedOperations:Math.max(0,all.length-operations.length)}));guard();
     if(reviewed.review.evidenceIds.some(id=>!operations.some(op=>op.id===id)))throw new Error('TASK_REVIEW_EVIDENCE_INVALID');
     this.d.store.bindInput(run.id,'task-review:'+context.operationId,{...reviewed,at:new Date().toISOString()});

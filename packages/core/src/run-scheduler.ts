@@ -70,6 +70,7 @@ interface Waiter {
   readonly lease: RunLease;
   readonly enqueuedAt: number;
   readonly resolve: (release: () => void) => void;
+  startedAt?: number;
 }
 
 const INTERACTIVE: RunClass = 'interactive';
@@ -81,6 +82,7 @@ export class RunScheduler {
   private backgroundActive = 0;
   private interactiveStreak = 0;
   private readonly queue: Waiter[] = [];
+  private readonly served = new Map<string, number>();
   private legacyCounter = 0;
   private focusRoute: string | undefined;
   private focusUntil = 0;
@@ -200,11 +202,10 @@ export class RunScheduler {
     if (!eligible.length) return undefined;
     const at = this.now();
     eligible.sort((left, right) => {
-      // Weighted fair ordering: owner tasks have weight 2, other background work weight 1.
-      // A long-waiting background item eventually overtakes a fresh owner task instead of
-      // being permanently pushed back by the ordering bonus.
-      const leftScore = (at - left.enqueuedAt) / this.classWeight(left.lease.class);
-      const rightScore = (at - right.enqueuedAt) / this.classWeight(right.lease.class);
+      // Higher score wins. Owner tasks have weight 2; already-served time is subtracted so
+      // a long-running owner task does not keep beating fresh work forever.
+      const leftScore = (at - left.enqueuedAt) * this.classWeight(left.lease.class) - (this.served.get(left.lease.workItemId) ?? 0);
+      const rightScore = (at - right.enqueuedAt) * this.classWeight(right.lease.class) - (this.served.get(right.lease.workItemId) ?? 0);
       if (leftScore !== rightScore) return rightScore - leftScore;
       return CLASS_ORDER[left.lease.class] - CLASS_ORDER[right.lease.class];
     });
@@ -213,6 +214,24 @@ export class RunScheduler {
 
   private classWeight(cls: RunClass): number {
     return cls === 'owner-task' ? 2 : 1;
+  }
+
+  /** Forget a completed work item's service history. */
+  forget(workItemId: string): void {
+    this.served.delete(workItemId);
+  }
+
+  /** Total admitted service time for diagnostics/tests. */
+  servedMs(workItemId: string): number {
+    return this.served.get(workItemId) ?? 0;
+  }
+
+  private rememberServed(workItemId: string, elapsedMs: number): void {
+    if (!this.served.has(workItemId) && this.served.size >= 1024) {
+      const oldest = this.served.keys().next().value;
+      if (oldest !== undefined) this.served.delete(oldest);
+    }
+    this.served.set(workItemId, (this.served.get(workItemId) ?? 0) + Math.max(0, elapsedMs));
   }
 
   private pickInteractive(): Waiter | undefined {
@@ -281,10 +300,12 @@ export class RunScheduler {
       this.emit(decision);
 
       const cls = chosen.lease.class;
+      chosen.startedAt = this.now();
       let released = false;
       chosen.resolve(() => {
         if (released) return;
         released = true;
+        if (chosen.startedAt !== undefined) this.rememberServed(chosen.lease.workItemId, this.now() - chosen.startedAt);
         this.used--;
         if (cls === INTERACTIVE) this.interactiveActive--;
         else this.backgroundActive--;
