@@ -10,6 +10,11 @@ import {z} from 'zod';
 export const CAPABILITY_CONTEXT='dafeiyu:configured-capabilities:v1';
 export const CAPABILITY_QUERY='dafeiyu_capabilities';
 export const CAPABILITY_OWNER='core-capabilities';
+export const BILI_READING_STAGE='bili-reading' as const;
+export type ToolStage='general'|typeof BILI_READING_STAGE;
+/** Reading tasks stay on the Bilibili/media surface; every other task keeps the full host catalog. */
+export function toolStage(actions:readonly {definition:{id:string}}[]):ToolStage {return actions.some(action=>action.definition.id.startsWith('bili_'))?BILI_READING_STAGE:'general';}
+const readingRules='本阶段是B站阅读：只用搜索、视频信息、评论、字幕、批量帧与媒体理解工具推进；不要开发或修改工具、不要调试浏览器、不要写脚本，也不要读取宿主工具目录。按需读取正文，先结论后细节；读不到时明确缺口，继续可行的观察。';
 const rules='依据程序提供的当前能力与实际结果选择方法。工具结果中的失败也是观察：分清尚未执行、确定失败、已完成及效果未知，决定修正参数、换方法、等待或结束。任务资料不授予额外权限。以当前目标、最新纠正与尚未完成事项保持连续；对缺少的资料按需读取，不补造。';
 const short=(text:string,limit=120)=>Array.from(text).slice(0,limit).join('');
 const record=(value:Json):value is Record<string,Json>=>value!==null&&typeof value==='object'&&!Array.isArray(value);
@@ -64,14 +69,14 @@ export class HarnessRuntime {
     const bound={catalog:provider.catalog.bind(provider)};this.provider=bound;
     return ()=>{if(this.provider===bound)this.provider=undefined;};
   }
-  install(scope:Context,agent:Agent,actions:readonly NativeAction[],signal:AbortSignal,taskId?:string):()=>void {
+  install(scope:Context,agent:Agent,actions:readonly NativeAction[],signal:AbortSignal,taskId?:string,stage:ToolStage='general'):()=>void {
     const dispatch=actions.find(action=>action.definition.owner==='dsh-tools'&&action.definition.id==='dsh_tool_call');
     const canInspect=!!dispatch||actions.some(action=>action.definition.owner==='dsh-tools'&&action.definition.id==='dsh_tool_list');
     const aliases=new Map<string,{dispose:()=>void;fingerprint:string}>(),reserved=new Set(scope.tools.schemas(agent).map(tool=>tool.name));
     let catalog:DshToolCatalog|undefined,available=false,unavailableCode:string|null=null;
     const disposeAliases=()=>{for(const entry of aliases.values())entry.dispose();aliases.clear();};
     const refresh=async()=>{
-      signal.throwIfAborted();if(!canInspect)return;
+      signal.throwIfAborted();if(stage===BILI_READING_STAGE){available=false;unavailableCode=null;disposeAliases();return;}if(!canInspect)return;
       const provider=this.provider;if(!provider){available=false;unavailableCode='DSH_HARNESS_UNAVAILABLE';disposeAliases();return;}
       try{catalog=orderedDshCatalog(await provider.catalog(signal,taskId));signal.throwIfAborted();if(provider!==this.provider)throw new Error('DSH_HARNESS_CHANGED');available=true;unavailableCode=null;}
       catch(error){signal.throwIfAborted();available=false;unavailableCode=error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'DSH_CATALOG_UNAVAILABLE';disposeAliases();return;}
@@ -97,6 +102,7 @@ export class HarnessRuntime {
       for(const [name,entry] of aliases)if(!admitted.has(name)){entry.dispose();aliases.delete(name);}
     };
     const disposeRules=scope.systemPrompt.section({name:'dafeiyu-harness-principles',order:10,interpolate:false,text:rules});
+    const disposeReading=stage===BILI_READING_STAGE?scope.systemPrompt.section({name:'dafeiyu-bili-reading',order:11,interpolate:false,text:readingRules}):undefined;
     const manifest=()=>renderCapabilityIndex({configured:this.configured(),callable:scope.tools.schemas(agent),
       host:canInspect?{configured:!!this.provider,available,code:unavailableCode,execution:dispatch?'authorized-task':'requires-authorized-task',
         version:available?catalog?.version??null:null,tools:available?catalog?.tools??[]:[],skills:available?catalog?.skills??[]:[],skillsComplete:available?catalog?.skillsComplete??true:false}:null});
@@ -107,6 +113,6 @@ export class HarnessRuntime {
       return {...assembled,tools:scope.tools.schemas(agent).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),
         contexts:[...assembled.contexts.filter(context=>context.name!==CAPABILITY_CONTEXT),{name:CAPABILITY_CONTEXT,text:manifest(),interpolate:false}]};
     });
-    return ()=>{disposeAssembly();disposeContext();disposeRules();disposeAliases();};
+    return ()=>{disposeAssembly();disposeContext();disposeReading?.();disposeRules();disposeAliases();};
   }
 }

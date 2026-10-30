@@ -1,4 +1,4 @@
-import {SNAPSHOT_RULE} from './context-snapshots.js';
+﻿import {SNAPSHOT_RULE} from './context-snapshots.js';
 import {retireContextCarrier} from './context-runtime.js';
 import {requestCapacity,inspectRequestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
@@ -13,7 +13,7 @@ import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { CompactionRuntime } from './compaction-runtime.js';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { z } from 'zod';
-import {HarnessRuntime,CAPABILITY_CONTEXT} from './harness-runtime.js';
+import {BILI_READING_STAGE,CAPABILITY_CONTEXT,HarnessRuntime,toolStage} from './harness-runtime.js';
 export const EXECUTION_MESSAGE_SOURCE='dafeiyu-execution' as const;
 
 declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {
@@ -69,11 +69,12 @@ export class NativeRuntime {
       owned.compaction.begin({id:frame.view.runId,route:frame.view.scope.scopeKey,sessionId:frame.sessionId,inputKind:'dafeiyu-execution',inputSourceId:frame.view.runId},owned.handle.agent);
       disposers.push(owned.scope.tools.restrict({allow:[]}));
       if(frame.prepare)disposers.push(await frame.prepare(owned.scope,owned.handle.agent));
-      for(const action of frame.actions){disposers.push(owned.scope.tools.register({name:action.definition.id,description:action.definition.description,
+      const stage=toolStage(frame.actions);
+      for(const action of frame.actions){if(stage===BILI_READING_STAGE&&action.definition.owner==='dsh-tools'&&action.definition.id==='dsh_tool_call')continue;disposers.push(owned.scope.tools.register({name:action.definition.id,description:action.definition.description,
         parameters:action.definition.parameters,output:{schema:{},render:(_args,value)=>[{type:'text',text:JSON.stringify(z.object({value:z.json()}).parse(value).value)}],presentationMeta:(_args,value)=>z.json().parse({dafeiyuExecution:z.object({receipt:z.json()}).parse(value).receipt})},
         execute:async(raw,exec)=>{if(exec.agent!==owned!.handle.agent)throw new Error('SCOPE_DENIED');frame.guard();
           const value=await action.execute(raw,String(exec.callId),AbortSignal.any([frame.view.signal,exec.signal]));return z.json().parse({value,receipt:action.metadata?.(value)??null});}}));}
-      disposers.push(this.harness.install(owned.scope,owned.handle.agent,frame.actions,frame.view.signal,frame.view.taskId));
+      disposers.push(this.harness.install(owned.scope,owned.handle.agent,frame.actions,frame.view.signal,frame.view.taskId,stage));
       const input=createUserMessage({source:{kind:'dafeiyu-execution',form:'notice',summary:'大肥鱼内部任务输入',taskId:frame.view.taskId,runId:frame.view.runId,inputId:randomUUID(),originKind:frame.view.origin.kind},
         content:[{type:'text',text:JSON.stringify(frame.program??{goal:frame.goal,inputs:frame.inputs})}]});
       owned.compaction.expectInput(input);
