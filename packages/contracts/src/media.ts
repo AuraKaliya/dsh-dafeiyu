@@ -42,9 +42,9 @@ export const NativeMediaMaterialSchema=z.strictObject({draftId:z.uuid(),draftVer
 export type NativeMediaMaterial=z.infer<typeof NativeMediaMaterialSchema>;
 export const MediaAcquireSchema=z.strictObject({requestId:PersonaRequestIdSchema,source:MediaProviderRefSchema});
 export const MediaReadSchema=z.strictObject({requestId:PersonaRequestIdSchema,asset:MediaAssetRefSchema.optional(),source:MediaProviderRefSchema.optional(),
-  mode:z.enum(['inspect','image','frames','audio','document']),pointsMs:z.array(z.number().int().nonnegative()).max(8).optional(),interval:MediaIntervalSchema.optional(),
-  offset:z.number().int().nonnegative().optional(),textOffset:z.number().int().nonnegative().optional(),limit:z.number().int().min(1).max(5000).optional()}).refine(v=>!!v.asset!==!!v.source,'Choose one asset or source')
-  .refine(v=>(v.mode==='frames'?!!v.pointsMs?.length:v.pointsMs===undefined)&&(v.mode==='audio'?!!v.interval:v.interval===undefined)&&(v.mode==='document'||v.offset===undefined&&v.textOffset===undefined&&v.limit===undefined),'Read options must match the selected mode');
+  mode:z.enum(['inspect','image','frames','images','audio','document']),assets:z.array(MediaAssetRefSchema).min(1).max(6).optional(),pointsMs:z.array(z.number().int().nonnegative()).max(8).optional(),interval:MediaIntervalSchema.optional(),
+  offset:z.number().int().nonnegative().optional(),textOffset:z.number().int().nonnegative().optional(),limit:z.number().int().min(1).max(5000).optional()}).refine(v=>[!!v.asset,!!v.source,!!v.assets].filter(Boolean).length===1,'Choose one asset, source or asset set')
+  .refine(v=>(v.mode==='frames'?!!v.pointsMs?.length:v.pointsMs===undefined)&&(v.mode==='audio'?!!v.interval:v.interval===undefined)&&(v.mode==='images'?!!v.assets?.length:v.assets===undefined)&&(v.mode==='document'||v.offset===undefined&&v.textOffset===undefined&&v.limit===undefined),'Read options must match the selected mode');
 export interface MediaAccess {readonly execution:PersonaAccess;readonly origin:ResourceProof;guard():void}
 export interface MediaByteStream {readonly bytes:number|null;readonly mime:string|null;readonly stream:AsyncIterable<Uint8Array>;
   readonly totalBytes?:number;readonly range?:{start:number;end:number}|null}

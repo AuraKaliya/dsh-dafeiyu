@@ -102,7 +102,38 @@ export class MediaService extends Service implements MediaPort {
       access.guard();return await work({input,access,source,parent,broker,signal});
     }finally{cancel.abort();if(broker)await broker.close();if(lease)this.store.releaseLease(lease,'process');}
   }
-  read(context:ExecutionContext,owner:string,input:Input){if(owner!=='media')return Promise.reject(new Error('MEDIA_READ_ACTION_REQUIRED'));return this.serial(()=>this.withInput(context,owner,input,async p=>{
+  private async readImages(context:ExecutionContext,owner:string,input:Input){
+    const assets=input.assets??[];
+    if(!assets.length)throw new Error('MEDIA_IMAGES_REQUIRED');
+    if(!this.config.vision)throw new Error('MEDIA_VISION_NOT_CONFIGURED');
+    const sources=assets.map(asset=>this.store.sourceForAsset(asset.id)),description=sources[0]!.description;
+    if(sources.some(source=>mediaHash(source.description)!==mediaHash(description)))throw new Error('MEDIA_IMAGE_SET_MIXED');
+    const {provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
+    const fingerprint={input,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
+    if(prior)return this.observed(context,access,this.store.exposure(access,prior));
+    const jobId=randomUUID();this.store.beginJob(access,jobId,fingerprint);const leases:string[]=[];const signal=AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)]);
+    try{
+      const images:DecodedImage[]=[];
+      for(const asset of assets){access.guard();this.store.requireRef(access,asset);
+        leases.push(this.store.lease(access,asset,'analysis',Date.now()+this.config.timeoutMs+60000));
+        const file=await this.files.verified(asset),metadata=await this.decoder.inspect({file},signal);
+        if(metadata.kind!=='image')throw new Error('MEDIA_MODE_MISMATCH');
+        images.push(await this.decoder.image({file},signal));
+        if(images.reduce((n,i)=>n+i.data.length,0)>this.images.imageLimits.maxMessageImageBytes)throw new Error('MEDIA_IMAGE_LIMIT');
+      }
+      const lease=this.images.grant(images,access.guard);
+      try{
+        const route={provider:this.config.vision.provider,model:this.config.vision.model,...(this.config.vision.reasoningEffort?{reasoningEffort:this.config.vision.reasoningEffort}:{})};
+        const result=await this.analysis.run({route,instructions:visionInstructions+'\n'+browserFrameInstructions,input:{images:images.map((i,index)=>({image:index,width:i.width,height:i.height,requestedMs:i.requestedMs,ptsMs:i.ptsMs})),coverage:'only-attached-images',outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:access.guard,parse:value=>visionResult.parse(value)},signal);
+        if(result.observations.length!==images.length)throw new Error('MEDIA_ANALYSIS_INVALID');
+        const actual=lease.exposure(),coverage={acquiredBytes:assets.reduce((n,asset)=>n+asset.bytes,0),processed:images.map(()=>({kind:'image' as const,unit:'whole-image' as const,start:0,end:1})),exposed:true,gaps:['仅浏览器捕获的原始单帧JPEG，未听音轨，不代表完整视频',...result.gaps],completeness:'partial' as const};
+        const text='视觉模型推断（observations仅针对本次图像，未独立核实）：\n'+JSON.stringify({observations:result.observations,frames:images.map(i=>({width:i.width,height:i.height})),gaps:coverage.gaps});
+        const exposure=this.store.recordExposure(access,input.requestId,fingerprint,source,{assets,coverage,text,occurredAt:new Date().toISOString(),detail:{mode:input.mode,route,actual}});
+        const observation=this.observed(context,access,exposure);this.store.finishJob(access,jobId,{exposureId:exposure.id},null);return observation;
+      }finally{lease.close();}
+    }catch(error){this.store.abortJob(access,jobId,failureCode(error));throw error;}finally{for(const lease of leases)this.store.releaseLease(lease,'analysis');}
+  }
+  read(context:ExecutionContext,owner:string,input:Input){if(owner!=='media')return Promise.reject(new Error('MEDIA_READ_ACTION_REQUIRED'));if(input.mode==='images')return this.serial(()=>this.readImages(context,owner,input));return this.serial(()=>this.withInput(context,owner,input,async p=>{
     if(input.mode==='inspect'){const metadata=await this.decoder.inspect(p.input,p.signal);p.access.guard();return {metadata,understood:false};}
     if(input.mode==='audio')return this.readAudio(context,input,p);
     if(input.mode==='document')return this.readDocument(context,input,p);
