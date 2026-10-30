@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { MessageSchema, conversationKey, TimelineQuerySchema, redactJson, ExecutionEventInputSchema, ExecutionEventSchema, taskScopeKey } from '@dafeiyu/contracts';
 import type { NewExecutionEvent, ExecutionEvent } from '@dafeiyu/contracts';
 import { JOURNAL_APPLICATION_ID, checkJournalShape, journalHasLiveOwner } from './schema.js';
+import { ownerAlive, ownerNonce } from './owner-identity.js';
 import { configureSqlite } from './sqlite.js';
 export { inspectJournal, JOURNAL_APPLICATION_ID } from './schema.js';
 export { configureSqlite } from './sqlite.js';
@@ -30,7 +31,7 @@ function state(value: unknown): MessageState {
 /** Single-process durable workflow ledger. DSH remains the owner of full session history. */
 export class Journal {
   private readonly db: DatabaseSync;
-  private readonly owner = randomUUID();
+  private readonly owner = ownerNonce();
   private closed = false;
   constructor(file: string) {
     mkdirSync(dirname(file), { recursive: true });
@@ -46,13 +47,8 @@ export class Journal {
     if(fresh)this.transaction(()=>{createStorageSchema(this.db);this.db.exec(`PRAGMA application_id=${JOURNAL_APPLICATION_ID};PRAGMA user_version=1;`);});
     try {
       this.transaction(() => {
-        const owner = this.db.prepare('SELECT pid FROM ownership WHERE singleton=1').get();
-        if (owner) {
-          let alive = true;
-          try { process.kill(Number(owner.pid), 0); }
-          catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ESRCH') alive = false; else throw error; }
-          if (alive) throw new Error('Journal is already owned by a live process');
-        }
+        const owner = this.db.prepare('SELECT pid,nonce FROM ownership WHERE singleton=1').get();
+        if (owner && ownerAlive(Number(owner.pid),{...(typeof owner.nonce==='string'?{nonce:owner.nonce}:{})})) throw new Error('Journal is already owned by a live process');
         this.db.prepare('INSERT OR REPLACE INTO ownership(singleton,pid,nonce) VALUES(1,?,?)').run(process.pid, this.owner);
       });
     } catch (error) { this.db.close(); throw error; }

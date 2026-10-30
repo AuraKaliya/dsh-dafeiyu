@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ActionOutcomeSchema, ExecutionScopeSchema, RunOriginSchema, conversationKey,PersonaManifestSchema } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
 import { configureSqlite,matchesSchema } from '@dafeiyu/journal';
+import { ownerAlive, ownerNonce } from '@dafeiyu/journal/owner-identity';
 import { NativeDeliveryStore } from './native-delivery-store.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
@@ -48,7 +49,7 @@ export class RuntimeStore {
   private sourceRead(sql:string){let statement=this.sourceReadStatements.get(sql);if(!statement){statement=this.db.prepare(sql);this.sourceReadStatements.set(sql,statement);}return statement;}
   readonly nativeDeliveries:NativeDeliveryStore;
   private readonly db:DatabaseSync;
-  private readonly nonce=randomUUID();
+  private readonly nonce=ownerNonce();
   private closed=false;
   readonly identity:Readonly<RuntimeIdentity>;
   constructor(readonly file:string,identity:RuntimeIdentity,private readonly options:{create?:boolean}={}){
@@ -66,11 +67,11 @@ export class RuntimeStore {
       if(fresh)this.initialize();
       const saved=this.db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();
       if(!saved||runtimeHash(JSON.parse(string(saved.body)))!==runtimeHash(this.identity))throw new Error('RUNTIME_IDENTITY_MISMATCH');
-      const owner=this.db.prepare('SELECT pid FROM runtime_ownership WHERE singleton=1').get();
-      if(owner){let alive=true;try{process.kill(Number(owner.pid),0);}catch(error){if(error instanceof Error&&'code'in error&&error.code==='ESRCH')alive=false;}if(alive)throw new Error('RUNTIME_ALREADY_OWNED');}
+      const owner=this.db.prepare('SELECT pid,nonce FROM runtime_ownership WHERE singleton=1').get();
+      if(owner&&ownerAlive(Number(owner.pid),{...(typeof owner.nonce==='string'?{nonce:owner.nonce}:{})}))throw new Error('RUNTIME_ALREADY_OWNED');
       configureSqlite(this.db);
-      this.transaction(()=>{const owner=this.db.prepare('SELECT pid FROM runtime_ownership WHERE singleton=1').get();
-        if(owner){let alive=true;try{process.kill(Number(owner.pid),0);}catch(error){if(error instanceof Error&&'code'in error&&error.code==='ESRCH')alive=false;}if(alive)throw new Error('RUNTIME_ALREADY_OWNED');}
+      this.transaction(()=>{const owner=this.db.prepare('SELECT pid,nonce FROM runtime_ownership WHERE singleton=1').get();
+        if(owner&&ownerAlive(Number(owner.pid),{...(typeof owner.nonce==='string'?{nonce:owner.nonce}:{})}))throw new Error('RUNTIME_ALREADY_OWNED');
         this.db.prepare('INSERT OR REPLACE INTO runtime_ownership VALUES(1,?,?)').run(process.pid,this.nonce);});
       this.nativeDeliveries=new NativeDeliveryStore(this.db,work=>this.transaction(work),(runId,type,data)=>this.event(runId,type,data));
     }catch(error){this.db.close();throw error;}

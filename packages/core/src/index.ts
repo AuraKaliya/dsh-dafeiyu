@@ -220,6 +220,7 @@ export class DafeiyuService extends Service {
   private feedback:FeedbackLedger;
   private feedbackDispatcher:FeedbackDispatcher|undefined;
   private feedbackReceipts:FeedbackReceiptPort|undefined;
+  private feedbackTimer:ReturnType<typeof setInterval>|undefined;
   private executionRecovered=false;
   private conversationRuns:ConversationRuns|undefined;
 
@@ -435,6 +436,7 @@ export class DafeiyuService extends Service {
       notice:notice=>this.conversations.recordNotice(notice.item,{text:notice.text,deliveryId:notice.deliveryId,status:notice.status,kind:notice.kind,...(notice.receiptId?{receiptId:notice.receiptId}:{}),...(notice.code?{code:notice.code}:{})}),
       persona:(item,id,signal,guard)=>this.targetPersona(item,id,signal,guard),media:()=>this.mediaPort,mediaAccess:(authority,reply,signal)=>this.prepareMediaReplyAccess(authority,reply,signal),
     });
+    if(!this.feedbackTimer){this.feedbackTimer=setInterval(()=>{void this.dispatchFeedback().catch(()=>{});},30_000);this.feedbackTimer.unref?.();}
   }
   async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;this.migrateFeedback();}
   private migrateFeedback():void{
@@ -661,6 +663,7 @@ export class DafeiyuService extends Service {
   }
   close(): Promise<void> {
     if (this.closing) return this.closing;
+    if(this.feedbackTimer){clearInterval(this.feedbackTimer);this.feedbackTimer=undefined;}
     this.quiesce();this.readyListeners.clear();this.registry.close();
     this.controller.abort();
     this.closing = (async () => {

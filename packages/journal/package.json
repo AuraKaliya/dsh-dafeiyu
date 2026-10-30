@@ -12,6 +12,10 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./owner-identity": {
+      "types": "./lib/owner-identity.d.ts",
+      "default": "./lib/owner-identity.js"
     }
   },
   "main": "./lib/index.js"

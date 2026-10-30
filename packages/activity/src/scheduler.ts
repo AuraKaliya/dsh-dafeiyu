@@ -174,7 +174,7 @@ export class ActivityScheduler {
   tick():Promise<void>{if(this.pending)return this.pending;if(!this.started||this.closed||!this.ready()||!this.dependenciesReady()||!this.ctx.dafeiyu.accepting)return Promise.resolve();
     const work=Promise.resolve().then(async()=>{
       if(!this.started||this.closed||!this.ready()||!this.ctx.dafeiyu.accepting)return;
-      const now=this.now();try{await this.ctx.dafeiyu.dispatchFeedback?.(now);}catch{/* Feedback dispatch cannot stop activity scheduling. */}
+      const now=this.now();
       this.importMemory(now);this.controlActive(now);const idleBusy=this.idle.control(now,this.pressure());this.settleRounds(now);if(this.pressure()||idleBusy)return;
       this.dispatch(now);
       for(const id of this.store.due(now)){const plan=this.store.get(id);const source=this.source(plan);if(source.state==='pending')continue;

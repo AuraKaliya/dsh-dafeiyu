@@ -1,5 +1,6 @@
 import {inspectDatabase} from './storage-inspection.js';
 import type {StorageIdentity} from './storage-inspection.js';
+import {ownerAlive} from './owner-identity.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 
@@ -11,9 +12,9 @@ const required: Record<string, readonly string[]> = {
 };
 export interface JournalInspection { exists: boolean; version: number; applicationId: number; supported: boolean; activeOwner: boolean }
 export function journalHasLiveOwner(db:DatabaseSync):boolean {
-  const owner=db.prepare('SELECT pid FROM ownership WHERE singleton=1').get();
+  const owner=db.prepare('SELECT pid,nonce FROM ownership WHERE singleton=1').get();
   if(!owner)return false;
-  try{process.kill(Number(owner.pid),0);return true;}catch(error){return !(error instanceof Error&&'code'in error&&error.code==='ESRCH');}
+  return ownerAlive(Number(owner.pid),{...(typeof owner.nonce==='string'?{nonce:owner.nonce}:{})});
 }
 export function checkJournalShape(db: DatabaseSync): void {
   for (const [table, columns] of Object.entries(required)) {

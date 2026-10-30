@@ -1,5 +1,6 @@
 import {DatabaseSync} from 'node:sqlite';
 import {existsSync} from 'node:fs';
+import {ownerAlive} from './owner-identity.js';
 
 export interface DatabaseInspection {exists:boolean;version:number;applicationId:number;supported:boolean;activeOwner:boolean;integrity:boolean;identityMatches:boolean}
 export interface StorageIdentity {agentId:string;profileId:string}
@@ -28,7 +29,7 @@ export function inspectDatabase(file:string,contract:DatabaseContract,identity?:
   try{db=new DatabaseSync(file,{readOnly:true});const version=Number(db.prepare('PRAGMA user_version').get()?.user_version),applicationId=Number(db.prepare('PRAGMA application_id').get()?.application_id);
     const supported=version===contract.version&&applicationId===contract.applicationId&&contract.validate(db);
     let activeOwner=false;
-    if(supported&&contract.ownerTable){const row=db.prepare(`SELECT pid FROM ${contract.ownerTable} WHERE singleton=1`).get();if(row){try{process.kill(Number(row.pid),0);activeOwner=true;}catch(error){activeOwner=!(error instanceof Error&&'code'in error&&error.code==='ESRCH');}}}
+    if(supported&&contract.ownerTable){const row=db.prepare(`SELECT pid,nonce FROM ${contract.ownerTable} WHERE singleton=1`).get();if(row)activeOwner=ownerAlive(Number(row.pid),{...(typeof row.nonce==='string'?{nonce:row.nonce}:{})});}
     const identityMatches=supported&&identity&&contract.identity?contract.identity(db,identity):supported;
     const integrity=Object.values(db.prepare('PRAGMA quick_check').get()??{})[0]==='ok'&&db.prepare('PRAGMA foreign_key_check').get()===undefined;
     return {exists:true,version,applicationId,supported,activeOwner,integrity,identityMatches};

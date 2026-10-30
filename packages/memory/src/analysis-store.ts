@@ -7,6 +7,7 @@ import type { TimelineScope } from '@dafeiyu/contracts';
 import { AnalysisError, jobSchema, authoritySchema } from './analysis-types.js';
 import type { AnalysisJob } from './analysis-types.js';
 import type { NewEvent } from '@dafeiyu/journal';
+import { ownerAlive, ownerNonce } from '@dafeiyu/journal/owner-identity';
 import { MEMORY_VERSION } from './types.js';
 
 const auditSchema=z.strictObject({id:z.uuid(),scope:authoritySchema,jobId:z.uuid(),state:jobSchema.shape.state,
@@ -15,7 +16,7 @@ const auditSchema=z.strictObject({id:z.uuid(),scope:authoritySchema,jobId:z.uuid
 /** Durable queue and candidate acknowledgements; memory commits use their own idempotency ledger. */
 export class AnalysisStore {
   private readonly db: DatabaseSync;
-  private readonly nonce = randomUUID();
+  private readonly nonce = ownerNonce();
   constructor(file: string,deferRecovery=false) {
     mkdirSync(dirname(file),{recursive:true});
     this.db=new DatabaseSync(file);
@@ -34,12 +35,8 @@ export class AnalysisStore {
         PRAGMA application_id=1145454897; PRAGMA user_version=1;`);
       this.db.exec('BEGIN IMMEDIATE');
       try {
-        const owner=this.db.prepare('SELECT pid FROM ownership WHERE singleton=1').get();
-        if(owner){
-          let alive=true;
-          try{process.kill(Number(owner.pid),0);}catch(error){if(error instanceof Error&&'code' in error&&error.code==='ESRCH')alive=false;else throw error;}
-          if(alive)throw new Error('Analysis queue already owned');
-        }
+        const owner=this.db.prepare('SELECT pid,nonce FROM ownership WHERE singleton=1').get();
+        if(owner&&ownerAlive(Number(owner.pid),{...(typeof owner.nonce==='string'?{nonce:owner.nonce}:{})}))throw new Error('Analysis queue already owned');
         this.db.prepare('INSERT OR REPLACE INTO ownership VALUES(1,?,?)').run(process.pid,this.nonce);
         this.db.exec('COMMIT');
       } catch(error){this.db.exec('ROLLBACK');throw error;}
