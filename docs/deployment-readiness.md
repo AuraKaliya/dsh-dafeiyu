@@ -9,10 +9,10 @@
 
 | 检查 | 命令 | 结果 |
 |---|---|---|
-| 全量测试 | `npm test` | 260/260 通过（60 个测试文件） |
-| 构建/类型源码编译 | `npm run check` | 260/260 通过（同一套构建测试） |
+| 全量测试 | `npm test` | 261/261 通过（60 个测试文件） |
+| 构建/类型源码编译 | `npm run check` | 261/261 通过（同一套构建测试） |
 | 短冒烟 | `npm run test:smoke` | 3/3 通过 |
-| 公开发布包 | `npm run build:release` | 983 个文件，7,029,874 字节 |
+| 公开发布包 | `npm run build:release` | 983 个文件，7,029,860 字节 |
 | 发布包隐私/内容检查 | `node scripts/check-public-release.mjs <release>` | `passed:true`，无 findings |
 | 发布包 npm 清单 | `npm pack --dry-run --json` | 598 个条目，包名 `dsh-dafeiyu@0.25.0` |
 | 发布包入口导入 | 使用仓库 `node_modules` 临时 junction 导入 | `{"ok":true,"exports":["Config","apply","inject","name"]}`；导入后已移除 junction |
