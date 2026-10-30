@@ -33,6 +33,14 @@ D:\DSH\DSH workspace\dafeiyu\.runtime\public-releases\a4949333-3f98-4657-b4cf-dd
 
 当前本机运行实例仍是 `dsh-dafeiyu-0.25.0-attention-v9-20261030-1930`；本候选尚未安装到该实例。
 
+已用 `npm run deploy:prepare` 生成并校验一个干净候选：
+
+```text
+D:\DSH\DaFeiYu-Local\deployment\packages\dsh-dafeiyu-0.25.0-attention-v10-20261030-201239
+```
+
+`node bin/dafeiyu.mjs check` 返回 `INSTALL_CONFIGURATION_VALID`，无真实模型/平台调用。
+
 ## 2. 部署前必须实现/确认
 
 ### 2.1 计费 authority
