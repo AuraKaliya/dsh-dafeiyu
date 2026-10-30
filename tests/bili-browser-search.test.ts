@@ -48,3 +48,16 @@ test('browser search rejects a page outside the search origin', async () => {
   const call: BrowserToolCall = async (name) => name === 'dsh_browser_open' ? { url: 'https://www.bilibili.com/', challenge: { blocked: false } } : result({ url: 'https://www.bilibili.com/', ids: ['42'] });
   await assert.rejects(readBiliBrowser(request(), '42', call, new AbortController().signal, clock()), /BILI_BROWSER_REDIRECT/);
 });
+
+test('browser discovery returns per-title candidates instead of one aggregate title', async () => {
+  const url = 'https://www.bilibili.com/v/popular/all';
+  const call: BrowserToolCall = async (name, args) => {
+    if (name === 'dsh_browser_open') return { url, challenge: { blocked: false } };
+    if (isIdentity(args)) return result({ url, ids: ['42'] });
+    return result({ title: 'B站当前热门列表', text: '标题甲 https://www.bilibili.com/video/BV1xNpFedEwH/', truncated: false, items: [{ bvid: 'BV1xNpFedEwH', title: '标题甲' }] });
+  };
+  const value = await readBiliBrowser({ taskId: randomUUID(), runId: randomUUID(), operationId: randomUUID(), section: 'discover', feed: 'popular' } as BiliBrowserRequest, '42', call, new AbortController().signal, clock());
+  assert.equal(value.items?.length, 1);
+  assert.equal(value.items?.[0]?.bvid, 'BV1xNpFedEwH');
+  assert.equal(value.items?.[0]?.author, '');
+});
