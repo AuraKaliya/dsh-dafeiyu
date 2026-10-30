@@ -42,6 +42,7 @@ export const BiliSearchResultSchema = z.strictObject({
     limit: z.number().int().min(1).max(20),
     items: z.array(BiliSearchItemSchema).max(20),
     nextPage: z.number().int().min(2).max(50).nullable(),
+    nextPageReason: z.enum(['next-page', 'platform-no-more', 'local-page-limit']).default('platform-no-more'),
     coverage,
 });
 

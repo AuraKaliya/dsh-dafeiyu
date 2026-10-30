@@ -10,8 +10,8 @@ function views(value:number|string|undefined){if(value===undefined||value==='')r
 function publishedAt(value:number|undefined){return value===undefined||!Number.isFinite(value)?null:new Date(value*1000).toISOString();}
 export function listing(raw:unknown,kind:'discover'|'search',page:number,limit:number){const result=kind==='discover'?z.object({list:z.array(videoItem).max(100),no_more:z.boolean().optional()}).parse(raw):z.object({result:z.array(videoItem).max(100).optional(),numPages:number.optional()}).parse(raw);
   const rows='list'in result?result.list:result.result??[];const items=rows.slice(0,limit).map(v=>({bvid:v.bvid,aid:v.aid??v.id??null,title:plain(v.title,160),author:plain(v.author??v.owner?.name??'',80),publishedAt:publishedAt(v.pubdate),views:views(v.play??v.stat?.view),durationSeconds:duration(v.duration)}));
-  const nextPage=('no_more'in result&&result.no_more||'numPages'in result&&result.numPages!==undefined&&page>=result.numPages||rows.length<limit)?null:page+1;
-  return {data:{items,page,limit,nextPage},fields:items.map((v,i)=>({id:'title:'+i,text:v.title})).filter(f=>f.text.trim()),count:items.length,
+  const platformMore='no_more'in result?!result.no_more:'numPages'in result&&result.numPages!==undefined?page<result.numPages:rows.length>=limit,nextPage=rows.length<limit||!platformMore||page>=50?null:page+1,nextPageReason=nextPage!==null?'next-page':page>=50&&platformMore?'local-page-limit':'platform-no-more';
+  return {data:{items,page,limit,nextPage,nextPageReason},fields:items.map((v,i)=>({id:'title:'+i,text:v.title})).filter(f=>f.text.trim()),count:items.length,
     coverage:['仅本次平台返回的一页；排序可能随时间变化','标题最多160字符；媒体尚未读取',...(rows.length>limit?['平台超额返回，未展示额外项目']:[])]};}
 const part=z.object({cid:platformId,page:z.number().int().positive(),part:rawText,duration:number});
 export function video(raw:unknown){const value=z.object({bvid:BvidSchema,aid:platformId,title:rawText,desc:rawText.default(''),duration:number,pages:z.array(part).min(1).max(10000),owner:z.object({mid:platformId,name:rawText}),state:z.number().optional()}).parse(raw);if(value.state!==undefined&&value.state<0)throw new Error('BILI_NOT_FOUND');

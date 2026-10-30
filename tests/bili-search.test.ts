@@ -1,7 +1,7 @@
 ﻿import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { BiliSearchResultSchema } from '../packages/contracts/lib/bili-reading.js';
+import { BiliCommentCursorSchema, BiliSearchResultSchema } from '../packages/contracts/lib/bili-reading.js';
 import { listing } from '../packages/bilibili/lib/pages.js';
 
 test('search listing normalizes views, publish time and duration from platform rows', () => {
@@ -20,6 +20,7 @@ test('search listing normalizes views, publish time and duration from platform r
   assert.equal(listed.data.items[1]!.views, null);
   assert.equal(listed.data.items[1]!.publishedAt, null);
   assert.equal(listed.data.nextPage, 2);
+  assert.equal(listed.data.nextPageReason, 'next-page');
 
   const result = BiliSearchResultSchema.parse({ keyword: '养鱼', order: 'click', ...listed.data, coverage: listed.coverage });
   assert.equal(result.keyword, '养鱼');
@@ -29,8 +30,10 @@ test('search listing normalizes views, publish time and duration from platform r
 test('search listing stops when the platform has no more pages or returns a short page', () => {
   const short = listing({ result: [{ bvid: 'BV1xNpFedEwH', title: 't', duration: '00:10' }], numPages: 5 }, 'search', 1, 2);
   assert.equal(short.data.nextPage, null);
+  assert.equal(short.data.nextPageReason, 'platform-no-more');
   const last = listing({ result: Array.from({ length: 5 }, () => ({ bvid: 'BV1xNpFedEwH', title: 't' })), numPages: 2 }, 'search', 2, 5);
   assert.equal(last.data.nextPage, null);
+  assert.equal(last.data.nextPageReason, 'platform-no-more');
 });
 
 test('discover listing shares the candidate shape and view counts', () => {
@@ -40,4 +43,18 @@ test('discover listing shares the candidate shape and view counts', () => {
   assert.equal(item.views, 9876);
   assert.equal(item.durationSeconds, 125);
   assert.equal(listed.data.nextPage, null);
+});
+
+test('a local page limit is reported separately from the platform having no more', () => {
+  const rows = Array.from({ length: 5 }, () => ({ bvid: 'BV1xNpFedEwH', title: 't' }));
+  const capped = listing({ result: rows, numPages: 99 }, 'search', 50, 5);
+  assert.equal(capped.data.nextPage, null);
+  assert.equal(capped.data.nextPageReason, 'local-page-limit');
+});
+
+test('comment cursors share one bound between input and output', () => {
+  const seen = Array.from({ length: 500 }, (_, index) => String(1000 + index));
+  const cursor = BiliCommentCursorSchema.parse({ aid: '900', seen });
+  assert.equal(cursor.seen.length, 500);
+  assert.throws(() => BiliCommentCursorSchema.parse({ aid: '900', seen: [...seen, '9999'] }));
 });

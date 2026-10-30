@@ -32,7 +32,7 @@ const browserReadSchema=z.strictObject({...request,bvid:BvidSchema.optional(),ai
 });
 const searchSource=z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('topic'),id:z.string().max(60)}),z.strictObject({kind:z.literal('owner'),sourceHash:z.string().length(64)}),z.strictObject({kind:z.literal('page'),pageId:z.uuid(),fieldId:z.string().max(80)})]);
 const searchSchema=z.strictObject({...request,...paging,keyword:z.string().trim().min(1).max(100),order:z.enum(['totalrank','pubdate','click']).default('totalrank')});
-const commentsSchema=z.strictObject({...request,...paging,aid:NumberIdSchema,parent:NumberIdSchema.optional(),sort:z.enum(['time','hot']).default('hot'),seen:z.array(z.string().regex(/^[1-9]\d{0,19}$/)).max(200).optional()});
+const commentsSchema=z.strictObject({...request,...paging,aid:NumberIdSchema,parent:NumberIdSchema.optional(),sort:z.enum(['time','hot']).default('hot'),seen:z.array(z.string().regex(/^[1-9]\d{0,19}$/)).max(500).optional()});
 const framesSchema=z.strictObject({...request,bvid:BvidSchema,pointsMs:z.array(z.number().int().nonnegative().max(21600000)).min(1).max(6)});
 const readingSaveSchema=z.strictObject({...request,bvid:BvidSchema,status:z.enum(['open','checkpoint','closed']),conclusion:z.string().max(2000).nullable().default(null),gaps:z.array(z.string().max(200)).max(20).default([]),nextStep:z.string().max(300).nullable().default(null)});
 const readingGetSchema=z.strictObject({...request,bvid:BvidSchema.optional(),limit:z.number().int().min(1).max(8).default(8)});
