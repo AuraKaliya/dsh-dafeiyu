@@ -40,7 +40,7 @@ function taskRepository() {
   };
 }
 
-async function harness(options: { runExecution?: () => Promise<unknown>; blocking?: boolean } = {}) {
+async function harness(options: { runExecution?: (frame: any) => Promise<unknown>; blocking?: boolean } = {}) {
   const root = await mkdtemp(join(testTempDir(), 'coordinator-'));
   const store = new RuntimeStore(join(root, 'runtime.sqlite'), { agentId: 'fish', profileId: 'test' }, { create: true });
   const repository = taskRepository();
@@ -74,7 +74,7 @@ async function harness(options: { runExecution?: () => Promise<unknown>; blockin
           : key === 'messageRecalled' ? (() => false)
             : (() => undefined),
     }) as never,
-    runtime: { runExecution: options.runExecution ?? (async (frame: { sessionId: string }) => ({ text: 'done', resultRef: { sessionId: frame.sessionId, messageSeq: 1, turnEndSeq: 2, textHash: hash('result') } })) },
+    runtime: { runExecution: options.runExecution ?? (async (frame: any) => ({ text: 'done', resultRef: { sessionId: frame.sessionId, messageSeq: 1, turnEndSeq: 2, textHash: hash('result') } })) },
     registry: { actions: () => [], contributors: () => [] },
     scheduler: { acquireHandle: async () => ({ close() {} }) },
     channelDescription: () => '', experience: () => undefined,
@@ -152,4 +152,29 @@ test('cancelling before the executor starts reaches cancelled without running', 
   } finally {
     store.close();
   }
+});
+
+test('the declared tool stage reaches the execution frame', async () => {
+  const frames: any[] = [];
+  const capture = async (frame: any) => {
+    frames.push(frame);
+    return { text: 'done', resultRef: { sessionId: frame.sessionId, messageSeq: 1, turnEndSeq: 2, textHash: hash('result') } };
+  };
+  const reading = await harness({ runExecution: capture });
+  try {
+    const producer = reading.coordinator.producer('fixture');
+    const { run } = producer.submitTask({ requestId: randomUUID(), title: '阅读', goal: '读完汇报', policyId: 'fixture-task', data: { toolStage: 'bili-reading' } });
+    reading.coordinator.activate();
+    await waitTerminal(reading.store, (run as unknown as { id: string }).id);
+    assert.equal(frames[0]?.toolStage, 'bili-reading');
+  } finally { reading.store.close(); }
+
+  const plain = await harness({ runExecution: capture });
+  try {
+    const producer = plain.coordinator.producer('fixture');
+    const { run } = producer.submitTask({ requestId: randomUUID(), title: '普通', goal: '普通任务', policyId: 'fixture-task' });
+    plain.coordinator.activate();
+    await waitTerminal(plain.store, (run as unknown as { id: string }).id);
+    assert.equal(frames[1]?.toolStage, 'general');
+  } finally { plain.store.close(); }
 });

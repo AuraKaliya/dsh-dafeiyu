@@ -1,17 +1,11 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { BILI_READING_STAGE, toolStage } from '../packages/core/lib/harness-runtime.js';
+import { BILI_READING_ACTIONS } from '../packages/core/lib/harness-runtime.js';
 
-const action = (id: string) => ({ definition: { id } });
-
-test('reading tasks derive the reading stage from Bilibili actions', () => {
-  assert.equal(toolStage([]), 'general');
-  assert.equal(toolStage([action('dsh_tool_call'), action('dafeiyu_media_read')]), 'general');
-  assert.equal(toolStage([action('dsh_tool_call'), action('bili_search')]), BILI_READING_STAGE);
-  assert.equal(toolStage([action('bili_frames'), action('bili_comments')]), BILI_READING_STAGE);
-});
-
-test('non-reading tasks keep the general stage even with media tools', () => {
-  assert.equal(toolStage([action('dsh_tool_list'), action('dafeiyu_media_read')]), 'general');
+test('the reading stage tool set is explicit and excludes host dispatch', () => {
+  for (const allowed of ['bili_search', 'bili_video', 'bili_comments', 'bili_subtitles', 'bili_frames', 'bili_reading_save', 'dafeiyu_media_read', 'dsh_result_read', 'dafeiyu_task_outcome'])
+    assert.ok(BILI_READING_ACTIONS.has(allowed), allowed);
+  for (const denied of ['dsh_tool_call', 'dsh_tool_list', 'dsh_browser_open', 'qq_send_message', 'dafeiyu_media_acquire'])
+    assert.ok(!BILI_READING_ACTIONS.has(denied), denied);
 });

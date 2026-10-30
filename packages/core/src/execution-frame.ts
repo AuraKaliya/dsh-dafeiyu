@@ -14,6 +14,8 @@ export interface NativeAction {
 }
 export interface TaskExecutionFrame {
   readonly handoff?:import('@dafeiyu/contracts').ContextHandoff;
+  /** Program-declared execution stage; never inferred from the available actions. */
+  readonly toolStage?:import('@dafeiyu/contracts').ToolStage;
   /** Program-issued identity for model-call admission; never derives from model text. */
   readonly work?:WorkCallContext;
   /** Optional run-level admission handle that can yield at agent step boundaries. */

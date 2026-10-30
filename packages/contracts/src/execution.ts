@@ -77,6 +77,8 @@ export interface ExtensionHandle {
   dispose():void;
 }
 
+export const ToolStageSchema=z.enum(['general','bili-reading']);
+export type ToolStage=z.infer<typeof ToolStageSchema>;
 export const ExtensionMetadataSchema = z.strictObject({ protocolVersion: z.literal(API_VERSION), id: ExtensionIdSchema,
   version: z.string().min(1).max(80), agentId: actor, provides: z.array(FeatureSchema).max(64).default([]), requires: z.array(FeatureSchema).max(64).default([]) });
 

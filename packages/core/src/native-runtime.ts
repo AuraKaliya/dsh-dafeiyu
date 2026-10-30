@@ -13,7 +13,7 @@ import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { CompactionRuntime } from './compaction-runtime.js';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { z } from 'zod';
-import {BILI_READING_STAGE,CAPABILITY_CONTEXT,HarnessRuntime,toolStage} from './harness-runtime.js';
+import {BILI_READING_ACTIONS,BILI_READING_STAGE,CAPABILITY_CONTEXT,HarnessRuntime} from './harness-runtime.js';
 export const EXECUTION_MESSAGE_SOURCE='dafeiyu-execution' as const;
 
 declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {
@@ -69,8 +69,8 @@ export class NativeRuntime {
       owned.compaction.begin({id:frame.view.runId,route:frame.view.scope.scopeKey,sessionId:frame.sessionId,inputKind:'dafeiyu-execution',inputSourceId:frame.view.runId},owned.handle.agent);
       disposers.push(owned.scope.tools.restrict({allow:[]}));
       if(frame.prepare)disposers.push(await frame.prepare(owned.scope,owned.handle.agent));
-      const stage=toolStage(frame.actions);
-      for(const action of frame.actions){if(stage===BILI_READING_STAGE&&action.definition.owner==='dsh-tools'&&action.definition.id==='dsh_tool_call')continue;disposers.push(owned.scope.tools.register({name:action.definition.id,description:action.definition.description,
+      const stage=frame.toolStage??'general';
+      for(const action of frame.actions){if(stage===BILI_READING_STAGE&&!BILI_READING_ACTIONS.has(action.definition.id))continue;disposers.push(owned.scope.tools.register({name:action.definition.id,description:action.definition.description,
         parameters:action.definition.parameters,output:{schema:{},render:(_args,value)=>[{type:'text',text:JSON.stringify(z.object({value:z.json()}).parse(value).value)}],presentationMeta:(_args,value)=>z.json().parse({dafeiyuExecution:z.object({receipt:z.json()}).parse(value).receipt})},
         execute:async(raw,exec)=>{if(exec.agent!==owned!.handle.agent)throw new Error('SCOPE_DENIED');frame.guard();
           const value=await action.execute(raw,String(exec.callId),AbortSignal.any([frame.view.signal,exec.signal]));return z.json().parse({value,receipt:action.metadata?.(value)??null});}}));}

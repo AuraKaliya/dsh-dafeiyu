@@ -16,7 +16,7 @@ import type { DshRuntime } from './runtime.js';
 import type { CapabilityRegistry,BoundAction } from './capability-registry.js';
 import type { RunLeaseControl,RunScheduler } from './run-scheduler.js';
 import type { NativeAction,TaskExecutionFrame } from './execution-frame.js';
-import { TaskReviewSchema,WakeWorkSchema } from '@dafeiyu/contracts';
+import { TaskReviewSchema,WakeWorkSchema,ToolStageSchema } from '@dafeiyu/contracts';
 import { DshCapabilityChangeSchema } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
 import type { ExecutionMemoryPort,ExecutionToolReceipt,Motivation,SourceDependency } from '@dafeiyu/contracts';
@@ -665,7 +665,8 @@ export class ExecutionCoordinator {
         let contextUsed=false;
         this.d.store.appendExecutionEvent(id,'task.stage',{phase:'execution',deadlineAt:new Date(Date.parse(run.updatedAt)+this.d.turnTimeoutMs).toISOString()});this.flushEvents();
         let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
-        const frame:TaskExecutionFrame={mode:'task',sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,
+        const declaredStage=ToolStageSchema.safeParse(z.object({toolStage:ToolStageSchema}).safeParse(saved.input.data??{}).success?(saved.input.data as {toolStage?:unknown}).toolStage:'general');
+        const frame:TaskExecutionFrame={mode:'task',toolStage:declaredStage.success?declaredStage.data:'general',sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,
           work:{workItemId:`task:${scheduled.definition.taskId}`,runId:run.id,scopeKey:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,targetVersion:run.definition.intentVersion,stage:'execution'},lease:releaseLease,
           handoff,refreshContexts:async()=>{if(contextUsed)await refreshContexts();contextUsed=true;},contextPlan:()=>lastPlan,
           contextAudit:data=>{this.d.store.appendExecutionEvent(id,'context.admitted',data);this.flushEvents();},
