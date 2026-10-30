@@ -13,4 +13,5 @@ export function apply(ctx:Context,config:Config){new BiliService(ctx,config);}
 
 export * from './migration.js';
 export * from './reading-facts.js';
+export * from './reading-view.js';
 export * from './storage-status.js';
