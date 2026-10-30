@@ -32,6 +32,7 @@ export * from './media.js';
 export * from './media-delivery.js';
 export * from './dsh-tools.js';
 export * from './bili-browser.js';
+export * from './bili-reading.js';
 export * from './qq-expression.js';
 export * from './task-review.js';
 export * from './experience.js';
