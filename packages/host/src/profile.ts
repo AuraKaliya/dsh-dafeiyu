@@ -16,6 +16,7 @@ import { ExecutorStore,EXECUTOR_SCHEMA_VERSION } from '@dafeiyu/server-executor/
 import { BILI_OWNER_SCHEMA_VERSION,BILI_OWNER_VERSION,initializeBiliOwnerStorage,inspectBiliOwnerStorage } from '@dafeiyu/bilibili/channel';
 import { executorFilesSnapshot } from '@dafeiyu/server-executor';
 import { inspectStorage } from './storage-inspection.js';
+import { inspectBiliMigration } from '@dafeiyu/bilibili';
 import type { StorageKind,StorageInspection } from './storage-inspection.js';
 import { claim,conflict } from './coordination.js';
 import { assertPaths,pluginConfig } from './configuration.js';
@@ -59,9 +60,9 @@ export function inspectHost(config:PreparedHostConfig,coordination?:string,ownIn
   try{manifest=readManifest(config);if(manifest&&manifest.state!=='initialized')codes.push('HOST_INITIALIZATION_INCOMPLETE');}catch(error){codes.push(error instanceof Error?error.message:'HOST_PROFILE_MANIFEST_INVALID');}
   const stores=storageFiles(config).map(item=>{
     const concrete=physicalPath(item.file);if(concrete!==item.file&&!within(concrete,dirname(item.file)))codes.push('HOST_STORAGE_PATH_CHANGED');
-    const inspection=inspectStorage(item.file,item.kind,identity);
-    if(inspection.activeOwner){codes.push('HOST_STORE_OWNED');occupied=true;}if(!inspection.supported||!inspection.integrity)codes.push('HOST_STORAGE_UNSUPPORTED');if(!inspection.identityMatches)codes.push('HOST_PROFILE_IDENTITY_MISMATCH');
-    if(inspection.exists&&target[item.kind]!==undefined&&inspection.version!==target[item.kind])codes.push('HOST_STORAGE_INVALID');
+    const inspection=inspectStorage(item.file,item.kind,identity),biliMigration=item.kind==='bilibili'&&inspection.exists?inspectBiliMigration(item.file,identity):null;
+    if(inspection.activeOwner){codes.push('HOST_STORE_OWNED');occupied=true;}if(!inspection.supported||!inspection.integrity)codes.push(biliMigration?.state==='upgradable'?'HOST_STORAGE_UPGRADABLE':'HOST_STORAGE_UNSUPPORTED');if(!inspection.identityMatches)codes.push('HOST_PROFILE_IDENTITY_MISMATCH');
+    if(inspection.exists&&target[item.kind]!==undefined&&inspection.version!==target[item.kind]&&biliMigration?.state!=='upgradable')codes.push('HOST_STORAGE_INVALID');
     if(!inspection.exists&&(manifest?.requiredStores.includes(item.name)||['journal','runtime'].includes(item.kind)||item.kind==='memory'&&config.plugins.some(p=>p.id==='memory'&&p.enabled)))codes.push('HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='activity'&&pluginConfig(config,'activity'))codes.push('HOST_INITIALIZATION_REQUIRED');
     if(!inspection.exists&&item.kind==='media'&&pluginConfig(config,'media'))codes.push('HOST_INITIALIZATION_REQUIRED');

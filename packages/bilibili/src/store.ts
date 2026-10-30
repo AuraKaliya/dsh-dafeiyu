@@ -10,7 +10,7 @@ import { BILI_SCENE,BvidSchema } from './config.js';
 import { BiliDiagnostics,initializeBiliDiagnostics } from './diagnostics.js';
 
 export const BILI_APPLICATION_ID=0x44464236,BILI_SCHEMA_VERSION=4;
-export const BILI_TABLES=['bili_metadata','bili_clock','bili_requests','bili_sources','bili_revisions','bili_pages','bili_media','bili_outbox','bili_http_attempts','bili_http_control','bili_reading','bili_reading_legacy'] as const;
+export const BILI_TABLES=['bili_metadata','bili_clock','bili_requests','bili_sources','bili_revisions','bili_pages','bili_media','bili_outbox','bili_http_attempts','bili_http_control','bili_reading','bili_reading_legacy','bili_reading_receipts'] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const jsonValue=z.json();
 function canonical(v:Json):string{return v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k]!)).join(',')+'}';}
@@ -47,6 +47,7 @@ export class BiliStore {
     CREATE TABLE bili_outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,body TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE bili_reading(owner TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,body TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(owner,bvid));
     CREATE TABLE bili_reading_legacy(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);
+    CREATE TABLE bili_reading_receipts(owner TEXT NOT NULL,request_id TEXT NOT NULL,bvid TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(owner,request_id));
     PRAGMA application_id=${BILI_APPLICATION_ID};PRAGMA user_version=4;`);
     initializeBiliDiagnostics(this.db);
     for(const table of ['bili_metadata','bili_revisions'])this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable Bili history');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain Bili history');END;`);
@@ -88,7 +89,13 @@ export class BiliStore {
   recover(){return Number(this.db.prepare("UPDATE bili_requests SET state='interrupted',error='BILI_PROCESS_INTERRUPTED' WHERE state='pending'").run().changes);}
   get counts(){return {pages:Number(this.db.prepare('SELECT count(*) AS n FROM bili_pages').get()?.n),requests:Number(this.db.prepare('SELECT count(*) AS n FROM bili_requests').get()?.n),pending:Number(this.db.prepare("SELECT count(*) AS n FROM bili_requests WHERE state='pending'").get()?.n)};}
   reading(context:ExecutionContext,bvid:string){const owner=biliOwner(context),row=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? AND bvid=?').get(owner,BvidSchema.parse(bvid));return row?BiliReadingRecordSchema.parse(JSON.parse(String(row.body))):null;}
-  saveReading(context:ExecutionContext,value:unknown){const owner=biliOwner(context),base=BiliReadingRecordSchema.parse({...z.record(z.string(),z.json()).parse(value),updatedAt:new Date().toISOString()});return this.atomic(()=>{const prior=this.db.prepare('SELECT version FROM bili_reading WHERE owner=? AND bvid=?').get(owner,base.bvid),version=(prior?Number(prior.version):0)+1,record={...base,version};this.db.prepare('INSERT INTO bili_reading(owner,bvid,version,body,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(owner,bvid) DO UPDATE SET version=excluded.version,body=excluded.body,updated_at=excluded.updated_at').run(owner,record.bvid,version,JSON.stringify(record),Date.now());return record;});}
+  saveReading(context:ExecutionContext,requestId:string,value:unknown){const owner=biliOwner(context),id=z.uuid().parse(requestId);return this.atomic(()=>{
+    const receipt=this.db.prepare('SELECT bvid FROM bili_reading_receipts WHERE owner=? AND request_id=?').get(owner,id);
+    if(receipt){const row=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? AND bvid=?').get(owner,String(receipt.bvid));if(!row)throw new Error('IDEMPOTENCY_STALE');return BiliReadingRecordSchema.parse(JSON.parse(String(row.body)));}
+    const base=BiliReadingRecordSchema.parse({...z.record(z.string(),z.json()).parse(value),updatedAt:new Date().toISOString()}),prior=this.db.prepare('SELECT version FROM bili_reading WHERE owner=? AND bvid=?').get(owner,base.bvid),version=(prior?Number(prior.version):0)+1,record={...base,version};
+    this.db.prepare('INSERT INTO bili_reading(owner,bvid,version,body,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(owner,bvid) DO UPDATE SET version=excluded.version,body=excluded.body,updated_at=excluded.updated_at').run(owner,record.bvid,version,JSON.stringify(record),Date.now());
+    this.db.prepare('INSERT INTO bili_reading_receipts(owner,request_id,bvid,version) VALUES(?,?,?,?)').run(owner,id,record.bvid,version);
+    return record;});}
   readingSummary(context:ExecutionContext,limit=8){const owner=biliOwner(context),total=Number(this.db.prepare('SELECT count(*) AS n FROM bili_reading WHERE owner=?').get(owner)?.n ?? 0),rows=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? ORDER BY updated_at DESC LIMIT ?').all(owner,Math.max(1,Math.min(8,limit))),records=rows.flatMap(row=>{try{return [BiliReadingRecordSchema.parse(JSON.parse(String(row.body)))];}catch{return [];}}),recent=records.map(record=>({bvid:record.bvid,title:record.title,status:record.status,conclusion:record.conclusion===null?null:Array.from(record.conclusion).slice(0,300).join('')})),highlights=records.filter(record=>record.conclusion!==null).slice(0,8).map(record=>({bvid:record.bvid,reason:Array.from(record.conclusion!).slice(0,200).join('')})),open=records.find(record=>record.status!=='closed');return BiliReadingIndexSchema.parse({total,recent,highlights,next:open?.nextStep??null});}
   close(){this.db.close();}
 }
