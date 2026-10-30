@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash,randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { HostConfigSchema,DSH_TOOL_ACTIONS } from '@dafeiyu/contracts';
-import { loadHostConfig,initializeProfile,inspectHost,ManagedHost,pluginConfig,BILI_OWNER_NATIVE_ACTIONS } from '@dafeiyu/host';
+import { loadHostConfig,initializeProfile,inspectHost,ManagedHost,pluginConfig,BILI_OWNER_NATIVE_ACTIONS,ProfileManifestSchema,layoutPaths,writeManifest } from '@dafeiyu/host';
 import type { HostRuntimeOptions } from '@dafeiyu/host';
 import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS,QQ_STICKER_ACTIONS,QQ_PROGRESS_ACTIONS } from '@dafeiyu/qq';
 import { BILI_ACTIONS,inspectBiliMigration,migrateBiliStorage } from '@dafeiyu/bilibili';
@@ -72,6 +72,9 @@ export function migrateInstallation(settingsFile:string):InstallationMigration{
   const backup=join(settings.dataDir,'backups','bilibili-v'+Date.now()+'.sqlite'),result=migrateBiliStorage(file,profile,{backup});
   return result.migrated?{code:'INSTALL_MIGRATED',version:result.version,backup:result.backup??backup}:{code:'INSTALL_CURRENT',version:result.version,backup:null};
 }
+
+/** Moving a data directory keeps identity; the manifest only stores resolved paths. */
+export function relocateProfileManifest(prepared:ReturnType<typeof loadHostConfig>){const manifest=join(prepared.paths.core,'host-profile.json');if(!existsSync(manifest))return false;const value=ProfileManifestSchema.parse(JSON.parse(readFileSync(manifest,'utf8')));if(value.profileId!==prepared.config.profileId||value.agentId!==prepared.config.agent.id)return false;const paths=layoutPaths(prepared);if(JSON.stringify(value.paths)===JSON.stringify(paths))return false;writeManifest(prepared,{...value,paths});return true;}
 export function prepareInstallation(settingsFile:string,options:InstallationOptions={}) {
   const settings=readInstallationSettings(settingsFile),root=settings.dataDir,metaFile=join(root,'installation.json');
   const biliStore=join(root,'core','bilibili.sqlite');
@@ -100,7 +103,7 @@ export function prepareInstallation(settingsFile:string,options:InstallationOpti
     if(existsSync(file)&&inspectHost(loadHostConfig(file)).occupied)throw new Error('HOST_STORE_OWNED');
     const temporary=file+'.'+randomUUID()+'.tmp';writeFileSync(temporary,bytes,{flag:'wx'});renameSync(temporary,file);
   }
-  const prepared=loadHostConfig(file);let inspection=inspectHost(prepared);
+  const prepared=loadHostConfig(file);relocateProfileManifest(prepared);let inspection=inspectHost(prepared);
   if(inspection.canInitialize)inspection=initializeProfile(prepared);
   if(pluginConfig(prepared,'channel-bili-owner')&&!inspection.occupied&&inspection.codes.every(code=>code==='HOST_BILI_OWNER_HANDOVER_REQUIRED')){
     const owner=settings.bilibili!.channel!,store=new BiliOwnerStore(join(prepared.paths.core,'bili-owner.sqlite'),{agentId:meta.agentId,profileId:meta.profileId,accountUid:owner.accountUid,ownerUid:owner.ownerUid});
