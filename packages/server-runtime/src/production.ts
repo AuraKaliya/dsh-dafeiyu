@@ -58,7 +58,7 @@ export async function createProductionRuntime(config:PreparedHostConfig,options:
   const budget=new SharedModelBudget(options.authority,{leaseFor:request=>{
     const jobId=request.owner.kind==='executor'?request.owner.jobId:undefined;
     const work=workContexts.resolveJob(jobId);
-    if(work)return {class:work.class,workItemId:work.workItemId};
+    if(work)return {class:work.class,workItemId:work.workItemId,runId:work.runId};
     if(jobId)workContexts.noteUnbound({...(request.purpose?{purpose:request.purpose}:{})});
     return jobId?{class:'interactive',workItemId:`unbound-job:${jobId}`}:undefined;
   }}),route=config.config.modelRoutes.chat;
@@ -79,7 +79,7 @@ export async function createProductionRuntime(config:PreparedHostConfig,options:
       installParentModelAdmission(ctx,budget,{profileId:config.config.profileId,maximumCallMs:options.maximumCallMs,guard,cancelActive:code=>cancelManagedModelWork(ctx,code),
         leaseFor:({purpose,sessionId})=>{
           const work=workContexts.resolveSession(sessionId);
-          if(work)return {class:work.class,workItemId:work.workItemId};
+          if(work)return {class:work.class,workItemId:work.workItemId,runId:work.runId};
           if(purpose==='compaction'||purpose==='session-title')return {class:'background',workItemId:`internal:${purpose}`};
           workContexts.noteUnbound({...(sessionId?{sessionId}:{ }),...(purpose?{purpose}:{})});
           return {class:'interactive',workItemId:`unbound:${sessionId??purpose??'unknown'}`};

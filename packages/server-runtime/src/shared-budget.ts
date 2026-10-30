@@ -12,7 +12,7 @@ import type { ModelBudgetAuthority,ModelBudgetRequest,ModelBudgetSettlement,Runt
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 interface ActiveRecord {
   readonly request:ModelBudgetRequest;readonly permit:ExecutorPermit;readonly release:()=>void;
-  readonly cleanup:()=>void;readonly abort:AbortController;
+  readonly cleanup:()=>void;readonly abort:AbortController;readonly lease?:CallLease;
   state:'reserved'|'settled'|'unknown';settlement:ModelBudgetSettlement|null;
   completed:{hash:string;promise:Promise<{unknown:boolean}>}|null;
 }
@@ -53,6 +53,23 @@ export class SharedModelBudget {
     for(const record of this.calls.values())if(record.state==='reserved')record.abort.abort(new Error(code));
     for(const listener of this.cancellations){try{listener(code);}catch{/* All remaining cancellation ports must still be notified. */}}
   }
+  /** Global stop: authorization end, unknown settlement, or host shutdown. */
+  cancelBudget(code='RUNTIME_BUDGET_CANCELLED'):void { this.cancel(code); }
+  /** Abort one admitted call without closing admission for other work. */
+  cancelCall(callId:string,code='RUNTIME_CALL_CANCELLED'):boolean {
+    const record=this.calls.get(callId);
+    if(!record||record.state!=='reserved')return false;
+    record.abort.abort(new Error(code));return true;
+  }
+  /** Abort admitted calls belonging to one program-issued Run. */
+  cancelRun(runId:string,code='RUNTIME_RUN_CANCELLED'):number {
+    let count=0;
+    for(const record of this.calls.values()){
+      if(record.state!=='reserved'||record.lease?.runId!==runId)continue;
+      record.abort.abort(new Error(code));count++;
+    }
+    return count;
+  }
   get status(){return {pending:this.gate.pending,stopped:this.gate.stopped,interrupted:this.interrupted??null};}
   snapshot():readonly RuntimeCallRecord[]{return structuredClone([...this.calls.values()].map(({request,permit,state,settlement})=>({request,permit,state,settlement})));}
   whenIdle(timeoutMs=10000):Promise<void>{return this.gate.whenIdle(timeoutMs);}
@@ -65,14 +82,16 @@ export class SharedModelBudget {
     const route=this.route;
     if(request.provider!==route.provider||request.model!==route.model||request.reasoningEffort!==route.reasoningEffort||request.inputBound!==route.contextWindow||request.outputBound>route.maxOutputTokens||request.requestBytes>route.maxRequestBytes)throw new Error('RUNTIME_ROUTE_CHANGED');
     if(this.seen.has(request.callId))throw new Error('RUNTIME_CALL_REPLAY');this.seen.add(request.callId);
-    const deadline=Math.min(request.deadline,Date.now()+this.remainingMs()),release=await this.gate.acquire(signal,deadline,lease??this.leaseFor?.(request));
+    const deadline=Math.min(request.deadline,Date.now()+this.remainingMs()),resolvedLease=lease??this.leaseFor?.(request),release=await this.gate.acquire(signal,deadline,resolvedLease);
     let owned=false;
     try {
       signal.throwIfAborted();this.assertReady();
       const actualDeadline=Math.min(deadline,Date.now()+this.remainingMs());
       if(actualDeadline<=Date.now())throw new Error('RUNTIME_CALL_DEADLINE');
-      const abort=new AbortController(),cancelled=()=>{abort.abort(new Error('RUNTIME_CALL_CANCELLED'));this.cancel('RUNTIME_CALL_CANCELLED');};
-      const timer=setTimeout(()=>{abort.abort(new Error('RUNTIME_CALL_DEADLINE'));this.cancel('RUNTIME_CALL_DEADLINE');},Math.max(1,Math.min(2147483647,actualDeadline-Date.now())));
+      // A single call's cancellation must not close the shared gate. Only cancelBudget()
+      // (authorization end / unknown settlement / shutdown) owns the global stop.
+      const abort=new AbortController(),cancelled=()=>{abort.abort(new Error('RUNTIME_CALL_CANCELLED'));};
+      const timer=setTimeout(()=>{abort.abort(new Error('RUNTIME_CALL_DEADLINE'));},Math.max(1,Math.min(2147483647,actualDeadline-Date.now())));
       signal.addEventListener('abort',cancelled,{once:true});
       const cleanup=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancelled);};
       const bounded=ModelBudgetRequestSchema.parse({...request,deadline:actualDeadline});
@@ -83,7 +102,7 @@ export class SharedModelBudget {
       if(this.reservations.has(permit.reservationId)){cleanup();this.cancel('RUNTIME_RESERVATION_REUSED');throw new Error('RUNTIME_RESERVATION_REUSED');}
       this.reservations.add(permit.reservationId);
       Object.freeze(permit);
-      const record:ActiveRecord={request:bounded,permit,release,cleanup,abort,state:'reserved',settlement:null,completed:null};
+      const record:ActiveRecord={request:bounded,permit,release,cleanup,abort,state:'reserved',settlement:null,completed:null,...(resolvedLease?{lease:resolvedLease}:{})};
       this.calls.set(request.callId,record);owned=true;
       if(signal.aborted||abort.signal.aborted||this.gate.stopped||actualDeadline<=Date.now()){
         await this.settle({authorizationId:this.authorizationId,owner:request.owner,callId:request.callId,reservationId:permit.reservationId,usage:null,finish:'interrupted',durationMs:0,error:'RUNTIME_CALL_CANCELLED'});
@@ -110,8 +129,10 @@ export class SharedModelBudget {
     const cancelled=record.abort.signal.aborted;
     // A terminal receipt ends the dispatch deadline. Slow accounting is still owed and is not another model call.
     record.cleanup();
-    const settlement=ModelBudgetSettlementSchema.parse({...input,usage:cancelled||['error','aborted','interrupted'].includes(input.finish)?null:input.usage,
-      ...(cancelled?{finish:'interrupted',error:'RUNTIME_CALL_CANCELLED'}:{})});
+    // A cancelled call may still have known provider usage. Only a null usage (or an
+    // authority-reported unknown) escalates to global budget stop; do not erase a real bill.
+    const usage=cancelled?input.usage:(['error','aborted','interrupted'].includes(input.finish)?null:input.usage);
+    const settlement=ModelBudgetSettlementSchema.parse({...input,usage,...(cancelled?{finish:'interrupted',error:'RUNTIME_CALL_CANCELLED'}:{})});
     Object.freeze(settlement.owner);if(settlement.usage)Object.freeze(settlement.usage);Object.freeze(settlement);
     record.settlement=settlement;
     try{

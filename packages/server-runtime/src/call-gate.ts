@@ -13,8 +13,10 @@ export type CallClass='interactive'|'owner-task'|'delivery'|'background'|'autono
 /** Caller-supplied priority class for one model call. Never a numeric priority from a model. */
 export interface CallLease {
   readonly class:CallClass;
-  /** Stable work item for diagnostics; not used for ordering beyond the class. */
+  /** Stable work item for diagnostics and scoped cancellation. */
   readonly workItemId?:string;
+  /** Program-issued Run identity for scoped cancellation. */
+  readonly runId?:string;
 }
 
 export interface ModelCallGateOptions {

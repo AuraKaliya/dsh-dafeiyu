@@ -50,10 +50,40 @@ test('a nested model dispatch fails instead of waiting on its own held call; a s
   assert.equal(authority.admitted.length,2);
 });
 
-test('actual active deadline invokes cancellation and preserves unknown even if a late success arrives',async()=>{
-  const authority=new FictionalBudgetAuthority(),budget=new SharedModelBudget(authority),cancelled=deferred();budget.onInterrupt(()=>cancelled.resolve());
-  const call={...runtimeCall(),deadline:Date.now()+20},permit=await budget.reserve(call,liveSignal());await cancelled.promise;
-  assert.deepEqual(await budget.settle(runtimeBill(call,permit)),{unknown:true});assert.equal(authority.settled[0]!.usage,null);assert.equal(authority.settled[0]!.finish,'interrupted');
+test('an active call deadline settles without closing admission for unrelated work',async()=>{
+  const authority=new FictionalBudgetAuthority(),budget=new SharedModelBudget(authority);
+  const call={...runtimeCall(),deadline:Date.now()+20},permit=await budget.reserve(call,liveSignal());
+  await new Promise(resolve=>setTimeout(resolve,40));
+  await budget.settle(runtimeBill(call,permit));
+  assert.equal(authority.settled[0]!.finish,'interrupted');
+  assert.notEqual(authority.settled[0]!.usage,null,'a known bill survives cancellation');
+
+  const next=runtimeCall(),nextPermit=await budget.reserve(next,liveSignal());
+  await budget.settle(runtimeBill(next,nextPermit));
+  assert.equal(authority.admitted.length,2,'a call deadline must not stop unrelated admission');
+});
+
+test('cancelCall aborts one call and leaves the shared gate open',async()=>{
+  const authority=new FictionalBudgetAuthority(),budget=new SharedModelBudget(authority);
+  const call=runtimeCall(),permit=await budget.reserve(call,liveSignal());
+  assert.equal(budget.cancelCall(call.callId),true);
+  await budget.settle(runtimeBill(call,permit));
+
+  const next=runtimeCall(),nextPermit=await budget.reserve(next,liveSignal());
+  await budget.settle(runtimeBill(next,nextPermit));
+  assert.equal(authority.admitted.length,2);
+  assert.equal(budget.cancelCall(call.callId),false,'a settled call cannot be cancelled again');
+});
+
+test('cancelRun only aborts calls carrying that program-issued run id',async()=>{
+  const authority=new FictionalBudgetAuthority(),budget=new SharedModelBudget(authority);
+  const call=runtimeCall(),permit=await budget.reserve(call,liveSignal(),{class:'owner-task',workItemId:'task-a',runId:'run-a'});
+  assert.equal(budget.cancelRun('run-b'),0);
+  assert.equal(budget.cancelRun('run-a'),1);
+  await budget.settle(runtimeBill(call,permit));
+  const next=runtimeCall(),nextPermit=await budget.reserve(next,liveSignal());
+  await budget.settle(runtimeBill(next,nextPermit));
+  assert.equal(authority.admitted.length,2);
 });
 
 test('an asynchronous continuation inherited from a completed call can acquire its next call',async()=>{
