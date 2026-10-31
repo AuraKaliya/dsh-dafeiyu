@@ -103,6 +103,7 @@ export class ManagementRuntime {
   private nextRetryAt:number|null=null;
   private capability:OneBotCapability|undefined;
   private capabilityStatus:CapabilityStatus={id:'qq',state:'pending',owned:false,pid:null,code:null,message:null};
+  private readonly history:{code:string;at:string;phase:ManagementRuntimePhase}[]=[];
   private healthProbe:Promise<boolean>|undefined;
   private readonly deps:Required<Pick<ManagementRuntimeDependencies,'fetchImpl'|'retryDelaysMs'|'controlWaitMs'|'startTimeoutMs'|'stopTimeoutMs'|'killTimeoutMs'|'healthTimeoutMs'|'timers'>>;
   private readonly sleepImpl:(ms:number)=>Promise<void>;
@@ -120,6 +121,7 @@ export class ManagementRuntime {
     return {state:this.state,phase:this.phase,operationId:this.operation&&!this.operation.settled?this.operation.id:null,operation,generation:this.childGeneration,pid:this.child?.pid??null,
       code:this.code,codeAt:this.codeAt,retryAttempt:this.retryAttempt,retry:{attempt:this.retryAttempt,nextAt:this.nextRetryAt===null?null:new Date(this.nextRetryAt).toISOString()},
       checkedAt:this.checkedAt,startedAt:this.startedAt,readyAt:this.readyAt,instance:this.instance,error:this.code===null?null:{code:this.code,at:this.codeAt??this.iso()},
+      history:[...this.history],
       capabilities:[this.capabilityStatus,...(activityCapability?[activityCapability]:[])],activity};
   }
   private operationSnapshot():ManagementOperationSnapshot|null{
@@ -245,7 +247,11 @@ export class ManagementRuntime {
     this.fail(code);
     if(!this.child&&isRetryable(code))this.scheduleRetry();
   }
-  private fail(code:string):void{this.code=code;this.codeAt=this.iso();this.checkedAt=this.codeAt;}
+  private fail(code:string):void{
+    this.code=code;this.codeAt=this.iso();this.checkedAt=this.codeAt;
+    const last=this.history[this.history.length-1];
+    if(!last||last.code!==code||last.phase!==this.phase){this.history.push({code,at:this.codeAt,phase:this.phase});if(this.history.length>8)this.history.shift();}
+  }
   private async startUp(operation:Operation):Promise<void>{
     const settings=readInstallationSettings(this.config.settingsFile);
     this.checkAbort(operation);

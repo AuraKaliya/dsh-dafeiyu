@@ -187,6 +187,8 @@ test('a temporary dependency failure retries within bounds and cancels the remai
     await new Promise(done=>setTimeout(done,20));
     const snapshot=runtime.status();
     assert.equal(snapshot.state,'running');assert.equal(list.length,1);assert.equal(snapshot.retry.nextAt,null);assert.equal(snapshot.retryAttempt,0);
+    assert.equal(snapshot.code,null,'the current error is cleared after recovery');
+    assert.equal(snapshot.history.some(entry=>entry.code==='ONEBOT_NOT_RUNNING'),true,'the earlier failure remains as diagnosis history');
     assert.deepEqual(timers.pending,[]);
   }finally{await runtime.dispose();rmSync(root,{recursive:true,force:true});}
 });

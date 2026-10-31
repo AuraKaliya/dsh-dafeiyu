@@ -114,8 +114,11 @@ test('a local credential error fails before any network request and a restart in
   const g=await fixture();try{
     const now=new Date().toISOString();
     g.service.store.beginVerification({id:randomUUID(),at:now,updatedAt:now,state:'pending',kind:'login',endpoint:'nav',uid:'42',credentialGeneration:0,instanceGeneration:0,target:null,result:null,errorCode:null});
+    g.service.store.diagnostics.acquireProbe('lease-from-previous-process',Date.now(),1000);
+    assert.notEqual(g.service.store.diagnostics.state.probe,null);
     assert.equal(g.service.store.verifications(10).some(record=>record.state==='pending'),true);
     g.service.recover();
+    assert.equal(g.service.store.diagnostics.state.probe,null,'a restart clears an inherited probe lease');
     assert.equal(g.service.store.verifications(10).every(record=>record.state!=='pending'),true);
     assert.equal(g.service.store.verifications(10).some(record=>record.errorCode==='BILI_VERIFICATION_INTERRUPTED'),true);
   }finally{await g.close();}

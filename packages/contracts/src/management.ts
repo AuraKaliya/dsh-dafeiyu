@@ -51,6 +51,8 @@ export interface ManagementRuntimeSnapshot {
   readyAt:string|null;
   instance:'absent'|'starting'|'unconfirmed'|'ready';
   error:{code:string;at:string}|null;
+  /** Bounded diagnosis history: cleared as current state, retained for explanation. */
+  history:readonly {code:string;at:string;phase:ManagementRuntimePhase}[];
   capabilities:readonly ManagementCapabilitySnapshot[];
   activity:ManagementActivitySnapshot|null;
 }

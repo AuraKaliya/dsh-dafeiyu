@@ -134,6 +134,8 @@ export class BiliDiagnostics {
     });
   }
   release(id:string):void{this.atomic(()=>{const s=this.state;if(s.probe?.id===id)this.set({...s,probe:null});});}
+  /** A restarted process must not inherit a probe lease or management permit from the previous one. */
+  clearRuntimeLeases():void{this.atomic(()=>{const s=this.state;if(s.probe!==null||s.permit!==null)this.set({...s,probe:null,permit:null});});}
   /** A successful attempt clears only its own endpoint pause; a shared or anonymous hold is kept separately. */
   success(id:string,endpoint:string,query?:PauseQuery):void{
     this.atomic(()=>{

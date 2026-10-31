@@ -154,6 +154,10 @@ test('a bounded management permit bypasses only evidence-backed anonymous pauses
     f.store.diagnostics.acquireProbe('probe',now,1000,permit.id,{scope:'anonymous-http',uid:null,endpoint});
     f.store.diagnostics.assertAvailable({scope:'anonymous-http',uid:null,endpoint},now);
     f.store.diagnostics.release('probe');
+    // A restarted process clears the consumed permit instead of reusing it.
+    assert.notEqual(f.store.diagnostics.state.permit,null);
+    f.store.diagnostics.clearRuntimeLeases();
+    assert.equal(f.store.diagnostics.state.permit,null);assert.equal(f.store.diagnostics.state.probe,null);
     // A shared hold cannot be released through a management permit.
     f.store.diagnostics.failure('video','login',now,policy,null,'shared',null);
     assert.throws(()=>f.store.diagnostics.authorizeProbe({scope:'anonymous-http',uid:null,endpoint,credentialGeneration:1,instanceGeneration:1,now}),/BILI_PROBE_NOT_PERMITTED/);

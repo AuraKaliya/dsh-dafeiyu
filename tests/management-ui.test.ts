@@ -36,7 +36,7 @@ const button=(tree:unknown,action:string):Element=>{
 };
 const snapshot=(overrides:Partial<ManagementRuntimeSnapshot>={}):ManagementRuntimeSnapshot=>({
   state:'stopped',phase:'idle',operationId:null,operation:null,generation:0,pid:null,code:null,codeAt:null,retryAttempt:0,retry:{attempt:0,nextAt:null},
-  checkedAt:null,startedAt:null,readyAt:null,instance:'absent',error:null,capabilities:[],activity:null,...overrides});
+  checkedAt:null,startedAt:null,readyAt:null,instance:'absent',error:null,history:[],capabilities:[],activity:null,...overrides});
 const temp=()=>mkdtempSync(join(testTempDir(),'ui-'));
 const settingsFile=(root:string)=>{
   writeFileSync(join(root,'token.txt'),'token-value');
@@ -103,6 +103,11 @@ test('the runtime panel disables start while running and renders instance and B�
   const stopped=RuntimePanel({snapshot:snapshot(),onControl:()=>{},onRefresh:()=>{}});
   assert.equal(button(stopped,'start').props['disabled'],false);
   assert.equal(button(stopped,'stop').props['disabled'],true);
+  const recovered=RuntimePanel({snapshot:snapshot({state:'running',phase:'ready',instance:'ready',history:[{code:'ONEBOT_NOT_RUNNING',at:new Date().toISOString(),phase:'qq'},{code:'MANAGEMENT_START_TIMEOUT',at:new Date().toISOString(),phase:'process'}]}),onControl:()=>{},onRefresh:()=>{}});
+  const recoveredHtml=renderToStaticMarkup(React.createElement(RuntimePanel,{snapshot:snapshot({state:'running',phase:'ready',instance:'ready',history:[{code:'ONEBOT_NOT_RUNNING',at:new Date().toISOString(),phase:'qq'}]}),onControl:()=>{},onRefresh:()=>{}}));
+  assert.match(recoveredHtml,/历史错误记录/);
+  assert.equal(find(recovered,element=>element.props['data-runtime-history']!==undefined)?.props['data-runtime-history'],2);
+  assert.match(recoveredHtml,/ONEBOT_NOT_RUNNING/);
 });
 
 test('a rendered start button drives the real management protocol into the lifecycle controller',async()=>{

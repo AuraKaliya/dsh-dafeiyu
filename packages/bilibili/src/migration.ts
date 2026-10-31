@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 
 import type { StorageIdentity } from '@dafeiyu/journal';
 import { BILI_APPLICATION_ID, BILI_SCHEMA_VERSION, BILI_TABLES,biliHash } from './store.js';
@@ -59,6 +60,16 @@ function tableCounts(db:DatabaseSync):Record<string,number>{
     for(const table of BASE_TABLES)counts[table]=Number((db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {n?:number}).n??0);
     return counts;
 }
+/** Content digests prove the upgrade kept every existing row, not just the row count. */
+function tableDigests(db:DatabaseSync):Record<string,string>{
+    const digests:Record<string,string>={};
+    // The control row is intentionally rewritten from the old shape; it is checked by its own migration.
+    for(const table of BASE_TABLES.filter(table=>table!=='bili_http_control')){
+        const rows=(db.prepare(`SELECT * FROM ${table}`).all() as Record<string,unknown>[]).map(row=>JSON.stringify(row)).sort();
+        digests[table]=createHash('sha256').update(rows.join('\n')).digest('hex');
+    }
+    return digests;
+}
 /** v2/v3/v4 reading layout -> the v5 reading layout. */
 function upgradeReadingLayout(db:DatabaseSync,version:number):void{
     db.exec('CREATE TABLE IF NOT EXISTS bili_reading_legacy(bvid TEXT PRIMARY KEY,body TEXT NOT NULL,updated_at INTEGER NOT NULL);');
@@ -81,7 +92,7 @@ function upgradeReadingLayout(db:DatabaseSync,version:number):void{
  * shared (conservative) and cannot be auto-released by a management probe.
  */
 function upgradeToV6(db:DatabaseSync):void{
-    const before=tableCounts(db);
+    const before=tableCounts(db),beforeDigests=tableDigests(db);
     db.exec(`CREATE TABLE IF NOT EXISTS bili_auth_meta(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS bili_verifications(id TEXT PRIMARY KEY,at INTEGER NOT NULL,state TEXT NOT NULL,kind TEXT NOT NULL,body TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS bili_verifications_recent ON bili_verifications(at DESC);`);
@@ -104,8 +115,9 @@ function upgradeToV6(db:DatabaseSync):void{
             db.prepare('UPDATE bili_http_control SET body=? WHERE id=1').run(JSON.stringify({version:2,pauses,probe:null,permit:null}));
         }else if(raw.version!==2)throw new Error('BILI_MIGRATION_UNSUPPORTED');
     }
-    const after=tableCounts(db);
+    const after=tableCounts(db),afterDigests=tableDigests(db);
     for(const [table,count] of Object.entries(before))if(after[table]!==count)throw new Error('BILI_MIGRATION_VERIFY_FAILED');
+    for(const [table,digest] of Object.entries(beforeDigests))if(afterDigests[table]!==digest)throw new Error('BILI_MIGRATION_VERIFY_FAILED');
 }
 
 /**

@@ -416,6 +416,12 @@ function RuntimePanel({ snapshot, host = null, busy = false, notice = "", onCont
       h6("p", null, errorHint(error51.code) ?? "\u8BF7\u67E5\u770B\u8FD0\u884C\u9636\u6BB5\u4E0E\u6700\u8FD1\u6838\u5BF9\u65F6\u95F4\u3002"),
       h6("p", { className: "df-muted" }, "\u8BB0\u5F55\u4E8E " + formatTime(error51.at))
     ),
+    (state?.history?.length ?? 0) > 0 && h6(
+      "details",
+      { className: "df-detail", "data-runtime-history": state.history.length },
+      h6("summary", null, "\u5386\u53F2\u9519\u8BEF\u8BB0\u5F55\uFF08" + state.history.length + "\uFF09"),
+      h6("ul", null, ...state.history.slice(-5).reverse().map((entry, index) => h6("li", { key: entry.at + ":" + index }, formatTime(entry.at) + " \xB7 " + phaseLabel(entry.phase) + " \xB7 " + entry.code + (errorHint(entry.code) ? "\uFF08" + errorHint(entry.code) + "\uFF09" : ""))))
+    ),
     h6("h3", null, "\u7EC4\u4EF6\u72B6\u6001"),
     rows.length === 0 ? h6("p", { className: "df-muted" }, "\u5B9E\u4F8B\u5C1A\u672A\u62A5\u544A\u7EC4\u4EF6\u72B6\u6001\u3002") : h6("ul", { className: "df-runtime-capabilities" }, ...rows.map((row) => h6("li", { key: row.id, "data-capability": row.id, "data-state": row.state }, h6("strong", null, row.title), h6("span", null, row.state), row.detail && h6("span", { className: "df-muted" }, row.detail)))),
     h6("p", { className: "df-note" }, "\u5B9E\u4F8B\u8FD0\u884C\u72B6\u6001\u4E0E B\u7AD9\u80FD\u529B\u5206\u522B\u663E\u793A\uFF1AB\u7AD9\u767B\u5F55\u6216\u63A5\u53E3\u53D7\u9650\u4E0D\u7B49\u4E8E\u5B9E\u4F8B\u542F\u52A8\u5931\u8D25\u3002")
