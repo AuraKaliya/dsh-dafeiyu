@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/bilibili",
-  "version": "0.25.1",
+  "version": "0.26.0",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -26,12 +26,16 @@
       "types": "./lib/channel/production-config.d.ts",
       "default": "./lib/channel/production-config.js"
     },
-    "./management": "./lib/management-definition.js"
+    "./management": "./lib/management-definition.js",
+    "./login-state": {
+      "types": "./lib/login-state.d.ts",
+      "default": "./lib/login-state.js"
+    }
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.25.1",
-    "@dafeiyu/core": "0.25.1",
-    "@dafeiyu/journal": "0.25.1",
+    "@dafeiyu/contracts": "0.26.0",
+    "@dafeiyu/core": "0.26.0",
+    "@dafeiyu/journal": "0.26.0",
     "zod": "4.4.3"
   },
   "peerDependencies": {

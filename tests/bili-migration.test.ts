@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -50,7 +50,7 @@ test('an identity mismatch is rejected before any write', async () => {
   assert.equal(inspectBiliMigration(f.file, identity).version, 3);
 });
 
-test('v4 scoped records and receipts survive v5 and only existing versions are backfilled',async()=>{
+test('v4 scoped records and receipts survive the v6 upgrade and only existing versions are backfilled',async()=>{
   const root=await mkdtemp(join(testTempDir(),'bili-v4-')),file=join(root,'bili.sqlite'),backup=join(root,'backup.sqlite');
   new BiliStore(file,identity,true).close();const db=new DatabaseSync(file);
   try{
@@ -59,7 +59,7 @@ test('v4 scoped records and receipts survive v5 and only existing versions are b
     db.prepare('INSERT INTO bili_reading_receipts VALUES(?,?,?,?)').run('owner-task','saved-request',bvid,7);
   }finally{db.close();}
   assert.equal(inspectBiliMigration(file,identity).state,'upgradable');
-  assert.equal(migrateBiliStorage(file,identity,{backup}).version,5);
+  assert.equal(migrateBiliStorage(file,identity,{backup}).version,BILI_SCHEMA_VERSION);
   const upgraded=new DatabaseSync(file,{readOnly:true});try{
     assert.equal(upgraded.prepare('SELECT version FROM bili_reading').get()!.version,7);
     assert.equal(upgraded.prepare('SELECT version FROM bili_reading_receipts').get()!.version,7);

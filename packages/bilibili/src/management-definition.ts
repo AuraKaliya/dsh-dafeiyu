@@ -8,7 +8,7 @@ export const managementDefinition={
     {
       "id": "content",
       "title": "内容账号",
-      "description": "登录凭据由现有登录流程生成；只引用凭据文件。",
+      "description": "登录凭据由本地文件提供；只引用凭据文件路径，管理中心和聊天都不接收 Cookie 原文。文件格式为 JSON：uid、SESSDATA，可选 buvid3、bili_jct。",
       "fields": [
         {
           "path": "bilibili.capabilities",
@@ -20,21 +20,27 @@ export const managementDefinition={
           "path": "bilibili.session.expectedUid",
           "label": "内容账号 UID",
           "kind": "text",
-          "description": "保存后重启实例生效。"
+          "description": "保存前需先停止实例；必须与服务端返回的登录 UID 一致。"
         },
         {
           "path": "bilibili.session.file",
           "label": "登录凭据文件",
           "kind": "text",
-          "description": "保存后重启实例生效。"
+          "description": "保存前需先停止实例；路径位于实例外部凭据目录，按整份文件读取校验。"
         }
-      ],
-      "panel": "status"
+      ]
+    },
+    {
+      "id": "account",
+      "title": "登录验证与读取可用性",
+      "description": "验证在后台执行，结果分批返回：登录是否有效、UID 是否匹配、各接口是否可读分别记录，互不代替。",
+      "fields": [],
+      "panel": "bilibili-status"
     },
     {
       "id": "browser",
       "title": "浏览器连接",
-      "description": "使用 DSH 桌面桥读取已登录浏览器；须同时装配 DSH 工具。",
+      "description": "使用 DSH 桌面桥读取已登录浏览器；须同时装配 DSH 工具。预期浏览器 UID 必须与内容 HTTP、私信账号一致，错配在启用前报告。",
       "fields": [
         {
           "path": "bilibili.browser.expectedUid",
@@ -47,7 +53,7 @@ export const managementDefinition={
     {
       "id": "read",
       "title": "公开内容与媒体读取",
-      "description": "支持搜索、视频信息、评论读取、字幕、弹幕读取及媒体观察。结果记录实际覆盖范围；不包含发表评论或发布弹幕。",
+      "description": "默认使用已验证且当前可用的登录态 HTTP；匿名、已登录与媒体/字幕资源的暂停分别记录。结果记录实际覆盖范围；不包含发表评论或发布弹幕。",
       "fields": []
     },
     {

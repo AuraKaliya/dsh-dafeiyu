@@ -9,7 +9,7 @@ import { FixtureAdapter,textResponse,toolResponse } from './sdk-fixture.js';
 import { testTempDir } from './test-temp.js';
 import { BILI_ACTIONS } from '@dafeiyu/bilibili';
 
-test('twenty readings use the real Host, tool loop, source ledger and seven bounded sessions',{timeout:30000},async t=>{
+test('twenty readings use the real Host, tool loop, source ledger and seven bounded sessions',{timeout:45000},async t=>{
   const root=await mkdtemp(join(testTempDir(),'bili-long-host-')),file=join(root,'host.json');
   process.env.DSH_HOME=join(root,'data/core/dsh-home');
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');

@@ -121,7 +121,12 @@ test('comment cursors round-trip through the service without echoing the dedupli
 
 test('the service search fallback passes client binding and browser metadata can become a reading record',async()=>{
   const f=await fixture();try{
-    const status=f.bili.client.status.bind(f.bili.client);f.bili.client.status=()=>{const current=status();return {...current,pause:{...current.pause,held:true}};};
+    // An endpoint-scoped anonymous pause makes the HTTP read raise BILI_DIAGNOSTIC_REQUIRED,
+    // and the service still falls back once to the configured browser channel.
+    const diagnostics=f.bili.store.diagnostics,policy={rateDelaysMs:[10000,30000,60000],riskDelayMs:30000};
+    diagnostics.failure('search','risk',Date.now(),policy,null,'anonymous-http',null);
+    diagnostics.failure('search','risk',Date.now(),policy,null,'anonymous-http',null);
+    assert.equal(diagnostics.summary.held,true);
     const actions=f.extensions.get('bilibili')!.actions!,search=actions.find(action=>action.id==='bili_search')!,video=actions.find(action=>action.id==='bili_video')!;
     const result=await search.execute({requestId:'search-1',keyword:'养鱼'},f.context);assert.equal(result.status,'succeeded',result.errorCode);
     const boundary=await search.execute({requestId:'search-50',keyword:'养鱼',page:50,limit:1},f.context);

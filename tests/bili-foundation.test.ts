@@ -37,8 +37,14 @@ test('Bili endpoints, signed parameters and account binding are program controll
 }finally{f.store.close();}});
 
 test('HTTP and platform risk responses persist backoff and never retry automatically',async()=>{for(const failure of [response({},412),response({code:-352,data:null})]){const f=await fixture();try{let calls=0;const client=new BiliClient(BiliConfigSchema.parse({}),f.store,async()=>{calls++;return failure;}),signal=new AbortController().signal;
-  await assert.rejects(client.read('discover',{pn:1,ps:2},signal,()=>{}),/BACKOFF/);await assert.rejects(client.read('discover',{pn:2,ps:2},signal,()=>{}),/BACKOFF/);await assert.rejects(client.external('https://cdn.bilivideo.com/video','media',null,signal,()=>{}),/BACKOFF/);assert.equal(calls,1);assert.ok(f.store.clock.blockedUntil>Date.now());
+  await assert.rejects(client.read('discover',{pn:1,ps:2},signal,()=>{}),/BACKOFF/);await assert.rejects(client.read('discover',{pn:2,ps:2},signal,()=>{}),/BACKOFF/);
+  assert.equal(f.store.diagnostics.pauses.some(pause=>pause.scope==='anonymous-http'&&pause.endpoint==='discover'),true);assert.ok(f.store.clock.blockedUntil>Date.now());
 }finally{f.store.close();}}});
+test('media and subtitle resources keep their own scope instead of inheriting an API pause',async()=>{const f=await fixture();try{let calls=0;const client=new BiliClient(BiliConfigSchema.parse({}),f.store,async(url)=>{calls++;return url.pathname.startsWith('/x/')?response({},412):response({},200);}),signal=new AbortController().signal;
+  await assert.rejects(client.read('discover',{pn:1,ps:2},signal,()=>{}),/BACKOFF/);await assert.rejects(client.read('discover',{pn:2,ps:2},signal,()=>{}),/BACKOFF/);
+  const opened=await client.external('https://cdn.bilivideo.com/video','media',null,signal,()=>{});opened.response.close();assert.equal(calls,2,'the media request is not blocked by an API pause');
+  assert.equal(f.store.diagnostics.pauses.some(pause=>pause.scope==='anonymous-http'&&pause.endpoint==='discover'),true);
+}finally{f.store.close();}});
 
 test('response budgets and origin restrictions reject malformed or excessive input',async()=>{const f=await fixture();try{let closed=false;const client=new BiliClient(BiliConfigSchema.parse({maxResponseBytes:1024}),f.store,async()=>({status:200,headers:{'content-length':'1025'},body:(async function*(){throw new Error('MUST_NOT_READ');})(),close(){closed=true;}}));
   await assert.rejects(client.read('discover',{pn:1,ps:1},new AbortController().signal,()=>{}),/RESPONSE_LIMIT/);assert.equal(closed,true);

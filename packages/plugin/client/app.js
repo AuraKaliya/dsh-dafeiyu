@@ -2,6 +2,7 @@ import { managementPanels as taskPanels } from '../../core/client/management.js'
 import { managementPanels as memoryPanels } from '../../memory/client/management.js';
 import { managementPanels as stickerPanels } from '../../channel-qq/client/management.js';
 import { managementPanels as activityPanels } from '../../activity/client/management.js';
+import { managementPanels as bilibiliPanels } from '../../bilibili/client/management.js';
 import { RuntimePanel } from './runtime-panel.js';
 import { controlNotice, controlRequest, createSequenceGuard, lifecycleLabel, pollInterval, unwrapResponse } from '../lib/management-view.js';
 import React from 'react';
@@ -11,7 +12,7 @@ const stateLabels = { running: '运行中', starting: '启动中', waiting: '等
 const pretty = value => JSON.stringify(value, null, 2);
 function Detail({ title, value }) { return h('details', { className: 'df-detail' }, h('summary', null, title), h('pre', null, typeof value === 'string' ? value : pretty(value))); }
 function Button({ onClick, children, disabled = false, primary = false }) { return h('button', { type: 'button', onClick, disabled, className: primary ? 'df-primary' : '' }, children); }
-const panelRegistry = new Map([...taskPanels, ...memoryPanels, ...stickerPanels, ...activityPanels].map(panel => [panel.id, panel.component]));
+const panelRegistry = new Map([...taskPanels, ...memoryPanels, ...stickerPanels, ...activityPanels, ...bilibiliPanels].map(panel => [panel.id, panel.component]));
 function RemotePanel({ module, panel, call, perform }) { const [value, setValue] = React.useState(null), Component = panelRegistry.get(panel); if (module === 'runtime')
     return null; if (Component)
     return h(Component, { call: (action, input) => call(module, action, input), perform, ui: { Button, Detail } }); return h('div', null, h(Button, { onClick: () => perform(async () => setValue(await call(module, 'status', null))) }, '读取当前状态'), module === 'qq' && h(Button, { onClick: () => perform(async () => setValue(await call(module, 'connection.check', null))) }, '检查组件连通'), value ? h(Detail, { title: '当前模块状态', value }) : h('p', { className: 'df-muted' }, '未连接实例时不显示示例状态。')); }

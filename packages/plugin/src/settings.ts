@@ -50,6 +50,8 @@ export const InstallationSettingsSchema=z.strictObject({
   if(value.media?.vision&&!value.model.inlineTransport)ctx.addIssue({code:'custom',path:['model','inlineTransport'],message:'Vision requires explicit image transport configuration'});
   if(value.bilibili?.capabilities&&!value.media)ctx.addIssue({code:'custom',path:['media'],message:'Bilibili video capabilities require media configuration'});
   if(value.bilibili?.session&&value.bilibili.channel&&value.bilibili.session.expectedUid!==value.bilibili.channel.accountUid)ctx.addIssue({code:'custom',path:['bilibili','session','expectedUid'],message:'Platform interfaces must use the same account'});
+  if(value.bilibili?.browser&&value.bilibili.session&&value.bilibili.session.expectedUid!==value.bilibili.browser.expectedUid)ctx.addIssue({code:'custom',path:['bilibili','browser','expectedUid'],message:'Browser reads must use the same account as the platform session'});
+  if(value.bilibili?.browser&&value.bilibili.channel&&value.bilibili.browser.expectedUid!==value.bilibili.channel.accountUid)ctx.addIssue({code:'custom',path:['bilibili','browser','expectedUid'],message:'Browser reads must use the same account as owner messages'});
 });
 export type InstallationSettings=z.infer<typeof InstallationSettingsSchema>;
 export class SettingsError extends Error {

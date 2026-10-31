@@ -93,12 +93,13 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     const visited=new Set();function testFile(path){if(visited.has(path))return;visited.add(path);const bytes=readFileSync(join(repository,'tests',path),'utf8');put(destination,'source/tests/'+path,bytes);
       for(const match of bytes.matchAll(/(?:from\s*|import\()\s*['"](\.\/[^'"]+)['"]/g)){const dependency=portable(join(dirname(path),match[1])).replace(/\.js$/,'.ts');if(existsSync(join(repository,'tests',dependency)))testFile(dependency);}}
     selected.push('bili-reading-integration.test.ts','bili-reading-delivery.test.ts','bili-media-service.test.ts','bili-migration.test.ts','installation-migration.test.ts','segment-handoff-store.test.ts','native-reading-runtime.test.ts','bili-browser-search.test.ts','bili-browser-frames.test.ts','tooling/profile-repair.test.ts');
+    selected.push('management-lifecycle.test.ts','management-ui.test.ts','management-startup.test.ts','onebot-capability.test.ts','bili-cookie-credentials.test.ts','bili-verification.test.ts','bili-diagnostics.test.ts','bili-foundation.test.ts');
     selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }
   let revision=null;try{revision=execFileSync('git',['rev-parse','HEAD'],{cwd:repository,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']}).trim();}catch{/* A source archive may have no Git metadata. */}
   const contentHash=hash(JSON.stringify(files(destination).map(file=>[portable(relative(destination,file)),hash(readFileSync(file))]).sort((a,b)=>a[0].localeCompare(b[0]))));
-  put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:5,runtime:2}},null,2)+'\n');
+  put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:6,runtime:2}},null,2)+'\n');
   const inventory=files(destination).map(file=>({path:portable(relative(destination,file)),bytes:lstatSync(file).size,sha256:hash(readFileSync(file))}));
   return {directory:destination,version:plugin.version,files:inventory.length,bytes:inventory.reduce((sum,file)=>sum+file.bytes,0),inventory};
 }

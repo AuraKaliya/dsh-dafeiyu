@@ -104,8 +104,144 @@ function ActivityPanel({ call, perform, ui: { Button: Button2, Detail: Detail2 }
 }
 var managementPanels4 = [{ id: "activity", component: ActivityPanel }];
 
-// packages/plugin/client/runtime-panel.js
+// packages/bilibili/client/management.js
 var import_react5 = __toESM(require("react"), 1);
+var h5 = import_react5.default.createElement;
+var engineLabels = { unverified: "\u5C1A\u672A\u9A8C\u8BC1", verifying: "\u6B63\u5728\u9A8C\u8BC1", verified: "\u767B\u5F55\u6709\u6548", expired: "\u767B\u5F55\u5DF2\u5931\u6548", mismatch: "\u8D26\u53F7\u4E0D\u7B26", interrupted: "\u9A8C\u8BC1\u4E2D\u65AD" };
+var credentialLabels = { "not-configured": "\u672A\u914D\u7F6E\u51ED\u636E\u6587\u4EF6", invalid: "\u51ED\u636E\u6587\u4EF6\u65E0\u6548", ready: "\u51ED\u636E\u53EF\u8BFB\u53D6" };
+var stateLabels = { pending: "\u8FDB\u884C\u4E2D", completed: "\u5DF2\u5B8C\u6210", failed: "\u5931\u8D25", interrupted: "\u5DF2\u4E2D\u65AD" };
+var scopeLabels = { "anonymous-http": "\u533F\u540D HTTP", "verified-http": "\u5DF2\u767B\u5F55 HTTP", browser: "\u6D4F\u89C8\u5668", resource: "\u5A92\u4F53/\u5B57\u5E55\u8D44\u6E90", shared: "\u5171\u4EAB\u6216\u6765\u6E90\u4E0D\u660E" };
+var routeLabels = { available: "\u53EF\u7528", cooldown: "\u7B49\u5F85\u51B7\u5374", "diagnostic-required": "\u9700\u8981\u8BCA\u65AD" };
+var codeLabels = { BILI_SESSION_NOT_CONFIGURED: "\u5C1A\u672A\u914D\u7F6E\u672C\u5730\u51ED\u636E\u6587\u4EF6", BILI_SESSION_INVALID: "\u51ED\u636E\u6587\u4EF6\u683C\u5F0F\u6216 UID \u6821\u9A8C\u5931\u8D25", BILI_ACCOUNT_MISMATCH: "\u670D\u52A1\u7AEF\u767B\u5F55 UID \u4E0E\u914D\u7F6E\u4E0D\u7B26", BILI_LOGIN_REQUIRED: "\u767B\u5F55\u6001\u5DF2\u5931\u6548\uFF0C\u9700\u8981\u66F4\u65B0\u672C\u5730\u51ED\u636E\u6587\u4EF6", BILI_BACKOFF: "\u4ECD\u5728\u51B7\u5374\u7B49\u5F85", BILI_DIAGNOSTIC_REQUIRED: "\u5171\u4EAB\u6216\u6765\u6E90\u4E0D\u660E\u7684\u6682\u505C\u963B\u6B62\u4E86\u81EA\u52A8\u63A2\u6D4B", BILI_SESSION_CHANGED: "\u51ED\u636E\u5728\u9A8C\u8BC1\u8FC7\u7A0B\u4E2D\u53D8\u5316\uFF0C\u65E7\u7ED3\u679C\u672A\u91C7\u7528", BILI_VERIFICATION_CANCELLED: "\u9A8C\u8BC1\u5DF2\u53D6\u6D88", BILI_VERIFICATION_INTERRUPTED: "\u5B9E\u4F8B\u91CD\u542F\u4E2D\u65AD\u4E86\u4E0A\u6B21\u9A8C\u8BC1" };
+var hint = (code) => code ? codeLabels[code] ?? code : "";
+function BilibiliStatusPanel({ call, ui }) {
+  const Button2 = ui.Button, Detail2 = ui.Detail;
+  const [status, setStatus] = import_react5.default.useState(null), [notice, setNotice] = import_react5.default.useState(""), [busy, setBusy] = import_react5.default.useState(false);
+  const [target, setTarget] = import_react5.default.useState({ endpoint: "video", bvid: "", aid: "", keyword: "", page: 1, limit: 5 });
+  const sequence = import_react5.default.useRef(0);
+  const read = async () => {
+    const token = ++sequence.current;
+    const value = await call("verify.status", {});
+    if (token === sequence.current) setStatus(value);
+    return value;
+  };
+  import_react5.default.useEffect(() => {
+    void read().catch((error51) => setNotice(error51.message));
+  }, []);
+  import_react5.default.useEffect(() => {
+    if (!status?.active)
+      return;
+    let cancelled = false, timer = null, inFlight = false;
+    const tick = async () => {
+      if (cancelled || inFlight)
+        return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden")
+        return;
+      inFlight = true;
+      try {
+        await read();
+      } catch (error51) {
+        if (!cancelled)
+          setNotice(error51.message);
+      } finally {
+        inFlight = false;
+        if (!cancelled)
+          timer = setTimeout(tick, 1e3);
+      }
+    };
+    timer = setTimeout(tick, 1e3);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [status?.active?.id]);
+  const run = async (action, input) => {
+    if (busy)
+      return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await call(action, input);
+      if (result?.accepted === false)
+        setNotice("\u64CD\u4F5C\u672A\u53D7\u7406\uFF1A" + (result.code ?? "\u672A\u77E5\u539F\u56E0"));
+      else if (result?.reused)
+        setNotice("\u5DF2\u6709\u9A8C\u8BC1\u6B63\u5728\u8FDB\u884C\uFF0C\u590D\u7528\u540C\u4E00\u64CD\u4F5C\u3002");
+      else
+        setNotice("\u5DF2\u53D7\u7406\uFF1A" + String(result?.operationId ?? "").slice(0, 8) + "\uFF1B\u9875\u9762\u6BCF\u79D2\u67E5\u8BE2\u8FDB\u5EA6\u3002");
+      await read();
+    } catch (error51) {
+      setNotice(error51.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const testRead = () => {
+    const endpoint = target.endpoint;
+    const input = endpoint === "video" ? { endpoint, bvid: target.bvid.trim() } : endpoint === "comments" ? { endpoint, aid: target.aid.trim(), page: Number(target.page), limit: Number(target.limit) } : endpoint === "search" ? { endpoint, keyword: target.keyword.trim(), page: Number(target.page), limit: Number(target.limit) } : { endpoint, page: Number(target.page), limit: Number(target.limit) };
+    return run("verify.read", input);
+  };
+  const account = status?.account, http = status?.http, operations = status?.operations ?? [];
+  return h5(
+    "div",
+    { className: "df-bili-status", "data-bili-account": account?.engine ?? "unknown" },
+    h5(
+      "div",
+      { className: "df-actions" },
+      h5(Button2, { disabled: busy, onClick: () => run("verify.start", {}), primary: true }, "\u9A8C\u8BC1\u767B\u5F55"),
+      h5(Button2, { disabled: busy, onClick: testRead }, "\u6D4B\u8BD5\u8BFB\u53D6"),
+      h5(Button2, { disabled: busy || !status?.active, onClick: () => run("verify.cancel", {}) }, "\u53D6\u6D88\u9A8C\u8BC1"),
+      h5(Button2, { disabled: busy, onClick: () => {
+        setNotice("");
+        void read().catch((error51) => setNotice(error51.message));
+      } }, "\u5237\u65B0\u8D26\u53F7\u72B6\u6001")
+    ),
+    notice && h5("div", { className: "df-notice", role: "status", "data-bili-notice": notice }, notice),
+    h5("h3", null, "\u8D26\u53F7\u4E0E\u51ED\u636E"),
+    account ? h5(
+      "dl",
+      { className: "df-runtime-facts" },
+      h5("div", null, h5("dt", null, "\u672C\u5730\u51ED\u636E"), h5("dd", null, credentialLabels[account.credentialState] ?? account.credentialState)),
+      h5("div", null, h5("dt", null, "\u914D\u7F6E\u8D26\u53F7"), h5("dd", null, account.expectedUid ?? "\u2014")),
+      h5("div", null, h5("dt", null, "\u767B\u5F55\u72B6\u6001"), h5("dd", { "data-bili-engine": account.engine }, engineLabels[account.engine] ?? account.engine)),
+      h5("div", null, h5("dt", null, "\u5DF2\u9A8C\u8BC1 UID"), h5("dd", null, account.verifiedUid ?? "\u2014")),
+      h5("div", null, h5("dt", null, "\u9A8C\u8BC1\u65F6\u95F4"), h5("dd", null, account.verifiedAt ? new Date(account.verifiedAt).toLocaleString("zh-CN", { hour12: false }) : "\u2014")),
+      h5("div", null, h5("dt", null, "\u6709\u6548\u81F3"), h5("dd", null, account.expiresAt ? new Date(account.expiresAt).toLocaleTimeString("zh-CN", { hour12: false }) : "\u2014"))
+    ) : h5("p", { className: "df-muted" }, "\u6B63\u5728\u8BFB\u53D6\u8D26\u53F7\u72B6\u6001\u3002"),
+    h5("p", { className: "df-note" }, "Cookie \u53EA\u5B58\u653E\u5728\u5B9E\u4F8B\u5916\u7684\u672C\u5730\u51ED\u636E\u6587\u4EF6\u4E2D\uFF0C\u901A\u8FC7\u6587\u4EF6\u8DEF\u5F84\u5F15\u7528\uFF1B\u7BA1\u7406\u4E2D\u5FC3\u4E0D\u63D0\u4F9B Cookie \u8F93\u5165\u6846\uFF0C\u804A\u5929\u4E2D\u4E5F\u4E0D\u4F1A\u63D0\u4EA4\u51ED\u636E\u3002"),
+    h5("h3", null, "\u8BFB\u53D6\u80FD\u529B"),
+    http ? h5(
+      "ul",
+      { className: "df-runtime-capabilities" },
+      h5("li", { "data-route": "http" }, h5("strong", null, "HTTP \u8BFB\u53D6"), h5("span", null, (http.identity === "anonymous" ? "\u533F\u540D" : "\u5DF2\u767B\u5F55") + " \xB7 " + routeLabels[http.state]), http.waitUntil && h5("span", { className: "df-muted" }, "\u7EA6\u81F3 " + http.waitUntil)),
+      h5("li", { "data-route": "browser" }, h5("strong", null, "\u6D4F\u89C8\u5668\u8BFB\u53D6"), h5("span", null, status.browser.configured ? routeLabels[status.browser.state] : "\u672A\u914D\u7F6E")),
+      h5("li", { "data-route": "resource" }, h5("strong", null, "\u5A92\u4F53\u4E0E\u5B57\u5E55"), h5("span", null, routeLabels[status.resource.state]))
+    ) : null,
+    h5("h3", null, "\u6682\u505C\u8303\u56F4"),
+    (status?.pauses ?? []).length === 0 ? h5("p", { className: "df-muted" }, "\u5F53\u524D\u6CA1\u6709\u8BB0\u5F55\u7684\u6682\u505C\u3002") : h5("ul", { className: "df-runtime-capabilities" }, ...status.pauses.map((pause, index) => h5("li", { key: index, "data-pause": pause.scope }, h5("strong", null, scopeLabels[pause.scope] ?? pause.scope), h5("span", null, pause.endpoint ?? "\u5168\u90E8\u63A5\u53E3"), h5("span", { className: "df-muted" }, [pause.held ? "\u9700\u8981\u8BCA\u65AD" : "\u51B7\u5374", pause.kind, "\u5931\u8D25 " + pause.failures + " \u6B21", "\u81F3 " + pause.until].join(" \xB7 "))))),
+    h5("h3", null, "\u6D4B\u8BD5\u8BFB\u53D6\u76EE\u6807"),
+    h5(
+      "div",
+      { className: "df-field-group" },
+      h5("label", null, "\u7C7B\u578B", h5("select", { value: target.endpoint, onChange: (event) => setTarget((current) => ({ ...current, endpoint: event.target.value })) }, h5("option", { value: "video" }, "\u89C6\u9891\u4FE1\u606F"), h5("option", { value: "search" }, "\u641C\u7D22"), h5("option", { value: "comments" }, "\u8BC4\u8BBA"), h5("option", { value: "discover" }, "\u70ED\u95E8\u5217\u8868"))),
+      target.endpoint === "video" && h5("label", null, "bv\u53F7", h5("input", { value: target.bvid, placeholder: "BV1xx411c7mD", onChange: (event) => setTarget((current) => ({ ...current, bvid: event.target.value })) })),
+      target.endpoint === "search" && h5("label", null, "\u5173\u952E\u8BCD", h5("input", { value: target.keyword, onChange: (event) => setTarget((current) => ({ ...current, keyword: event.target.value })) })),
+      target.endpoint === "comments" && h5("label", null, "aid", h5("input", { value: target.aid, onChange: (event) => setTarget((current) => ({ ...current, aid: event.target.value })) }))
+    ),
+    h5("p", { className: "df-note" }, "\u6D4B\u8BD5\u8BFB\u53D6\u5148\u505A\u4E00\u6B21\u767B\u5F55\u9A8C\u8BC1\uFF0C\u518D\u505A\u4E00\u6B21\u6307\u5B9A\u63A5\u53E3\u8BFB\u53D6\uFF1B\u4E24\u6B65\u7ED3\u679C\u5206\u522B\u8BB0\u5F55\uFF0C\u4E0D\u8FFD\u52A0\u63A2\u6D4B\u8BF7\u6C42\u3002"),
+    h5("h3", null, "\u6700\u8FD1\u7684\u9A8C\u8BC1\u8BB0\u5F55"),
+    operations.length === 0 ? h5("p", { className: "df-muted" }, "\u8FD8\u6CA1\u6709\u9A8C\u8BC1\u8BB0\u5F55\u3002") : h5("ul", { className: "df-runtime-capabilities" }, ...operations.slice(0, 8).map((operation) => h5(
+      "li",
+      { key: operation.id, "data-verification": operation.state },
+      h5("strong", null, (operation.kind === "login" ? "\u767B\u5F55\u9A8C\u8BC1" : "\u8BFB\u53D6\u9A8C\u8BC1") + " \xB7 " + (stateLabels[operation.state] ?? operation.state)),
+      h5("span", { className: "df-muted" }, new Date(operation.at).toLocaleString("zh-CN", { hour12: false }) + (operation.endpoint ? " \xB7 " + operation.endpoint : "") + (operation.errorCode ? " \xB7 " + (hint(operation.errorCode) || operation.errorCode) : "")),
+      operation.result && h5(Detail2, { title: "\u9A8C\u8BC1\u7ED3\u679C", value: operation.result })
+    )))
+  );
+}
+var managementPanels5 = [{ id: "bilibili-status", component: BilibiliStatusPanel }];
+
+// packages/plugin/client/runtime-panel.js
+var import_react6 = __toESM(require("react"), 1);
 
 // packages/plugin/lib/management-view.js
 var LIFECYCLE_LABELS = { stopped: "\u5DF2\u505C\u6B62", starting: "\u542F\u52A8\u4E2D", waiting: "\u7B49\u5F85\u4F9D\u8D56", running: "\u8FD0\u884C\u4E2D", stopping: "\u6B63\u5728\u505C\u6B62", failed: "\u542F\u52A8\u6216\u8FD0\u884C\u5931\u8D25" };
@@ -235,81 +371,81 @@ function unwrapResponse(result) {
 }
 
 // packages/plugin/client/runtime-panel.js
-var h5 = import_react5.default.createElement;
+var h6 = import_react6.default.createElement;
 var instanceLabels = { absent: "\u6CA1\u6709\u5B9E\u4F8B\u8FDB\u7A0B", starting: "\u5B9E\u4F8B\u542F\u52A8\u4E2D", unconfirmed: "\u72B6\u6001\u5F85\u786E\u8BA4", ready: "\u5B9E\u4F8B\u5DF2\u5C31\u7EEA" };
 var dispositionLabels = { accepted: "\u5DF2\u53D7\u7406", completed: "\u5DF2\u5B8C\u6210", failed: "\u5931\u8D25", rejected: "\u672A\u53D7\u7406" };
 function Fact({ label, children }) {
-  return h5("div", { className: "df-fact" }, h5("dt", null, label), h5("dd", null, children ?? "\u2014"));
+  return h6("div", { className: "df-fact" }, h6("dt", null, label), h6("dd", null, children ?? "\u2014"));
 }
 function RuntimePanel({ snapshot, host = null, busy = false, notice = "", onControl, onRefresh }) {
   const state = snapshot ?? null;
   const availability = controlAvailability(state);
   const rows = capabilityRows(state, host);
   const error51 = state?.error ?? null;
-  return h5(
+  return h6(
     "section",
     { className: "df-section df-runtime", "data-runtime-state": state?.state ?? "unknown" },
-    h5("h2", null, "\u5B9E\u4F8B\u8FD0\u884C"),
-    h5("p", { className: "df-muted" }, "\u542F\u52A8\u3001\u505C\u6B62\u4E0E\u91CD\u542F\u8FDB\u5165\u540C\u4E00\u4E2A\u751F\u547D\u5468\u671F\u63A7\u5236\u5668\u3002\u72B6\u6001\u6765\u81EA\u672C\u673A\u5FEB\u7167\uFF0C\u67E5\u8BE2\u4E0D\u4F1A\u89E6\u53D1\u6A21\u578B\u8C03\u7528\u6216\u5E73\u53F0\u8BF7\u6C42\u3002"),
-    h5(
+    h6("h2", null, "\u5B9E\u4F8B\u8FD0\u884C"),
+    h6("p", { className: "df-muted" }, "\u542F\u52A8\u3001\u505C\u6B62\u4E0E\u91CD\u542F\u8FDB\u5165\u540C\u4E00\u4E2A\u751F\u547D\u5468\u671F\u63A7\u5236\u5668\u3002\u72B6\u6001\u6765\u81EA\u672C\u673A\u5FEB\u7167\uFF0C\u67E5\u8BE2\u4E0D\u4F1A\u89E6\u53D1\u6A21\u578B\u8C03\u7528\u6216\u5E73\u53F0\u8BF7\u6C42\u3002"),
+    h6(
       "div",
       { className: "df-actions df-runtime-controls" },
-      h5("button", { type: "button", className: "df-primary", "data-action": "start", disabled: busy || !availability.start, onClick: () => onControl("start") }, "\u542F\u52A8\u5B9E\u4F8B"),
-      h5("button", { type: "button", "data-action": "stop", disabled: busy || !availability.stop, onClick: () => onControl("stop") }, "\u505C\u6B62\u5B9E\u4F8B"),
-      h5("button", { type: "button", "data-action": "restart", disabled: busy || !availability.restart, onClick: () => onControl("restart") }, "\u91CD\u542F\u5E76\u5E94\u7528\u914D\u7F6E"),
-      h5("button", { type: "button", "data-action": "refresh", disabled: busy, onClick: () => onRefresh() }, "\u5237\u65B0\u8FD0\u884C\u72B6\u6001")
+      h6("button", { type: "button", className: "df-primary", "data-action": "start", disabled: busy || !availability.start, onClick: () => onControl("start") }, "\u542F\u52A8\u5B9E\u4F8B"),
+      h6("button", { type: "button", "data-action": "stop", disabled: busy || !availability.stop, onClick: () => onControl("stop") }, "\u505C\u6B62\u5B9E\u4F8B"),
+      h6("button", { type: "button", "data-action": "restart", disabled: busy || !availability.restart, onClick: () => onControl("restart") }, "\u91CD\u542F\u5E76\u5E94\u7528\u914D\u7F6E"),
+      h6("button", { type: "button", "data-action": "refresh", disabled: busy, onClick: () => onRefresh() }, "\u5237\u65B0\u8FD0\u884C\u72B6\u6001")
     ),
-    availability.reason && h5("p", { className: "df-note", "data-control-reason": availability.reason }, availability.reason),
-    notice && h5("div", { className: "df-notice", role: "status", "data-runtime-notice": notice }, notice),
-    h5(
+    availability.reason && h6("p", { className: "df-note", "data-control-reason": availability.reason }, availability.reason),
+    notice && h6("div", { className: "df-notice", role: "status", "data-runtime-notice": notice }, notice),
+    h6(
       "dl",
       { className: "df-runtime-facts" },
-      h5(Fact, { label: "\u751F\u547D\u5468\u671F" }, lifecycleLabel(state)),
-      h5(Fact, { label: "\u5F53\u524D\u9636\u6BB5" }, state ? phaseLabel(state.phase) : "\u2014"),
-      h5(Fact, { label: "\u5B9E\u4F8B" }, state ? instanceLabels[state.instance] ?? state.instance : "\u2014"),
-      h5(Fact, { label: "\u8FDB\u7A0B PID" }, state?.pid === null || state?.pid === void 0 ? "\u2014" : String(state.pid)),
-      h5(Fact, { label: "\u5B50\u8FDB\u7A0B\u4EE3\u6B21" }, state ? String(state.generation) : "\u2014"),
-      h5(Fact, { label: "\u5F53\u524D\u64CD\u4F5C" }, state?.operation ? `${state.operation.action} \xB7 ${dispositionLabels[state.operation.disposition] ?? state.operation.disposition} \xB7 ${state.operation.id.slice(0, 8)}` : "\u65E0"),
-      h5(Fact, { label: "\u6700\u8FD1\u6838\u5BF9" }, formatTime(state?.checkedAt)),
-      h5(Fact, { label: "\u4E0B\u6B21\u91CD\u8BD5" }, state ? retryText(state.retry) : "\u2014")
+      h6(Fact, { label: "\u751F\u547D\u5468\u671F" }, lifecycleLabel(state)),
+      h6(Fact, { label: "\u5F53\u524D\u9636\u6BB5" }, state ? phaseLabel(state.phase) : "\u2014"),
+      h6(Fact, { label: "\u5B9E\u4F8B" }, state ? instanceLabels[state.instance] ?? state.instance : "\u2014"),
+      h6(Fact, { label: "\u8FDB\u7A0B PID" }, state?.pid === null || state?.pid === void 0 ? "\u2014" : String(state.pid)),
+      h6(Fact, { label: "\u5B50\u8FDB\u7A0B\u4EE3\u6B21" }, state ? String(state.generation) : "\u2014"),
+      h6(Fact, { label: "\u5F53\u524D\u64CD\u4F5C" }, state?.operation ? `${state.operation.action} \xB7 ${dispositionLabels[state.operation.disposition] ?? state.operation.disposition} \xB7 ${state.operation.id.slice(0, 8)}` : "\u65E0"),
+      h6(Fact, { label: "\u6700\u8FD1\u6838\u5BF9" }, formatTime(state?.checkedAt)),
+      h6(Fact, { label: "\u4E0B\u6B21\u91CD\u8BD5" }, state ? retryText(state.retry) : "\u2014")
     ),
-    error51 && h5(
+    error51 && h6(
       "div",
       { className: "df-notice df-runtime-error", "data-runtime-error": error51.code },
-      h5("strong", null, "\u5F53\u524D\u9519\u8BEF\uFF1A" + error51.code),
-      h5("p", null, errorHint(error51.code) ?? "\u8BF7\u67E5\u770B\u8FD0\u884C\u9636\u6BB5\u4E0E\u6700\u8FD1\u6838\u5BF9\u65F6\u95F4\u3002"),
-      h5("p", { className: "df-muted" }, "\u8BB0\u5F55\u4E8E " + formatTime(error51.at))
+      h6("strong", null, "\u5F53\u524D\u9519\u8BEF\uFF1A" + error51.code),
+      h6("p", null, errorHint(error51.code) ?? "\u8BF7\u67E5\u770B\u8FD0\u884C\u9636\u6BB5\u4E0E\u6700\u8FD1\u6838\u5BF9\u65F6\u95F4\u3002"),
+      h6("p", { className: "df-muted" }, "\u8BB0\u5F55\u4E8E " + formatTime(error51.at))
     ),
-    h5("h3", null, "\u7EC4\u4EF6\u72B6\u6001"),
-    rows.length === 0 ? h5("p", { className: "df-muted" }, "\u5B9E\u4F8B\u5C1A\u672A\u62A5\u544A\u7EC4\u4EF6\u72B6\u6001\u3002") : h5("ul", { className: "df-runtime-capabilities" }, ...rows.map((row) => h5("li", { key: row.id, "data-capability": row.id, "data-state": row.state }, h5("strong", null, row.title), h5("span", null, row.state), row.detail && h5("span", { className: "df-muted" }, row.detail)))),
-    h5("p", { className: "df-note" }, "\u5B9E\u4F8B\u8FD0\u884C\u72B6\u6001\u4E0E B\u7AD9\u80FD\u529B\u5206\u522B\u663E\u793A\uFF1AB\u7AD9\u767B\u5F55\u6216\u63A5\u53E3\u53D7\u9650\u4E0D\u7B49\u4E8E\u5B9E\u4F8B\u542F\u52A8\u5931\u8D25\u3002")
+    h6("h3", null, "\u7EC4\u4EF6\u72B6\u6001"),
+    rows.length === 0 ? h6("p", { className: "df-muted" }, "\u5B9E\u4F8B\u5C1A\u672A\u62A5\u544A\u7EC4\u4EF6\u72B6\u6001\u3002") : h6("ul", { className: "df-runtime-capabilities" }, ...rows.map((row) => h6("li", { key: row.id, "data-capability": row.id, "data-state": row.state }, h6("strong", null, row.title), h6("span", null, row.state), row.detail && h6("span", { className: "df-muted" }, row.detail)))),
+    h6("p", { className: "df-note" }, "\u5B9E\u4F8B\u8FD0\u884C\u72B6\u6001\u4E0E B\u7AD9\u80FD\u529B\u5206\u522B\u663E\u793A\uFF1AB\u7AD9\u767B\u5F55\u6216\u63A5\u53E3\u53D7\u9650\u4E0D\u7B49\u4E8E\u5B9E\u4F8B\u542F\u52A8\u5931\u8D25\u3002")
   );
 }
 
 // packages/plugin/client/app.js
-var import_react6 = __toESM(require("react"), 1);
-var h6 = import_react6.default.createElement;
+var import_react7 = __toESM(require("react"), 1);
+var h7 = import_react7.default.createElement;
 var tabs = [["overview", "\u603B\u89C8"], ["personality", "\u4EBA\u683C\u4E0E\u8BB0\u5FC6"], ["capabilities", "\u80FD\u529B"], ["tasks", "\u4EFB\u52A1\u4E0E\u8BB0\u5F55"], ["prompts", "\u63D0\u793A\u8BCD\u9884\u89C8"], ["runtime", "\u8FD0\u884C"]];
-var stateLabels = { running: "\u8FD0\u884C\u4E2D", starting: "\u542F\u52A8\u4E2D", waiting: "\u7B49\u5F85\u4F9D\u8D56", stopped: "\u5DF2\u505C\u6B62", stopping: "\u6B63\u5728\u505C\u6B62", failed: "\u542F\u52A8\u6216\u8FD0\u884C\u5931\u8D25" };
+var stateLabels2 = { running: "\u8FD0\u884C\u4E2D", starting: "\u542F\u52A8\u4E2D", waiting: "\u7B49\u5F85\u4F9D\u8D56", stopped: "\u5DF2\u505C\u6B62", stopping: "\u6B63\u5728\u505C\u6B62", failed: "\u542F\u52A8\u6216\u8FD0\u884C\u5931\u8D25" };
 var pretty = (value) => JSON.stringify(value, null, 2);
 function Detail({ title, value }) {
-  return h6("details", { className: "df-detail" }, h6("summary", null, title), h6("pre", null, typeof value === "string" ? value : pretty(value)));
+  return h7("details", { className: "df-detail" }, h7("summary", null, title), h7("pre", null, typeof value === "string" ? value : pretty(value)));
 }
 function Button({ onClick, children, disabled = false, primary = false }) {
-  return h6("button", { type: "button", onClick, disabled, className: primary ? "df-primary" : "" }, children);
+  return h7("button", { type: "button", onClick, disabled, className: primary ? "df-primary" : "" }, children);
 }
-var panelRegistry = new Map([...managementPanels, ...managementPanels2, ...managementPanels3, ...managementPanels4].map((panel) => [panel.id, panel.component]));
+var panelRegistry = new Map([...managementPanels, ...managementPanels2, ...managementPanels3, ...managementPanels4, ...managementPanels5].map((panel) => [panel.id, panel.component]));
 function RemotePanel({ module: module2, panel, call, perform }) {
-  const [value, setValue] = import_react6.default.useState(null), Component = panelRegistry.get(panel);
+  const [value, setValue] = import_react7.default.useState(null), Component = panelRegistry.get(panel);
   if (module2 === "runtime")
     return null;
   if (Component)
-    return h6(Component, { call: (action, input) => call(module2, action, input), perform, ui: { Button, Detail } });
-  return h6("div", null, h6(Button, { onClick: () => perform(async () => setValue(await call(module2, "status", null))) }, "\u8BFB\u53D6\u5F53\u524D\u72B6\u6001"), module2 === "qq" && h6(Button, { onClick: () => perform(async () => setValue(await call(module2, "connection.check", null))) }, "\u68C0\u67E5\u7EC4\u4EF6\u8FDE\u901A"), value ? h6(Detail, { title: "\u5F53\u524D\u6A21\u5757\u72B6\u6001", value }) : h6("p", { className: "df-muted" }, "\u672A\u8FDE\u63A5\u5B9E\u4F8B\u65F6\u4E0D\u663E\u793A\u793A\u4F8B\u72B6\u6001\u3002"));
+    return h7(Component, { call: (action, input) => call(module2, action, input), perform, ui: { Button, Detail } });
+  return h7("div", null, h7(Button, { onClick: () => perform(async () => setValue(await call(module2, "status", null))) }, "\u8BFB\u53D6\u5F53\u524D\u72B6\u6001"), module2 === "qq" && h7(Button, { onClick: () => perform(async () => setValue(await call(module2, "connection.check", null))) }, "\u68C0\u67E5\u7EC4\u4EF6\u8FDE\u901A"), value ? h7(Detail, { title: "\u5F53\u524D\u6A21\u5757\u72B6\u6001", value }) : h7("p", { className: "df-muted" }, "\u672A\u8FDE\u63A5\u5B9E\u4F8B\u65F6\u4E0D\u663E\u793A\u793A\u4F8B\u72B6\u6001\u3002"));
 }
 function RuntimeScreen({ initial, invoke, perform }) {
-  const [snapshot, setSnapshot] = import_react6.default.useState(initial ?? null), [host, setHost] = import_react6.default.useState(null), [notice, setNotice] = import_react6.default.useState(""), [working, setWorking] = import_react6.default.useState(false);
-  const guard = import_react6.default.useRef(createSequenceGuard());
+  const [snapshot, setSnapshot] = import_react7.default.useState(initial ?? null), [host, setHost] = import_react7.default.useState(null), [notice, setNotice] = import_react7.default.useState(""), [working, setWorking] = import_react7.default.useState(false);
+  const guard = import_react7.default.useRef(createSequenceGuard());
   const issue2 = () => guard.current.issue();
   const accept = (token, result) => {
     if (!guard.current.accept(token))
@@ -349,10 +485,10 @@ function RuntimeScreen({ initial, invoke, perform }) {
       setWorking(false);
     }
   };
-  import_react6.default.useEffect(() => {
+  import_react7.default.useEffect(() => {
     void read().catch((error51) => setNotice(error51.message));
   }, []);
-  import_react6.default.useEffect(() => {
+  import_react7.default.useEffect(() => {
     if (typeof document === "undefined")
       return;
     let timer = null, cancelled = false, inFlight = false;
@@ -395,38 +531,38 @@ function RuntimeScreen({ initial, invoke, perform }) {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [snapshot?.operationId, snapshot?.state]);
-  return h6("div", { className: "df-runtime-screen" }, h6(RuntimePanel, { snapshot, host, busy: working, notice, onControl: (action) => void control(action), onRefresh: () => void refresh() }));
+  return h7("div", { className: "df-runtime-screen" }, h7(RuntimePanel, { snapshot, host, busy: working, notice, onControl: (action) => void control(action), onRefresh: () => void refresh() }));
 }
 function Field({ field, value, onChange }) {
   const scale = field.scale ?? 1;
   const displayed = value == null ? "" : field.kind === "json" ? pretty(value) : field.kind === "lines" ? (value ?? []).join("\n") : field.kind === "number" ? value / scale : value;
   let input;
   if (field.kind === "choices")
-    input = h6("div", { className: "df-field-group" }, ...(field.options ?? []).map((option) => h6("label", { key: option.value }, h6("input", { type: "checkbox", checked: (value ?? []).includes(option.value), onChange: (e) => onChange(e.target.checked ? [...value ?? [], option.value] : (value ?? []).filter((item) => item !== option.value)) }), option.label)));
+    input = h7("div", { className: "df-field-group" }, ...(field.options ?? []).map((option) => h7("label", { key: option.value }, h7("input", { type: "checkbox", checked: (value ?? []).includes(option.value), onChange: (e) => onChange(e.target.checked ? [...value ?? [], option.value] : (value ?? []).filter((item) => item !== option.value)) }), option.label)));
   else if (field.kind === "select")
-    input = h6("select", { value: value ?? "", onChange: (e) => onChange(e.target.value || null) }, h6("option", { value: "" }, "\u4F7F\u7528\u9ED8\u8BA4\u503C"), ...(field.options ?? []).map((option) => h6("option", { key: option.value, value: option.value }, option.label)));
+    input = h7("select", { value: value ?? "", onChange: (e) => onChange(e.target.value || null) }, h7("option", { value: "" }, "\u4F7F\u7528\u9ED8\u8BA4\u503C"), ...(field.options ?? []).map((option) => h7("option", { key: option.value, value: option.value }, option.label)));
   else if (field.kind === "time-windows")
-    input = h6("div", null, ...(value ?? []).map((window, index) => h6("div", { key: index, className: "df-actions" }, h6("input", { type: "time", value: window.start, "aria-label": "\u5F00\u59CB\u65F6\u95F4 " + (index + 1), onChange: (e) => onChange(value.map((entry, i) => i === index ? { ...entry, start: e.target.value } : entry)) }), h6("span", null, "\u81F3"), h6("input", { type: "time", value: window.end, "aria-label": "\u7ED3\u675F\u65F6\u95F4 " + (index + 1), onChange: (e) => onChange(value.map((entry, i) => i === index ? { ...entry, end: e.target.value } : entry)) }), h6(Button, { onClick: () => onChange(value.filter((_entry, i) => i !== index)) }, "\u5220\u9664\u65F6\u6BB5"))), h6(Button, { disabled: (value?.length ?? 0) >= 8, onClick: () => onChange([...value ?? [], { start: "22:00", end: "08:00" }]) }, "\u6DFB\u52A0\u5B89\u9759\u65F6\u6BB5"));
+    input = h7("div", null, ...(value ?? []).map((window, index) => h7("div", { key: index, className: "df-actions" }, h7("input", { type: "time", value: window.start, "aria-label": "\u5F00\u59CB\u65F6\u95F4 " + (index + 1), onChange: (e) => onChange(value.map((entry, i) => i === index ? { ...entry, start: e.target.value } : entry)) }), h7("span", null, "\u81F3"), h7("input", { type: "time", value: window.end, "aria-label": "\u7ED3\u675F\u65F6\u95F4 " + (index + 1), onChange: (e) => onChange(value.map((entry, i) => i === index ? { ...entry, end: e.target.value } : entry)) }), h7(Button, { onClick: () => onChange(value.filter((_entry, i) => i !== index)) }, "\u5220\u9664\u65F6\u6BB5"))), h7(Button, { disabled: (value?.length ?? 0) >= 8, onClick: () => onChange([...value ?? [], { start: "22:00", end: "08:00" }]) }, "\u6DFB\u52A0\u5B89\u9759\u65F6\u6BB5"));
   else if (field.kind === "numbers")
-    input = h6("textarea", { rows: 3, value: (value ?? []).map((item) => item / scale).join("\n"), onChange: (e) => onChange(e.target.value.split("\n").map((item) => item.trim()).filter(Boolean).map((item) => Number(item) * scale)) });
+    input = h7("textarea", { rows: 3, value: (value ?? []).map((item) => item / scale).join("\n"), onChange: (e) => onChange(e.target.value.split("\n").map((item) => item.trim()).filter(Boolean).map((item) => Number(item) * scale)) });
   else if (field.kind === "boolean")
-    input = h6("input", { type: "checkbox", checked: !!value, onChange: (e) => onChange(e.target.checked) });
+    input = h7("input", { type: "checkbox", checked: !!value, onChange: (e) => onChange(e.target.checked) });
   else if (field.kind === "json" || field.kind === "lines")
-    input = h6("textarea", { rows: field.kind === "json" ? 5 : 3, value: displayed, onChange: (e) => onChange(field.kind === "lines" ? e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) : { draftJson: e.target.value }) });
+    input = h7("textarea", { rows: field.kind === "json" ? 5 : 3, value: displayed, onChange: (e) => onChange(field.kind === "lines" ? e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) : { draftJson: e.target.value }) });
   else
-    input = h6("input", { type: field.kind === "number" ? "number" : "text", value: displayed, min: field.minimum, max: field.maximum, step: "any", onChange: (e) => onChange(e.target.value === "" ? null : field.kind === "number" ? Number(e.target.value) * scale : e.target.value) });
+    input = h7("input", { type: field.kind === "number" ? "number" : "text", value: displayed, min: field.minimum, max: field.maximum, step: "any", onChange: (e) => onChange(e.target.value === "" ? null : field.kind === "number" ? Number(e.target.value) * scale : e.target.value) });
   if (value && typeof value === "object" && "draftJson" in value)
-    input = h6("textarea", { rows: 5, value: value.draftJson, onChange: (e) => onChange({ draftJson: e.target.value }) });
-  return h6(["choices", "time-windows"].includes(field.kind) ? "div" : "label", { className: "df-field" }, h6("span", null, field.label, field.unit && h6("small", null, " \xB7 " + field.unit)), input, h6("small", null, field.description));
+    input = h7("textarea", { rows: 5, value: value.draftJson, onChange: (e) => onChange({ draftJson: e.target.value }) });
+  return h7(["choices", "time-windows"].includes(field.kind) ? "div" : "label", { className: "df-field" }, h7("span", null, field.label, field.unit && h7("small", null, " \xB7 " + field.unit)), input, h7("small", null, field.description));
 }
 function Module({ module: module2, configuration, drafts, changeDraft, call, perform, save }) {
   const draft = drafts[module2.id] ?? {};
-  return h6("div", null, h6("h2", null, module2.title), h6("p", { className: "df-lead" }, module2.description), ...module2.sections.map((section) => h6("section", { key: section.id, id: `df-${module2.id}-${section.id}`, className: "df-section" }, h6("h3", null, section.title), h6("p", { className: "df-muted" }, section.description), ...section.fields.map((field) => h6(Field, { key: field.path, field, value: Object.hasOwn(draft, field.path) ? draft[field.path] : configuration?.values?.[field.path], onChange: (value) => changeDraft(module2.id, field.path, value) })), section.id === "delay" && h6("p", { className: "df-note" }, "\u793A\u4F8B\uFF1A\u6309\u9ED8\u8BA4\u89C4\u5219\uFF0C50 \u5B57\u56DE\u590D\u7B49\u5F85 3 \u79D2\uFF1B500 \u5B57\u8FBE\u5230 10 \u79D2\u4E0A\u9650\u3002"), section.optionalPath && h6(Button, { onClick: () => changeDraft(module2.id, section.optionalPath, null) }, "\u79FB\u9664\u6B64\u9879\u7EC4\u4EF6\u914D\u7F6E"), section.panel && h6(RemotePanel, { module: module2.id, panel: section.panel, call, perform }))), module2.sections.some((section) => section.fields.length) && h6("div", { className: "df-save" }, h6("span", null, Object.keys(draft).length ? `${Object.keys(draft).length} \u4E2A\u672A\u4FDD\u5B58\u5B57\u6BB5` : "\u914D\u7F6E\u4E0E\u6587\u4EF6\u4E00\u81F4"), h6(Button, { disabled: !configuration?.revision || !Object.values(drafts).some((value) => Object.keys(value).length), onClick: () => perform(() => save(module2.id)), primary: true }, "\u4FDD\u5B58\u5168\u90E8\u914D\u7F6E\u8349\u7A3F")));
+  return h7("div", null, h7("h2", null, module2.title), h7("p", { className: "df-lead" }, module2.description), ...module2.sections.map((section) => h7("section", { key: section.id, id: `df-${module2.id}-${section.id}`, className: "df-section" }, h7("h3", null, section.title), h7("p", { className: "df-muted" }, section.description), ...section.fields.map((field) => h7(Field, { key: field.path, field, value: Object.hasOwn(draft, field.path) ? draft[field.path] : configuration?.values?.[field.path], onChange: (value) => changeDraft(module2.id, field.path, value) })), section.id === "delay" && h7("p", { className: "df-note" }, "\u793A\u4F8B\uFF1A\u6309\u9ED8\u8BA4\u89C4\u5219\uFF0C50 \u5B57\u56DE\u590D\u7B49\u5F85 3 \u79D2\uFF1B500 \u5B57\u8FBE\u5230 10 \u79D2\u4E0A\u9650\u3002"), section.optionalPath && h7(Button, { onClick: () => changeDraft(module2.id, section.optionalPath, null) }, "\u79FB\u9664\u6B64\u9879\u7EC4\u4EF6\u914D\u7F6E"), section.panel && h7(RemotePanel, { module: module2.id, panel: section.panel, call, perform }))), module2.sections.some((section) => section.fields.length) && h7("div", { className: "df-save" }, h7("span", null, Object.keys(draft).length ? `${Object.keys(draft).length} \u4E2A\u672A\u4FDD\u5B58\u5B57\u6BB5` : "\u914D\u7F6E\u4E0E\u6587\u4EF6\u4E00\u81F4"), h7(Button, { disabled: !configuration?.revision || !Object.values(drafts).some((value) => Object.keys(value).length), onClick: () => perform(() => save(module2.id)), primary: true }, "\u4FDD\u5B58\u5168\u90E8\u914D\u7F6E\u8349\u7A3F")));
 }
 function createManagementApp(request) {
   return function ManagementApp() {
-    const [view, setView] = import_react6.default.useState(null), [tab, setTab] = import_react6.default.useState("overview"), [selected, setSelected] = import_react6.default.useState(null), [busy, setBusy] = import_react6.default.useState(false), [notice, setNotice] = import_react6.default.useState(""), [drafts, setDrafts] = import_react6.default.useState({}), [foundation, setFoundation] = import_react6.default.useState(null);
-    const describeSequence = import_react6.default.useRef(createSequenceGuard());
+    const [view, setView] = import_react7.default.useState(null), [tab, setTab] = import_react7.default.useState("overview"), [selected, setSelected] = import_react7.default.useState(null), [busy, setBusy] = import_react7.default.useState(false), [notice, setNotice] = import_react7.default.useState(""), [drafts, setDrafts] = import_react7.default.useState({}), [foundation, setFoundation] = import_react7.default.useState(null);
+    const describeSequence = import_react7.default.useRef(createSequenceGuard());
     const send = (body) => request(body).then(unwrapResponse);
     const invoke = async (body) => send({ apiVersion: 5, ...body });
     const refresh = async () => {
@@ -448,7 +584,7 @@ function createManagementApp(request) {
         setBusy(false);
       }
     };
-    import_react6.default.useEffect(() => {
+    import_react7.default.useEffect(() => {
       void perform(refresh);
     }, []);
     const call = (module2, action, input) => invoke({ kind: "module", module: module2, action, input });
@@ -471,13 +607,13 @@ function createManagementApp(request) {
       setNotice(saved.notice ?? (saved.applies === "next-round" ? "\u9884\u7B97\u5DF2\u4FDD\u5B58\uFF1B\u5F53\u524D\u8F6E\u4FDD\u6301\u539F\u9884\u7B97\uFF0C\u4E0B\u4E00\u8F6E\u5E94\u7528\u65B0\u9884\u7B97\u3002" : "\u5DF2\u4FDD\u5B58\u3002\u5F53\u524D\u8FD0\u884C\u4E0D\u53D8\uFF0C\u4E0B\u6B21\u542F\u52A8\u4F7F\u7528\u65B0\u914D\u7F6E\u3002"));
     };
     const modules = view?.modules ?? [], active = modules.find((module2) => module2.id === selected), status = view?.runtime?.state ?? "loading";
-    return h6("main", { className: "df-app", "aria-busy": busy }, h6("header", { className: "df-header" }, h6("div", null, h6("p", { className: "df-eyebrow" }, "DAFEIYU \xB7 \u7BA1\u7406"), h6("h1", null, "\u5927\u80A5\u9C7C\u7BA1\u7406\u4E2D\u5FC3"), h6("p", null, "\u67E5\u770B\u5979\u7684\u6210\u957F\uFF0C\u7BA1\u7406\u5979\u4F7F\u7528\u7684\u80FD\u529B\u3002")), h6("span", { className: "df-badge", "data-runtime-badge": status }, stateLabels[status] ?? lifecycleLabel(view?.runtime))), h6("nav", { className: "df-tabs", "aria-label": "\u7BA1\u7406\u4E2D\u5FC3\u9875\u9762" }, ...tabs.map(([id, label]) => h6("button", { key: id, type: "button", "aria-current": tab === id ? "page" : void 0, onClick: () => navigate(id) }, label))), notice && h6("div", { className: "df-notice", role: "status" }, notice), busy && h6("p", { role: "status" }, "\u6B63\u5728\u5904\u7406\u2026"), view?.configuration?.error && h6("div", { className: "df-notice" }, "\u914D\u7F6E\u5C1A\u672A\u5C31\u7EEA\uFF1A\u8BF7\u5728\u63D2\u4EF6\u8BBE\u7F6E\u4E2D\u6307\u5B9A\u914D\u7F6E\u6587\u4EF6\uFF0C\u7136\u540E\u586B\u5199\u4E0B\u5217\u6A21\u5757\u7F3A\u5931\u7684\u5B57\u6BB5\uFF1B\u6240\u6709\u8349\u7A3F\u4F1A\u4E00\u8D77\u4FDD\u5B58\u3002", h6("p", null, (view.configuration.fields ?? []).join("\u3001"))), tab === "runtime" && h6(RuntimeScreen, { initial: view?.runtime ?? null, invoke, perform }), tab === "overview" && h6("div", null, h6("section", { className: "df-section" }, h6("h2", null, "\u966A\u4F34\u4E0E\u6210\u957F"), h6("p", null, "\u4EBA\u683C\u6765\u81EA\u8BB0\u5FC6\u3002\u80FD\u529B\u63D0\u4F9B\u63A5\u53E3\u548C\u4F7F\u7528\u6D41\u7A0B\uFF0C\u7ECF\u5386\u4E0E\u81EA\u5DF1\u7684\u770B\u6CD5\u5206\u522B\u7559\u5B58\u3002"), h6("div", { className: "df-actions" }, h6(Button, { onClick: () => navigate("personality", "memory") }, "\u67E5\u770B\u4EBA\u683C\u4E0E\u8BB0\u5FC6"), h6(Button, { onClick: () => navigate("prompts") }, "\u67E5\u770B\u63D0\u793A\u8BCD\u7EC4\u88C5"))), h6("h2", null, "\u6A21\u5757\u7BA1\u7406"), h6("div", { className: "df-cards" }, ...modules.filter((m) => m.id !== "tasks").map((module2) => h6("button", { key: module2.id, className: "df-card", onClick: () => navigate(module2.tab, module2.id) }, h6("strong", null, module2.title), h6("span", null, module2.description)))), h6("p", { className: "df-muted" }, `\u7A0B\u5E8F\u7248\u672C ${view?.version ?? "\u2026"} \xB7 API ${view?.apiVersion ?? "\u2026"} \xB7 \u8FD0\u884C\u72B6\u6001\u4EE5\u5B9E\u4F8B\u8FD4\u56DE\u4E3A\u51C6`)), ["capabilities", "runtime", "personality"].includes(tab) && h6(import_react6.default.Fragment, null, h6("div", { className: "df-module-tabs" }, ...modules.filter((m) => m.tab === tab && m.id !== "tasks").map((module2) => h6(Button, { key: module2.id, onClick: () => setSelected(module2.id), primary: active?.id === module2.id }, module2.title))), active && active.tab === tab ? h6(Module, { module: active, configuration: view.configuration, drafts, changeDraft: (id, key, value) => setDrafts((old) => ({ ...old, [id]: { ...old[id], [key]: value } })), call, perform, save }) : h6("p", { className: "df-muted" }, "\u9009\u62E9\u4E00\u4E2A\u6A21\u5757\u67E5\u770B\u8BE6\u7EC6\u8BBE\u7F6E\u3002")), tab === "tasks" && h6("section", { className: "df-section" }, h6("h2", null, "\u4EFB\u52A1\u4E0E\u8BB0\u5F55"), h6("p", { className: "df-muted" }, "\u67E5\u770B\u6982\u51B5\u3001\u6267\u884C\u56DE\u6267\u3001\u7ED3\u679C\u3001\u7528\u91CF\u548C\u4E0A\u4E0B\u6587\uFF1B\u672A\u77E5\u6548\u679C\u4E0D\u4F1A\u901A\u8FC7\u7EE7\u7EED\u6309\u94AE\u81EA\u52A8\u91CD\u6F14\u3002"), h6(RemotePanel, { module: "tasks", panel: "tasks", call, perform })), tab === "prompts" && h6("div", null, h6("h2", null, "\u63D0\u793A\u8BCD\u6587\u672C\u9884\u89C8"), h6("p", { className: "df-lead" }, "\u7A33\u5B9A\u89C4\u5219\u4E0E\u5E95\u8272\u6784\u6210\u524D\u7F00\u3002\u5408\u6CD5\u5386\u53F2\u4FDD\u7559\uFF0C\u65B0\u72B6\u6001\u4EE5\u5B8C\u6574\u5FEB\u7167\u8FFD\u52A0\uFF1B\u6700\u540E\u4E00\u4EFD\u5FEB\u7167\u4EE3\u8868\u5F53\u524D\u72B6\u6001\u3002"), h6("p", { className: "df-note" }, "\u989C\u8272\u4E0E\u6765\u6E90\u6807\u7B7E\u53EA\u7528\u4E8E\u754C\u9762\u3002\u9884\u89C8\u4E0D\u8C03\u7528\u6A21\u578B\uFF0C\u4E0D\u8BFB\u53D6\u4F1A\u8BDD\u539F\u6587\uFF0C\u4E5F\u4E0D\u6267\u884C\u4E0A\u4E0B\u6587 prepare\u3002"), h6(Button, { onClick: () => perform(async () => {
+    return h7("main", { className: "df-app", "aria-busy": busy }, h7("header", { className: "df-header" }, h7("div", null, h7("p", { className: "df-eyebrow" }, "DAFEIYU \xB7 \u7BA1\u7406"), h7("h1", null, "\u5927\u80A5\u9C7C\u7BA1\u7406\u4E2D\u5FC3"), h7("p", null, "\u67E5\u770B\u5979\u7684\u6210\u957F\uFF0C\u7BA1\u7406\u5979\u4F7F\u7528\u7684\u80FD\u529B\u3002")), h7("span", { className: "df-badge", "data-runtime-badge": status }, stateLabels2[status] ?? lifecycleLabel(view?.runtime))), h7("nav", { className: "df-tabs", "aria-label": "\u7BA1\u7406\u4E2D\u5FC3\u9875\u9762" }, ...tabs.map(([id, label]) => h7("button", { key: id, type: "button", "aria-current": tab === id ? "page" : void 0, onClick: () => navigate(id) }, label))), notice && h7("div", { className: "df-notice", role: "status" }, notice), busy && h7("p", { role: "status" }, "\u6B63\u5728\u5904\u7406\u2026"), view?.configuration?.error && h7("div", { className: "df-notice" }, "\u914D\u7F6E\u5C1A\u672A\u5C31\u7EEA\uFF1A\u8BF7\u5728\u63D2\u4EF6\u8BBE\u7F6E\u4E2D\u6307\u5B9A\u914D\u7F6E\u6587\u4EF6\uFF0C\u7136\u540E\u586B\u5199\u4E0B\u5217\u6A21\u5757\u7F3A\u5931\u7684\u5B57\u6BB5\uFF1B\u6240\u6709\u8349\u7A3F\u4F1A\u4E00\u8D77\u4FDD\u5B58\u3002", h7("p", null, (view.configuration.fields ?? []).join("\u3001"))), tab === "runtime" && h7(RuntimeScreen, { initial: view?.runtime ?? null, invoke, perform }), tab === "overview" && h7("div", null, h7("section", { className: "df-section" }, h7("h2", null, "\u966A\u4F34\u4E0E\u6210\u957F"), h7("p", null, "\u4EBA\u683C\u6765\u81EA\u8BB0\u5FC6\u3002\u80FD\u529B\u63D0\u4F9B\u63A5\u53E3\u548C\u4F7F\u7528\u6D41\u7A0B\uFF0C\u7ECF\u5386\u4E0E\u81EA\u5DF1\u7684\u770B\u6CD5\u5206\u522B\u7559\u5B58\u3002"), h7("div", { className: "df-actions" }, h7(Button, { onClick: () => navigate("personality", "memory") }, "\u67E5\u770B\u4EBA\u683C\u4E0E\u8BB0\u5FC6"), h7(Button, { onClick: () => navigate("prompts") }, "\u67E5\u770B\u63D0\u793A\u8BCD\u7EC4\u88C5"))), h7("h2", null, "\u6A21\u5757\u7BA1\u7406"), h7("div", { className: "df-cards" }, ...modules.filter((m) => m.id !== "tasks").map((module2) => h7("button", { key: module2.id, className: "df-card", onClick: () => navigate(module2.tab, module2.id) }, h7("strong", null, module2.title), h7("span", null, module2.description)))), h7("p", { className: "df-muted" }, `\u7A0B\u5E8F\u7248\u672C ${view?.version ?? "\u2026"} \xB7 API ${view?.apiVersion ?? "\u2026"} \xB7 \u8FD0\u884C\u72B6\u6001\u4EE5\u5B9E\u4F8B\u8FD4\u56DE\u4E3A\u51C6`)), ["capabilities", "runtime", "personality"].includes(tab) && h7(import_react7.default.Fragment, null, h7("div", { className: "df-module-tabs" }, ...modules.filter((m) => m.tab === tab && m.id !== "tasks").map((module2) => h7(Button, { key: module2.id, onClick: () => setSelected(module2.id), primary: active?.id === module2.id }, module2.title))), active && active.tab === tab ? h7(Module, { module: active, configuration: view.configuration, drafts, changeDraft: (id, key, value) => setDrafts((old) => ({ ...old, [id]: { ...old[id], [key]: value } })), call, perform, save }) : h7("p", { className: "df-muted" }, "\u9009\u62E9\u4E00\u4E2A\u6A21\u5757\u67E5\u770B\u8BE6\u7EC6\u8BBE\u7F6E\u3002")), tab === "tasks" && h7("section", { className: "df-section" }, h7("h2", null, "\u4EFB\u52A1\u4E0E\u8BB0\u5F55"), h7("p", { className: "df-muted" }, "\u67E5\u770B\u6982\u51B5\u3001\u6267\u884C\u56DE\u6267\u3001\u7ED3\u679C\u3001\u7528\u91CF\u548C\u4E0A\u4E0B\u6587\uFF1B\u672A\u77E5\u6548\u679C\u4E0D\u4F1A\u901A\u8FC7\u7EE7\u7EED\u6309\u94AE\u81EA\u52A8\u91CD\u6F14\u3002"), h7(RemotePanel, { module: "tasks", panel: "tasks", call, perform })), tab === "prompts" && h7("div", null, h7("h2", null, "\u63D0\u793A\u8BCD\u6587\u672C\u9884\u89C8"), h7("p", { className: "df-lead" }, "\u7A33\u5B9A\u89C4\u5219\u4E0E\u5E95\u8272\u6784\u6210\u524D\u7F00\u3002\u5408\u6CD5\u5386\u53F2\u4FDD\u7559\uFF0C\u65B0\u72B6\u6001\u4EE5\u5B8C\u6574\u5FEB\u7167\u8FFD\u52A0\uFF1B\u6700\u540E\u4E00\u4EFD\u5FEB\u7167\u4EE3\u8868\u5F53\u524D\u72B6\u6001\u3002"), h7("p", { className: "df-note" }, "\u989C\u8272\u4E0E\u6765\u6E90\u6807\u7B7E\u53EA\u7528\u4E8E\u754C\u9762\u3002\u9884\u89C8\u4E0D\u8C03\u7528\u6A21\u578B\uFF0C\u4E0D\u8BFB\u53D6\u4F1A\u8BDD\u539F\u6587\uFF0C\u4E5F\u4E0D\u6267\u884C\u4E0A\u4E0B\u6587 prepare\u3002"), h7(Button, { onClick: () => perform(async () => {
       const value = await call("memory", "status", null);
       setFoundation(value.foundation);
-    }) }, "\u8BFB\u53D6\u5DF2\u4FDD\u5B58\u7684\u8EAB\u4EFD\u5E95\u8272"), ...["system", "context", "history", "tools"].map((position) => h6("section", { key: position, className: "df-section" }, h6("h3", null, { system: "\u7A33\u5B9A\u7CFB\u7EDF\u63D0\u793A\u8BCD", context: "\u672C\u8F6E\u4E0A\u4E0B\u6587\u589E\u91CF", history: "\u6709\u6548\u5386\u53F2", tools: "\u5DE5\u5177\u5B9A\u4E49\uFF08\u72EC\u7ACB\u5B57\u6BB5\uFF09" }[position]), ...[...view?.prompts ?? [], ...modules.flatMap((m) => m.prompts), { id: "history", module: "tasks", title: "\u4F1A\u8BDD\u3001\u5DE5\u5177\u56DE\u6267\u4E0E\u6709\u6548\u5386\u53F2", position: "history", dynamic: true, condition: "\u6309\u771F\u5B9E\u4F1A\u8BDD\u4E0E\u6765\u6E90\u8303\u56F4\u8BFB\u53D6" }].filter((p) => p.position === position).sort((a, b) => (a.id === "foundation" ? -1 : 0) - (b.id === "foundation" ? -1 : 0)).map((prompt) => h6("details", { key: prompt.id, className: `df-prompt df-source-${prompt.module}`, open: !!prompt.dynamic }, h6("summary", null, prompt.title), h6("button", { className: "df-source-link", onClick: () => {
+    }) }, "\u8BFB\u53D6\u5DF2\u4FDD\u5B58\u7684\u8EAB\u4EFD\u5E95\u8272"), ...["system", "context", "history", "tools"].map((position) => h7("section", { key: position, className: "df-section" }, h7("h3", null, { system: "\u7A33\u5B9A\u7CFB\u7EDF\u63D0\u793A\u8BCD", context: "\u672C\u8F6E\u4E0A\u4E0B\u6587\u589E\u91CF", history: "\u6709\u6548\u5386\u53F2", tools: "\u5DE5\u5177\u5B9A\u4E49\uFF08\u72EC\u7ACB\u5B57\u6BB5\uFF09" }[position]), ...[...view?.prompts ?? [], ...modules.flatMap((m) => m.prompts), { id: "history", module: "tasks", title: "\u4F1A\u8BDD\u3001\u5DE5\u5177\u56DE\u6267\u4E0E\u6709\u6548\u5386\u53F2", position: "history", dynamic: true, condition: "\u6309\u771F\u5B9E\u4F1A\u8BDD\u4E0E\u6765\u6E90\u8303\u56F4\u8BFB\u53D6" }].filter((p) => p.position === position).sort((a, b) => (a.id === "foundation" ? -1 : 0) - (b.id === "foundation" ? -1 : 0)).map((prompt) => h7("details", { key: prompt.id, className: `df-prompt df-source-${prompt.module}`, open: !!prompt.dynamic }, h7("summary", null, prompt.title), h7("button", { className: "df-source-link", onClick: () => {
       const owner = modules.find((m) => m.id === prompt.module);
       navigate(owner?.tab ?? "runtime", owner?.id ?? "runtime");
-    } }, "\u6765\u6E90\uFF1A" + (modules.find((m) => m.id === prompt.module)?.title ?? prompt.module)), h6("p", { className: "df-muted" }, prompt.condition), h6("pre", null, prompt.dynamic ? "\u3010\u52A8\u6001\u63D0\u793A\u8BCD\u3011" : prompt.id === "foundation" ? foundation?.text ?? "\u8BF7\u8FDE\u63A5\u5B9E\u4F8B\u5E76\u8BFB\u53D6\u5DF2\u4FDD\u5B58\u7684\u5E95\u8272\u3002" : prompt.text ?? "\u672A\u63D0\u4F9B\u9759\u6001\u6B63\u6587"), prompt.source && h6("small", null, prompt.source)))))), h6("footer", { className: "df-footer" }, h6("span", null, "\u914D\u7F6E\u4E0E\u5B9E\u9645\u8FD0\u884C\u5206\u5F00\u5448\u73B0"), h6(Button, { disabled: busy, onClick: () => perform(refresh) }, "\u5237\u65B0\u7BA1\u7406\u4E2D\u5FC3")));
+    } }, "\u6765\u6E90\uFF1A" + (modules.find((m) => m.id === prompt.module)?.title ?? prompt.module)), h7("p", { className: "df-muted" }, prompt.condition), h7("pre", null, prompt.dynamic ? "\u3010\u52A8\u6001\u63D0\u793A\u8BCD\u3011" : prompt.id === "foundation" ? foundation?.text ?? "\u8BF7\u8FDE\u63A5\u5B9E\u4F8B\u5E76\u8BFB\u53D6\u5DF2\u4FDD\u5B58\u7684\u5E95\u8272\u3002" : prompt.text ?? "\u672A\u63D0\u4F9B\u9759\u6001\u6B63\u6587"), prompt.source && h7("small", null, prompt.source)))))), h7("footer", { className: "df-footer" }, h7("span", null, "\u914D\u7F6E\u4E0E\u5B9E\u9645\u8FD0\u884C\u5206\u5F00\u5448\u73B0"), h7(Button, { disabled: busy, onClick: () => perform(refresh) }, "\u5237\u65B0\u7BA1\u7406\u4E2D\u5FC3")));
   };
 }
 

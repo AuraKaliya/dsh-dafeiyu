@@ -11,7 +11,7 @@ export interface ManagementDispatchPorts {
   readonly describe:()=>unknown;
 }
 export type ManagementDispatchResult={ok:true;value:Json}|{ok:false;code:string;fields:string[]};
-const CREDENTIAL_FIELDS=['qq.botId','qq.ownerId','qq.tokenFile','qq.httpURL','qq.wsURL','bilibili.channel.accountUid','bilibili.channel.ownerUid'];
+const CREDENTIAL_FIELDS=['qq.botId','qq.ownerId','qq.tokenFile','qq.httpURL','qq.wsURL','bilibili.channel.accountUid','bilibili.channel.ownerUid','bilibili.channel.sessionFile','bilibili.session.expectedUid','bilibili.session.file','bilibili.browser.expectedUid'];
 const codeOf=(error:unknown):string=>error instanceof Error&&/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:error instanceof SettingsError?'INSTALL_CONFIGURATION_REQUIRED':'MANAGEMENT_REQUEST_INVALID';
 
 /**
