@@ -38,6 +38,12 @@ test('offline Host connects Core, memory, registered tools and one simulator rep
   const actions = host.core.capabilityManifest().actions;
   assert.ok(actions.some(action => action.owner === 'memory'));
   assert.ok(actions.some(action => action.id === 'dafeiyu_task_intent'));
+  // Only lifecycle status plus the owner verification whitelist reach the B站 branch.
+  assert.deepEqual(await host.management('bilibili','status',null),{public:null,owner:null});
+  await assert.rejects(host.management('bilibili','verify.status',{}),/MANAGEMENT_MODULE_NOT_ASSEMBLED/);
+  await assert.rejects(host.management('bilibili','verify.write',{}),/MANAGEMENT_ACTION_INVALID/);
+  await assert.rejects(host.management('runtime','start',null),/MANAGEMENT_ACTION_INVALID/);
+  await assert.rejects(host.management('bilibili','status',{}),/MANAGEMENT_INPUT_INVALID/);
   host.ctx.dafeiyuSimulator.send('room', '虚构输入', { id: 'smoke-message' });
   await host.core.whenIdle();
   assert.equal(host.ctx.dafeiyuSimulator.deliveries.length, 1);

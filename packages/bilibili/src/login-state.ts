@@ -105,6 +105,10 @@ export class BiliCredentials {
     this.lastKnownState='unverified';
     try{
       const nav=await verify(snapshot,signal,permit);
+      // Re-read before consuming the result: a replaced file must not commit to the newer generation.
+      const current=this.read();
+      if(current.state==='invalid')throw new Error(current.code);
+      if(current.state!=='ready'||current.snapshot.generation!==snapshot.generation)throw new Error('BILI_SESSION_CHANGED');
       this.assertCurrent(snapshot);
       const account=z.object({isLogin:z.literal(true),mid:z.union([NumberIdSchema,z.number().int().positive().safe().transform(String)])}).safeParse(nav);
       if(!account.success)throw new Error('BILI_LOGIN_REQUIRED');
@@ -114,13 +118,21 @@ export class BiliCredentials {
       this.verified=identity;this.lastResult={at:identity.at,kind:'success',code:null,uid:identity.uid};
       return identity;
     }catch(error){
-      const code=codeOf(error);
+      let code=codeOf(error);
+      // A status read may have aborted the shared check because the file changed mid-flight.
+      if(code==='BILI_CANCELLED'||code==='BILI_SESSION_CHANGED'){
+        try{
+          const current=this.read();
+          if(current.state==='invalid')code=current.code;
+          else if(current.state==='ready'&&current.snapshot.generation!==snapshot.generation)code='BILI_SESSION_CHANGED';
+        }catch{/* the local check below stays authoritative */}
+      }
       this.lastResult={at:this.now(),kind:'failure',code,uid:snapshot.uid};
       if(code==='BILI_LOGIN_REQUIRED'){this.verified=null;this.lastKnownState='expired';}
       else if(code==='BILI_ACCOUNT_MISMATCH'){this.verified=null;this.lastKnownState='mismatch';}
       else if(NETWORK_CODES.has(code)||code==='BILI_CANCELLED'){this.lastKnownState=this.verified?'verified':'interrupted';}
       else this.lastKnownState='interrupted';
-      throw error;
+      throw new Error(code);
     }
   }
   invalidate(reason:'expired'|'mismatch'|'interrupted'):void{

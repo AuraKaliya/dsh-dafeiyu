@@ -219,8 +219,8 @@ export class BiliService extends Service {
     catch(error){login={ok:false,code:code(error),uid:null};}
     const verifiedAt=login.ok?new Date().toISOString():null;
     this.saveAccountHistory(login,credential.uid,verifiedAt);
-    if(record.kind==='login'){finish(login.ok?'completed':'failed',login.ok?null:login.code,{stage:'login',login},login.uid);return;}
-    if(!login.ok){finish('failed',login.code,{stage:'login',login,read:null},login.uid);return;}
+    if(record.kind==='login'){finish(login.ok?'completed':login.code==='BILI_SESSION_CHANGED'?'interrupted':'failed',login.ok?null:login.code,{stage:'login',login},login.uid);return;}
+    if(!login.ok){finish(login.code==='BILI_SESSION_CHANGED'?'interrupted':'failed',login.code,{stage:'login',login,read:null},login.uid);return;}
     if(this.client.accountStatus().credentialGeneration!==record.credentialGeneration){finish('interrupted','BILI_SESSION_CHANGED',{stage:'credential',login,read:null},login.uid);return;}
     try{
       const value=await this.client.probeRead(target!.endpoint,this.verifyReadInput(target!),{signal,...(permit?{permit}:{})});

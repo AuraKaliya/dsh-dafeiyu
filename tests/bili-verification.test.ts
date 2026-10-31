@@ -29,18 +29,21 @@ async function fixture(){
     capabilityManifest:()=>({features:[]}),taskContextScope:()=>({kind:'context',scopeKey:'fixture'}),
     journal:{appendExecutionOnce(){},appendOnce(){}}};
   context.provide('dafeiyu',core as unknown as DafeiyuService);
-  const calls:string[]=[],controls={nav:'ok' as 'ok'|'hang'};
+  const calls:string[]=[],controls={nav:'ok' as 'ok'|'hang'|'hold'};
+  let releaseNav:()=>void=()=>{};
+  const navHold=new Promise<void>(resolve=>{releaseNav=resolve;});
   const transport=async(url:URL,_headers:Readonly<Record<string,string>>,signal:AbortSignal)=>{
     calls.push(url.pathname);
     if(url.pathname.endsWith('/nav')){
       if(controls.nav==='hang')await new Promise<void>((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));
+      if(controls.nav==='hold')await new Promise<void>((resolve,reject)=>{void navHold.then(resolve);signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true});});
       return response(nav());
     }
     return response(video());
   };
   const service=new BiliService(context,{agentId:'fish',profileId:'fixture',dataDir:join(root,'bili'),createStore:true,settings:{session:{file:sessionFile,expectedUid:'42'},minIntervalMs:100}},transport);
   service.recover();service.activate();
-  return {root,sessionFile,service,controls,calls,close:async()=>{await service.close();await context.fiber.dispose();}};
+  return {root,sessionFile,service,controls,calls,releaseNav:()=>releaseNav(),close:async()=>{await service.close();await context.fiber.dispose();}};
 }
 const count=(calls:string[],path:string)=>calls.filter(call=>call===path).length;
 
@@ -81,6 +84,21 @@ test('repeated verification clicks reuse the in-flight operation and cancel mark
     assert.equal(cancelled.active,null);
     const record=f.service.store.verification(first.operationId);
     assert.equal(record?.state,'interrupted');assert.equal(record?.errorCode,'BILI_VERIFICATION_CANCELLED');
+  }finally{await f.close();}
+});
+
+test('a credential change during verification interrupts the operation instead of committing a stale result',async()=>{
+  const f=await fixture();try{
+    f.controls.nav='hold';
+    const started=f.service.management('verify.start',{}) as {operationId:string};
+    await new Promise(done=>setTimeout(done,30));
+    await writeFile(f.sessionFile,JSON.stringify({uid:'42',SESSDATA:cookieMarker+'-rotated'}));
+    f.releaseNav();
+    await waitFor(()=>view(f.service.management('verify.status',{id:started.operationId})).operation?.state!=='pending','credential change');
+    const operation=view(f.service.management('verify.status',{id:started.operationId})).operation;
+    assert.equal(operation?.state,'interrupted');assert.equal(operation?.errorCode,'BILI_SESSION_CHANGED');
+    assert.equal(f.service.store.authMeta?.lastVerifiedUid??null,null,'a stale success is never recorded as verified');
+    assert.notEqual(f.service.client.accountStatus().engine,'verified');
   }finally{await f.close();}
 });
 
