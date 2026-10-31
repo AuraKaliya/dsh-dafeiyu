@@ -7,6 +7,25 @@
 
 本文是**可执行清单**，不在本轮自动执行。每一步都应先核对路径，再执行；破坏性操作前先备份。
 
+## 0. 只读预检（切换前、重启后都先跑）
+
+仓库内提供只读检查器，不会停止/启动/切换/写入任何东西：
+
+```powershell
+# 切换前：当前应当是 0.25.1 + v5；只报告，不要求 ready
+node scripts/verify-local-deploy.mjs --expect-bilibili 5
+
+# 切到 A 并重启后：应当 ready:true
+node scripts/verify-local-deploy.mjs --expect-version 0.25.2 --expect-bilibili 5 --expect-runtime 2 --backup D:\DSH\DaFeiYu-Local\backups\before-management-cookie-20261031
+
+# 切到 B、迁移并重启后：应当 ready:true，且 client bundle 含验证面板
+node scripts/verify-local-deploy.mjs --expect-version 0.26.0 --expect-bilibili 6 --expect-runtime 2 --backup D:\DSH\DaFeiYu-Local\backups\before-management-cookie-20261031
+```
+
+检查项：profile 的 `dsh-dafeiyu` 链接与已安装链接是否指向同一包、`release.json` 版本/修订、`client.js` 是否包含对应面板、`cordis.patch.yml` 的 settingsFile、配置是否可读、数据目录、`host-status.json` 的 phase/PID/存活、B站库与运行库版本、备份目录。失败时以稳定错误码输出，不打印凭据路径或内容。
+
+> 说明：`host-status.json` 的读取 schema 在 0.26.0 修复了与真实写入不一致的问题（B站 `diagnostic` 字段、存储版本漂移），否则旧快照会被误判为 `HOST_STATUS_INVALID`。A 0.25.2 沿用 0.25.1 的该读取器，但本预检脚本直接读取状态文件，A 阶段的预检与中心页 IPC 快照不受影响；A 阶段不要依赖 `dafeiyu status` 读取该文件。
+
 ## 0. 前提与安全边界
 
 - 当前正在运行的实例（PID 11324，自 `dsh-dafeiyu-0.25.1-reading-20261031`）由 DSH Desktop 的 profile 加载。切换包后必须重启 DSH Desktop 才能加载新插件代码。
