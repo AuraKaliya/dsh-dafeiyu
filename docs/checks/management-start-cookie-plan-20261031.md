@@ -2,7 +2,7 @@
 
 日期：2026-10-31。基线：0.25.1、B站数据库 v5、运行数据库 v2。状态：**开发方案，尚未实施**。
 
-> 实施进度（2026-10-31）：A、B 代码与离线/集成验收已完成（A 提交 `dcf448a`，A 独立包 0.25.2；B 提交 `cd7c847`，合并包 0.26.0，B站库 v6）。正式部署、真实账号与真实平台验收**未执行**，结论见 `reports/dafeiyu-management-start-cookie-acceptance-2026-10-31.md`，部署/回退步骤见 `docs/checks/management-start-cookie-deploy-20261031.md`。
+> 实施进度（2026-10-31）：A、B 代码与离线/集成验收已完成（A 提交 `dcf448a`，A 独立包 0.25.2；B 提交 `432e012`，合并包 0.26.0，B站库 v6）。正式部署、真实账号与真实平台验收**未执行**，结论见 `reports/dafeiyu-management-start-cookie-acceptance-2026-10-31.md`，部署/回退步骤与只读预检见 `docs/checks/management-start-cookie-deploy-20261031.md`。
 
 执行顺序固定为：**A 修复管理中心启动 → A 独立验收和部署 → B 接入 Cookie → B 离线验收 → 真实账号小范围验收 → 长任务回归和正式交付**。A 未通过，不开始 B 的代码接入。
 
