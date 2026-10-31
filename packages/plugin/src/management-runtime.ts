@@ -6,11 +6,49 @@ import {randomUUID} from 'node:crypto';
 import type {Context} from '@deepseek-ai/cordis';
 import {readInstallationSettings} from './settings.js';
 import {managementJson} from '@dafeiyu/contracts';
-import type {Json} from '@dafeiyu/contracts';
+import type {Json,ManagementActivitySnapshot,ManagementControlResult,ManagementLifecycleState,ManagementOperationDisposition,ManagementOperationSnapshot,ManagementRuntimeAction,ManagementRuntimePhase,ManagementRuntimeSnapshot} from '@dafeiyu/contracts';
 import {OneBotCapability} from './onebot-capability.js';
 import type {CapabilityStatus} from './onebot-capability.js';
 
+/** Initial bounded retry sequence for recoverable dependency or startup failures. */
 export const ONEBOT_RETRY_DELAYS_MS=[2_000,5_000,15_000,30_000,60_000] as const;
+/** Deterministic failures must not enter the automatic retry loop. */
+const NON_RETRYABLE=new Set(['INSTALL_CONFIGURATION_REQUIRED','INSTALL_NODE_UNAVAILABLE','BILI_SCHEMA_UNSUPPORTED','BILI_MIGRATION_REQUIRED','BILI_ACCOUNT_MISMATCH','BILI_SESSION_INVALID','BILI_BROWSER_BRIDGE_REQUIRED','MANAGEMENT_ACCOUNT_MISMATCH','INSTALL_DSH_READINESS_INVALID','MANAGEMENT_INPUT_INVALID','MANAGEMENT_RUNTIME_DISPOSED','MANAGEMENT_START_TIMEOUT']);
+const isRetryable=(code:string):boolean=>!NON_RETRYABLE.has(code)&&!/^(BILI_|MANAGEMENT_[A-Z]*_?INVALID)/.test(code);
+const errorCode=(error:unknown):string=>error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'INSTALL_START_FAILED';
+type TimerHandle=unknown;
+interface TimerPort {setTimeout:(work:()=>void,ms:number)=>TimerHandle;clearTimeout:(handle:TimerHandle)=>void}
+const defaultTimers:TimerPort={setTimeout:(work,ms)=>{const handle=setTimeout(work,ms);handle.unref();return handle;},clearTimeout:handle=>{clearTimeout(handle as ReturnType<typeof setTimeout>);}};
+
+export interface ManagementRuntimeDependencies {
+  /** Replace child creation in tests; defaults to this process's node with the installation entry point. */
+  readonly spawnInstance?:(input:{settingsFile:string;nodePath:string;env:NodeJS.ProcessEnv})=>ChildProcess;
+  readonly importBridge?:()=>Promise<{attachDshBridge:(ctx:Context,child:ChildProcess,settingsFile:string)=>()=>Promise<void>}>;
+  readonly fetchImpl?:typeof fetch;
+  readonly sleep?:(ms:number)=>Promise<void>;
+  readonly retryDelaysMs?:readonly number[];
+  readonly controlWaitMs?:number;
+  readonly startTimeoutMs?:number;
+  readonly stopTimeoutMs?:number;
+  readonly killTimeoutMs?:number;
+  readonly healthTimeoutMs?:number;
+  readonly timers?:TimerPort;
+}
+export interface ManagementControlOptions {readonly wait?:boolean;readonly operationId?:string;readonly signal?:AbortSignal;readonly automatic?:boolean}
+
+interface Operation {
+  readonly id:string;
+  readonly action:'start'|'stop'|'restart';
+  readonly at:string;
+  readonly automatic:boolean;
+  readonly controller:AbortController;
+  readonly done:Promise<void>;
+  disposition:ManagementOperationDisposition;
+  code:string|null;
+  settled:boolean;
+  settle:(disposition:ManagementOperationDisposition,code:string|null)=>void;
+}
+interface ReadyWaiter {resolve:()=>void;reject:(error:Error)=>void;timer:TimerHandle}
 
 /** Verify the exact bot account before starting a Host that treats QQ as required. */
 export async function waitForOneBot(settings:{qq:{botId:string;tokenFile:string;httpURL:string}},options:{timeoutMs?:number;fetchImpl?:typeof fetch}={}):Promise<void>{
@@ -34,41 +72,377 @@ export async function waitForOneBot(settings:{qq:{botId:string;tokenFile:string;
   throw new Error(last);
 }
 
-/** Parent remains available while the isolated Agent is stopped or failed. */
+/**
+ * One lifecycle controller for automatic startup, manual start, restart and retry.
+ * A request returns a receipt and an operation id; `status` is the only source of truth.
+ * Child callbacks, retry timers and IPC replies are bound to their generation.
+ */
 export class ManagementRuntime {
-  private child:ChildProcess|undefined;private bridgeClose:(()=>Promise<void>)|undefined;private closed:Promise<void>=Promise.resolve();
-  private pending=new Map<string,{resolve:(value:Json)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
-  private state='stopped';private code:string|null=null;private busy=false;private disposed=false;
-  private retryTimer:ReturnType<typeof setTimeout>|undefined;private retryAttempt=0;
+  private child:ChildProcess|undefined;
+  private childGeneration=0;
+  private generation=0;
+  private bridgeClose:(()=>Promise<void>)|undefined;
+  private lastExitCode:string|null=null;
+  private readonly readyWaiters=new Map<number,ReadyWaiter>();
+  private readonly closeWaiters=new Map<number,Set<(closed:boolean)=>void>>();
+  private readonly pending=new Map<string,{resolve:(value:Json)=>void;reject:(error:Error)=>void;timer:TimerHandle}>();
+  private state:ManagementLifecycleState='stopped';
+  private phase:ManagementRuntimePhase='idle';
+  private code:string|null=null;
+  private codeAt:string|null=null;
+  private startedAt:string|null=null;
+  private readyAt:string|null=null;
+  private checkedAt:string|null=null;
+  private instance:'absent'|'starting'|'unconfirmed'|'ready'='absent';
+  private disposed=false;
+  private disposePromise:Promise<void>|undefined;
+  private operation:Operation|undefined;
+  private readonly operations=new Map<string,Operation>();
+  private retryTimer:TimerHandle|undefined;
+  private retryAttempt=0;
+  private nextRetryAt:number|null=null;
   private capability:OneBotCapability|undefined;
   private capabilityStatus:CapabilityStatus={id:'qq',state:'pending',owned:false,pid:null,code:null,message:null};
-  constructor(private readonly ctx:Context,private readonly config:{settingsFile:string;nodePath:string}){}
-  status(){
-    let activity:{enabled:boolean;exploration:boolean;maintenance:boolean;plans:boolean}|null=null;
+  private healthProbe:Promise<boolean>|undefined;
+  private readonly deps:Required<Pick<ManagementRuntimeDependencies,'fetchImpl'|'retryDelaysMs'|'controlWaitMs'|'startTimeoutMs'|'stopTimeoutMs'|'killTimeoutMs'|'healthTimeoutMs'|'timers'>>;
+  private readonly sleepImpl:(ms:number)=>Promise<void>;
+  constructor(private readonly ctx:Context,private readonly config:{settingsFile:string;nodePath:string},private readonly dependencies:ManagementRuntimeDependencies={}){
+    this.deps={fetchImpl:dependencies.fetchImpl??fetch,retryDelaysMs:dependencies.retryDelaysMs??ONEBOT_RETRY_DELAYS_MS,controlWaitMs:dependencies.controlWaitMs??1_500,
+      startTimeoutMs:dependencies.startTimeoutMs??90_000,stopTimeoutMs:dependencies.stopTimeoutMs??40_000,killTimeoutMs:dependencies.killTimeoutMs??10_000,healthTimeoutMs:dependencies.healthTimeoutMs??3_000,timers:dependencies.timers??defaultTimers};
+    this.sleepImpl=dependencies.sleep??(ms=>new Promise<void>(resolve=>{const timer=setTimeout(resolve,ms);timer.unref();}));
+  }
+  private iso():string{return new Date().toISOString();}
+  status():ManagementRuntimeSnapshot {
+    let activity:ManagementActivitySnapshot|null=null;
     try{const settings=readInstallationSettings(this.config.settingsFile);activity={enabled:settings.activity.enabled,exploration:settings.activity.exploration,maintenance:settings.activity.maintenance,plans:settings.activity.plans};}catch{/* configuration is reported separately */}
     const activityCapability:CapabilityStatus|undefined=activity?{id:'activity',state:activity.enabled?'pending':'disabled',owned:false,pid:null,code:activity.enabled?null:'ACTIVITY_DISABLED_BY_USER',message:activity.enabled?'自主活动已启用，等待 Host 就绪':'自主活动已由配置关闭'}:undefined;
-    return {state:this.state,code:this.code,pid:this.child?.pid??null,retryAttempt:this.retryAttempt,capabilities:[this.capabilityStatus,...(activityCapability?[activityCapability]:[])],activity};
+    const operation=this.operationSnapshot();
+    return {state:this.state,phase:this.phase,operationId:this.operation&&!this.operation.settled?this.operation.id:null,operation,generation:this.childGeneration,pid:this.child?.pid??null,
+      code:this.code,codeAt:this.codeAt,retryAttempt:this.retryAttempt,retry:{attempt:this.retryAttempt,nextAt:this.nextRetryAt===null?null:new Date(this.nextRetryAt).toISOString()},
+      checkedAt:this.checkedAt,startedAt:this.startedAt,readyAt:this.readyAt,instance:this.instance,error:this.code===null?null:{code:this.code,at:this.codeAt??this.iso()},
+      capabilities:[this.capabilityStatus,...(activityCapability?[activityCapability]:[])],activity};
   }
-  async control(action:'start'|'stop'|'restart'|'status'){if(action==='status')return this.child&&this.state==='running'?{...this.status(),host:await this.call('runtime','status',null)}:this.status();
-    if(this.disposed||this.busy)throw new Error('MANAGEMENT_RUNTIME_BUSY');this.busy=true;try{if(action!=='start')await this.stop();if(action!=='stop'){try{await this.start();}catch(error){this.code=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'INSTALL_START_FAILED';this.scheduleRetry();}}return this.status();}finally{this.busy=false;}}
-  private scheduleRetry(){if(this.disposed||this.state==='stopping'||this.retryTimer||this.retryAttempt>=ONEBOT_RETRY_DELAYS_MS.length)return;
-    const delay=ONEBOT_RETRY_DELAYS_MS[this.retryAttempt++]!;if(this.capability?.status().state!=='waiting-login')this.state='failed';this.retryTimer=setTimeout(()=>{this.retryTimer=undefined;void this.start().catch(()=>this.scheduleRetry());},delay);this.retryTimer.unref();}
-  private async start(){if(this.child)throw new Error('MANAGEMENT_ALREADY_STARTED');const settings=readInstallationSettings(this.config.settingsFile);this.state='starting';this.code=null;
-    this.capability??=new OneBotCapability(settings.qq);
-    try{await this.capability.ensureReady();this.capabilityStatus=this.capability.status();}
+  private operationSnapshot():ManagementOperationSnapshot|null{
+    const operation=this.operation;
+    if(!operation)return null;
+    if(operation.settled&&Date.now()-Date.parse(operation.at)>300_000&&this.state!=='stopping')return null;
+    return {id:operation.id,action:operation.action,disposition:operation.disposition,at:operation.at,code:operation.code};
+  }
+  async control(action:ManagementRuntimeAction,options:ManagementControlOptions={}):Promise<ManagementControlResult>{
+    if(action==='status')return this.inspect();
+    if(this.disposed)throw new Error('MANAGEMENT_RUNTIME_DISPOSED');
+    if(action==='start')return this.startRequest(options);
+    if(action==='stop')return this.stopRequest(options);
+    return this.restartRequest(options);
+  }
+  private receipt(action:ManagementRuntimeAction,disposition:ManagementOperationDisposition,code:string|null,operationId:string|null,accepted:boolean,host:Json|null=null,hostCode:string|null=null):ManagementControlResult{
+    return {...this.status(),action,accepted,disposition,operationId,host,hostCode,...(code===null?{}:{rejectCode:code})};
+  }
+  private async finish(operation:Operation,options:ManagementControlOptions):Promise<ManagementControlResult>{
+    if(options.wait)await operation.done;
+    else await Promise.race([operation.done,this.sleepImpl(this.deps.controlWaitMs)]);
+    const disposition=operation.settled?operation.disposition:'accepted';
+    return this.receipt(operation.action,disposition,operation.settled?operation.code:null,operation.id,true);
+  }
+  private async startRequest(options:ManagementControlOptions):Promise<ManagementControlResult>{
+    const active=this.operation;
+    if(active&&!active.settled){
+      if(active.action==='stop')return this.receipt('start','rejected','MANAGEMENT_STOPPING',active.id,false);
+      return this.receipt('start','accepted',null,active.id,true);
+    }
+    const prior=options.operationId?this.operations.get(options.operationId):undefined;
+    if(prior&&prior.action!=='stop')return this.receipt('start',prior.disposition,prior.code,prior.id,true);
+    if(this.child&&this.state==='running'&&this.instance==='ready')return this.receipt('start','completed',null,null,true);
+    if(this.child){
+      const recovered=await this.reconcile();
+      if(recovered)return this.receipt('start','completed',null,null,true);
+      this.fail('MANAGEMENT_START_UNCONFIRMED');
+      return this.receipt('start','accepted','MANAGEMENT_START_UNCONFIRMED',null,true);
+    }
+    const operation=this.beginOperation('start',options.automatic??false,options.operationId);
+    this.linkSignal(operation,options.signal);
+    if(!options.automatic)this.retryAttempt=0;
+    this.prepareStart();
+    void this.runStart(operation);
+    return this.finish(operation,options);
+  }
+  private async stopRequest(options:ManagementControlOptions):Promise<ManagementControlResult>{
+    const active=this.operation;
+    if(active&&!active.settled&&active.action==='stop')return this.finish(active,options);
+    if(active&&!active.settled){active.controller.abort();await active.done;}
+    this.clearRetry();this.retryAttempt=0;
+    if(!this.child){this.resetStopped();return this.receipt('stop','completed',null,null,true);}
+    const operation=this.beginOperation('stop',options.automatic??false,options.operationId);
+    this.linkSignal(operation,options.signal);
+    void this.runStop(operation);
+    return this.finish(operation,options);
+  }
+  private async restartRequest(options:ManagementControlOptions):Promise<ManagementControlResult>{
+    const active=this.operation;
+    if(active&&!active.settled){
+      if(active.action==='restart')return this.finish(active,options);
+      if(active.action==='stop')return this.receipt('restart','rejected','MANAGEMENT_STOPPING',active.id,false);
+      active.controller.abort();await active.done;
+    }
+    const prior=options.operationId?this.operations.get(options.operationId):undefined;
+    if(prior&&prior.action==='restart')return this.receipt('restart',prior.disposition,prior.code,prior.id,true);
+    const operation=this.beginOperation('restart',options.automatic??false,options.operationId);
+    this.linkSignal(operation,options.signal);
+    void this.runRestart(operation);
+    return this.finish(operation,options);
+  }
+  private beginOperation(action:'start'|'stop'|'restart',automatic:boolean,id?:string):Operation{
+    const at=this.iso();
+    let resolveDone:()=>void=()=>{};
+    const done=new Promise<void>(resolve=>{resolveDone=resolve;});
+    const operation:Operation={id:id??randomUUID(),action,at,automatic,controller:new AbortController(),done,disposition:'accepted',code:null,settled:false,
+      settle:(disposition,code)=>{if(operation.settled)return;operation.disposition=disposition;operation.code=code;operation.settled=true;resolveDone();}};
+    this.operations.set(operation.id,operation);
+    while(this.operations.size>8){const first=this.operations.keys().next().value;if(first===undefined)break;this.operations.delete(first);}
+    this.operation=operation;
+    return operation;
+  }
+  private linkSignal(operation:Operation,signal?:AbortSignal):void{
+    if(!signal)return;
+    if(signal.aborted){operation.controller.abort();return;}
+    signal.addEventListener('abort',()=>operation.controller.abort(),{once:true});
+  }
+  private checkAbort(operation:Operation):void{
+    if(operation.controller.signal.aborted||this.disposed)throw new Error('MANAGEMENT_OPERATION_CANCELLED');
+  }
+  private prepareStart(){this.clearRetry();this.code=null;this.codeAt=null;this.state='starting';this.phase='configuration';this.checkedAt=this.iso();}
+  private async runStart(operation:Operation):Promise<void>{
+    try{await this.startUp(operation);operation.settle('completed',null);}
+    catch(error){this.settleStartFailure(operation,error);}
+  }
+  private async runRestart(operation:Operation):Promise<void>{
+    try{
+      await this.shutDown(operation);
+      this.checkAbort(operation);
+      this.prepareStart();
+      await this.startUp(operation);
+      operation.settle('completed',null);
+    }catch(error){this.settleStartFailure(operation,error);}
+  }
+  private async runStop(operation:Operation):Promise<void>{
+    try{await this.shutDown(operation);operation.settle('completed',null);}
+    catch(error){const code=errorCode(error);this.fail(code);operation.settle('failed',code);}
+  }
+  private settleStartFailure(operation:Operation,error:unknown):void{
+    if(operation.controller.signal.aborted){
+      operation.settle('failed','MANAGEMENT_OPERATION_CANCELLED');
+      return;
+    }
+    const code=errorCode(error);
+    if(code==='MANAGEMENT_START_TIMEOUT'){
+      // The child exists; the result is not confirmed yet. Never respawn to "retry" it.
+      this.state='starting';this.instance='unconfirmed';this.phase='process';this.fail(code);
+      operation.settle('accepted',code);
+      return;
+    }
+    operation.settle('failed',code);
+    if(this.state!=='waiting')this.state=this.capability?.status().state==='waiting-login'?'waiting':'failed';
+    this.fail(code);
+    if(!this.child&&isRetryable(code))this.scheduleRetry();
+  }
+  private fail(code:string):void{this.code=code;this.codeAt=this.iso();this.checkedAt=this.codeAt;}
+  private async startUp(operation:Operation):Promise<void>{
+    const settings=readInstallationSettings(this.config.settingsFile);
+    this.checkAbort(operation);
+    this.phase='qq';
+    this.capability??=new OneBotCapability(settings.qq,{fetch:this.deps.fetchImpl,sleep:this.sleepImpl});
+    try{await this.capability.ensureReady(operation.controller.signal);}
     catch(error){this.capabilityStatus=this.capability.status();if(this.capabilityStatus.state==='waiting-login')this.state='waiting';throw error;}
     this.capabilityStatus=this.capability.status();
-    const bridge=settings.dshTools?await import('./bridge-parent.js'):null;
-    const child=spawn(this.config.nodePath,[fileURLToPath(new URL('../bin/dafeiyu.mjs',import.meta.url)),'start','--settings',this.config.settingsFile],{windowsHide:true,env:{...process.env,DAFEIYU_DSH_BRIDGE:settings.dshTools?'1':''},stdio:['ignore','ignore','ignore','ipc']});this.child=child;
-    this.closed=new Promise(resolve=>{let ended=false;const finish=()=>{if(ended)return;ended=true;if(this.state!=='stopping'){this.state='failed';this.code??='INSTALL_PROCESS_EXITED';}else this.state='stopped';this.child=undefined;for(const pending of this.pending.values()){clearTimeout(pending.timer);pending.reject(new Error('MANAGEMENT_PROCESS_CLOSED'));}this.pending.clear();resolve();if(this.state==='failed')this.scheduleRetry();};child.once('close',finish);child.once('error',()=>{this.code='INSTALL_NODE_UNAVAILABLE';finish();});});
-    child.on('message',(raw:unknown)=>{if(!raw||typeof raw!=='object')return;const value=raw as Record<string,unknown>;
-      if(value.type==='management.result'&&typeof value.id==='string'){const pending=this.pending.get(value.id);if(!pending)return;this.pending.delete(value.id);clearTimeout(pending.timer);if(value.ok===true)pending.resolve(managementJson(value.value));else pending.reject(new Error(typeof value.code==='string'&&/^[A-Z_0-9]{1,100}$/.test(value.code)?value.code:'MANAGEMENT_OPERATION_FAILED'));return;}
-      if(value.code==='INSTALL_READY'){this.state='running';this.retryAttempt=0;}else if(typeof value.code==='string'&&/^[A-Z_0-9]{1,100}$/.test(value.code)&&value.code!=='INSTALL_STOPPED')this.code=value.code;});
-    try{this.bridgeClose=bridge?bridge.attachDshBridge(this.ctx,child,this.config.settingsFile):undefined;}catch(error){await this.stop();throw error;}}
-  private async stop(){if(this.retryTimer){clearTimeout(this.retryTimer);this.retryTimer=undefined;}this.retryAttempt=0;const child=this.child;if(child){this.state='stopping';if(child.connected)child.send({type:'stop'});let timer:ReturnType<typeof setTimeout>|undefined;try{await Promise.race([this.closed,new Promise<void>(resolve=>{timer=setTimeout(resolve,40000);})]);if(this.child){child.kill();await this.closed;}}finally{if(timer)clearTimeout(timer);}}
-    await this.capability?.stop();this.capability=undefined;this.capabilityStatus={id:'qq',state:'stopped',owned:false,pid:null,code:null,message:null};
-    await this.bridgeClose?.();this.bridgeClose=undefined;}
-  call(module:string,action:string,input:Json):Promise<Json>{const child=this.child;if(!child?.connected||this.state!=='running')return Promise.reject(new Error('MANAGEMENT_RUNTIME_OFFLINE'));
-    const id=randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);reject(new Error('MANAGEMENT_RESULT_UNKNOWN'));},15000);this.pending.set(id,{resolve,reject,timer});child.send({type:'management.request',id,module,action,input},error=>{if(error){clearTimeout(timer);this.pending.delete(id);reject(new Error('MANAGEMENT_SEND_FAILED'));}});});}
-  async dispose(){this.disposed=true;if(this.retryTimer){clearTimeout(this.retryTimer);this.retryTimer=undefined;}await this.stop();}
+    this.checkAbort(operation);
+    this.phase='bridge';
+    const bridge=settings.dshTools?await (this.dependencies.importBridge??(()=>import('./bridge-parent.js')))():null;
+    this.checkAbort(operation);
+    this.phase='process';
+    const generation=++this.generation;
+    const child=(this.dependencies.spawnInstance??(input=>spawn(input.nodePath,[fileURLToPath(new URL('../bin/dafeiyu.mjs',import.meta.url)),'start','--settings',input.settingsFile],{windowsHide:true,env:input.env,stdio:['ignore','ignore','ignore','ipc']})))({settingsFile:this.config.settingsFile,nodePath:this.config.nodePath,env:{...process.env,DAFEIYU_DSH_BRIDGE:settings.dshTools?'1':''}});
+    this.child=child;this.childGeneration=generation;this.instance='starting';this.startedAt=this.iso();this.lastExitCode=null;
+    this.attachChild(child,generation);
+    try{if(bridge)this.bridgeClose=bridge.attachDshBridge(this.ctx,child,this.config.settingsFile);}catch(error){await this.shutDown(operation).catch(()=>{});throw error;}
+    if(operation.controller.signal.aborted){await this.shutDown(operation).catch(()=>{});throw new Error('MANAGEMENT_OPERATION_CANCELLED');}
+    await this.waitReady(generation,operation);
+    this.markReady(generation);
+  }
+  private async shutDown(operation:Operation):Promise<void>{
+    this.state='stopping';this.phase='stopping';this.instance=this.child?'unconfirmed':'absent';this.checkedAt=this.iso();
+    let unconfirmed=false;
+    const child=this.child,generation=this.childGeneration;
+    if(child){
+      const closed=this.waitClosed(generation,this.deps.stopTimeoutMs);
+      try{if(child.connected)child.send({type:'stop'});}catch{/* the child may already be gone */}
+      if(!await closed){
+        if(this.child&&this.childGeneration===generation){try{child.kill();}catch{/* reported below */}await this.waitClosed(generation,this.deps.killTimeoutMs);}
+      }
+      if(this.child&&this.childGeneration===generation)unconfirmed=true;
+    }
+    await this.releaseCapability();
+    await this.releaseBridge();
+    if(unconfirmed){this.state='failed';this.instance='unconfirmed';this.fail('MANAGEMENT_STOP_UNCONFIRMED');throw new Error('MANAGEMENT_STOP_UNCONFIRMED');}
+    this.resetStopped();
+  }
+  private async releaseCapability():Promise<void>{
+    const capability=this.capability;this.capability=undefined;
+    try{await capability?.stop();}catch{/* cleanup never masks the lifecycle result */}
+    this.capabilityStatus={id:'qq',state:'stopped',owned:false,pid:null,code:null,message:null};
+  }
+  private async releaseBridge():Promise<void>{
+    const close=this.bridgeClose;this.bridgeClose=undefined;
+    if(close)try{await close();}catch{/* cleanup independently */}
+  }
+  private resetStopped():void{
+    this.state='stopped';this.phase='stopped';this.code=null;this.codeAt=null;this.instance=this.child?'unconfirmed':'absent';this.checkedAt=this.iso();this.readyAt=null;
+    this.clearRetry();this.retryAttempt=0;
+  }
+  private attachChild(child:ChildProcess,generation:number):void{
+    child.on('message',(raw:unknown)=>{this.onChildMessage(raw,generation);});
+    child.once('error',()=>{if(this.childGeneration===generation)this.lastExitCode='INSTALL_NODE_UNAVAILABLE';});
+    child.once('close',()=>{this.onChildClose(generation);});
+  }
+  private onChildMessage(raw:unknown,generation:number):void{
+    if(!raw||typeof raw!=='object')return;
+    const value=raw as Record<string,unknown>;
+    if(value.type==='management.result'&&typeof value.id==='string'){
+      const pending=this.pending.get(value.id);if(!pending)return;this.pending.delete(value.id);this.deps.timers.clearTimeout(pending.timer);
+      if(value.ok===true)pending.resolve(managementJson(value.value));else pending.reject(new Error(typeof value.code==='string'&&/^[A-Z_0-9]{1,100}$/.test(value.code)?value.code:'MANAGEMENT_OPERATION_FAILED'));
+      return;
+    }
+    if(value.code==='INSTALL_READY'&&this.childGeneration===generation){
+      const waiter=this.readyWaiters.get(generation);
+      this.markReady(generation);
+      if(waiter){this.readyWaiters.delete(generation);this.deps.timers.clearTimeout(waiter.timer);waiter.resolve();}
+    }
+  }
+  private onChildClose(generation:number):void{
+    const waiter=this.readyWaiters.get(generation);
+    if(waiter){this.readyWaiters.delete(generation);this.deps.timers.clearTimeout(waiter.timer);waiter.reject(new Error(this.lastExitCode??'MANAGEMENT_PROCESS_EXITED'));}
+    for(const resolve of this.closeWaiters.get(generation)??[])resolve(true);
+    this.closeWaiters.delete(generation);
+    if(this.childGeneration!==generation)return;
+    const stopping=this.state==='stopping';
+    this.child=undefined;this.instance='absent';
+    this.rejectPending(new Error('MANAGEMENT_PROCESS_CLOSED'));
+    void this.releaseBridge();
+    if(stopping){this.resetStopped();return;}
+    this.state='failed';
+    const code=this.lastExitCode??'INSTALL_PROCESS_EXITED';
+    this.fail(code);
+    if(isRetryable(code))this.scheduleRetry();
+  }
+  private markReady(generation:number):void{
+    if(this.childGeneration!==generation)return;
+    this.state='running';this.phase='ready';this.instance='ready';this.code=null;this.codeAt=null;this.readyAt=this.iso();this.checkedAt=this.readyAt;this.retryAttempt=0;this.clearRetry();
+  }
+  private waitReady(generation:number,operation:Operation):Promise<void>{
+    return new Promise((resolve,reject)=>{
+      if(operation.controller.signal.aborted||this.childGeneration!==generation)return reject(new Error('MANAGEMENT_OPERATION_CANCELLED'));
+      if(this.instance==='ready'&&this.state==='running')return resolve();
+      let settled=false;
+      const finish=(error?:Error)=>{
+        if(settled)return;settled=true;
+        const waiter=this.readyWaiters.get(generation);
+        if(waiter){this.readyWaiters.delete(generation);this.deps.timers.clearTimeout(waiter.timer);}
+        operation.controller.signal.removeEventListener('abort',onAbort);
+        if(error)reject(error);else resolve();
+      };
+      const onAbort=()=>finish(new Error('MANAGEMENT_OPERATION_CANCELLED'));
+      const timer=this.deps.timers.setTimeout(()=>finish(new Error('MANAGEMENT_START_TIMEOUT')),this.deps.startTimeoutMs);
+      this.readyWaiters.set(generation,{resolve:()=>finish(),reject:(error)=>finish(error),timer});
+      operation.controller.signal.addEventListener('abort',onAbort,{once:true});
+    });
+  }
+  private waitClosed(generation:number,timeoutMs:number):Promise<boolean>{
+    if(!this.child||this.childGeneration!==generation)return Promise.resolve(true);
+    return new Promise<boolean>(resolve=>{
+      let settled=false;
+      const waiters=this.closeWaiters.get(generation)??new Set<(closed:boolean)=>void>();
+      const finish=(closed:boolean)=>{
+        if(settled)return;settled=true;this.deps.timers.clearTimeout(timer);waiters.delete(finish);resolve(closed);
+      };
+      const timer=this.deps.timers.setTimeout(()=>finish(false),timeoutMs);
+      waiters.add(finish);this.closeWaiters.set(generation,waiters);
+    });
+  }
+  private async reconcile():Promise<boolean>{
+    const child=this.child;if(!child?.connected)return false;
+    if(this.healthProbe)return this.healthProbe;
+    this.healthProbe=(async()=>{
+      const generation=this.childGeneration;
+      try{
+        const value=await this.sendCall('runtime','status',null,this.deps.healthTimeoutMs);
+        if(this.childGeneration!==generation||!this.child)return false;
+        const phase=(value as {phase?:unknown}).phase;
+        this.checkedAt=this.iso();
+        if(typeof phase==='string'&&['ready','degraded'].includes(phase)){
+          this.markReady(generation);
+          const waiter=this.readyWaiters.get(generation);
+          if(waiter){this.readyWaiters.delete(generation);this.deps.timers.clearTimeout(waiter.timer);waiter.resolve();}
+          return true;
+        }
+        this.instance='unconfirmed';
+        return false;
+      }catch{
+        if(this.child)this.instance='unconfirmed';
+        this.checkedAt=this.iso();
+        return false;
+      }finally{this.healthProbe=undefined;}
+    })();
+    return this.healthProbe;
+  }
+  private async inspect():Promise<ManagementControlResult>{
+    if(this.child&&this.instance!=='ready')await this.reconcile();
+    let host:Json|null=null,hostCode:string|null=null;
+    if(this.child?.connected&&this.instance==='ready'){
+      try{host=managementJson(await this.sendCall('runtime','status',null,this.deps.healthTimeoutMs));}catch(error){hostCode=errorCode(error);}
+    }
+    this.checkedAt=this.iso();
+    return this.receipt('status',hostCode===null?'completed':'failed',null,null,true,host,hostCode);
+  }
+  private scheduleRetry():void{
+    if(this.disposed||this.child||this.state==='stopping'||this.state==='stopped'||this.retryTimer!==undefined||this.retryAttempt>=this.deps.retryDelaysMs.length)return;
+    const delay=this.deps.retryDelaysMs[this.retryAttempt++]!;this.nextRetryAt=Date.now()+delay;
+    this.retryTimer=this.deps.timers.setTimeout(()=>{
+      this.retryTimer=undefined;this.nextRetryAt=null;
+      if(this.disposed||this.child||this.state==='stopping')return;
+      void this.startRequest({automatic:true,wait:true}).catch(()=>{});
+    },delay);
+  }
+  private clearRetry():void{
+    if(this.retryTimer!==undefined){this.deps.timers.clearTimeout(this.retryTimer);this.retryTimer=undefined;}
+    this.nextRetryAt=null;
+  }
+  private rejectPending(error:Error):void{
+    for(const pending of this.pending.values()){this.deps.timers.clearTimeout(pending.timer);pending.reject(error);}
+    this.pending.clear();
+  }
+  private sendCall(module:string,action:string,input:Json,timeoutMs:number):Promise<Json>{
+    const child=this.child;
+    if(!child?.connected)return Promise.reject(new Error('MANAGEMENT_RUNTIME_OFFLINE'));
+    const id=randomUUID();
+    return new Promise<Json>((resolve,reject)=>{
+      const timer=this.deps.timers.setTimeout(()=>{this.pending.delete(id);reject(new Error('MANAGEMENT_RESULT_UNKNOWN'));},timeoutMs);
+      this.pending.set(id,{resolve,reject,timer});
+      try{child.send({type:'management.request',id,module,action,input},error=>{if(error){this.deps.timers.clearTimeout(timer);this.pending.delete(id);reject(new Error('MANAGEMENT_SEND_FAILED'));}});}
+      catch{this.deps.timers.clearTimeout(timer);this.pending.delete(id);reject(new Error('MANAGEMENT_SEND_FAILED'));}
+    });
+  }
+  /** While the management snapshot may be stale, a live IPC channel still serves module queries. */
+  call(module:string,action:string,input:Json):Promise<Json>{
+    if(!this.child?.connected||this.state==='stopped'||this.state==='stopping')return Promise.reject(new Error('MANAGEMENT_RUNTIME_OFFLINE'));
+    return this.sendCall(module,action,input,15_000);
+  }
+  dispose():Promise<void>{
+    if(this.disposePromise)return this.disposePromise;
+    this.disposed=true;this.clearRetry();this.retryAttempt=0;
+    this.disposePromise=(async()=>{
+      const active=this.operation;
+      if(active&&!active.settled){active.controller.abort();await active.done;}
+      await this.stopRequest({wait:true}).catch(()=>{});
+    })().finally(()=>{this.rejectPending(new Error('MANAGEMENT_RUNTIME_DISPOSED'));});
+    return this.disposePromise;
+  }
 }

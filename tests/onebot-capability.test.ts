@@ -63,3 +63,26 @@ test('starts its own service and attaches the configured account',async()=>{
     assert.equal(capability.status().pid,1234);
   }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('a cancelled QQ wait ends before any service process is created',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'dafeiyu-onebot-cancel-'));
+  try{
+    const token=join(root,'token');writeFileSync(token,'token-value');
+    const controller=new AbortController();let spawned=0;
+    const capability=new OneBotCapability(qq(token,{service:{command:'D:/service/node.exe',args:[],startTimeoutMs:5000}}),{
+      spawn:()=>{spawned++;throw new Error('must not spawn');},
+      sleep:async()=>{},
+      fetch:async (_input,init)=>new Promise<Response>((_resolve,reject)=>{
+        const signal=init?.signal,fail=()=>reject(new Error('aborted'));
+        if(signal?.aborted)return fail();
+        signal?.addEventListener('abort',fail,{once:true});
+        setTimeout(()=>controller.abort(),5).unref();
+      }),
+    });
+    await assert.rejects(capability.ensureReady(controller.signal),/ONEBOT_WAIT_CANCELLED/);
+    assert.equal(spawned,0);
+    assert.equal(capability.status().owned,false);
+    await capability.stop();
+    assert.equal(capability.status().state,'stopped');
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
