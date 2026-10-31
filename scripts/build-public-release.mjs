@@ -66,6 +66,9 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   const emitted=readFileSync(join(repository,'packages/contracts/lib/protocol.js'),'utf8').match(/export const RELEASE_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
   if(emitted!==plugin.version||json(join(repository,'package.json')).version!==plugin.version
     ||moduleNames.some(name=>json(join(repository,'packages',name,'package.json')).version!==plugin.version))throw new Error('RELEASE_VERSION_MISMATCH');
+  if(moduleNames.some(name=>{const pkg=json(join(repository,'packages',name,'package.json'));
+    return Object.entries({...pkg.dependencies,...pkg.peerDependencies,...pkg.optionalDependencies}).some(([dependency,version])=>dependency.startsWith('@dafeiyu/')&&version!==plugin.version);
+  }))throw new Error('RELEASE_INTERNAL_VERSION_MISMATCH');
   const manifest={name:'dsh-dafeiyu',version:plugin.version,type:'module',description:plugin.description,license:'MIT',
     main:'./runtime/plugin/lib/index.js',types:'./runtime/plugin/lib/index.d.ts',
     exports:{'.':{types:'./runtime/plugin/lib/index.d.ts',default:'./runtime/plugin/lib/index.js'},'./settings':'./runtime/plugin/lib/settings.js','./installation':'./runtime/plugin/lib/installation.js','./client':'./client.js','./package.json':'./package.json'},
