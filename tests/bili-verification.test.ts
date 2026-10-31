@@ -16,7 +16,7 @@ import {testTempDir} from './test-temp.js';
 const identity={agentId:'fish',profileId:'test'},bvid='BV1xNpFedEwH',cookieMarker='SESSDATA-management-marker-9876543210';
 const response=(body:string,status=200):HttpResponse=>{const bytes=Buffer.from(body);return {status,headers:{'content-type':'application/json','content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};};
 const nav=(mid='42')=>JSON.stringify({code:0,data:{isLogin:true,mid,wbi_img:{img_url:'https://i0.hdslb.com/bfs/wbi/'+'a'.repeat(32)+'.png',sub_url:'https://i0.hdslb.com/bfs/wbi/'+'b'.repeat(32)+'.png'}}});
-const video=()=>JSON.stringify({code:0,data:{bvid,aid:'170001',title:'Fixture video',owner:{mid:999,name:'Up'},pages:[{cid:'9',page:1,part:'p1',duration:10}]}});
+const video=()=>JSON.stringify({code:0,data:{bvid,aid:'170001',title:'Fixture video',duration:10,owner:{mid:999,name:'Up'},pages:[{cid:'9',page:1,part:'p1',duration:10}]}});
 interface OperationView {state:string;kind:string;errorCode:string|null;result:{stage?:string;login?:{ok:boolean;uid:string|null};read?:{ok:boolean;title?:string|null;items?:number|null}|null}|null}
 interface StatusView {account:{engine:string;verifiedUid:string|null};operations:OperationView[];active:{id:string}|null;operation?:OperationView}
 const view=(value:unknown)=>value as StatusView;
@@ -29,7 +29,7 @@ async function fixture(){
     capabilityManifest:()=>({features:[]}),taskContextScope:()=>({kind:'context',scopeKey:'fixture'}),
     journal:{appendExecutionOnce(){},appendOnce(){}}};
   context.provide('dafeiyu',core as unknown as DafeiyuService);
-  const calls:string[]=[],controls={nav:'ok' as 'ok'|'hang'|'hold'};
+  const calls:string[]=[],controls={nav:'ok' as 'ok'|'hang'|'hold',business:'ok' as 'ok'|'invalid'};
   let releaseNav:()=>void=()=>{};
   const navHold=new Promise<void>(resolve=>{releaseNav=resolve;});
   const transport=async(url:URL,_headers:Readonly<Record<string,string>>,signal:AbortSignal)=>{
@@ -39,13 +39,20 @@ async function fixture(){
       if(controls.nav==='hold')await new Promise<void>((resolve,reject)=>{void navHold.then(resolve);signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true});});
       return response(nav());
     }
-    return response(video());
+    return response(controls.business==='invalid'?JSON.stringify({code:0,data:{}}):video());
   };
   const service=new BiliService(context,{agentId:'fish',profileId:'fixture',dataDir:join(root,'bili'),createStore:true,settings:{session:{file:sessionFile,expectedUid:'42'},minIntervalMs:100}},transport);
   service.recover();service.activate();
   return {root,sessionFile,service,controls,calls,releaseNav:()=>releaseNav(),close:async()=>{await service.close();await context.fiber.dispose();}};
 }
 const count=(calls:string[],path:string)=>calls.filter(call=>call===path).length;
+
+test('a successful HTTP envelope with invalid video data is not a passed reading verification',async()=>{
+  const f=await fixture();try{f.controls.business='invalid';const started=f.service.management('verify.read',{endpoint:'video',bvid}) as {operationId:string};
+    await waitFor(()=>view(f.service.management('verify.status',{id:started.operationId})).operation?.state!=='pending','invalid video');
+    const done=view(f.service.management('verify.status',{id:started.operationId}));assert.equal(done.operation?.state,'failed');assert.equal(done.operation?.errorCode,'BILI_INVALID_DATA');assert.equal(done.operation?.result?.read?.ok,false);
+  }finally{await f.close();}
+});
 
 test('management can validate a newly configured credential under an old anonymous hold',async()=>{
   const f=await fixture();try{

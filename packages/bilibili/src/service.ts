@@ -189,9 +189,13 @@ export class BiliService extends Service {
     if(target.endpoint==='search')return {search_type:'video',keyword:target.keyword,page:target.page,page_size:target.limit,order:target.order};
     return {type:1,oid:target.aid,pn:target.page,ps:target.limit,sort:target.sort==='hot'?2:0};
   }
-  private verifyReadCount(endpoint:string,value:unknown){
-    try{const data=z.record(z.string(),z.json()).parse(value),items=Array.isArray(data.items)?data.items.length:null;
-      return {endpoint,items,...(endpoint==='video'&&typeof data.title==='string'?{title:data.title.slice(0,200)}:{})};}catch{return {endpoint,items:null};}
+  private verifyReadCount(target:VerifyTarget,value:unknown){
+    if(target.endpoint==='video'){
+      const video=pages.video(value).data;if(video.bvid!==target.bvid)throw new Error('BILI_VIDEO_BINDING_MISMATCH');
+      return {endpoint:target.endpoint,items:1,bvid:video.bvid,aid:video.aid,title:video.title,parts:video.pages.slice(0,3).map(part=>({cid:part.cid,page:part.page,durationSeconds:part.durationSeconds}))};
+    }
+    if(target.endpoint==='comments')return {endpoint:target.endpoint,items:pages.comments(value,NumberIdSchema.parse(target.aid),target.page,target.limit,null).count};
+    return {endpoint:target.endpoint,items:pages.listing(value,target.endpoint==='search'?'search':'discover',target.page,target.limit).count};
   }
   private async runVerification(record:BiliVerification,target:VerifyTarget|null,signal:AbortSignal):Promise<void>{
     const id=record.id;
@@ -218,7 +222,7 @@ export class BiliService extends Service {
     try{
       permit=this.client.verificationPermit(target!.endpoint);
       const value=await this.client.probeRead(target!.endpoint,this.verifyReadInput(target!),{signal,permit});
-      finish('completed',null,{stage:'read',login,read:{ok:true,...this.verifyReadCount(target!.endpoint,value)}},login.uid);
+      finish('completed',null,{stage:'read',login,read:{ok:true,...this.verifyReadCount(target!,value)}},login.uid);
     }catch(error){
       finish(code(error)==='BILI_SESSION_CHANGED'?'interrupted':'failed',code(error),{stage:'read',login,read:{ok:false,code:code(error),endpoint:target!.endpoint,recommendation:'账号有效但该接口读取失败；请检查本次诊断。'}},login.uid);
     }finally{if(permit)this.store.diagnostics.dropPermit(permit);}
