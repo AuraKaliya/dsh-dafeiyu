@@ -101,3 +101,31 @@ export function initializeProfile(config:PreparedHostConfig,coordination?:string
   }catch(error){if(manifest)writeManifest(config,{...manifest,state:'failed'});throw error;}finally{lease.release();}
   return inspectHost(config,coordination);
 }
+
+/** Explicitly provision newly enabled modules; never recreate a previously required store. */
+export function initializeAdditionalStores(config:PreparedHostConfig,coordination?:string):HostInspection{
+  const before=inspectHost(config,coordination),manifest=readManifest(config);
+  if(before.occupied)throw new Error('HOST_STORE_OWNED');
+  if(!manifest||manifest.state!=='initialized')throw new Error('HOST_INITIALIZATION_REQUIRED');
+  if(before.stores.some(store=>manifest.requiredStores.includes(store.name)&&!store.exists))throw new Error('HOST_REQUIRED_STORAGE_MISSING');
+  const invalid=before.codes.find(code=>!['HOST_INITIALIZATION_REQUIRED','HOST_BILI_OWNER_HANDOVER_REQUIRED'].includes(code));
+  if(invalid)throw new Error(invalid);
+  const enabled:Record<string,boolean>={activity:!!pluginConfig(config,'activity'),media:!!pluginConfig(config,'media'),
+    bilibili:!!pluginConfig(config,'bilibili'),executor:!!pluginConfig(config,'server-executor'),'bili-owner':!!pluginConfig(config,'channel-bili-owner')};
+  const wanted=storageFiles(config).filter(store=>enabled[store.name]);
+  if(wanted.every(store=>manifest.requiredStores.includes(store.name)))return before;
+  const identity={agentId:config.config.agent.id,profileId:config.config.profileId},lease=claim(config.resources,identity,coordination);
+  try{
+    assertPaths(config);
+    for(const store of wanted){
+      if(existsSync(store.file))continue;
+      if(store.name==='activity')new ActivityStore(store.file,identity,pluginConfig(config,'activity')!,true).close();
+      else if(store.name==='media')new MediaStore(store.file,identity,true).close();
+      else if(store.name==='bilibili')new BiliStore(store.file,identity,true).close();
+      else if(store.name==='executor')new ExecutorStore(store.file,identity,true).close();
+      else{const owner=pluginConfig(config,'channel-bili-owner')!;initializeBiliOwnerStorage(config.paths.core,{...identity,accountUid:owner.accountUid,ownerUid:owner.ownerUid});}
+    }
+    writeManifest(config,{...manifest,requiredStores:[...new Set([...manifest.requiredStores,...wanted.map(store=>store.name)])]});
+  }finally{lease.release();}
+  return inspectHost(config,coordination);
+}

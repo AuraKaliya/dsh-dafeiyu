@@ -2,19 +2,11 @@
 
 所有路径相对于配置文件所在目录解析。配置文件和 `dataDir` 放在安装包之外，避免升级时丢失。
 
-## 接到DSH桌面
+## 接到 DSH 桌面
 
-当前版本没有图形初始化表单，安装和启用插件本身不代表已配置成功。先退出DSH，再在当前profile的 `cordis.patch.yml` 序列末尾加入以下一项；已有同ID项时修改原项，不重复添加。默认桌面profile位于 `~/.dsh/profiles/desktop/`。
+首次部署、发布包结构和正确的组合补丁写法见 [安装指南](install.md)。先配置外部 settingsFile 和 Node 路径，再执行 check、init，并通过 DSH 安装器加载发布包。安装界面显示已加载不代表实例已就绪。
 
-```yaml
-- id: dsh-dafeiyu
-  name: dsh-dafeiyu
-  config:
-    settingsFile: 'D:/your-config/dafeiyu.config.json'
-    nodePath: 'D:/your-node/node.exe'
-```
-
-路径必须换成自己的配置文件和Node.js 24.13+。启动顺序为本机OneBot与QQ登录、DSH、启用大肥鱼。插件入口显示“运行中”不能证明QQ连接成功；使用 `node bin/dafeiyu.mjs status --settings <配置文件绝对路径>` 查看 `online`、`snapshot.phase` 和 `snapshot.services.qq`。`check`只检查配置及文件；`status`不发模型请求或平台消息。当前入口不会在依赖失败退出后自动重启，恢复依赖后需停用再启用。
+管理器会对可恢复故障进行有限重试；重复启动不视为故障。使用 status 核对 online、snapshot.phase 和 snapshot.services.qq；查询本身不发模型或平台请求。
 
 ## 本地部署后的 profile 检查
 
@@ -73,7 +65,7 @@ QQ历史工具 `qq_browse` 首轮使用 `includeRecentHistory:true` 按需补取
 {"bilibili":{"capabilities":true}}
 ```
 
-同时配置 `media`。公开读取可不登录；需要登录时配置 `bilibili.session: {file,expectedUid}`。私信配置为 `bilibili.channel: {accountUid,ownerUid,sessionFile}`，账号值没有默认值；公开能力与私信同时使用登录态时，预期账号必须一致。私信生产连接当前支持Windows。
+同时配置 `media`。公开读取可不登录；需要登录时参见 [B站登录与读取](bilibili.md)，配置 `bilibili.session: {file,expectedUid}`。私信配置为 `bilibili.channel: {accountUid,ownerUid,sessionFile}`，账号值没有默认值；公开能力与私信同时使用登录态时，预期账号必须一致。私信生产连接当前支持Windows。
 
 公开读取和私信共用一个B站插件；每种接口按实际来源与已配置权限工作。频道账号变更、实例目录冲突、缺失必要库或未知库版本都会停止启动并报告原因，不自动清空或迁移。
 

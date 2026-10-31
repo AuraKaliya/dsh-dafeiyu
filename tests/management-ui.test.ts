@@ -42,7 +42,7 @@ const settingsFile=(root:string)=>{
   writeFileSync(join(root,'token.txt'),'token-value');
   const file=join(root,'settings.json');
   writeFileSync(file,JSON.stringify({schemaVersion:1,dataDir:join(root,'data'),instanceName:'dafeiyu',model:{model:'fixture',credentialStore:join(root,'credentials.json')},
-    qq:{botId:'1994142241',ownerId:'756013063',tokenFile:join(root,'token.txt'),httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'},activity:{enabled:false}}));
+    qq:{botId:'10000001',ownerId:'10000002',tokenFile:join(root,'token.txt'),httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'},activity:{enabled:false}}));
   return file;
 };
 class FakeChild extends EventEmitter {
@@ -113,7 +113,7 @@ test('the runtime panel disables start while running and renders instance and Bç
 test('a rendered start button drives the real management protocol into the lifecycle controller',async()=>{
   const root=temp();const file=settingsFile(root);let spawns=0;
   const spawnInstance=()=>{spawns++;return new FakeChild(9000+spawns) as unknown as ChildProcess;};
-  const runtime=new ManagementRuntime(new Context(),{settingsFile:file,nodePath:process.execPath},{controlWaitMs:10,startTimeoutMs:1_000,stopTimeoutMs:500,fetchImpl:async()=>new Response(JSON.stringify({status:'ok',data:{user_id:1994142241}}),{status:200}),spawnInstance});
+  const runtime=new ManagementRuntime(new Context(),{settingsFile:file,nodePath:process.execPath},{controlWaitMs:10,startTimeoutMs:1_000,stopTimeoutMs:500,fetchImpl:async()=>new Response(JSON.stringify({status:'ok',data:{user_id:10000001}}),{status:200}),spawnInstance});
   const dispatch=createManagementDispatch({settings:new ManagementSettings(file),runtime,describe:()=>({apiVersion:API_VERSION,version:'test',modules:[],prompts:[]})});
   /** Same shape as the Client remote: a protocol envelope around the inner result. */
   const request=async(body:Record<string,unknown>)=>({ok:true,value:JSON.stringify(await dispatch(JSON.stringify({apiVersion:API_VERSION,...body})))});

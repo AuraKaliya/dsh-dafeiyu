@@ -1,6 +1,5 @@
 import {spawn} from 'node:child_process';
 import type {ChildProcess} from 'node:child_process';
-import {existsSync,readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import type {Context} from '@deepseek-ai/cordis';
@@ -12,9 +11,8 @@ import type {CapabilityStatus} from './onebot-capability.js';
 
 /** Initial bounded retry sequence for recoverable dependency or startup failures. */
 export const ONEBOT_RETRY_DELAYS_MS=[2_000,5_000,15_000,30_000,60_000] as const;
-/** Deterministic failures must not enter the automatic retry loop. */
-const NON_RETRYABLE=new Set(['INSTALL_CONFIGURATION_REQUIRED','INSTALL_NODE_UNAVAILABLE','BILI_SCHEMA_UNSUPPORTED','BILI_MIGRATION_REQUIRED','BILI_ACCOUNT_MISMATCH','BILI_SESSION_INVALID','BILI_BROWSER_BRIDGE_REQUIRED','MANAGEMENT_ACCOUNT_MISMATCH','INSTALL_DSH_READINESS_INVALID','MANAGEMENT_INPUT_INVALID','MANAGEMENT_RUNTIME_DISPOSED','MANAGEMENT_START_TIMEOUT']);
-const isRetryable=(code:string):boolean=>!NON_RETRYABLE.has(code)&&!/^(BILI_|MANAGEMENT_[A-Z]*_?INVALID)/.test(code);
+const RETRYABLE=new Set(['ONEBOT_NOT_RUNNING','ONEBOT_LOGIN_REQUIRED','ONEBOT_ACCOUNT_NOT_ATTACHED','ONEBOT_NOT_READY','ONEBOT_HTTP_ERROR','ONEBOT_SERVICE_EXITED','INSTALL_PROCESS_EXITED','MANAGEMENT_PROCESS_EXITED']);
+const isRetryable=(code:string):boolean=>RETRYABLE.has(code);
 const errorCode=(error:unknown):string=>error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'INSTALL_START_FAILED';
 type TimerHandle=unknown;
 interface TimerPort {setTimeout:(work:()=>void,ms:number)=>TimerHandle;clearTimeout:(handle:TimerHandle)=>void}
@@ -49,28 +47,6 @@ interface Operation {
   settle:(disposition:ManagementOperationDisposition,code:string|null)=>void;
 }
 interface ReadyWaiter {resolve:()=>void;reject:(error:Error)=>void;timer:TimerHandle}
-
-/** Verify the exact bot account before starting a Host that treats QQ as required. */
-export async function waitForOneBot(settings:{qq:{botId:string;tokenFile:string;httpURL:string}},options:{timeoutMs?:number;fetchImpl?:typeof fetch}={}):Promise<void>{
-  const deadline=Date.now()+(options.timeoutMs??30_000),fetchImpl=options.fetchImpl??fetch;
-  if(!existsSync(settings.qq.tokenFile))throw new Error('ONEBOT_TOKEN_UNAVAILABLE');
-  const token=readFileSync(settings.qq.tokenFile,'utf8').trim();
-  if(!token)throw new Error('ONEBOT_TOKEN_UNAVAILABLE');
-  const url=`${settings.qq.httpURL.replace(/\/+$/,'')}/get_login_info`;
-  let last='ONEBOT_NOT_READY';
-  while(Date.now()<deadline){
-    try{
-      const response=await fetchImpl(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(3_000)});
-      if(response.ok){
-        const value=await response.json() as {status?:unknown;data?:{user_id?:unknown}};
-        if(value.status==='ok'&&String(value.data?.user_id)===settings.qq.botId)return;
-        last='ONEBOT_IDENTITY_MISMATCH';
-      }else last='ONEBOT_HTTP_ERROR';
-    }catch(error){last=error instanceof Error&&/^ONEBOT_/.test(error.message)?error.message:'ONEBOT_NOT_READY';}
-    await new Promise(resolve=>setTimeout(resolve,500));
-  }
-  throw new Error(last);
-}
 
 /**
  * One lifecycle controller for automatic startup, manual start, restart and retry.
@@ -133,6 +109,11 @@ export class ManagementRuntime {
   async control(action:ManagementRuntimeAction,options:ManagementControlOptions={}):Promise<ManagementControlResult>{
     if(action==='status')return this.inspect();
     if(this.disposed)throw new Error('MANAGEMENT_RUNTIME_DISPOSED');
+    const prior=options.operationId?this.operations.get(options.operationId):undefined;
+    if(prior){
+      if(prior.action!==action)return this.receipt(action,'rejected','MANAGEMENT_OPERATION_CONFLICT',prior.id,false);
+      return this.finish(prior,options);
+    }
     if(action==='start')return this.startRequest(options);
     if(action==='stop')return this.stopRequest(options);
     return this.restartRequest(options);
@@ -152,8 +133,6 @@ export class ManagementRuntime {
       if(active.action==='stop')return this.receipt('start','rejected','MANAGEMENT_STOPPING',active.id,false);
       return this.receipt('start','accepted',null,active.id,true);
     }
-    const prior=options.operationId?this.operations.get(options.operationId):undefined;
-    if(prior&&prior.action!=='stop')return this.receipt('start',prior.disposition,prior.code,prior.id,true);
     if(this.child&&this.state==='running'&&this.instance==='ready')return this.receipt('start','completed',null,null,true);
     if(this.child){
       const recovered=await this.reconcile();
@@ -171,12 +150,11 @@ export class ManagementRuntime {
   private async stopRequest(options:ManagementControlOptions):Promise<ManagementControlResult>{
     const active=this.operation;
     if(active&&!active.settled&&active.action==='stop')return this.finish(active,options);
-    if(active&&!active.settled){active.controller.abort();await active.done;}
+    if(active&&!active.settled)active.controller.abort();
     this.clearRetry();this.retryAttempt=0;
-    if(!this.child){this.resetStopped();return this.receipt('stop','completed',null,null,true);}
     const operation=this.beginOperation('stop',options.automatic??false,options.operationId);
     this.linkSignal(operation,options.signal);
-    void this.runStop(operation);
+    void this.runStop(operation,active?.done);
     return this.finish(operation,options);
   }
   private async restartRequest(options:ManagementControlOptions):Promise<ManagementControlResult>{
@@ -184,13 +162,11 @@ export class ManagementRuntime {
     if(active&&!active.settled){
       if(active.action==='restart')return this.finish(active,options);
       if(active.action==='stop')return this.receipt('restart','rejected','MANAGEMENT_STOPPING',active.id,false);
-      active.controller.abort();await active.done;
+      active.controller.abort();
     }
-    const prior=options.operationId?this.operations.get(options.operationId):undefined;
-    if(prior&&prior.action==='restart')return this.receipt('restart',prior.disposition,prior.code,prior.id,true);
     const operation=this.beginOperation('restart',options.automatic??false,options.operationId);
     this.linkSignal(operation,options.signal);
-    void this.runRestart(operation);
+    void this.runRestart(operation,active?.done);
     return this.finish(operation,options);
   }
   private beginOperation(action:'start'|'stop'|'restart',automatic:boolean,id?:string):Operation{
@@ -207,7 +183,8 @@ export class ManagementRuntime {
   private linkSignal(operation:Operation,signal?:AbortSignal):void{
     if(!signal)return;
     if(signal.aborted){operation.controller.abort();return;}
-    signal.addEventListener('abort',()=>operation.controller.abort(),{once:true});
+    const abort=()=>operation.controller.abort();signal.addEventListener('abort',abort,{once:true});
+    void operation.done.then(()=>signal.removeEventListener('abort',abort));
   }
   private checkAbort(operation:Operation):void{
     if(operation.controller.signal.aborted||this.disposed)throw new Error('MANAGEMENT_OPERATION_CANCELLED');
@@ -215,23 +192,25 @@ export class ManagementRuntime {
   private prepareStart(){this.clearRetry();this.code=null;this.codeAt=null;this.state='starting';this.phase='configuration';this.checkedAt=this.iso();}
   private async runStart(operation:Operation):Promise<void>{
     try{await this.startUp(operation);operation.settle('completed',null);}
-    catch(error){this.settleStartFailure(operation,error);}
+    catch(error){await this.settleStartFailure(operation,error);}
   }
-  private async runRestart(operation:Operation):Promise<void>{
+  private async runRestart(operation:Operation,previous?:Promise<void>):Promise<void>{
     try{
+      await previous;this.checkAbort(operation);
       await this.shutDown(operation);
       this.checkAbort(operation);
       this.prepareStart();
       await this.startUp(operation);
       operation.settle('completed',null);
-    }catch(error){this.settleStartFailure(operation,error);}
+    }catch(error){await this.settleStartFailure(operation,error);}
   }
-  private async runStop(operation:Operation):Promise<void>{
-    try{await this.shutDown(operation);operation.settle('completed',null);}
+  private async runStop(operation:Operation,previous?:Promise<void>):Promise<void>{
+    try{await previous;await this.shutDown(operation);operation.settle('completed',null);}
     catch(error){const code=errorCode(error);this.fail(code);operation.settle('failed',code);}
   }
-  private settleStartFailure(operation:Operation,error:unknown):void{
+  private async settleStartFailure(operation:Operation,error:unknown):Promise<void>{
     if(operation.controller.signal.aborted){
+      try{await this.shutDown(operation);}catch(cleanup){operation.settle('failed',errorCode(cleanup));return;}
       operation.settle('failed','MANAGEMENT_OPERATION_CANCELLED');
       return;
     }
@@ -310,17 +289,19 @@ export class ManagementRuntime {
     child.once('close',()=>{this.onChildClose(generation);});
   }
   private onChildMessage(raw:unknown,generation:number):void{
-    if(!raw||typeof raw!=='object')return;
+    if(!raw||typeof raw!=='object'||generation!==this.childGeneration||!this.child)return;
     const value=raw as Record<string,unknown>;
     if(value.type==='management.result'&&typeof value.id==='string'){
       const pending=this.pending.get(value.id);if(!pending)return;this.pending.delete(value.id);this.deps.timers.clearTimeout(pending.timer);
       if(value.ok===true)pending.resolve(managementJson(value.value));else pending.reject(new Error(typeof value.code==='string'&&/^[A-Z_0-9]{1,100}$/.test(value.code)?value.code:'MANAGEMENT_OPERATION_FAILED'));
       return;
     }
-    if(value.code==='INSTALL_READY'&&this.childGeneration===generation){
+    if(value.code==='INSTALL_READY'&&this.state!=='stopping'&&!this.disposed&&!this.operation?.controller.signal.aborted){
       const waiter=this.readyWaiters.get(generation);
       this.markReady(generation);
       if(waiter){this.readyWaiters.delete(generation);this.deps.timers.clearTimeout(waiter.timer);waiter.resolve();}
+    }else if(this.instance!=='ready'&&typeof value.code==='string'&&value.code!=='INSTALL_READY'&&value.code!=='INSTALL_STOPPED'&&/^[A-Z][A-Z0-9_]{0,99}$/.test(value.code)){
+      this.lastExitCode=value.code;
     }
   }
   private onChildClose(generation:number):void{
@@ -340,7 +321,7 @@ export class ManagementRuntime {
     if(isRetryable(code))this.scheduleRetry();
   }
   private markReady(generation:number):void{
-    if(this.childGeneration!==generation)return;
+    if(this.childGeneration!==generation||!this.child||this.state==='stopping'||this.disposed||this.operation?.controller.signal.aborted)return;
     this.state='running';this.phase='ready';this.instance='ready';this.code=null;this.codeAt=null;this.readyAt=this.iso();this.checkedAt=this.readyAt;this.retryAttempt=0;this.clearRetry();
   }
   private waitReady(generation:number,operation:Operation):Promise<void>{
@@ -380,7 +361,7 @@ export class ManagementRuntime {
       const generation=this.childGeneration;
       try{
         const value=await this.sendCall('runtime','status',null,this.deps.healthTimeoutMs);
-        if(this.childGeneration!==generation||!this.child)return false;
+        if(this.childGeneration!==generation||!this.child||this.state==='stopping'||this.disposed||this.operation?.controller.signal.aborted)return false;
         const phase=(value as {phase?:unknown}).phase;
         this.checkedAt=this.iso();
         if(typeof phase==='string'&&['ready','degraded'].includes(phase)){

@@ -16,7 +16,7 @@ const app=0x44464831;
 export function processAlive(pid:number){return ownerAlive(pid);}
 function ownerCurrent(owner:HostOwner){return ownerAlive(owner.pid,{...(owner.processStartedAt!==undefined?{processStartedAt:owner.processStartedAt}:{}),claimedAt:owner.startedAt});}
 function check(db:DatabaseSync){if(db.prepare('PRAGMA application_id').get()?.application_id!==app||db.prepare('PRAGMA user_version').get()?.user_version!==1)throw new Error('HOST_COORDINATION_UNSUPPORTED');db.prepare('SELECT instance_id,body FROM owners LIMIT 0').all();}
-export function owners(file=coordinationFile()):HostOwner[]{if(!existsSync(file))return [];const db=new DatabaseSync(file,{readOnly:true});try{check(db);return db.prepare('SELECT body FROM owners').all().map(row=>ownerSchema.parse(JSON.parse(String(row.body))));}finally{db.close();}}
+export function owners(file=coordinationFile()):HostOwner[]{if(!existsSync(file))return [];const db=new DatabaseSync(file,{readOnly:true});try{db.exec('PRAGMA busy_timeout=5000');check(db);return db.prepare('SELECT body FROM owners').all().map(row=>ownerSchema.parse(JSON.parse(String(row.body))));}finally{db.close();}}
 export function conflict(resources:readonly HostResource[],file?:string){return owners(file).find(owner=>ownerCurrent(owner)&&owner.resources.some(a=>resources.some(b=>overlap(a,b))));}
 export interface HostLease {readonly owner:HostOwner;release():void}
 /** Serializes competing claims, including directory aliases and ancestor overlaps, without deleting data. */
@@ -33,5 +33,5 @@ export function claim(resources:readonly HostResource[],identity:{profileId:stri
       db.prepare('INSERT INTO owners VALUES(?,?)').run(owner.instanceId,JSON.stringify(owner));db.exec('COMMIT');acquired=true;
     }catch(error){db.exec('ROLLBACK');throw error;}
   }finally{db.close();}
-  return {owner,release(){if(!acquired)return;const db=new DatabaseSync(file);try{check(db);db.prepare('DELETE FROM owners WHERE instance_id=? AND json_extract(body,\'$.pid\')=?').run(owner.instanceId,process.pid);acquired=false;}finally{db.close();}}};
+  return {owner,release(){if(!acquired)return;const db=new DatabaseSync(file);try{db.exec('PRAGMA busy_timeout=5000');check(db);db.prepare('DELETE FROM owners WHERE instance_id=? AND json_extract(body,\'$.pid\')=?').run(owner.instanceId,process.pid);acquired=false;}finally{db.close();}}};
 }

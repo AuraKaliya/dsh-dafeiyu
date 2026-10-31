@@ -4,12 +4,14 @@ import type {ManagementControlResult,ManagementLifecycleState,ManagementRuntimeP
 export const LIFECYCLE_LABELS:Record<ManagementLifecycleState,string>={stopped:'已停止',starting:'启动中',waiting:'等待依赖',running:'运行中',stopping:'正在停止',failed:'启动或运行失败'};
 export const PHASE_LABELS:Record<ManagementRuntimePhase,string>={idle:'空闲',configuration:'检查配置',qq:'等待 QQ',bridge:'准备桥接',process:'启动实例',ready:'实例就绪',stopping:'正在停止',stopped:'已停止'};
 const CODE_LABELS:Record<string,string>={
-  MANAGEMENT_STOPPING:'实例正在停止，请等待结束后再启动。',MANAGEMENT_START_UNCONFIRMED:'实例已创建但还没有确认就绪；正在通过 IPC 核对，不会重复启动。',
+  MANAGEMENT_STOPPING:'实例正在停止，请等待结束后再启动。',MANAGEMENT_START_UNCONFIRMED:'实例已创建但还没有确认就绪；正在核对实例状态，不会重复启动。',
   MANAGEMENT_STOP_UNCONFIRMED:'停止结果未能确认；请核对实例进程后再处理。',MANAGEMENT_INSTANCE_UNCONFIRMED:'实例仍存活但暂时无法确认就绪，请稍后刷新。',
   MANAGEMENT_RUNTIME_OFFLINE:'受管实例当前不在线。',MANAGEMENT_RUNTIME_DISPOSED:'管理中心已关闭。',MANAGEMENT_RESULT_UNKNOWN:'实例没有及时回复；结果待确认。',
   ONEBOT_NOT_RUNNING:'OneBot 没有运行；请先启动 SnowLuma/OneBot。',ONEBOT_LOGIN_REQUIRED:'OneBot 已启动，等待机器人账号登录。',ONEBOT_ACCOUNT_NOT_ATTACHED:'OneBot 已启动，但机器人账号尚未连接。',
   ONEBOT_TOKEN_UNAVAILABLE:'OneBot 令牌文件缺失或为空。',ONEBOT_SERVICE_START_FAILED:'OneBot 服务无法启动，请检查命令与路径。',ONEBOT_SERVICE_EXITED:'OneBot 服务启动后退出。',
   INSTALL_CONFIGURATION_REQUIRED:'配置不完整；请在下方模块中补全缺失字段。',INSTALL_NODE_UNAVAILABLE:'找不到可用的 Node.js 24 可执行文件。',INSTALL_PROCESS_EXITED:'实例进程已退出。',
+  HOST_INITIALIZATION_REQUIRED:'新增模块尚未初始化；停止实例并备份后运行 init。',HOST_REQUIRED_STORAGE_MISSING:'原有数据库缺失，请恢复备份；不会用空库替换原数据。',
+  HOST_CREDENTIAL_REFERENCE_MISSING:'模型凭据文件没有配置 DEEPSEEK_API_KEY，请在 DSH 中配置。',HOST_CREDENTIAL_STORE_UNSUPPORTED:'模型凭据文件格式不受支持，请使用 DSH 的版本 1 凭据文件。',
   BILI_SCHEMA_UNSUPPORTED:'B站数据库版本不受支持，需要显式迁移后再启动。',BILI_MIGRATION_REQUIRED:'B站数据库需要先完成迁移才能启动。',
 };
 

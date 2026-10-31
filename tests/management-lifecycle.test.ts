@@ -7,6 +7,7 @@ import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {Context} from '@deepseek-ai/cordis';
 import {ManagementRuntime} from '../packages/plugin/lib/management-runtime.js';
+import {OneBotCapability} from '../packages/plugin/lib/onebot-capability.js';
 import type {ManagementRuntimeDependencies} from '../packages/plugin/lib/management-runtime.js';
 import {testTempDir} from './test-temp.js';
 
@@ -15,10 +16,10 @@ const settingsFile=(root:string)=>{
   const file=join(root,'settings.json');
   writeFileSync(join(root,'token.txt'),token);
   writeFileSync(file,JSON.stringify({schemaVersion:1,dataDir:join(root,'data'),instanceName:'dafeiyu',model:{model:'fixture',credentialStore:join(root,'credentials.json')},
-    qq:{botId:'1994142241',ownerId:'756013063',tokenFile:join(root,'token.txt'),httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'},activity:{enabled:false}}));
+    qq:{botId:'10000001',ownerId:'10000002',tokenFile:join(root,'token.txt'),httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'},activity:{enabled:false}}));
   return file;
 };
-const onebotReady:typeof fetch=async()=>new Response(JSON.stringify({status:'ok',data:{user_id:1994142241}}),{status:200});
+const onebotReady:typeof fetch=async()=>new Response(JSON.stringify({status:'ok',data:{user_id:10000001}}),{status:200});
 class VirtualTimers {
   private sequence=0;private readonly handles=new Map<number,{fn:()=>void;ms:number}>();
   readonly port={setTimeout:(fn:()=>void,ms:number)=>{const id=++this.sequence;this.handles.set(id,{fn,ms});return id;},clearTimeout:(handle:unknown)=>{this.handles.delete(handle as number);}};
@@ -72,13 +73,14 @@ test('concurrent start requests share one operation and create one child',async(
   }finally{await runtime.dispose();rmSync(root,{recursive:true,force:true});}
 });
 
-test('a stop during a pending QQ wait cancels the operation without spawning an instance or scheduling retry',async()=>{
+test('a stop during a pending QQ wait cancels the operation without spawning an instance or scheduling retry',async t=>{
   const root=temp();const {list,spawnInstance}=children();const timers=new VirtualTimers();
   const hangingFetch:typeof fetch=(_input,init)=>new Promise((_resolve,reject)=>{
     const signal=init?.signal;const fail=()=>reject(new Error('aborted'));
     if(signal?.aborted)fail();else signal?.addEventListener('abort',fail,{once:true});
   });
   const runtime=make(root,{spawnInstance,timers:timers.port,fetchImpl:hangingFetch});
+  const cleanup=t.mock.method(OneBotCapability.prototype,'stop',async()=>{});
   try{
     const starting=runtime.control('start');
     await new Promise(done=>setTimeout(done,10));
@@ -86,7 +88,33 @@ test('a stop during a pending QQ wait cancels the operation without spawning an 
     const stopped=await runtime.control('stop',{wait:true});
     assert.equal(stopped.state,'stopped');assert.equal(stopped.disposition,'completed');assert.equal(list.length,0);
     assert.deepEqual(timers.pending,[]);assert.equal(runtime.status().retry.nextAt,null);
+    assert.equal(cleanup.mock.callCount(),1,'the pending capability must also be released');
     await starting;
+  }finally{await runtime.dispose();rmSync(root,{recursive:true,force:true});}
+});
+
+test('a delayed ready event after stopping cannot revive a closed generation',async()=>{
+  const root=temp(),{list,spawnInstance}=children(),runtime=make(root,{spawnInstance});
+  try{await runtime.control('start',{wait:true});await runtime.control('stop',{wait:true});
+    list[0]!.emit('message',{code:'INSTALL_READY'});
+    assert.equal(runtime.status().state,'stopped');assert.equal(runtime.status().instance,'absent');
+  }finally{await runtime.dispose();rmSync(root,{recursive:true,force:true});}
+});
+
+test('structured child startup failures retain their cause and are not retried as generic exits',async()=>{
+  for(const code of ['BILI_MIGRATION_REQUIRED','HOST_CREDENTIAL_REFERENCE_MISSING']){
+  const root=temp(),{list,spawnInstance}=children({autoReady:false}),timers=new VirtualTimers(),runtime=make(root,{spawnInstance,timers:timers.port});
+  try{await runtime.control('start');list[0]!.emit('message',{code});list[0]!.exit();
+    await new Promise(done=>setImmediate(done));assert.equal(runtime.status().code,code);assert.equal(runtime.status().retry.nextAt,null);
+  }finally{await runtime.dispose();rmSync(root,{recursive:true,force:true});}
+  }
+});
+
+test('concurrent restart requests during startup share the replacement operation',async()=>{
+  const root=temp(),{list,spawnInstance}=children({autoReady:false}),runtime=make(root,{spawnInstance});
+  try{await runtime.control('start');const first=runtime.control('restart'),second=runtime.control('restart');
+    await new Promise(done=>setTimeout(done,20));for(const child of list)child.ready();
+    const [a,b]=await Promise.all([first,second]);assert.equal(a.operationId,b.operationId);assert.equal(list.length,2);
   }finally{await runtime.dispose();rmSync(root,{recursive:true,force:true});}
 });
 
@@ -178,7 +206,7 @@ test('an unavailable node executable is reported and not retried',async()=>{
 test('a temporary dependency failure retries within bounds and cancels the remaining retries on success',async()=>{
   const root=temp();const {list,spawnInstance}=children();const timers=new VirtualTimers();
   let probes=0;
-  const flakyFetch:typeof fetch=async()=>{probes++;if(probes<=1)throw new Error('offline');return new Response(JSON.stringify({status:'ok',data:{user_id:1994142241}}),{status:200});};
+  const flakyFetch:typeof fetch=async()=>{probes++;if(probes<=1)throw new Error('offline');return new Response(JSON.stringify({status:'ok',data:{user_id:10000001}}),{status:200});};
   const runtime=make(root,{spawnInstance,timers:timers.port,fetchImpl:flakyFetch,retryDelaysMs:[5,5,5]});
   try{
     const first=await runtime.control('start',{wait:true});

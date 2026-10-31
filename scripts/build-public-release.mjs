@@ -63,6 +63,9 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     }
   }
   const plugin=json(join(repository,'packages/plugin/package.json'));
+  const emitted=readFileSync(join(repository,'packages/contracts/lib/protocol.js'),'utf8').match(/export const RELEASE_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
+  if(emitted!==plugin.version||json(join(repository,'package.json')).version!==plugin.version
+    ||moduleNames.some(name=>json(join(repository,'packages',name,'package.json')).version!==plugin.version))throw new Error('RELEASE_VERSION_MISMATCH');
   const manifest={name:'dsh-dafeiyu',version:plugin.version,type:'module',description:plugin.description,license:'MIT',
     main:'./runtime/plugin/lib/index.js',types:'./runtime/plugin/lib/index.d.ts',
     exports:{'.':{types:'./runtime/plugin/lib/index.d.ts',default:'./runtime/plugin/lib/index.js'},'./settings':'./runtime/plugin/lib/settings.js','./installation':'./runtime/plugin/lib/installation.js','./client':'./client.js','./package.json':'./package.json'},
@@ -74,30 +77,30 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   put(destination,'client.js',readFileSync(join(repository,'packages/plugin/client.js')));
   put(destination,'bin/dafeiyu.mjs',"#!/usr/bin/env node\nawait import('../runtime/plugin/bin/dafeiyu.mjs');\n");
   for(const file of ['README.md','LICENSE','NOTICE','cordis.patch.yml'])put(destination,file,readFileSync(join(repository,'packages/plugin',file)));
-  for(const tree of ['examples','docs'])for(const file of files(join(repository,'packages/plugin',tree)))put(destination,tree+'/'+portable(relative(join(repository,'packages/plugin',tree),file)),readFileSync(file));
+  for(const tree of ['examples','docs'])for(const file of files(join(repository,'packages/plugin',tree)).filter(file=>tree!=='docs'||!portable(relative(join(repository,'packages/plugin',tree),file)).startsWith('history/')))put(destination,tree+'/'+portable(relative(join(repository,'packages/plugin',tree),file)),readFileSync(file));
   put(destination,'.gitignore','node_modules/\n.runtime/\n**/node_modules/\n**/.runtime/\n**/build-tests/\nsource/packages/*/lib/\n**/dafeiyu-data/\n*.local.json\n*.token\n*.jsonl\nbilibili.session.json\n.credentials.yaml\n*.tsbuildinfo\n.env*\n*.sqlite*\n*.log\n');
   if(includeSource){
     for(const directory of moduleNames){const root=join(repository,'packages',directory);
       for(const name of ['package.json','tsconfig.json'])put(destination,'source/packages/'+directory+'/'+name,readFileSync(join(root,name)));
-      for(const tree of ['src','client','bin','assets','workers','windows','vendor','examples','docs'])for(const file of files(join(root,tree)))put(destination,'source/packages/'+directory+'/'+portable(relative(root,file)),readFileSync(file));
+      for(const tree of ['src','client','bin','assets','workers','windows','vendor','examples','docs'])for(const file of files(join(root,tree)).filter(file=>tree!=='docs'||!portable(relative(join(root,tree),file)).startsWith('history/')))put(destination,'source/packages/'+directory+'/'+portable(relative(root,file)),readFileSync(file));
       for(const name of ['README.md','LICENSE','NOTICE','cordis.patch.yml'])if(existsSync(join(root,name)))put(destination,'source/packages/'+directory+'/'+name,readFileSync(join(root,name)));
     }
     const development=json(join(repository,'package.json'));
     // Use the same lightweight development entry points in a source release.
     development.scripts={...development.scripts};delete development.scripts.host;
     put(destination,'source/package.json',JSON.stringify(development,null,2)+'\n');
-    for(const file of ['package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/build.mjs','scripts/generate-management.mjs','scripts/preview-management.mjs','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
+    for(const file of ['README.md','AGENTS.md','package-lock.json','tsconfig.json','tsconfig.base.json','tests/tsconfig.json','scripts/build.mjs','scripts/generate-management.mjs','scripts/preview-management.mjs','scripts/run-tests.mjs','scripts/cleanup-test-runs.mjs','scripts/build-public-release.mjs','scripts/check-public-release.mjs','scripts/build-public-release.d.mts','scripts/check-public-release.d.mts'])put(destination,'source/'+file,readFileSync(join(repository,file)));
     for(const file of files(join(repository,'scripts/testing')))put(destination,'source/'+portable(relative(repository,file)),readFileSync(file));
-    for(const file of ['repair-dsh-profile.mjs','repair-dsh-profile.d.mts','verify-local-deploy.mjs','verify-local-deploy.d.mts'])put(destination,'source/scripts/'+file,readFileSync(join(repository,'scripts',file)));
+    for(const file of ['check-fresh-install.mjs','prepare-local-deploy.mjs','repair-dsh-profile.mjs','repair-dsh-profile.d.mts','verify-local-deploy.mjs','verify-local-deploy.d.mts'])put(destination,'source/scripts/'+file,readFileSync(join(repository,'scripts',file)));
     const selected=['management.test.ts','management-client.test.ts','activity-rounds.test.ts','activity-idle.test.ts','context-snapshots.test.ts','current-api.test.ts','current-storage.test.ts','autobiography.test.ts','plugin-startup.test.ts','host-status.test.ts','test-temp.ts','smoke/host.test.ts','smoke/onebot.test.ts','tooling/test-selection.test.ts','tooling/test-storage.test.ts','tooling/deploy-check.test.ts'];
     const visited=new Set();function testFile(path){if(visited.has(path))return;visited.add(path);const bytes=readFileSync(join(repository,'tests',path),'utf8');put(destination,'source/tests/'+path,bytes);
       for(const match of bytes.matchAll(/(?:from\s*|import\()\s*['"](\.\/[^'"]+)['"]/g)){const dependency=portable(join(dirname(path),match[1])).replace(/\.js$/,'.ts');if(existsSync(join(repository,'tests',dependency)))testFile(dependency);}}
-    selected.push('bili-reading-integration.test.ts','bili-reading-delivery.test.ts','bili-media-service.test.ts','bili-migration.test.ts','installation-migration.test.ts','segment-handoff-store.test.ts','native-reading-runtime.test.ts','bili-browser-search.test.ts','bili-browser-frames.test.ts','tooling/profile-repair.test.ts');
-    selected.push('management-lifecycle.test.ts','management-ui.test.ts','management-startup.test.ts','onebot-capability.test.ts','bili-cookie-credentials.test.ts','bili-verification.test.ts','bili-diagnostics.test.ts','bili-foundation.test.ts');
+    selected.push('bili-reading-integration.test.ts','bili-reading-delivery.test.ts','bili-media-service.test.ts','bili-migration.test.ts','installation-migration.test.ts','installation-bootstrap.test.ts','segment-handoff-store.test.ts','native-reading-runtime.test.ts','bili-browser-search.test.ts','bili-browser-frames.test.ts','tooling/profile-repair.test.ts');
+    selected.push('management-lifecycle.test.ts','management-ui.test.ts','onebot-capability.test.ts','bili-cookie-credentials.test.ts','bili-verification.test.ts','bili-diagnostics.test.ts','bili-foundation.test.ts');
     selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }
-  let revision=null;try{revision=execFileSync('git',['rev-parse','HEAD'],{cwd:repository,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']}).trim();}catch{/* A source archive may have no Git metadata. */}
+  let revision=null;try{const options={cwd:repository,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']};if(resolve(execFileSync('git',['rev-parse','--show-toplevel'],options).trim())===repository)revision=execFileSync('git',['rev-parse','HEAD'],options).trim();}catch{/* A source archive may have no Git metadata. */}
   const contentHash=hash(JSON.stringify(files(destination).map(file=>[portable(relative(destination,file)),hash(readFileSync(file))]).sort((a,b)=>a[0].localeCompare(b[0]))));
   put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:6,runtime:2}},null,2)+'\n');
   const inventory=files(destination).map(file=>({path:portable(relative(destination,file)),bytes:lstatSync(file).size,sha256:hash(readFileSync(file))}));

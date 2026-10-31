@@ -17,7 +17,7 @@ test('HTTP status, platform code and blocked attempts survive restart without se
     await assert.rejects(c.read('video',{bvid:'BV1xx411c7mD'},new AbortController().signal,()=>{}),/BACKOFF/);
     await assert.rejects(c.read('video',{bvid:'BV1xx411c7mD'},new AbortController().signal,()=>{}),/BACKOFF/);
     assert.equal(calls,1);const logs=store.diagnostics.recent();assert.equal(logs[0]!.networkSent,false);assert.equal(logs[1]!.httpStatus,200);assert.equal(logs[1]!.platformCode,-352);assert.equal(logs[1]!.waitSource,'local-policy');assert.ok(logs[1]!.retryAt!-logs[1]!.endedAt<31000);assert.doesNotMatch(JSON.stringify(logs),/secret-value|never-persist|SESSDATA|BV1xx/);
-    store.close();store=new BiliStore(f.file,identity);assert.equal(store.diagnostics.recent().length,2);assert.equal(store.diagnostics.summary.failures,1);
+    store.close();store=new BiliStore(f.file,identity);assert.equal(store.diagnostics.recent().length,2);assert.equal(store.diagnostics.pauses[0]!.failures,1);
   }finally{store.close();}
 });
 test('Retry-After supports seconds and dates without the previous 15 minute floor',async()=>{
@@ -27,11 +27,11 @@ test('Retry-After supports seconds and dates without the previous 15 minute floo
 test('HTTP rejection retains an available bounded JSON error code and actual dispatch time',async()=>{const f=await fixture();try{const c=new BiliClient(BiliConfigSchema.parse({}),f.store,async()=>response(412,'{"code":-412,"message":"secret body must not persist"}'));await assert.rejects(c.read('video',{bvid:'BV1xx411c7mD'},new AbortController().signal,()=>{}),/BACKOFF/);const a=f.store.diagnostics.recent()[0]!;assert.equal(a.httpStatus,412);assert.equal(a.platformCode,-412);assert.ok(a.sentAt!>=a.at);assert.doesNotMatch(JSON.stringify(a),/secret body/);}finally{f.store.close();}});
 test('one persisted recovery probe and a diagnostic hold prevent retry storms',async()=>{
   const f=await fixture(),d=f.store.diagnostics,p=BiliRetryPolicySchema.parse({}),now=Date.now();try{const first=d.failure('video','risk',now,p,null);assert.equal(first.at,now+30000);assert.throws(()=>d.acquireProbe('early',now,1000),/BACKOFF/);d.acquireProbe('one',now+30001,1000);assert.throws(()=>d.acquireProbe('two',now+30002,1000),/PROBE_BUSY/);
-    d.success('one','nav');assert.equal(d.summary.failures,1);d.release('one');const second=d.failure('video','risk',now+30003,p,null);assert.equal(second.held,true);assert.throws(()=>d.acquireProbe('three',now+999999,1000),/DIAGNOSTIC_REQUIRED/);
+    d.success('one','nav');assert.equal(d.pauses[0]!.failures,1);d.release('one');const second=d.failure('video','risk',now+30003,p,null);assert.equal(second.held,true);assert.throws(()=>d.acquireProbe('three',now+999999,1000),/DIAGNOSTIC_REQUIRED/);
   }finally{f.store.close();}
 });
 test('local policy uses short increasing rate waits and only a matching probe resets failures',async()=>{
-  const f=await fixture(),d=f.store.diagnostics,p=BiliRetryPolicySchema.parse({}),now=Date.now();try{for(const [i,ms]of [10000,30000,60000].entries()){const at=now+i*100000;assert.equal(d.failure('video','rate-limit',at,p,null).at,at+ms);}assert.equal(d.summary.held,false);d.acquireProbe('ok',now+300000,1000);d.success('ok','video');assert.equal(d.summary.failures,0);}finally{f.store.close();}
+  const f=await fixture(),d=f.store.diagnostics,p=BiliRetryPolicySchema.parse({}),now=Date.now();try{for(const [i,ms]of [10000,30000,60000].entries()){const at=now+i*100000;assert.equal(d.failure('video','rate-limit',at,p,null).at,at+ms);}assert.equal(d.pauses.some(p=>p.held),false);d.acquireProbe('ok',now+300000,1000);d.success('ok','video');assert.equal(d.pauses.length,0);}finally{f.store.close();}
 });
 test('non-JSON, server errors, transport failure and media headers retain truthful stages',async()=>{
   for(const kind of ['html','network','media'] as const){const f=await fixture();try{const c=new BiliClient(BiliConfigSchema.parse({}),f.store,async()=>{if(kind==='network')throw new Error('socket error with secret');return response(200,kind==='html'?'<html>not JSON</html>':'data',{'content-type':kind==='html'?'text/html':'video/mp4'});});

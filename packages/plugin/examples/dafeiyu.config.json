@@ -29,8 +29,9 @@
     }
   },
   "activity": {
-    "enabled": true,
+    "enabled": false,
     "timeZone": "Asia/Shanghai",
-    "roundTokens": 100000, "roundDurationMs": 900000
+    "roundTokens": 100000,
+    "roundDurationMs": 900000
   }
 }

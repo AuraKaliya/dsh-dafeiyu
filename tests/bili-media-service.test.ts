@@ -124,9 +124,8 @@ test('the service search fallback passes client binding and browser metadata can
     // An endpoint-scoped anonymous pause makes the HTTP read raise BILI_DIAGNOSTIC_REQUIRED,
     // and the service still falls back once to the configured browser channel.
     const diagnostics=f.bili.store.diagnostics,policy={rateDelaysMs:[10000,30000,60000],riskDelayMs:30000};
-    diagnostics.failure('search','risk',Date.now(),policy,null,'anonymous-http',null);
-    diagnostics.failure('search','risk',Date.now(),policy,null,'anonymous-http',null);
-    assert.equal(diagnostics.summary.held,true);
+    for(const endpoint of ['search','video']){diagnostics.failure(endpoint,'risk',Date.now()-60000,policy,null,'anonymous-http',null);diagnostics.failure(endpoint,'risk',Date.now()-60000,policy,null,'anonymous-http',null);}
+    assert.equal(diagnostics.pauses.some(p=>p.held),true);
     const actions=f.extensions.get('bilibili')!.actions!,search=actions.find(action=>action.id==='bili_search')!,video=actions.find(action=>action.id==='bili_video')!;
     const result=await search.execute({requestId:'search-1',keyword:'养鱼'},f.context);assert.equal(result.status,'succeeded',result.errorCode);
     const boundary=await search.execute({requestId:'search-50',keyword:'养鱼',page:50,limit:1},f.context);

@@ -47,6 +47,20 @@ async function fixture(){
 }
 const count=(calls:string[],path:string)=>calls.filter(call=>call===path).length;
 
+test('management can validate a newly configured credential under an old anonymous hold',async()=>{
+  const f=await fixture();try{
+    const now=Date.now()-60000,policy={riskDelayMs:1000,rateDelaysMs:[1000]};
+    f.service.store.diagnostics.failure('video','risk',now,policy,null,'anonymous-http');
+    f.service.store.diagnostics.failure('video','risk',now+1000,policy,null,'anonymous-http');
+    const started=f.service.management('verify.start',{}) as {operationId:string};
+    await waitFor(()=>view(f.service.management('verify.status',{id:started.operationId})).operation?.state!=='pending','credential verification with anonymous history');
+    const result=view(f.service.management('verify.status',{id:started.operationId}));
+    assert.equal(result.operation?.state,'completed',result.operation?.errorCode??'');
+    assert.equal(count(f.calls,'/x/web-interface/nav'),1);
+    assert.ok(f.service.store.diagnostics.pauses.some(pause=>pause.scope==='anonymous-http'&&pause.held));
+  }finally{await f.close();}
+});
+
 test('management verification performs one login check and one designated read with separate results',async()=>{
   const f=await fixture();try{
     const status=view(f.service.management('verify.status',{}));
@@ -65,7 +79,7 @@ test('management verification performs one login check and one designated read w
     assert.equal(done.operation?.state,'completed');assert.equal(done.operation?.kind,'read');assert.equal(done.operation?.result?.read?.ok,true);
     assert.equal(done.operation?.result?.read?.title,'Fixture video');
     assert.equal(done.account.engine,'verified','login validity stays separate and visible');
-    assert.equal(count(f.calls,'/x/web-interface/nav'),2,'one login verification per flow');
+    assert.equal(count(f.calls,'/x/web-interface/nav'),1,'read verification reuses the current login check');
     assert.equal(count(f.calls,'/x/web-interface/view'),1,'exactly one designated business read');
     const meta=f.service.store.authMeta;assert.equal(meta?.lastVerifiedUid,'42');assert.ok(meta?.lastVerifiedAt);
     const serialized=JSON.stringify({status:f.service.management('verify.status',{}),operation:f.service.management('verify.status',{id:read.operationId})});
@@ -126,7 +140,7 @@ test('a local credential error fails before any network request and a restart in
 
 test('session, browser and owner-message accounts must agree before the capability is enabled',()=>{
   const config={schemaVersion:1,dataDir:'./data',instanceName:'dafeiyu',dshTools:true,model:{model:'fixture',credentialStore:'./credentials.json'},
-    qq:{botId:'1994142241',ownerId:'756013063',tokenFile:'./token.txt',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'},activity:{enabled:false},
+    qq:{botId:'10000001',ownerId:'10000002',tokenFile:'./token.txt',httpURL:'http://127.0.0.1:13000/',wsURL:'ws://127.0.0.1:13001/'},activity:{enabled:false},
     bilibili:{capabilities:false,session:{file:'./session.json',expectedUid:'42'},browser:{expectedUid:'43'},channel:{accountUid:'42',ownerUid:'7',sessionFile:'./channel.json'}}};
   const mismatch=InstallationSettingsSchema.safeParse(config);
   assert.equal(mismatch.success,false);

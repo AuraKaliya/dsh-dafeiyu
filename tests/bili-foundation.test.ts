@@ -40,8 +40,9 @@ test('HTTP and platform risk responses persist backoff and never retry automatic
   await assert.rejects(client.read('discover',{pn:1,ps:2},signal,()=>{}),/BACKOFF/);await assert.rejects(client.read('discover',{pn:2,ps:2},signal,()=>{}),/BACKOFF/);
   assert.equal(f.store.diagnostics.pauses.some(pause=>pause.scope==='anonymous-http'&&pause.endpoint==='discover'),true);assert.ok(f.store.clock.blockedUntil>Date.now());
 }finally{f.store.close();}}});
-test('media and subtitle resources keep their own scope instead of inheriting an API pause',async()=>{const f=await fixture();try{let calls=0;const client=new BiliClient(BiliConfigSchema.parse({}),f.store,async(url)=>{calls++;return url.pathname.startsWith('/x/')?response({},412):response({},200);}),signal=new AbortController().signal;
+test('media and subtitle resources keep their own scope after the shared cooldown',async t=>{const f=await fixture();try{let now=Date.now();t.mock.method(Date,'now',()=>now);let calls=0;const client=new BiliClient(BiliConfigSchema.parse({}),f.store,async(url)=>{calls++;return url.pathname.startsWith('/x/')?response({},412):response({},200);}),signal=new AbortController().signal;
   await assert.rejects(client.read('discover',{pn:1,ps:2},signal,()=>{}),/BACKOFF/);await assert.rejects(client.read('discover',{pn:2,ps:2},signal,()=>{}),/BACKOFF/);
+  await assert.rejects(client.external('https://cdn.bilivideo.com/video','media',null,signal,()=>{}),/BACKOFF/);now+=31000;
   const opened=await client.external('https://cdn.bilivideo.com/video','media',null,signal,()=>{});opened.response.close();assert.equal(calls,2,'the media request is not blocked by an API pause');
   assert.equal(f.store.diagnostics.pauses.some(pause=>pause.scope==='anonymous-http'&&pause.endpoint==='discover'),true);
 }finally{f.store.close();}});

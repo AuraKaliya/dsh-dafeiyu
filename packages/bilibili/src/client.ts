@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { BvidSchema,NumberIdSchema } from './config.js';
 import type { BiliConfig } from './config.js';
 import type { BiliStore } from './store.js';
-import { BiliCredentials } from './login-state.js';
+import { BiliCredentials,verifiedLoginUid } from './login-state.js';
 import type { CredentialSnapshot,CredentialStatus } from './login-state.js';
 import { biliUrl,nativeTransport,boundedBytes,boundedJson } from './http.js';
 import type { HttpTransport,HttpResponse } from './http.js';
@@ -46,11 +46,12 @@ export function browserBindingMatches(request:BiliBrowserRequest,value:BiliBrows
   }catch{return false;}}
   return value.accountUid===expectedUid&&bvidMatches&&value.section===request.section&&urlMatches&&!(request.section==='discover'&&value.feed!==(request.feed??'home'));
 }
-export interface BiliClientOptions {readonly now?:()=>number;readonly credentialTtlMs?:number;readonly probeTtlMs?:number}
+export interface BiliClientOptions {readonly now?:()=>number;readonly credentialTtlMs?:number;readonly instanceGeneration?:number}
 export class BiliClient {
   private readonly materials=new Map<string,{value:unknown;at:number;bytes:number}>();
   private materialHits=0;
   private readonly credentials:BiliCredentials;
+  private readonly instanceGeneration:number;
   get cacheStats(){return {entries:this.materials.size,bytes:[...this.materials.values()].reduce((sum,row)=>sum+row.bytes,0),hits:this.materialHits};}
   async material(key:string,ttlMs:number,read:()=>Promise<unknown>,signal:AbortSignal,guard:()=>void,cacheable:(value:unknown)=>boolean=()=>true):Promise<unknown>{
     guard();signal.throwIfAborted();const stamp=this.accountStamp(),id=stamp+':'+key,old=this.materials.get(id);
@@ -64,6 +65,7 @@ export class BiliClient {
   }
   private readonly context=new AsyncLocalStorage<{taskId:string|null;runId:string;operationId:string}>();
   constructor(readonly config:BiliConfig,private readonly store:BiliStore,private readonly transport:HttpTransport=nativeTransport,options:BiliClientOptions={}){
+    this.instanceGeneration=options.instanceGeneration??0;
     this.credentials=new BiliCredentials(config.session,{...(options.credentialTtlMs===undefined?{}:{ttlMs:options.credentialTtlMs}),...(options.now?{now:options.now}:{})});
   }
   withContext<T>(context:{taskId:string|null;runId:string;operationId:string},work:()=>T):T{return this.context.run({taskId:context.taskId,runId:context.runId,operationId:context.operationId},work);}
@@ -76,10 +78,13 @@ export class BiliClient {
     if(auth==='configured-session'){const uid=this.config.session?.expectedUid??null;return uid?{scope:'verified-http',uid}:{scope:'shared',uid:null};}
     return {scope:'anonymous-http',uid:null};
   }
+  httpRoute(endpoint?:string){
+    const account=this.accountStatus(),route:BiliScope=this.config.session?'verified-http':'anonymous-http',uid=this.config.session?.expectedUid??null;
+    const http=this.store.diagnostics.route({scope:route,uid,endpoint:endpoint??null}),shared=this.store.diagnostics.route({scope:'shared'});
+    return {account,route,http,shared,backoffUntil:Math.max(this.store.clock.blockedUntil,http.until??0,shared.until??0)||null};
+  }
   status(){
-    const now=Date.now(),account=this.accountStatus(),route:BiliScope=account.engine==='verified'?'verified-http':'anonymous-http';
-    const uid=route==='verified-http'?account.verifiedUid:null;
-    const http=this.store.diagnostics.route({scope:route,uid},now),shared=this.store.diagnostics.route({scope:'shared'},now);
+    const now=Date.now(),{account,route,http,shared}=this.httpRoute();
     const browser=this.store.diagnostics.route({scope:'browser'},now),resource=this.store.diagnostics.route({scope:'resource'},now);
     const describe=(state:RouteState)=>({state:state.held?'diagnostic-required':state.reason==='cooldown'?'cooldown':'available',kind:state.kind,endpoint:state.endpoint,waitUntil:state.until===null?null:new Date(state.until).toISOString()});
     const pause=shared.available?http:shared,held=http.held||shared.held;
@@ -90,8 +95,9 @@ export class BiliClient {
       note:'登录有效与接口可用分别判断：登录校验成功不会解除视频、评论等接口的风控；匿名HTTP暂停不影响已验证账号读取；媒体与字幕资源单独记录。'};
   }
   /** Login/verification challenges on a verified or shared scope must not silently switch channels. */
-  fallbackAllowed(){const account=this.accountStatus(),route:BiliScope=account.engine==='verified'?'verified-http':'anonymous-http';
-    return !this.store.diagnostics.pauses.some(pause=>(pause.scope==='shared'||pause.scope===route)&&['login','permission','verification'].includes(pause.kind));}
+  fallbackAllowed(){const {account,route}=this.httpRoute();
+    if(account.configured&&(account.credentialState!=='ready'||['expired','mismatch'].includes(account.engine)))return false;
+    return !this.store.diagnostics.pauses.some(pause=>(pause.scope==='shared'||pause.scope===route)&&(['login','permission','verification'].includes(pause.kind)||route==='verified-http'&&pause.kind==='risk'));}
   async browserRead(port:BiliBrowserPort,request:BiliBrowserRequest,signal:AbortSignal,guard:()=>void){
     if(!this.config.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');
     const auth='configured-session' as const,record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint:request.section==='discover'?'discover':request.section==='comments'?'comments':'video',transport:'dsh-browser',auth,origin:'task',taskId:request.taskId,runId:request.runId,operationId:request.operationId,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
@@ -117,11 +123,18 @@ export class BiliClient {
     return this.json('nav',url,credential?.cookie??null,signal,check,credential===null,permit?{permit}:{});
   }
   /** Verify the configured login with one request; callers share one in-flight check per credential generation. */
-  async verifyLogin(signal:AbortSignal,permit?:string):Promise<CredentialStatus>{
+  verificationPermit(endpoint:string):string{
+    const read=this.credentials.read();if(read.state!=='ready')throw new Error(read.state==='invalid'?read.code:'BILI_SESSION_NOT_CONFIGURED');
+    return this.store.diagnostics.authorizeProbe({scope:'verified-http',uid:read.snapshot.uid,endpoint,
+      credentialGeneration:read.snapshot.generation,instanceGeneration:this.instanceGeneration}).id;
+  }
+  async verifyLogin(caller:AbortSignal,permit?:string,force=true):Promise<CredentialStatus>{
     const read=this.credentials.read();
     if(read.state==='not-configured')return this.credentials.status();
     if(read.state==='invalid')throw new Error(read.code);
-    await this.credentials.identity(read.snapshot,(snapshot,shared,probe)=>this.fetchNav(snapshot,shared,probe),signal,{force:true,...(permit?{permit}:{})});
+    const timeout=AbortSignal.timeout(this.config.timeoutMs),signal=AbortSignal.any([caller,timeout]);
+    try{await this.credentials.identity(read.snapshot,(snapshot,shared,probe)=>this.fetchNav(snapshot,shared,probe),signal,{force,...(permit?{permit}:{})});}
+    catch(error){if(timeout.aborted&&!caller.aborted)throw new Error('BILI_VERIFICATION_TIMEOUT');throw error;}
     return this.credentials.status();
   }
   async probeRead(endpoint:'video'|'search'|'comments'|'discover',input:unknown,options:{signal:AbortSignal;guard?:()=>void;permit?:string}){
@@ -129,18 +142,21 @@ export class BiliClient {
   }
   dispose(){this.credentials.dispose();}
   private async slot(id:string,signal:AbortSignal,guard:()=>void,routing:{auth:'anonymous'|'configured-session';transport:'http'|'dsh-browser';endpoint:string},permit?:string){guard();signal.throwIfAborted();
-    const query=this.scopeFor(routing.endpoint,routing.auth,routing.transport);
-    if(routing.transport==='http'){this.store.diagnostics.acquireProbe(id,Date.now(),this.config.timeoutMs,permit,query);this.store.diagnostics.assertAvailable(query);}
+    const query={...this.scopeFor(routing.endpoint,routing.auth,routing.transport),endpoint:routing.endpoint};
+    if(routing.transport==='http'){this.store.diagnostics.acquireProbe(id,Date.now(),this.config.timeoutMs,permit,query,
+      {credentialGeneration:this.accountStatus().credentialGeneration,instanceGeneration:this.instanceGeneration});this.store.diagnostics.assertAvailable(query);}
     else this.store.diagnostics.assertAvailable({scope:'browser',uid:null});
-    const wait=this.store.reserveRequest(Date.now(),this.config.minIntervalMs,this.config.timeoutMs,true);if(wait)await setTimeout(wait,undefined,{signal});guard();signal.throwIfAborted();}
+    const wait=this.store.reserveRequest(Date.now(),this.config.minIntervalMs,this.config.timeoutMs);if(wait)await setTimeout(wait,undefined,{signal});guard();signal.throwIfAborted();}
   private async request<T>(endpoint:BiliAttempt['endpoint'],url:URL,cookie:string|null,signal:AbortSignal,guard:()=>void,consume:(response:HttpResponse,record:BiliAttempt,reject:(kind:BiliFailureKind,code:string,backoff?:boolean)=>never)=>Promise<T>,extra:Readonly<Record<string,string>>={},options:{allowWhole?:boolean;permit?:string}={}):Promise<T>{
     const context=this.context.getStore(),auth=cookie?'configured-session'as const:'anonymous'as const;
     const record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint,transport:'http',auth,origin:context?'task':'maintenance',taskId:context?.taskId??null,runId:context?.runId??null,operationId:context?.operationId??null,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
-    const routing={auth,transport:'http' as const,endpoint},query=this.scopeFor(endpoint,auth,'http');
+    const routing={auth,transport:'http' as const,endpoint},query={...this.scopeFor(endpoint,auth,'http'),endpoint};
     let response:HttpResponse|undefined;
     const reject=(kind:BiliFailureKind,code:string,backoff=false):never=>{record.kind=kind;record.errorCode=code;
       if(backoff){const supplied=parseRetryAfter(response?.headers['retry-after'],Date.now()),policy={...this.config.retry,...(this.config.backoffMs===undefined?{}:{riskDelayMs:this.config.backoffMs,rateDelaysMs:[this.config.backoffMs]})};
-        const retry=this.store.diagnostics.failure(endpoint,kind,Date.now(),policy,supplied?.at??null,query.scope,query.uid);record.retryAt=retry.at;record.waitSource=retry.source;}
+        const failureEndpoint=kind==='login'&&query.scope==='verified-http'?'nav':endpoint;
+        const scope=['permission','verification'].includes(kind)?'shared':query.scope;
+        const retry=this.store.diagnostics.failure(failureEndpoint,kind,Date.now(),policy,supplied?.at??null,scope,query.uid);record.retryAt=retry.at;record.waitSource=retry.source;}
       throw new Error(code);};
     try{await this.slot(record.id,signal,guard,routing,options.permit);record.networkSent=null;record.sentAt=Date.now();response=await this.transport(url,{...headers,...extra,...(cookie?{Cookie:cookie}:{})},signal);
       record.networkSent=true;record.httpStatus=response.status;const mime=response.headers['content-type']?.split(';')[0]?.trim().toLowerCase();record.contentType=mime&&/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mime)&&mime.length<=100?mime:null;
@@ -154,6 +170,7 @@ export class BiliClient {
       record.kind??=record.networkSent===false?'local':signal.aborted?'cancelled':record.httpStatus===null?'network':'response';
       if(record.kind==='network'&&record.retryAt===null&&!signal.aborted){const retry=this.store.diagnostics.failure(endpoint,'network',Date.now(),{...this.config.retry,rateDelaysMs:[2000,5000,10000]},null,query.scope,query.uid);record.retryAt=retry.at;record.waitSource=retry.source;}
       if(record.networkSent===false){record.outcome='blocked';record.retryAt=this.store.clock.blockedUntil||null;record.waitSource='existing-state';}
+      if(endpoint!=='nav'&&cookie&&record.kind==='login')this.credentials.invalidate('expired');
       // Never forward transport text: it may contain platform bodies or connection details.
       throw new Error(code);
     }finally{record.endedAt=Date.now();this.store.diagnostics.release(record.id);this.store.diagnostics.record(record);}
@@ -161,7 +178,9 @@ export class BiliClient {
   private async json(endpoint:Endpoint,url:URL,cookie:string|null,signal:AbortSignal,guard:()=>void,anonymousNav=false,options:{permit?:string}={}){return this.request(endpoint,url,cookie,signal,guard,async(response,record,reject)=>{
     const raw=boundedJson(await boundedBytes(response,this.config.maxResponseBytes,signal,guard)),envelope=z.object({code:z.number().int().safe(),data:z.unknown().optional()}).parse(raw);record.platformCode=envelope.code;
     if([-352,-412,-509,-799].includes(envelope.code))reject('risk','BILI_BACKOFF',true);
-    if(envelope.code!==0&&!(anonymousNav&&envelope.code===-101))reject(envelope.code===-101?'login':'response',envelope.code===-101?'BILI_LOGIN_REQUIRED':envelope.code===-404||envelope.code===62002?'BILI_NOT_FOUND':'BILI_PLATFORM_ERROR',envelope.code===-101);return envelope.data;},undefined,options);}
+    if(envelope.code!==0&&!(anonymousNav&&envelope.code===-101))reject(envelope.code===-101?'login':'response',envelope.code===-101?'BILI_LOGIN_REQUIRED':envelope.code===-404||envelope.code===62002?'BILI_NOT_FOUND':'BILI_PLATFORM_ERROR',envelope.code===-101);
+    if(endpoint==='nav'&&cookie){try{verifiedLoginUid(envelope.data,this.config.session!.expectedUid);}catch(error){reject('login',error instanceof Error?error.message:'BILI_LOGIN_REQUIRED',true);}}
+    return envelope.data;},undefined,options);}
   private wbiKeys(nav:unknown){const keys=WBI.safeParse(nav);if(!keys.success)throw new Error('BILI_WBI_UNAVAILABLE');return {img:keys.data.wbi_img.img_url,sub:keys.data.wbi_img.sub_url};}
   async read(endpoint:Endpoint,input:unknown,caller:AbortSignal,guard:()=>void,options:{permit?:string}={}){
     if(!Object.hasOwn(endpoints,endpoint))throw new Error('BILI_ENDPOINT_DENIED');
@@ -178,6 +197,7 @@ export class BiliClient {
       const identity=await this.credentials.identity(snapshot,(value,shared,permit)=>this.fetchNav(value,shared,permit),signal,options.permit?{permit:options.permit}:{});
       checked();nav=identity.nav;
     }
+    if(!snapshot&&spec.signed)nav=await this.fetchNav(null,signal,undefined,checked);
     if(endpoint==='nav'){if(nav===null)nav=await this.fetchNav(null,signal,undefined,checked);return nav;}
     const url=biliUrl('https://api.bilibili.com'+spec.path,'api');
     if(spec.signed){const keys=this.wbiKeys(nav);url.search=wbiQuery(params,keys.img,keys.sub,Math.floor(Date.now()/1000));}

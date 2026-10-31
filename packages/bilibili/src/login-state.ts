@@ -9,9 +9,8 @@ const CredentialFileSchema=z.strictObject({
   bili_jct:z.string().regex(/^[a-fA-F0-9]{32}$/).optional(),
   buvid3:z.string().max(200).regex(/^[a-zA-Z0-9_-]+$/).optional(),
 });
-export type CredentialValue=z.infer<typeof CredentialFileSchema>;
 /** A credential snapshot is complete and immutable; only its fingerprint leaves this module. */
-export interface CredentialSnapshot {readonly uid:string;readonly fingerprint:string;readonly generation:number;readonly cookie:string;readonly value:CredentialValue}
+export interface CredentialSnapshot {readonly uid:string;readonly fingerprint:string;readonly generation:number;readonly cookie:string}
 export type CredentialRead={state:'not-configured'}|{state:'invalid';code:string}|{state:'ready';snapshot:CredentialSnapshot};
 export interface BiliIdentity {readonly uid:string;readonly fingerprint:string;readonly at:number;readonly expiresAt:number;readonly nav:unknown}
 export type IdentityVerify=(snapshot:CredentialSnapshot,signal:AbortSignal,permit?:string)=>Promise<unknown>;
@@ -25,6 +24,12 @@ export interface CredentialStatus {
 interface Inflight {fingerprint:string;controller:AbortController;waiters:number;settled:boolean;promise:Promise<BiliIdentity>}
 const NETWORK_CODES=new Set(['BILI_HTTP_FAILED','BILI_BACKOFF','BILI_DIAGNOSTIC_REQUIRED','BILI_CANCELLED','BILI_HEADERS_FAILED','BILI_RESPONSE_LIMIT']);
 const codeOf=(error:unknown,fallback='BILI_REQUEST_FAILED'):string=>error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:fallback;
+export function verifiedLoginUid(nav:unknown,expectedUid:string):string{
+  const account=z.object({isLogin:z.literal(true),mid:z.union([NumberIdSchema,z.number().int().positive().safe().transform(String)])}).safeParse(nav);
+  if(!account.success)throw new Error('BILI_LOGIN_REQUIRED');
+  if(account.data.mid!==expectedUid)throw new Error('BILI_ACCOUNT_MISMATCH');
+  return account.data.mid;
+}
 
 /**
  * Credential snapshot and login verification cache shared by every HTTP entry.
@@ -60,12 +65,18 @@ export class BiliCredentials {
         this.currentFingerprint=fingerprint;this.currentGeneration++;this.verified=null;this.lastKnownState='unverified';
         const inflight=this.inflight;if(inflight){this.inflight=null;inflight.controller.abort();}
       }
-      const snapshot:CredentialSnapshot={uid:value.uid,fingerprint,generation:this.currentGeneration,cookie:'SESSDATA='+value.SESSDATA+(value.buvid3?'; buvid3='+value.buvid3:''),value};
+      const snapshot:CredentialSnapshot={uid:value.uid,fingerprint,generation:this.currentGeneration,cookie:'SESSDATA='+value.SESSDATA+(value.buvid3?'; buvid3='+value.buvid3:'')};
       return {state:'ready',snapshot};
-    }catch(error){return {state:'invalid',code:codeOf(error,'BILI_SESSION_INVALID')};}
+    }catch(error){
+      const code=codeOf(error,'BILI_SESSION_INVALID');
+      if(this.currentFingerprint!==null){this.currentFingerprint=null;this.currentGeneration++;}
+      this.invalidate(code==='BILI_ACCOUNT_MISMATCH'?'mismatch':'interrupted');
+      return {state:'invalid',code};
+    }
   }
   /** Reject a result produced under a credential snapshot that is no longer current. */
   assertCurrent(snapshot:CredentialSnapshot):void{
+    const read=this.read();if(read.state==='invalid')throw new Error(read.code);
     if(this.currentFingerprint!==snapshot.fingerprint||snapshot.generation!==this.currentGeneration)throw new Error('BILI_SESSION_CHANGED');
   }
   private cached(snapshot:CredentialSnapshot):BiliIdentity|null{
@@ -74,20 +85,18 @@ export class BiliCredentials {
     return this.now()<verified.expiresAt?verified:null;
   }
   identity(snapshot:CredentialSnapshot,verify:IdentityVerify,caller:AbortSignal,options:{force?:boolean;permit?:string}={}):Promise<BiliIdentity>{
+    if(caller.aborted)return Promise.reject(new Error('BILI_CANCELLED'));
     const cached=options.force?null:this.cached(snapshot);
     if(cached)return Promise.resolve(cached);
     const existing=this.inflight;
     if(existing&&existing.fingerprint===snapshot.fingerprint&&!existing.settled)return this.join(existing,caller);
     if(existing&&!existing.settled){this.inflight=null;existing.controller.abort();}
     const controller=new AbortController();
-    const entry:Inflight={fingerprint:snapshot.fingerprint,controller,waiters:1,settled:false,promise:Promise.resolve() as unknown as Promise<BiliIdentity>};
+    const promise=this.runVerification(snapshot,verify,controller.signal,options.permit);
+    const entry:Inflight={fingerprint:snapshot.fingerprint,controller,waiters:0,settled:false,promise};
     this.inflight=entry;
-    entry.promise=this.runVerification(snapshot,verify,controller.signal,options.permit).then(identity=>{
-      entry.settled=true;if(this.inflight===entry)this.inflight=null;return identity;
-    },error=>{
-      entry.settled=true;if(this.inflight===entry)this.inflight=null;throw error;
-    });
-    void entry.promise.catch(()=>{});
+    const finish=()=>{entry.settled=true;if(this.inflight===entry)this.inflight=null;};
+    void promise.then(finish,finish);
     return this.join(entry,caller);
   }
   private join(entry:Inflight,signal:AbortSignal):Promise<BiliIdentity>{
@@ -105,14 +114,13 @@ export class BiliCredentials {
     this.lastKnownState='unverified';
     try{
       const nav=await verify(snapshot,signal,permit);
+      if(signal.aborted)throw new Error('BILI_CANCELLED');
       // Re-read before consuming the result: a replaced file must not commit to the newer generation.
       const current=this.read();
       if(current.state==='invalid')throw new Error(current.code);
       if(current.state!=='ready'||current.snapshot.generation!==snapshot.generation)throw new Error('BILI_SESSION_CHANGED');
       this.assertCurrent(snapshot);
-      const account=z.object({isLogin:z.literal(true),mid:z.union([NumberIdSchema,z.number().int().positive().safe().transform(String)])}).safeParse(nav);
-      if(!account.success)throw new Error('BILI_LOGIN_REQUIRED');
-      if(account.data.mid!==snapshot.uid)throw new Error('BILI_ACCOUNT_MISMATCH');
+      verifiedLoginUid(nav,snapshot.uid);
       const identity:BiliIdentity={uid:snapshot.uid,fingerprint:snapshot.fingerprint,at:this.now(),expiresAt:this.now()+this.ttlMs,nav};
       if(this.currentFingerprint!==snapshot.fingerprint)throw new Error('BILI_SESSION_CHANGED');
       this.verified=identity;this.lastResult={at:identity.at,kind:'success',code:null,uid:identity.uid};
@@ -127,6 +135,7 @@ export class BiliCredentials {
           else if(current.state==='ready'&&current.snapshot.generation!==snapshot.generation)code='BILI_SESSION_CHANGED';
         }catch{/* the local check below stays authoritative */}
       }
+      if(this.currentFingerprint!==snapshot.fingerprint||this.currentGeneration!==snapshot.generation)throw new Error(code);
       this.lastResult={at:this.now(),kind:'failure',code,uid:snapshot.uid};
       if(code==='BILI_LOGIN_REQUIRED'){this.verified=null;this.lastKnownState='expired';}
       else if(code==='BILI_ACCOUNT_MISMATCH'){this.verified=null;this.lastKnownState='mismatch';}
@@ -141,6 +150,7 @@ export class BiliCredentials {
   }
   status():CredentialStatus{
     const read=this.read();
+    if(this.verified&&this.now()>=this.verified.expiresAt){this.verified=null;this.lastKnownState='unverified';}
     const verified=this.verified;
     const state:CredentialStatus['engine']=this.inflight&&!this.inflight.settled?'verifying':verified?'verified':this.lastKnownState;
     const iso=(value:number|null):string|null=>value===null?null:new Date(value).toISOString();
@@ -152,7 +162,6 @@ export class BiliCredentials {
       engine:state,verifiedUid:verified?.uid??null,verifiedAt:iso(verified?.at??null),expiresAt:iso(verified?.expiresAt??null),credentialGeneration:this.currentGeneration,
       lastResult:this.lastResult?{at:new Date(this.lastResult.at).toISOString(),kind:this.lastResult.kind,code:this.lastResult.code,uid:this.lastResult.uid}:null,note};
   }
-  /** Read-only view for management responses; never includes the cookie, file path or fingerprint. */
   dispose():void{
     const inflight=this.inflight;if(inflight&&!inflight.settled){this.inflight=null;inflight.controller.abort();}
     this.verified=null;

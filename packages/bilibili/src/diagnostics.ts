@@ -17,8 +17,6 @@ const permitSchema=z.strictObject({id:z.uuid(),scope:BiliScopeSchema,uid:z.strin
   credentialGeneration:z.number().int().nonnegative(),instanceGeneration:z.number().int().nonnegative(),expiresAt:z.number().nonnegative(),used:z.boolean()});
 const probeSchema=z.strictObject({id:z.string().max(100),scope:BiliScopeSchema,uid:z.string().regex(/^[1-9]\d{0,19}$/).nullable(),endpoint:z.string().max(40).nullable(),until:z.number().nonnegative(),permitId:z.uuid().nullable()});
 const controlSchema=z.strictObject({version:z.literal(2),pauses:z.array(pauseSchema).max(24),probe:probeSchema.nullable(),permit:permitSchema.nullable()});
-/** The persisted v5 shape; migrated once and never written again. */
-const legacyControlSchema=z.object({failures:z.number().int().nonnegative(),kind:z.string().max(40).nullable(),endpoint:z.string().max(40).nullable(),held:z.boolean(),probeId:z.string().nullable(),probeUntil:z.number().nonnegative()});
 export type BiliPause=z.infer<typeof pauseSchema>;
 export type BiliControlState=z.infer<typeof controlSchema>;
 export const initialControls=()=>({version:2 as const,pauses:[],probe:null,permit:null});
@@ -56,19 +54,10 @@ export class BiliDiagnostics {
   constructor(private readonly db:DatabaseSync){}
   private atomic<T>(work:()=>T):T{this.db.exec('BEGIN IMMEDIATE');try{const value=work();this.db.exec('COMMIT');return value;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   get state():BiliControlState{
-    const raw=JSON.parse(String(this.db.prepare('SELECT body FROM bili_http_control WHERE id=1').get()?.body));
-    const parsed=controlSchema.safeParse(raw);
-    if(parsed.success)return parsed.data;
-    // A v5 row is only reachable through the explicit migration; never silently reinterpret it.
-    legacyControlSchema.parse(raw);
-    throw new Error('BILI_MIGRATION_REQUIRED');
+    return controlSchema.parse(JSON.parse(String(this.db.prepare('SELECT body FROM bili_http_control WHERE id=1').get()?.body)));
   }
   private set(value:BiliControlState){this.db.prepare('UPDATE bili_http_control SET body=? WHERE id=1').run(JSON.stringify(controlSchema.parse(value)));}
   get pauses():readonly BiliPause[]{return this.state.pauses;}
-  /** Compatibility view for older callers and reports. */
-  get summary(){const pauses=this.state.pauses,held=pauses.some(p=>p.held),latest=[...pauses].sort((a,b)=>b.updatedAt-a.updatedAt)[0];
-    return {version:2 as const,failures:pauses.reduce((max,p)=>Math.max(max,p.failures),0),kind:latest?.kind??null,endpoint:latest?.endpoint??null,held,
-      probeId:this.state.probe?.id??null,probeUntil:this.state.probe?.until??0,pauses};}
   route(query:PauseQuery,now=Date.now()):RouteState{
     const pauses=this.state.pauses.filter(pause=>matches(pause,query));
     const blocked=pauses.filter(pause=>pause.held||pause.until>now);
@@ -77,17 +66,16 @@ export class BiliDiagnostics {
     return {available:blocked.length===0,held,until:latest?latest.until:null,kind:latest?.kind??null,endpoint:latest?.endpoint??null,
       reason:held?'diagnostic-required':blocked.length?'cooldown':null,pauses};
   }
-  /** A permit only bypasses pauses confirmed to belong to anonymous HTTP; shared holds still apply. */
+  /** Only an explicit account recheck may test its own login-expired pause. */
   private permitCovers(state:BiliControlState,query:PauseQuery,now:number):boolean{
     const permit=state.permit;if(!permit||permit.expiresAt<=now)return false;
-    if(permit.scope!=='anonymous-http'||state.probe?.permitId!==permit.id)return false;
-    return query.scope==='anonymous-http'&&(permit.endpoint===null||query.endpoint===null||permit.endpoint===query.endpoint);
+    return permit.used&&state.probe?.permitId===permit.id&&permit.scope===query.scope&&permit.uid===query.uid&&permit.endpoint===query.endpoint;
   }
   assertAvailable(query:PauseQuery,now=Date.now()):void{
     const state=this.state,permitCovered=this.permitCovers(state,query,now);
     for(const pause of state.pauses){
       if(!matches(pause,query))continue;
-      if(pause.scope==='anonymous-http'&&permitCovered&&state.probe?.permitId===state.permit?.id){
+      if(pause.scope==='verified-http'&&pause.kind==='login'&&pause.endpoint==='nav'&&permitCovered){
         if(pause.until>now)throw new Error('BILI_BACKOFF');
         continue;
       }
@@ -97,34 +85,31 @@ export class BiliDiagnostics {
   }
   /** Short-lived, single-use, UID/credential/instance-bound management probe authorisation. */
   authorizeProbe(input:{scope:BiliScope;uid:string|null;endpoint:string|null;credentialGeneration:number;instanceGeneration:number;ttlMs?:number;now?:number}):{id:string;expiresAt:number}{
-    if(input.scope!=='anonymous-http')throw new Error('BILI_PROBE_NOT_PERMITTED');
+    if(input.scope!=='verified-http'||!input.uid||!input.endpoint)throw new Error('BILI_PROBE_NOT_PERMITTED');
     const now=input.now??Date.now(),state=this.state;
     const blocking=state.pauses.filter(pause=>matches(pause,{scope:input.scope,uid:input.uid,endpoint:input.endpoint})&&(pause.held||pause.until>now));
-    if(!blocking.length)throw new Error('BILI_PROBE_NOT_REQUIRED');
-    if(blocking.some(pause=>pause.scope!=='anonymous-http'))throw new Error('BILI_PROBE_NOT_PERMITTED');
-    const evidence=this.conditionAttempt(blocking[0]!);
-    if(!evidence||evidence.transport!=='http'||evidence.auth!=='anonymous')throw new Error('BILI_PROBE_NOT_PERMITTED');
+    if(Number(this.db.prepare('SELECT blocked_until FROM bili_clock WHERE id=1').get()?.blocked_until)>now)throw new Error('BILI_BACKOFF');
+    if(blocking.some(pause=>pause.scope!=='verified-http'||pause.kind!=='login'||pause.endpoint!=='nav'))throw new Error('BILI_PROBE_NOT_PERMITTED');
     const permit={id:randomUUID(),scope:input.scope,uid:input.uid,endpoint:input.endpoint,credentialGeneration:input.credentialGeneration,instanceGeneration:input.instanceGeneration,
       expiresAt:now+(input.ttlMs??60_000),used:false};
     this.atomic(()=>{const s=this.state;this.set({...s,permit,probe:null});});
     return {id:permit.id,expiresAt:permit.expiresAt};
   }
   get permit(){return this.state.permit;}
-  dropPermit():void{this.atomic(()=>{const s=this.state;if(s.permit)this.set({...s,permit:null});});}
-  acquireProbe(id:string,now:number,timeout:number,permitId?:string,query?:PauseQuery):void{
+  dropPermit(id:string):void{this.atomic(()=>{const s=this.state;if(s.permit?.id===id)this.set({...s,permit:null});});}
+  acquireProbe(id:string,now:number,timeout:number,permitId?:string,query?:PauseQuery,binding?:{credentialGeneration:number;instanceGeneration:number}):void{
     this.atomic(()=>{
       const s=this.state,relevant=query?s.pauses.filter(pause=>matches(pause,query)):s.pauses;
       let permit=null;
       if(permitId){
         const candidate=s.permit;
         if(!candidate||candidate.id!==permitId||candidate.used||candidate.expiresAt<=now)throw new Error('BILI_PROBE_EXPIRED');
-        if(candidate.scope!=='anonymous-http')throw new Error('BILI_PROBE_NOT_PERMITTED');
-        const evidence=this.conditionAttempt(s.pauses[0]);
-        if(!evidence||evidence.auth!=='anonymous')throw new Error('BILI_PROBE_NOT_PERMITTED');
+        if(!query||candidate.scope!==query.scope||candidate.uid!==query.uid||candidate.endpoint!==query.endpoint||!binding
+          ||candidate.credentialGeneration!==binding.credentialGeneration||candidate.instanceGeneration!==binding.instanceGeneration)throw new Error('BILI_PROBE_NOT_PERMITTED');
         permit={...candidate,used:true};
       }
       if(relevant.some(pause=>pause.held)&&!permit)throw new Error('BILI_DIAGNOSTIC_REQUIRED');
-      if(permit&&relevant.some(pause=>pause.held&&pause.scope!=='anonymous-http'))throw new Error('BILI_PROBE_NOT_PERMITTED');
+      if(permit&&relevant.some(pause=>pause.held&&(pause.scope!=='verified-http'||pause.kind!=='login'||pause.endpoint!=='nav')))throw new Error('BILI_PROBE_NOT_PERMITTED');
       const paused=relevant.filter(pause=>pause.failures>0);
       if(paused.length&&s.probe&&s.probe.until>now&&s.probe.id!==id)throw new Error('BILI_PROBE_BUSY');
       const maxUntil=relevant.reduce((max,pause)=>Math.max(max,pause.until),0);
@@ -144,8 +129,7 @@ export class BiliDiagnostics {
       const scope=query?.scope??probe.scope;
       const pauses=s.pauses.filter(pause=>{
         if(pause.endpoint!==endpoint)return true;
-        if(scope==='shared')return false;
-        return !(pause.scope===scope||(scope==='anonymous-http'&&pause.scope==='anonymous-http'));
+        return !(pause.scope===scope&&pause.uid===(query?.uid??probe.uid));
       });
       this.set({...s,pauses,probe:null});
       this.refreshClock();
@@ -168,15 +152,6 @@ export class BiliDiagnostics {
     const pauses=this.state.pauses,until=pauses.reduce((max,pause)=>Math.max(max,pause.until),0),anyHeld=pauses.some(pause=>pause.held);
     this.db.prepare('UPDATE bili_clock SET blocked_until=max(blocked_until,?),error=? WHERE id=1').run(until,anyHeld?'BILI_DIAGNOSTIC_REQUIRED':'BILI_BACKOFF');
     if(!pauses.length)this.db.prepare('UPDATE bili_clock SET error=NULL WHERE id=1').run();
-  }
-  /** Trusted maintenance only: resolve the exact diagnosed condition, never a global "clear all". */
-  resolveHold(scope?:BiliScope,endpoint?:string|null):void{
-    this.atomic(()=>{
-      const now=Date.now(),s=this.state;
-      if(s.pauses.some(pause=>pause.until>now))throw new Error('BILI_BACKOFF');
-      this.set({...s,pauses:s.pauses.filter(pause=>!(pause.scope===scope&&pause.endpoint===endpoint))});
-      this.refreshClock();
-    });
   }
   /** Latest failed attempt that evidences one pause; migration uses the same rule. */
   conditionAttempt(pause?:Pick<BiliPause,'kind'|'endpoint'>):BiliAttempt|null{

@@ -1,6 +1,7 @@
 export interface LocalDeployFault {code:string;detail?:unknown}
 export interface LocalDeployInspection {
   ready:boolean;
+  online:boolean;
   profile:string;
   package:{version:string|null;revision:string|null;stores:{bilibili?:number;runtime?:number}|null}|null;
   checks:{
@@ -11,6 +12,6 @@ export interface LocalDeployInspection {
   faults:LocalDeployFault[];
 }
 export interface LocalDeployOptions {
-  profile?:string;settings?:string;data?:string;backup?:string;expectVersion?:string;expectBiliStore?:number;expectRuntimeStore?:number;now?:number|Date;
+  profile?:string;settings?:string;data?:string;backup?:string;expectVersion?:string;expectBiliStore?:number;expectRuntimeStore?:number;now?:number|Date;requireOnline?:boolean;
 }
 export declare function inspectLocalDeploy(options?:LocalDeployOptions):LocalDeployInspection;

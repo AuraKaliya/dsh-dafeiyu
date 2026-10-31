@@ -18,3 +18,5 @@ __pycache__/
 *.jsonl
 bilibili.session.json
 .credentials.yaml
+
+bilibili*session*.json

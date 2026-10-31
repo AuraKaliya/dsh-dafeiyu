@@ -25,7 +25,7 @@ import { BiliMedia,rejectRestricted } from './media.js';
 import * as pages from './pages.js';
 
 export const BILI_READ_IMPLEMENTATION='1' as const;
-export const BILI_ACTIONS=['bili_status','bili_discover','bili_search_sources','bili_search','bili_video','bili_comments','bili_subtitles','bili_danmaku','bili_media','bili_observe_select','bili_frames','bili_reading_save','bili_reading_get'] as const;
+export const BILI_ACTIONS=['bili_status','bili_discover','bili_search','bili_video','bili_comments','bili_subtitles','bili_danmaku','bili_media','bili_observe_select','bili_frames','bili_reading_save','bili_reading_get'] as const;
 /** Owner-only management actions; they are never model tools. */
 export const BILI_MANAGEMENT_ACTIONS=['status','verify.start','verify.read','verify.status','verify.cancel'] as const;
 const verifyReadSchema=z.strictObject({endpoint:z.enum(['discover','video','search','comments']),bvid:BvidSchema.optional(),aid:NumberIdSchema.optional(),keyword:z.string().trim().min(1).max(100).optional(),
@@ -44,7 +44,6 @@ const browserReadSchema=z.strictObject({...request,bvid:BvidSchema.optional(),ai
   if(value.section==='frame'?value.positionMs===undefined:value.positionMs!==undefined)ctx.addIssue({code:'custom',path:['positionMs'],message:'Only a frame read requires an explicit position'});
   if(value.section!=='discover'&&value.feed!==undefined)ctx.addIssue({code:'custom',path:['feed'],message:'Only discovery accepts a feed'});
 });
-const searchSource=z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('topic'),id:z.string().max(60)}),z.strictObject({kind:z.literal('owner'),sourceHash:z.string().length(64)}),z.strictObject({kind:z.literal('page'),pageId:z.uuid(),fieldId:z.string().max(80)})]);
 const searchSchema=BiliSearchQuerySchema.extend(request);
 const commentsSchema=z.strictObject({...request,...paging,aid:NumberIdSchema.optional(),parent:NumberIdSchema.nullable().optional(),sort:z.enum(['time','hot']).default('hot'),seen:z.array(NumberIdSchema).max(500).optional(),cursor:z.union([z.uuid(),BiliCommentCursorSchema]).optional()})
   .refine(value=>!!value.aid!==!!value.cursor,'Provide aid or a returned cursor');
@@ -70,7 +69,7 @@ export class BiliService extends Service {
   private finalBackoff:number|null=null;private finalHeld=false;
   private verification:{id:string;kind:'login'|'read';startedAt:number;controller:AbortController;promise:Promise<void>}|undefined;
   private readonly instanceGeneration=Date.now();
-  constructor(ctx:Context,config:Config,transport?:HttpTransport,private readonly browser?:BiliBrowserPort){super(ctx,'dafeiyuBilibili');this.config=biliServiceConfigSchema.parse(config);if(this.config.settings.browser&&!browser)throw new Error('BILI_BROWSER_BRIDGE_REQUIRED');this.store=new BiliStore(join(this.config.dataDir,'bilibili.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore,this.config.settings.maxPages);this.client=new BiliClient(this.config.settings,this.store,transport);
+  constructor(ctx:Context,config:Config,transport?:HttpTransport,private readonly browser?:BiliBrowserPort){super(ctx,'dafeiyuBilibili');this.config=biliServiceConfigSchema.parse(config);if(this.config.settings.browser&&!browser)throw new Error('BILI_BROWSER_BRIDGE_REQUIRED');this.store=new BiliStore(join(this.config.dataDir,'bilibili.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore,this.config.settings.maxPages);this.client=new BiliClient(this.config.settings,this.store,transport,{instanceGeneration:this.instanceGeneration});
     try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'bilibili',version:RELEASE_VERSION,agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['bilibili.read.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
       contexts:[readingContext(this.store,view=>ctx.dafeiyu.taskContextScope(view,'bilibili',BILI_SCENE),()=>this.ready())],
       resourceProofs:{current:proof=>this.ready()&&this.store.valid(proof),epoch:()=>this.ready()?this.store.epoch():'closed',publicView:(proof,view)=>this.publicView(proof,view)}});}catch(e){this.store.close();throw e;}
@@ -81,9 +80,6 @@ export class BiliService extends Service {
   private guard(context:ExecutionContext){const access=this.access(context);return ()=>{if(!this.ready())throw new Error('BILI_UNAVAILABLE');access.guard();this.ctx.dafeiyu.authorizeCapabilityResource(context,'bilibili',BILI_SCENE);};}
   private exposed(access:PersonaAccess,page:BiliPage){const source=this.store.observation(page);if(!source||!access.historyTracked||!access.historyDependencies?.some(d=>(d.kind==='execution-source'||d.kind==='capability')&&biliHash(d.ref)===biliHash(source)))throw new Error('OBSERVATION_NOT_EXPOSED');
     const dependency=access.historyDependencies.find(d=>(d.kind==='execution-source'||d.kind==='capability')&&biliHash(d.ref)===biliHash(source));if(!dependency||!access.validateHistory?.([dependency]))throw new Error('SOURCE_STALE');}
-  private ownerQuery(context:ExecutionContext){const instruction=this.ctx.dafeiyu.explicitTaskInstruction(context,'bilibili');if(!instruction)return null;const match=/^B站搜索[：:]\s*([^\r\n]{1,100})$/u.exec(instruction.text.trim());return match?{sourceHash:instruction.sourceHash,text:match[1]!.trim()}:null;}
-  private sources(context:ExecutionContext,pageId?:string){const access=this.access(context);if(pageId){const page=this.store.page(biliOwner(context),pageId);this.exposed(access,page);return {sources:page.fields.map(f=>({source:{kind:'page',pageId:page.id,fieldId:f.id},text:f.text}))};}
-    const owner=this.ownerQuery(context);return {sources:[...this.config.settings.topics.map(t=>({source:{kind:'topic',id:t.id},text:t.text})),...(owner?[{source:{kind:'owner',sourceHash:owner.sourceHash},text:owner.text}]:[])],note:'没有关键词时可先discover；页面关键词须指定已经读到的pageId。'};}
   private keyword(input:z.infer<typeof searchSchema>){const keyword=input.keyword;if(!keyword||redactContent(keyword).redacted)throw new Error('BILI_QUERY_PRIVATE_INPUT');return keyword;}
   private commentsInput(context:ExecutionContext,raw:unknown){
     const input=commentsSchema.parse(raw),cursor=typeof input.cursor==='string'?this.store.commentCursor(context,input.cursor)
@@ -113,7 +109,6 @@ export class BiliService extends Service {
     catch(error){const failure=code(error);if(write&&!['INVALID_INPUT','BILI_INVALID_DATA','BILI_PAGE_UNAVAILABLE','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','SOURCE_STALE','OBSERVATION_NOT_EXPOSED','SOURCE_SUPPRESSED','HISTORY_UNTRACKED','EMPTY_OBSERVATION','CAPACITY_EXCEEDED','IDEMPOTENCY_CONFLICT','PRIVATE_INPUT_REJECTED','BILI_READING_REQUEST_CONFLICT','BILI_READING_RECEIPT_UNAVAILABLE','BILI_READING_SOURCE_REQUIRED'].includes(failure))throw error;return {status:'failed' as const,effects:'none' as const,completeness:'unknown' as const,data:['BILI_BACKOFF','BILI_DIAGNOSTIC_REQUIRED'].includes(failure)?z.json().parse({diagnostic:this.client.status()}):null,sources:[],receipts:[],errorCode:failure};}})});
     return [make('bili_status','查看B站实际配置、各通道暂停范围与恢复条件；只读本机状态，不请求平台，不解除暂停。',z.strictObject({}),false,()=>this.client.status()),
       make('bili_discover','读取一页公开热门视频，返回观察及下一页，不自动播放或保存。',z.strictObject({...request,...paging}),false,(c,raw)=>{const i=z.object({...request,...paging}).parse(raw);return this.readPage(c,i.requestId,{action:'discover',...i},'discover',`discover:${i.page}:${i.limit}`,async(s,g)=>pages.listing(await this.client.read('discover',{pn:i.page,ps:i.limit},s,g),'discover',i.page,i.limit));}),
-      make('bili_search_sources','列出可用搜索词来源：公开种子、真实主人明确的B站搜索指令，或当前Task已经看过的pageId中的公开字段。不接受自填query。',z.strictObject({...request,pageId:z.uuid().optional()}),false,(c,i)=>this.sources(c,z.object({pageId:z.uuid().optional()}).parse(i).pageId)),
       make('bili_search','按关键词搜索B站视频；程序自动选择当前可用通道并保留任务来源，返回结构化候选、缺失字段与下一页。不要再先查来源ID或计算字符偏移。',searchSchema,false,(c,raw)=>{const i=searchSchema.parse(raw),keyword=this.keyword(i);return this.readPage(c,i.requestId,{action:'search',...i,keyword},'search','search:'+biliHash([BILI_READ_IMPLEMENTATION,keyword,i.page,i.limit,i.order]),async(s,g)=>{try{const listed=pages.listing(await this.client.read('search',{search_type:'video',keyword,page:i.page,page_size:i.limit,order:i.order},s,g),'search',i.page,i.limit);return {...listed,data:BiliSearchResultSchema.parse({keyword,order:i.order,...listed.data,coverage:listed.coverage})};}catch(error){if(!(error instanceof Error)||error.message!=='BILI_DIAGNOSTIC_REQUIRED'||!this.browser||!this.config.settings.browser||!c.taskId||!this.client.fallbackAllowed())throw error;}const value=await this.client.browserRead(this.browser,{taskId:c.taskId,runId:c.runId,operationId:c.operationId,section:'search',keyword,order:i.order,page:i.page},s,g),items=(value.items??[]).slice(0,i.limit).map(v=>({bvid:v.bvid,aid:null,title:v.title,author:v.author,publishedAt:null,views:null,durationSeconds:null})),data=BiliSearchResultSchema.parse({keyword,order:i.order,page:i.page,limit:i.limit,items,nextPage:items.length<i.limit||i.page>=50?null:i.page+1,nextPageReason:items.length<i.limit?'platform-no-more':i.page>=50?'local-page-limit':'next-page',coverage:['浏览器搜索页已加载结果；播放量与发布时间未读取','按实际登录账号读取；未执行发布动作']});return {data,fields:items.map((v,n)=>({id:'title:'+n,text:v.title})).filter(f=>f.text.trim()),coverage:data.coverage};});}),
       make('bili_video','读取视频信息、简介和分P，未处理画面或音轨。',z.strictObject({...request,bvid:BvidSchema}),false,(c,raw)=>{const i=z.object({...request,bvid:BvidSchema}).parse(raw);return this.readPage(c,i.requestId,{action:'video',...i},'video','video:'+i.bvid,async(s,g)=>{try{const value=await this.client.read('video',{bvid:i.bvid},s,g);rejectRestricted(value);const page=pages.video(value);if(page.data.bvid!==i.bvid)throw new Error('BILI_VIDEO_BINDING_MISMATCH');return page;}catch(e){
         if(code(e)==='BILI_DIAGNOSTIC_REQUIRED'&&this.client.fallbackAllowed()&&this.browser&&this.config.settings.browser&&c.taskId){const value=await this.client.browserRead(this.browser,{taskId:c.taskId,runId:c.runId,operationId:c.operationId,section:'video',bvid:i.bvid},s,g);
@@ -146,10 +141,9 @@ export class BiliService extends Service {
     if(action==='verify.cancel'){const {id}=z.strictObject({id:z.uuid().optional()}).parse(input??{});return this.cancelVerification(id);}
     throw new Error('MANAGEMENT_ACTION_INVALID');
   }
-  private biliRoute(){
-    const account=this.client.accountStatus(),route=account.engine==='verified'?'verified-http' as const:'anonymous-http' as const;
-    const http=this.store.diagnostics.route({scope:route,uid:route==='verified-http'?account.verifiedUid:null}),shared=this.store.diagnostics.route({scope:'shared'});
-    return {account,route,http,shared,diagnosticRequired:http.held||shared.held,backoffUntil:Math.max(http.until??0,shared.until??0)||null};
+  private biliRoute(endpoint?:string){
+    const route=this.client.httpRoute(endpoint);
+    return {...route,diagnosticRequired:route.http.held||route.shared.held};
   }
   private managementStatus(id?:string){
     const client=this.client.status(),route=this.biliRoute();
@@ -167,9 +161,11 @@ export class BiliService extends Service {
       endpoint:kind==='login'?'nav':target?.endpoint??null,target:target?z.json().parse(target):null,result:null,errorCode:null};
     this.store.beginVerification(record);
     const controller=new AbortController();
-    const entry={id,kind,startedAt:Date.now(),controller,promise:Promise.resolve() as unknown as Promise<void>};
+    const entry={id,kind,startedAt:Date.now(),controller,promise:Promise.resolve()};
     this.verification=entry;
-    entry.promise=this.runVerification(record,target,controller.signal).catch(()=>{}).finally(()=>{if(this.verification?.id===id)this.verification=undefined;});
+    entry.promise=this.runVerification(record,target,controller.signal).catch(error=>{
+      const current=this.store.verification(id);if(current?.state==='pending')this.store.updateVerification(id,{...current,state:'failed',errorCode:code(error),updatedAt:new Date().toISOString()});
+    }).finally(()=>{if(this.verification?.id===id)this.verification=undefined;});
     return {accepted:true,reused:false,operationId:id,state:'pending',kind};
   }
   private cancelVerification(id?:string){
@@ -206,31 +202,29 @@ export class BiliService extends Service {
     const credential=this.client.accountStatus();
     if(credential.credentialState==='not-configured'){finish('failed','BILI_SESSION_NOT_CONFIGURED',{stage:'local',ok:false,recommendation:'在配置文件中填写 bilibili.session.file 与 expectedUid；Cookie 不在管理界面或聊天中提交。'});return;}
     if(credential.credentialState==='invalid'){finish('failed','BILI_SESSION_INVALID',{stage:'local',ok:false,recommendation:'凭据文件路径、格式或 UID 校验失败；修正本地文件后重试。'});return;}
-    const route=this.biliRoute();
-    if(!route.http.available&&route.http.held){finish('failed','BILI_DIAGNOSTIC_REQUIRED',{stage:'pause',ok:false,recommendation:'当前读取通道处于诊断暂停；请核对暂停范围，共享或来源不明的暂停不会自动放行。'});return;}
-    if(!route.http.available&&route.http.until!==null&&route.http.until>Date.now()){finish('failed','BILI_BACKOFF',{stage:'cooldown',ok:false,waitUntil:new Date(route.http.until).toISOString(),recommendation:'冷却尚未结束；到时间后再验证，不占用悬挂请求。'});return;}
+    const route=this.biliRoute('nav');
+    if(route.backoffUntil!==null&&route.backoffUntil>Date.now()){finish('failed','BILI_BACKOFF',{stage:'cooldown',ok:false,waitUntil:new Date(route.backoffUntil).toISOString(),recommendation:'冷却尚未结束；到时间后再验证。'});return;}
     let permit:string|undefined;
-    try{
-      if(this.store.diagnostics.pauses.some(pause=>pause.scope==='anonymous-http'&&pause.held))
-        permit=this.store.diagnostics.authorizeProbe({scope:'anonymous-http',uid:null,endpoint:target?.endpoint??'nav',credentialGeneration:credential.credentialGeneration,instanceGeneration:this.instanceGeneration}).id;
-    }catch{/* an anonymous association without evidence stays conservative */}
     let login:{ok:boolean;code:string|null;uid:string|null};
-    try{const account=await this.client.verifyLogin(signal,permit);login={ok:account.engine==='verified',code:account.engine==='verified'?null:account.lastResult?.code??'BILI_LOGIN_UNVERIFIED',uid:account.verifiedUid};}
+    try{permit=this.client.verificationPermit('nav');const account=await this.client.verifyLogin(signal,permit,record.kind==='login');login={ok:account.engine==='verified',code:account.engine==='verified'?null:account.lastResult?.code??'BILI_LOGIN_UNVERIFIED',uid:account.verifiedUid};}
     catch(error){login={ok:false,code:code(error),uid:null};}
+    finally{if(permit)this.store.diagnostics.dropPermit(permit);}
+    if(signal.aborted||this.verification?.id!==id)return;
     const verifiedAt=login.ok?new Date().toISOString():null;
     this.saveAccountHistory(login,credential.uid,verifiedAt);
     if(record.kind==='login'){finish(login.ok?'completed':login.code==='BILI_SESSION_CHANGED'?'interrupted':'failed',login.ok?null:login.code,{stage:'login',login},login.uid);return;}
     if(!login.ok){finish(login.code==='BILI_SESSION_CHANGED'?'interrupted':'failed',login.code,{stage:'login',login,read:null},login.uid);return;}
     if(this.client.accountStatus().credentialGeneration!==record.credentialGeneration){finish('interrupted','BILI_SESSION_CHANGED',{stage:'credential',login,read:null},login.uid);return;}
     try{
-      const value=await this.client.probeRead(target!.endpoint,this.verifyReadInput(target!),{signal,...(permit?{permit}:{})});
+      permit=this.client.verificationPermit(target!.endpoint);
+      const value=await this.client.probeRead(target!.endpoint,this.verifyReadInput(target!),{signal,permit});
       finish('completed',null,{stage:'read',login,read:{ok:true,...this.verifyReadCount(target!.endpoint,value)}},login.uid);
     }catch(error){
-      finish('failed',code(error),{stage:'read',login,read:{ok:false,code:code(error),endpoint:target!.endpoint,recommendation:'账号有效但该接口仍受限；不会在匿名、Cookie、浏览器之间循环尝试。'}},login.uid);
-    }
+      finish(code(error)==='BILI_SESSION_CHANGED'?'interrupted':'failed',code(error),{stage:'read',login,read:{ok:false,code:code(error),endpoint:target!.endpoint,recommendation:'账号有效但该接口读取失败；请检查本次诊断。'}},login.uid);
+    }finally{if(permit)this.store.diagnostics.dropPermit(permit);}
   }
   flush(){if(this.gate.state==='closed')return;this.store.drain((raw,id)=>{const row=z.object({scope:ExecutionScopeSchema,origin:RunOriginSchema,runId:z.uuid(),operationId:z.uuid(),type:z.string(),at:z.string(),data:z.record(z.string(),z.json())}).parse(raw);if(row.scope.kind!=='task')throw new Error('BILI_AUDIT_SCOPE_INVALID');this.ctx.dafeiyu.journal.appendExecutionOnce({agentId:row.scope.agentId,route:row.scope.scopeKey,taskId:row.scope.taskId,runId:row.runId,traceId:row.runId,operationId:row.operationId,causedBy:null,type:row.type,plugin:'bilibili',pluginVersion:RELEASE_VERSION,occurredAt:row.at,sources:[],data:{...row.data,origin:row.origin}},id);});}
-  recover(){this.store.recover();this.store.interruptVerifications();this.store.diagnostics.clearRuntimeLeases();this.verification?.controller.abort();this.verification=undefined;this.flush();this.gate.recovered();}activate(){this.gate.activate();}whenIdle(){return this.tail;}cancelRunning(){this.controller.abort();}
+  recover(){this.store.recover();this.store.interruptVerifications();this.store.diagnostics.clearRuntimeLeases();this.verification?.controller.abort();this.verification=undefined;this.flush();this.gate.recovered();}activate(){this.gate.activate();}async whenIdle(){await Promise.allSettled([this.tail,this.verification?.promise]);}cancelRunning(){this.controller.abort();this.cancelVerification();}
   get health(){const route=this.finalHealth?null:this.biliRoute();return {lifecycle:this.gate.state,media:!!this.media,counts:this.finalHealth??this.store.counts,backoffUntil:route===null?this.finalBackoff:route.backoffUntil,diagnosticRequired:route===null?this.finalHeld:route.diagnosticRequired,...(this.finalHealth?{}:{diagnostic:this.client.status()})};}
-  close(){if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.verification?.controller.abort();this.closing=(async()=>{await this.tail;const route=this.biliRoute();this.flush();this.finalHealth=this.store.counts;this.finalBackoff=route.backoffUntil;this.finalHeld=route.diagnosticRequired;this.client.dispose();this.unbindMedia?.();this.handle.dispose();this.store.close();this.gate.close();})();return this.closing;}
+  close(){if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();const verification=this.verification?.promise;this.cancelVerification();this.closing=(async()=>{await Promise.allSettled([this.tail,verification]);const route=this.biliRoute();this.flush();this.finalHealth=this.store.counts;this.finalBackoff=route.backoffUntil;this.finalHeld=route.diagnosticRequired;this.client.dispose();this.unbindMedia?.();this.handle.dispose();this.store.close();this.gate.close();})();return this.closing;}
 }
