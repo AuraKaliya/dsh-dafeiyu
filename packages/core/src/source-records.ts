@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { pluginRecordOf,SessionSeq } from '@deepseek-ai/dsh-session';
+import { pluginRecordOf,SessionSeq,SessionLogOffset } from '@deepseek-ai/dsh-session';
 import type { Session,SessionEvent } from '@deepseek-ai/dsh-session';
 import { SourceDependencySchema } from '@dafeiyu/contracts';
 import type { SourceDependency } from '@dafeiyu/contracts';
@@ -17,6 +17,7 @@ export const sourceRecordSchema=z.strictObject({...scopeFields,schemaVersion:z.l
 const requestSchema=z.strictObject({...scopeFields,turn:z.number().int(),step:z.number().int(),parents:z.array(z.number().int().nonnegative()),dependencies:dependenciesSchema,
   contexts:z.array(z.strictObject({owner:z.string(),region:z.string(),id:z.string(),version:z.string(),hash:z.string(),sources:z.array(z.strictObject({ref:z.string(),version:z.string(),hash:z.string()}))})).default([])});
 export type SourceRecord=z.infer<typeof sourceRecordSchema>;
+export type RequestSources=z.infer<typeof requestSchema>;
 export const provenanceRecordSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('plugin:dafeiyu/source-record'),seq:z.number().transform(SessionSeq),data:sourceRecordSchema}),
   z.object({type:z.literal('plugin:dafeiyu/request-sources'),seq:z.number().transform(SessionSeq),data:requestSchema}),
@@ -26,7 +27,7 @@ declare module '@deepseek-ai/dsh-session' { interface PluginRecordMap {
   'plugin:dafeiyu/source-record':SourceRecord;
   'plugin:dafeiyu/request-sources':z.infer<typeof requestSchema>;
 } }
-export function readProvenance(session:Session){return session.snapshotEvents().flatMap(event=>{
+export function readProvenance(session:Session,fromSeq=0){return session.snapshotEvents(SessionLogOffset(fromSeq)).flatMap(event=>{
   const record=pluginRecordOf(event);return record&&(record.type==='plugin:dafeiyu/source-record'||record.type==='plugin:dafeiyu/request-sources')
     ?[provenanceRecordSchema.parse(record)]:[];
 });}

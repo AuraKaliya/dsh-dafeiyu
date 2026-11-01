@@ -966,7 +966,8 @@ export class ExecutionCoordinator {
       unknownOperations:operations.filter(op=>op.state==='unknown'||op.outcome?.effects==='unknown'||op.outcome?.status==='unknown').map(op=>op.id),
       summary:!safe.redacted&&text.length<=1000?text:'本轮可见结果留在DSH归档，需按权限回查。',
       gaps:[...(safe.redacted||text.length>1000?['检查点未携带完整结果正文']:[]),...(omitted?[`${omitted}项上下文未装入`]:[]),...(memory.intent(access).blocking?['存在未解决的阻断异议，任务尚未完成']:[])],createdAt:new Date().toISOString()});
-    const reference=memory.captureContinuity({...access,historyDependencies:deps},checkpoint);this.d.store.bindInput(run.id,'continuity-reference',reference);
+    const evidence=this.evidence.get(run.id)!;let reference!:ReturnType<ExecutionMemoryPort['captureContinuity']>;
+    evidence.readSources(()=>{reference=memory.captureContinuity({...evidence.access(access),historyDependencies:deps},checkpoint);});this.d.store.bindInput(run.id,'continuity-reference',reference);
     this.d.store.checkpoint(run.id,{kind:'continuity',checkpointId:reference.id,hash:reference.hash});this.d.store.appendExecutionEvent(run.id,'continuity.bound',{checkpointId:reference.id,hash:reference.hash});this.flushEvents();
   }
   private bindAction(run:StoredRun,action:BoundAction,signal:AbortSignal,guard:()=>void,commitGuard:()=>void=guard):NativeAction{

@@ -6,7 +6,7 @@ import type { CompactionProvider,CompactionScope,SourceDependency } from '@dafei
 import type { ContextEvidenceView } from './context-runtime.js';
 import type { HistoryFrame } from './history-frame.js';
 import { digestSource,unionDependencies,readProvenance,eventText } from './source-records.js';
-import type { SourceRecord } from './source-records.js';
+import type { SourceRecord,RequestSources } from './source-records.js';
 export * from './source-records.js';
 import { z } from 'zod';
 import { dependenciesSchema } from './source-records.js';
@@ -25,6 +25,7 @@ export class SourceTracker {
   private records=new Map<number,SourceRecord>();
   private indexed=-1;
   private reverse=new Map<string,Set<number>>();
+  private readonly requests=new Map<number,{data:RequestSources;dependencies:string}>();
   private validationStamp='';
   private validationProvider:CompactionProvider|undefined;
   private validationCache=new Map<string,boolean>();
@@ -37,19 +38,22 @@ export class SourceTracker {
   private common(){const b=this.binding();if(!b)throw new Error('Source provider unavailable');return {...this.scope(),owner:b.owner,producerVersion:b.version};}
   private index():void{
     if(!this.session||this.indexed===this.session.seq)return;
-    const records=new Map<number,SourceRecord>(),reverse=new Map<string,Set<number>>();
-    const provenance=readProvenance(this.session),requests=new Map(provenance.filter(e=>e.type==='plugin:dafeiyu/request-sources').map(e=>[Number(e.seq),e.data]));
-    for(const event of provenance)if(event.type==='plugin:dafeiyu/source-record'){
+    if(this.indexed<0||this.indexed>this.session.seq){this.records.clear();this.reverse.clear();this.requests.clear();this.indexed=0;}
+    const records=this.records,reverse=this.reverse;
+    // Session records are append-only. Validate old records once, and index only the new suffix.
+    for(const event of readProvenance(this.session,this.indexed)){
+      if(event.type==='plugin:dafeiyu/request-sources'){this.requests.set(Number(event.seq),{data:event.data,dependencies:JSON.stringify(unionDependencies(event.data.dependencies))});continue;}
+      if(event.type==='plugin:dafeiyu/source-record'){
       const r=event.data;
       if(r.targetSeq>=event.seq||r.parents.some(p=>p>=r.targetSeq)||records.has(r.targetSeq))throw new Error('Invalid source ancestry');
       if(r.requestSeq!==undefined){
-        const request=requests.get(r.requestSeq);
+        const indexed=this.requests.get(r.requestSeq),request=indexed?.data;
         if(!request||r.requestSeq>=r.targetSeq||request.route!==r.route||request.agentId!==r.agentId||request.traceId!==r.traceId
-          ||JSON.stringify(unionDependencies(r.dependencies))!==JSON.stringify(unionDependencies(request.dependencies)))throw new Error('Source exposure mismatch');
+          ||JSON.stringify(unionDependencies(r.dependencies))!==indexed!.dependencies)throw new Error('Source exposure mismatch');
       }
       records.set(r.targetSeq,r);
       for(const dep of r.dependencies){const key=JSON.stringify(dep),targets=reverse.get(key)??new Set<number>();targets.add(r.targetSeq);reverse.set(key,targets);}
-    }
+    }}
     this.records=records;this.reverse=reverse;this.indexed=this.session.seq;
   }
   get(seq:number):SourceRecord|undefined{this.index();return this.records.get(seq);}
@@ -96,7 +100,8 @@ export class SourceTracker {
   /** Capture completed outputs before any pruning; record input hashes at first dispatch. */
   sync():void{
     const b=this.binding();if(!this.item||!this.session||!b?.provider.sources)return;
-    const events=this.session.snapshotEvents(),requests=readProvenance(this.session).filter(e=>e.type==='plugin:dafeiyu/request-sources');
+    this.index();
+    const events=this.session.snapshotEvents(),requests=[...this.requests].map(([seq,record])=>({seq,data:record.data}));
     const open=events.slice(this.offset).find(e=>e.type==='turn/start');const turn=open?.type==='turn/start'?open.data.turn:-1;
     for(const event of events.slice(this.offset)){
       if(this.get(event.seq))continue;

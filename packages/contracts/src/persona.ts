@@ -38,8 +38,8 @@ export const PersonaManifestSchema=z.strictObject({schemaVersion:z.literal(1),ag
 export type PersonaManifest=z.infer<typeof PersonaManifestSchema>;
 export const ContinuityCheckpointSchema=z.strictObject({schemaVersion:z.literal(1),id,agentId:z.string().min(1).max(100),runId:id,taskId:id,taskEpoch:version,
   scope:ExecutionScopeSchema,foundationHash:hash,stageRevision:z.number().int().nonnegative(),sessionId:z.string().min(1).max(300),throughSeq:z.number().int().nonnegative(),
-  dependencies:z.array(PersonaSourceRefSchema).max(64),completedOperations:z.array(id).max(1000),unknownOperations:z.array(id).max(1000),
-  historyHash:hash.optional(),intentEvents:z.array(id).max(1000).optional(),
+  dependencies:z.array(PersonaSourceRefSchema),completedOperations:z.array(id),unknownOperations:z.array(id),
+  historyHash:hash.optional(),intentEvents:z.array(id).optional(),
   summary:z.string().max(8000),gaps:z.array(z.string().min(1).max(1000)).max(32),createdAt:z.iso.datetime()})
   .refine(value=>value.scope.kind==='task'&&value.scope.agentId===value.agentId&&value.scope.taskId===value.taskId,'Checkpoint scope mismatch');
 export type ContinuityCheckpoint=z.infer<typeof ContinuityCheckpointSchema>;
