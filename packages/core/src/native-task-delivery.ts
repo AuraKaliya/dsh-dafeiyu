@@ -75,7 +75,7 @@ export class NativeTaskDelivery {
     const failed=source.state==='failed',noticeId=`${runId}-${source.state}`,failure=failed?{code:source.error??'EXECUTION_FAILED',summary:this.failureSummary(source.error),completed:source.operations.filter(op=>op.state==='finished'&&op.status==='succeeded').length,unknown:source.operations.filter(op=>op.effects==='unknown').length}:null;
     let invoked=false;
     try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,noticeId,persona.text,persona.items,
-      {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:failed?'向原会话说明这次卡在哪里、已经做到什么、接下来怎么办。':'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,failure,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。不要说任务已完成或结果已发送；不要输出内部错误码。'})}]},signal,()=>{guard();persona.guard();},32000);
+      {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:failed?'向原会话说明这次卡在哪里、已经做到什么、接下来怎么办。':'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,failure,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。不要说任务已完成或结果已发送；不要输出内部错误码。'})}]},signal,()=>{guard();persona.guard();},32000,this.host.ctx.dafeiyu.contextBudget().maxTokens);
       let feedbackId:string|undefined;
       try{feedbackId=this.host.feedback?.queue({workItemId:runId,route:source.item.route,kind:'must-know',text:result.text,dueAt:new Date().toISOString(),
         sourceMessageId:source.item.id,taskId:source.taskId,runId,intentVersion:this.host.store.get(runId).definition.intentVersion}).id;}catch{/* Status delivery remains authoritative if the ledger write fails. */}
@@ -119,7 +119,7 @@ export class NativeTaskDelivery {
         let repair:DeliveryRepair|undefined;
         for(let attempt=0;attempt<NATIVE_RENDER_ATTEMPTS;attempt++){
           this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'rendering',attempt,deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().render).toISOString()});this.host.flush();
-          const rendered=await renderTaskResult(this.host.ctx,model,this.host.cwd,record.id,persona.text,persona.items,packet,signal,guard,access.requestMaxBytes,repair);guard();
+          const rendered=await renderTaskResult(this.host.ctx,model,this.host.cwd,record.id,persona.text,persona.items,packet,signal,guard,access.requestMaxBytes,repair,access.maxTokens);guard();
           this.host.store.nativeDeliveries.candidate(runId,rendered.resultRef);this.host.flush();
           this.host.store.appendExecutionEvent(runId,'task.stage',{phase:'verification',attempt,deadlineAt:new Date(Date.now()+this.host.ctx.dafeiyu.phaseTimeouts().verification).toISOString()});this.host.flush();
           try{await provider.verify(access,packet.id,['qq','local-owner'].includes(record.anchor.target.channel)?(qqVisibleText(rendered.text)||rendered.text):rendered.text,signal,guard);}
@@ -172,7 +172,7 @@ export class NativeTaskDelivery {
       {target:row.anchor.target,taskId:row.anchor.taskId,runId,inboundId:item.id,question:'向原会话说明本次任务的实际交付状态及当前限制。',taskState:row.state,
         evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,sendAttempted,workPreserved:true,
           phase:sendAttempted?'transport':row.error?.startsWith('DELIVERY_VERIFICATION_')||row.error==='DELIVERY_UNFAITHFUL'?'verification':'pre-send',
-          note:sendAttempted?'发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。':'回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。'})}]},signal,()=>{guard();persona.guard();},32000);
+          note:sendAttempted?'发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。':'回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。'})}]},signal,()=>{guard();persona.guard();},32000,this.host.ctx.dafeiyu.contextBudget().maxTokens);
       const receipt=await this.host.enqueue(item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'native-status:'+row.id,conversation:row.anchor.target,sourceMessageId:item.message.id,text:message.text},signal,()=>{guard();persona.guard();});});
       this.host.notice({item,text:message.text,deliveryId:'native-status:'+row.id,status:receipt.status,kind:'failure',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{code:receipt.code})});
       this.host.store.appendExecutionEvent(runId,'native.delivery.feedback',{status:receipt.status});this.host.flush();

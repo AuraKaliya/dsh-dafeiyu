@@ -23,6 +23,6 @@ export interface NativeExpressionAccess {readonly execution:PersonaAccess;readon
   readSources?(read:()=>void):void;
   readonly candidates:readonly z.infer<typeof NativeExpressionCandidateSchema>[];readonly opaqueInfluence:boolean;
   /** Only the Core source walk can attest that a derived target page has no unclassified input influence. */
-  readonly derivedInputComplete?:boolean;readonly requestMaxBytes:number;readonly expressionPolicy?:{id:string;version:number};readonly media?:NativeMediaMaterial;guard():void;}
+  readonly derivedInputComplete?:boolean;readonly requestMaxBytes:number;readonly maxTokens:number;readonly expressionPolicy?:{id:string;version:number};readonly media?:NativeMediaMaterial;guard():void;}
 export interface NativeExpressionPort {readonly signal?:AbortSignal;ready():boolean;prepare(access:NativeExpressionAccess):NativeExpressionPacket;open(access:NativeExpressionAccess,id:string,purpose?:'send'|'context'):NativeExpressionPacket;
   withdraw(access:NativeExpressionAccess,id:string,version:number):void;verify(access:NativeExpressionAccess,id:string,answer:string,signal:AbortSignal,guard:()=>void):Promise<void>;}
