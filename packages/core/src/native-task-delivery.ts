@@ -95,18 +95,18 @@ export class NativeTaskDelivery {
     }
   }
   close(){this.unregister();}
-  private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire(),deadlineAt=performance.now()+this.host.timeoutMs;let invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
+  private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire(),deadlineAt=performance.now()+this.host.timeoutMs;let stage='source-admission',invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
     try{let record=this.host.store.nativeDeliveries.get(runId)!;if(terminal.has(record.state))return this.host.store.nativeDeliveries.status(runId);
       const access=await this.host.access(runId),provider=this.host.expression(),channel=this.host.channel(item);
       if(!provider?.ready()||!channel?.capability.deliverTaskResult)throw new Error('DEPENDENCY_UNAVAILABLE');
       const sendTaskResult=channel.capability.deliverTaskResult.bind(channel.capability);
       signal=AbortSignal.any([signal,channel.signal,...(provider.signal?[provider.signal]:[])]);
       if(nativeDeliveryHash(record.anchor)!==nativeDeliveryHash(access.anchor)||conversationKey(access.execution.view.scope.agentId,access.anchor.target)!==item.route)throw new Error('DELIVERY_BINDING_CONFLICT');
-      const packet=NativeExpressionPacketSchema.parse(record.material?provider.open(access,record.material.packetId):provider.prepare(access));
+      stage='packet-prepare';const packet=NativeExpressionPacketSchema.parse(record.material?provider.open(access,record.material.packetId):provider.prepare(access));
       if(nativeDeliveryHash(packet.anchor)!==nativeDeliveryHash(record.anchor))throw new Error('DELIVERY_BINDING_CONFLICT');
       const guardMaterial=()=>{signal.throwIfAborted();access.guard();if(this.host.expression()!==provider||!provider.ready()||this.host.channel(item)?.identity!==channel.identity)throw new Error('DEPENDENCY_UNAVAILABLE');
         if(provider.open(access,packet.id).sourceStamp!==packet.sourceStamp||Date.parse(record.anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');};
-      const persona=this.host.persona(item,record.id,signal,guardMaterial),model=this.host.model(),material={packetId:packet.id,sourceStamp:packet.sourceStamp,foundationHash:persona.foundationHash,personaHash:persona.stamp,modelHash:nativeDeliveryHash(model),...(packet.media?{mediaStamp:packet.media.sourceStamp}:{})};
+      stage='persona-prepare';const persona=this.host.persona(item,record.id,signal,guardMaterial),model=this.host.model(),material={packetId:packet.id,sourceStamp:packet.sourceStamp,foundationHash:persona.foundationHash,personaHash:persona.stamp,modelHash:nativeDeliveryHash(model),...(packet.media?{mediaStamp:packet.media.sourceStamp}:{})};
       const guard=()=>{persona.guard();if(nativeDeliveryHash(this.host.model())!==material.modelHash)throw new Error('SOURCE_STALE');};guard();
       if(record.state==='accepted'){
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
@@ -156,7 +156,9 @@ export class NativeTaskDelivery {
       if(!invoked&&result.status==='not-sent'&&this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.notSentBeforeDispatch(runId,result.code);
       else this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
       this.host.notice({item,text:body,deliveryId:`native-delivery:${record.id}`,status:result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':'unknown',kind:'result',...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code})});
-    }catch(error){const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
+    }catch(error){this.host.store.appendExecutionEvent(runId,'native.delivery.diagnostic',{stage,code:code(error),name:error instanceof Error?error.name:'Unknown',
+      ...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(String).join('.')}))}:{})});
+      const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
     }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');}catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
       finally{if(mediaAccess)media?.releaseReply?.(mediaAccess);mediaAccess?.release();release();this.host.flush();}}

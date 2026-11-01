@@ -97,7 +97,7 @@ export class ExecutionCoordinator {
     const historyGuard=()=>{const current=this.d.store.get(view.runId),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
       if(task.epoch!==run.definition.intentVersion||task.status!=='active'||!this.allowedResource(current,scene))throw new Error('SOURCE_STALE');};
     const guard=()=>{view.signal.throwIfAborted();historyGuard();};
-    guard();return {scope:run.definition.scope,intentVersion:run.definition.intentVersion,expiresAt:'9999-12-31T23:59:59.999Z',guard,historyGuard};
+    guard();return {scope:run.definition.scope,intentVersion:run.definition.intentVersion,expiresAt:'9999-12-31T23:59:59.999Z',guard,historyGuard,mediaReadings:()=>{historyGuard();const port=this.d.media?.();return port?.ready()?(port.readingProgress?.(run.definition.scope,scene)??[]).map(row=>z.json().parse(row)):[];}};
   }
   quoteReplySource(context:ExecutionContext,pluginId:string){this.authority(context,pluginId);const run=this.d.store.get(context.runId);
     if(run.definition.origin.kind==='message'){const item=this.d.journal.get(run.definition.origin.inboundId);return {key:item.id+':reply',target:item.message.conversation,inboundId:item.id};}
@@ -214,7 +214,7 @@ export class ExecutionCoordinator {
     const {directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
     if(input.kind==='explicit-task'&&(item.message.sender.id!==binding.ownerId||directive.kind!=='submit'))throw new Error('TASK_DIRECTIVE_REQUIRED');
     const declared=input.intent?.relation??'new',detected=input.kind==='explicit-task'?this.continuationIntent(directive.text):null;
-    const relation=input.kind==='explicit-task'?(declared!=='new'?declared:(detected??'new')):'new';
+    const relation=input.kind==='explicit-task'?(detected??declared):'new';
     const resolution=relation!=='new'?this.messageTaskTarget(binding,item.message.conversation,input.intent?.targetTaskId):{run:null,ambiguous:false,candidates:[]};
     if(resolution.ambiguous)return {accepted:false,relation,reason:'TASK_AMBIGUOUS',candidates:resolution.candidates,note:'当前会话有多个任务，须确定目标任务；未新建或修改任务。'};
     const target=resolution.run;

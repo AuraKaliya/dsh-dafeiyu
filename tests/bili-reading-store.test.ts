@@ -42,6 +42,15 @@ test('media understanding remains historical evidence when validation receives t
     current=false;assert.equal(contributor.validateHistorical?.({...leased},item),false,'Revoking the media evidence still invalidates the history');
   }finally{f.store.close();}
 });
+test('final delivery can use the issued media capability after the preparation lease is released',async()=>{
+  const f=await fixture(),receipt={exposureId:randomUUID(),pageId:randomUUID(),mode:'images'};let authorized=true;
+  const scope={...f.first,guard:()=>{},historyGuard:()=>{if(!authorized)throw new Error('SOURCE_STALE');},mediaReadings:()=>[receipt]};
+  const contributor=readingContext(f.store,()=>scope,()=>true,()=>[]);
+  try{const item=(await contributor.prepare(f.first))[0]!;assert.deepEqual(JSON.parse(item.text).mediaReadings,[receipt]);
+    assert.equal(contributor.validateHistorical?.({...f.first},item),true);
+    authorized=false;assert.equal(contributor.validateHistorical?.({...f.first},item),false,'Releasing a temporary preparation lease differs from revoking the task authority');
+  }finally{f.store.close();}
+});
 
 test('a large resume keeps every displayed frame/search source and stays within one context item',async()=>{
   const f=await fixture();try{

@@ -2,13 +2,14 @@ import type { ContextItem,ExecutionContext,ExecutionView,TaskContextContributor 
 import { BiliStore,biliHash,biliOwner } from './store.js';
 import {readingResume} from './reading-resume.js';
 
-type Scope=Pick<ExecutionContext,'scope'|'intentVersion'>&{expiresAt?:string;guard():void;historyGuard?():void};
+type Scope=Pick<ExecutionContext,'scope'|'intentVersion'>&{expiresAt?:string;guard():void;historyGuard?():void;mediaReadings?():readonly import('@dafeiyu/contracts').Json[]};
 const MAX_TEXT_BYTES=15000;
 const MAX_PAGES=15;
 
 /** Current task state is refreshed once per request; full readings remain in the task-scoped store. */
 export function readingContext(store:BiliStore,grant:(view:ExecutionView)=>Scope|null,ready:()=>boolean,media:(view:ExecutionView)=>readonly import('@dafeiyu/contracts').Json[]=()=>[]):TaskContextContributor {
   const scopes=new Map<string,Scope>();const views=new WeakMap<Scope,ExecutionView>();
+  const mediaFor=(scope:Scope)=>scope.mediaReadings?.()??(views.has(scope)?media(views.get(scope)!):[]);
   /** Text and sources come from the same filtered projection, so every displayed frame/search page
    * has a matching validated source and history validation covers all visible material. */
   const project=(scope:Scope,limit=8)=>{
@@ -19,7 +20,7 @@ export function readingContext(store:BiliStore,grant:(view:ExecutionView)=>Scope
     const visible=new Set(pages.map(source=>source.pageId));
     const frames=resume[0]?.frames.filter(frame=>visible.has(frame.pageId))??[],omittedFrames=(resume[0]?.frames.length??0)-frames.length;
     const viewed=resume.map(record=>({...record,frames})),shownSearch=search.filter(group=>visible.has(group.pageId)).map(group=>({...group,items:group.items.slice(0,4)}));
-    const text=JSON.stringify({kind:'bilibili-reading-progress',instructionAuthority:false,...view,mediaReadings:views.has(scope)?media(views.get(scope)!).slice(0,8):[],
+    const text=JSON.stringify({kind:'bilibili-reading-progress',instructionAuthority:false,...view,mediaReadings:mediaFor(scope).slice(0,8),
       open:view.open?{...view.open,title:view.open.title.slice(0,80),nextStep:view.open.nextStep?.slice(0,100)??null}:null,
       recent:view.recent.map(record=>({...record,title:record.title.slice(0,80),conclusion:record.conclusion?.slice(0,120)??null})),resume:viewed,
       ...(shownSearch.length?{search:shownSearch}:{}),...(omittedFrames>0?{omittedFrames,continueEntry:'bili_reading_get 分页读取完整来源'}:{}),
@@ -43,7 +44,7 @@ export function readingContext(store:BiliStore,grant:(view:ExecutionView)=>Scope
   },validateHistorical:(view,item)=>{
     try{if(!ready())return false;const scope=scopes.get(view.runId);if(!scope)return false;(scope.historyGuard??scope.guard)();
       if(item.id!=='bilibili-reading:'+biliOwner(scope)||item.version!==biliHash(item.text))return false;
-      const prior=JSON.parse(item.text) as {mediaReadings?:unknown[]},current=media(views.get(scope)??view).map(row=>biliHash(row));if(prior.mediaReadings?.some(row=>!current.includes(biliHash(row))))return false;
+      const prior=JSON.parse(item.text) as {mediaReadings?:unknown[]},current=mediaFor(scope).map(row=>biliHash(row));if(prior.mediaReadings?.some(row=>!current.includes(biliHash(row))))return false;
       return item.sources.filter(source=>source.ref.startsWith('page:')).every(source=>biliHash(store.page(biliOwner(scope),source.ref.slice(5)))===source.hash)&&item.sources.filter(source=>source.ref.startsWith('reading:')).every(source=>{
         const record=store.readingVersion(scope,source.ref.slice(8),Number(source.version));return record!==null&&biliHash(record)===source.hash;
       });

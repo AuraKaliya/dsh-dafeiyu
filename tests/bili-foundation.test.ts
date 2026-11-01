@@ -17,14 +17,15 @@ async function fixture(){const root=await mkdtemp(join(testTempDir(),'bili-')),f
 const response=(data:unknown,status=200):HttpResponse=>{const bytes=Buffer.from(JSON.stringify(data));return {status,headers:{'content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};};
 const page={kind:'discover' as const,sourceKey:'popular:1',data:{titles:['虚构天文']},coverage:['本页'],fields:[{id:'title:0',text:'虚构天文'}]};
 
-test('a CDN permission hold preserves its resource scope and does not permanently block API reads',async t=>{
+test('a CDN permission hold preserves its resource scope and does not impose its cooldown on API reads',async t=>{
   const f=await fixture();try{let now=Date.now();t.mock.method(Date,'now',()=>now);
     const client=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100}),f.store,async url=>url.hostname==='api.bilibili.com'?response({code:0,data:{available:true}}):response({},403));
     const signal=new AbortController().signal;
     await assert.rejects(client.external('https://cdn.bilivideo.com/movie','media',null,signal,()=>{}),/ACCESS_DENIED/);
     assert.ok(f.store.diagnostics.pauses.some(p=>p.scope==='resource'&&p.endpoint==='media'&&p.held));
     assert.ok(!f.store.diagnostics.pauses.some(p=>p.scope==='shared'));
-    now+=61000;
+    assert.equal(f.store.clock.blockedUntil,0,'Resource cooldown must not become an account-wide pause');
+    now+=200;
     assert.deepEqual(await client.read('video',{bvid:'BV1xx411c7mD'},signal,()=>{}),{available:true});
     await assert.rejects(client.external('https://cdn.bilivideo.com/movie','media',null,signal,()=>{}),/DIAGNOSTIC_REQUIRED/);
   }finally{f.store.close();}

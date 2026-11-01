@@ -73,7 +73,7 @@ export class BiliService extends Service {
   private readonly instanceGeneration=Date.now();
   constructor(ctx:Context,config:Config,transport?:HttpTransport,private readonly browser?:BiliBrowserPort){super(ctx,'dafeiyuBilibili');this.config=biliServiceConfigSchema.parse(config);if(this.config.settings.browser&&!browser)throw new Error('BILI_BROWSER_BRIDGE_REQUIRED');this.store=new BiliStore(join(this.config.dataDir,'bilibili.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore,this.config.settings.maxPages);this.client=new BiliClient(this.config.settings,this.store,transport,{instanceGeneration:this.instanceGeneration});
     try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'bilibili',version:RELEASE_VERSION,agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['bilibili.read.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
-      contexts:[readingContext(this.store,view=>ctx.dafeiyu.taskContextScope(view,'bilibili',BILI_SCENE),()=>this.ready(),view=>this.ctx.dafeiyu.mediaReadingProgress(view,'bilibili',BILI_SCENE).map(row=>z.json().parse(row)))],
+      contexts:[readingContext(this.store,view=>ctx.dafeiyu.taskContextScope(view,'bilibili',BILI_SCENE),()=>this.ready())],
       resourceProofs:{current:proof=>this.ready()&&this.store.valid(proof),epoch:()=>this.ready()?this.store.epoch():'closed',publicView:(proof,view)=>this.publicView(proof,view)}});}catch(e){this.store.close();throw e;}
     try{if(ctx.dafeiyu.capabilityManifest().features.includes('media.assets.v1')){this.media=new BiliMedia(this.store,this.client,()=>this.ready());this.unbindMedia=ctx.dafeiyu.registerMediaProvider(this.media);}}catch(e){this.handle.dispose();this.store.close();throw e;}
     ctx.effect(()=>()=>this.close(),'bilibili.close');}
@@ -103,7 +103,7 @@ export class BiliService extends Service {
     }catch(e){this.store.fail(context,id,code(e));throw e;}}
   private publicView(proof:ResourceProof,view:string){try{if(!this.ready()||!this.store.valid(proof))return false;const owner=z.object({owner:z.string()}).parse(proof.detail).owner;return JSON.stringify(pageView(this.store.page(owner,proof.key)))===view;}catch{return false;}}
   private async resolveVideoPart(context:ExecutionContext,input:{videoPageId?:string|undefined;bvid?:string|undefined;cid?:string|undefined;part:number;requestId:string}){
-    if(!!input.videoPageId===!!input.bvid)throw new Error('BILI_VIDEO_SELECTOR_REQUIRED');
+    if(!input.videoPageId&&!input.bvid)throw new Error('BILI_VIDEO_SELECTOR_REQUIRED');
     let page:BiliPage;
     if(input.videoPageId){page=this.store.page(biliOwner(context),input.videoPageId);this.exposed(this.access(context),page);}
     else {
@@ -116,6 +116,7 @@ export class BiliService extends Service {
     }
     if(page.kind!=='video')throw new Error('BILI_VIDEO_PAGE_REQUIRED');
     const data=z.object({bvid:BvidSchema,pages:z.array(z.object({cid:NumberIdSchema,durationSeconds:z.number()}))}).parse(page.data);
+    if(input.bvid&&data.bvid!==input.bvid)throw new Error('BILI_VIDEO_BINDING_MISMATCH');
     const selected=input.cid?data.pages.find(part=>part.cid===input.cid):data.pages[input.part-1];
     if(!selected)throw new Error('BILI_PART_UNAVAILABLE');
     return {page,bvid:data.bvid,cid:selected.cid,durationMs:Math.round(selected.durationSeconds*1000)};

@@ -120,7 +120,7 @@ export class BiliDiagnostics {
   }
   release(id:string):void{this.atomic(()=>{const s=this.state;if(s.probe?.id===id)this.set({...s,probe:null});});}
   /** A restarted process must not inherit a probe lease or management permit from the previous one. */
-  clearRuntimeLeases():void{this.atomic(()=>{const s=this.state;if(s.probe!==null||s.permit!==null)this.set({...s,probe:null,permit:null});});}
+  clearRuntimeLeases():void{this.atomic(()=>{const s=this.state;if(s.probe!==null||s.permit!==null)this.set({...s,probe:null,permit:null});this.refreshClock(s.pauses);});}
   /** A successful attempt clears only its own endpoint pause; a shared or anonymous hold is kept separately. */
   success(id:string,endpoint:string,query?:PauseQuery):void{
     this.atomic(()=>{
@@ -132,7 +132,7 @@ export class BiliDiagnostics {
         return !(pause.scope===scope&&pause.uid===(query?.uid??probe.uid));
       });
       this.set({...s,pauses,probe:null});
-      this.refreshClock();
+      this.refreshClock(s.pauses);
     });
   }
   failure(endpoint:string,kind:BiliFailureKind,now:number,policy:BiliRetryPolicy,platformAt:number|null,scope:BiliScope='shared',uid:string|null=null){return this.atomic(()=>{
@@ -145,13 +145,15 @@ export class BiliDiagnostics {
     const next:BiliPause={scope,uid,endpoint,kind,failures,held,until,updatedAt:now};
     const pauses=[...s.pauses.filter(pause=>pause!==existing),next].sort((a,b)=>b.updatedAt-a.updatedAt).slice(0,24);
     this.set({...s,pauses});
-    this.refreshClock();
+    this.refreshClock(s.pauses);
     return {at,held,source:platformAt===null?'local-policy' as const:'platform' as const,scope};
   });}
-  private refreshClock(){
-    const pauses=this.state.pauses,until=pauses.reduce((max,pause)=>Math.max(max,pause.until),0),anyHeld=pauses.some(pause=>pause.held);
-    this.db.prepare('UPDATE bili_clock SET blocked_until=max(blocked_until,?),error=? WHERE id=1').run(until,anyHeld?'BILI_DIAGNOSTIC_REQUIRED':'BILI_BACKOFF');
-    if(!pauses.length)this.db.prepare('UPDATE bili_clock SET error=NULL WHERE id=1').run();
+  private refreshClock(previous:readonly BiliPause[]=[]){
+    const pauses=this.state.pauses,current=Number(this.db.prepare('SELECT blocked_until FROM bili_clock WHERE id=1').get()?.blocked_until??0);
+    // Media CDN failures hold their resource endpoint. API/browser pauses retain the shared request cooldown.
+    const global=pauses.filter(pause=>pause.scope!=='resource'),derived=[...previous,...pauses].some(pause=>pause.until===current);
+    const until=global.reduce((max,pause)=>Math.max(max,pause.until),derived?0:current),anyHeld=global.some(pause=>pause.held);
+    this.db.prepare('UPDATE bili_clock SET blocked_until=?,error=? WHERE id=1').run(until,anyHeld?'BILI_DIAGNOSTIC_REQUIRED':until>Date.now()?'BILI_BACKOFF':null);
   }
   /** Latest failed attempt that evidences one pause; migration uses the same rule. */
   conditionAttempt(pause?:Pick<BiliPause,'kind'|'endpoint'>):BiliAttempt|null{
