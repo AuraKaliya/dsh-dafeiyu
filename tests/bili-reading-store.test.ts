@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
@@ -34,6 +34,43 @@ const record = (over: Record<string, unknown> = {}) => ({
   frames: [], sources: [], conclusion: null, gaps: [], nextStep: '继续读评论区', ...over,
 });
 
+test('search resume keeps the newest three pages and the selected video survives long pagination',async()=>{
+  const f=await fixture();try{
+    const add=(kind:'video'|'search'|'browser',data:Record<string,unknown>)=>{
+      const id=randomUUID();f.store.begin(f.first,id,{kind});
+      const page=f.store.complete(f.first,id,{kind,sourceKey:kind+':'+randomUUID(),data:JSON.parse(JSON.stringify(data)),coverage:[],fields:[]});
+      f.store.bindObservation(page,{id:randomUUID(),agentId:'fish',scopeKey:f.first.scope.kind==='task'?f.first.scope.scopeKey:'',version:1,contentHash:'a'.repeat(64),kind:'execution-source'});return page;
+    };
+    add('video',{bvid,aid:'900',pages:[{cid:'123',durationSeconds:60}]});
+    for(let page=0;page<4;page++)add('search',{keyword:'关键词'+page,order:'pubdate',page:1,limit:5,nextPage:null,nextPageReason:'platform-no-more',coverage:[],items:[]});
+    for(let index=0;index<70;index++)add('browser',{bvid,section:'comments',item:index});
+    const resumed=readingResume(f.store,f.first);
+    assert.deepEqual(resumed.search?.map(group=>group.keyword),['关键词3','关键词2','关键词1']);
+    assert.ok(resumed.resume[0]?.videoPageId,'The selected video must survive pages outside the recent-64 window');
+    assert.ok((resumed.resume[0]?.sources.length??0)<=16);
+    const scope={...f.first,guard:()=>{}},items=await readingContext(f.store,()=>scope,()=>true).prepare(f.first);
+    assert.ok((items[0]?.sources.length??0)<=16);
+  }finally{f.store.close();}
+});
+
+test('search candidates and captured frames survive as resumable work before any judgement',async()=>{
+  const f=await fixture();try{
+    const add=(kind:'video'|'search'|'browser',data:Record<string,unknown>)=>{
+      const id=randomUUID();f.store.begin(f.first,id,{kind});
+      const page=f.store.complete(f.first,id,{kind,sourceKey:kind+':'+randomUUID(),data:JSON.parse(JSON.stringify(data)),coverage:[],fields:[]});
+      f.store.bindObservation(page,{id:randomUUID(),agentId:'fish',scopeKey:f.first.scope.kind==='task'?f.first.scope.scopeKey:'',version:1,contentHash:'a'.repeat(64),kind:'execution-source'});return page;
+    };
+    add('search',{keyword:'养鱼',order:'pubdate',page:1,limit:5,nextPage:2,nextPageReason:'next-page',coverage:[],items:[{bvid,aid:null,title:'养鱼第一年',author:'UP甲',publishedAt:null,views:100,durationSeconds:60}]});
+    add('video',{bvid,aid:'900',pages:[{cid:'123',durationSeconds:60}]});
+    add('browser',{bvid,section:'frames',points:[{positionMs:12000,requestedMs:12000,sourceKey:'frame:captured-1',ok:true,errorCode:null}]});
+    const resumed=readingResume(f.store,f.first);
+    assert.equal(resumed.search?.[0]?.keyword,'养鱼');
+    assert.equal(resumed.search?.[0]?.nextPage,2);
+    assert.equal(resumed.resume[0]?.frames[0]?.sourceKey,'frame:captured-1');
+    assert.match(resumed.resume[0]?.nextStep??'',/视觉理解/u);
+  }finally{f.store.close();}
+});
+
 test('observed page handles survive a segment before judgement, remain task-scoped and validate invalidation',async()=>{
   const f=await fixture();try{
     const add=(kind:'video'|'subtitles',data:Record<string,unknown>)=>{
@@ -43,7 +80,7 @@ test('observed page handles survive a segment before judgement, remain task-scop
     };
     const video=add('video',{bvid,aid:'900',pages:[{cid:'123',durationSeconds:60}]}),subtitle=add('subtitles',{bvid,cid:'123',track:{id:'456'},range:{startMs:0,endMs:60000},offset:0,nextOffset:5});
     assert.equal(f.store.reading(f.first,bvid),null);
-    const resume=readingResume(f.store,f.first)[0]!;assert.equal(resume.videoPageId,video.id);assert.equal(resume.subtitle?.nextOffset,5);assert.equal(resume.judgementSaved,false);assert.deepEqual(readingResume(f.store,f.second),[]);
+    const resume=readingResume(f.store,f.first).resume[0]!;assert.equal(resume.videoPageId,video.id);assert.equal(resume.subtitle?.nextOffset,5);assert.equal(resume.judgementSaved,false);assert.deepEqual(readingResume(f.store,f.second).resume,[]);
     const scope={...f.first,guard:()=>{}},contributor=readingContext(f.store,()=>scope,()=>true),items=await contributor.prepare(f.first);
     assert.ok(Buffer.byteLength(JSON.stringify(items))<6000);assert.equal(contributor.validate(f.first,items[0]!),true);
     f.store.unavailable(subtitle.sourceKey);assert.equal(contributor.validateHistorical?.(f.first,items[0]!),false);

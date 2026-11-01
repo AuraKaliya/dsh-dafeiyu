@@ -54,7 +54,7 @@ test('a tool result beyond the old 32k reading threshold is still dispatched to 
 test('a request estimated beyond the real model window is rejected before dispatch',async()=>{
   const root=await mkdtemp(join(testTempDir(),'native-minimum-')),adapter=new FixtureAdapter(()=>textResponse('not reached'));
   const ctx=await sdkFixture(root,adapter),runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
-  try{const input=frame();input.program={required:'材料'.repeat(40000)};
+  try{const input=frame();input.program={required:'材料'.repeat(120000)};
     await assert.rejects(runtime.run(input),/MODEL_CONTEXT_CAPACITY/);assert.equal(adapter.requests.length,0);
   }finally{await runtime.close();await ctx.fiber.dispose();}
 });

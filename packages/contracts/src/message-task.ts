@@ -29,7 +29,7 @@ export const MessageTaskStatusSchema=z.strictObject({taskId:z.uuid()});
 export const MessageTaskControlSchema=z.strictObject({requestId:PersonaRequestIdSchema,taskId:z.uuid(),expectedVersion:z.number().int().positive(),action:z.enum(['cancel','revise','resolve','resume']),objectionId:z.uuid().optional(),voiceExposureId:z.uuid().optional()})
   .refine(value=>value.action==='resolve'?value.objectionId!==undefined:value.objectionId===undefined);
 const voiceSourceSchema=z.strictObject({bindingVersion:z.string().min(1).max(100),evidence:MediaVoiceEvidenceSchema});
-const intentRequestSource=z.strictObject({conversation:ConversationSchema,messageId:z.string().max(200),occurredAt:z.iso.datetime({offset:true}),text:z.string().max(32000)});
+const intentRequestSource=z.strictObject({inboundId:z.uuid(),messageHash:z.string().length(64),conversation:ConversationSchema,messageId:z.string().max(200),occurredAt:z.iso.datetime({offset:true}),text:z.string().max(32000)});
 /** Durable, program-verified continuation of one owner task across messages and intent versions. */
 const MessageIntentSnapshotSchema=z.strictObject({schemaVersion:z.literal(1),
   relation:z.enum(['new','amend','confirm','continue','retry','status']),

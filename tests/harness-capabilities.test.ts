@@ -21,6 +21,10 @@ test('capability index keeps names, short purposes and real versions without ful
   assert.equal(parsed.host.tools[0].name,'host-tool');
   const changed=renderCapabilityIndex({...input,host:{...input.host,version:'catalog-v2'}});
   assert.notEqual(JSON.parse(changed).version,parsed.version);
+  const reading=JSON.parse(renderCapabilityIndex({...input,host:{...input.host,execution:'read-only-discovery',stage:'bili-reading',available:true,code:null}}));
+  assert.equal(reading.host.execution,'read-only-discovery','Reading stage exposes read-only discovery, not an empty unavailable catalog');
+  assert.equal(reading.host.stage,'bili-reading');
+  assert.equal(reading.host.available,true);
 });
 
 test('capability index is hard capped and degrades to a queryable shell instead of growing without bound',()=>{

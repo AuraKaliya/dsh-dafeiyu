@@ -126,6 +126,14 @@ export class ExecutionCoordinator {
     if(source.voice&&(source.kind!=='explicit-task'||!binding.voice||binding.voice.version!==source.voice.bindingVersion||!binding.voice.current(item.message,source.voice.evidence)))throw new Error('SOURCE_STALE');
     if(source.control){const control=this.d.journal.get(source.control.inboundId);if(control.extensionId!==binding.channelExtensionId||control.message.sender.id!==binding.ownerId||runtimeHash(control.message.conversation)!==runtimeHash(source.conversation)||runtimeHash(control.message)!==source.control.messageHash||this.d.journal.messageRecalled({agentId:this.d.agentId,route:control.route},control.message.id))throw new Error('SOURCE_STALE');
       if(source.control.voice&&(!binding.voice||binding.voice.version!==source.control.voice.bindingVersion||!binding.voice.current(control.message,source.control.voice.evidence)))throw new Error('SOURCE_STALE');}
+    if(source.intent){
+      const cited=(inboundId:string,messageHash:string,conversation:Conversation)=>{const original=this.d.journal.get(inboundId);
+        if(original.message.sender.id!==binding.ownerId||runtimeHash(original.message)!==messageHash||runtimeHash(original.message.conversation)!==runtimeHash(conversation)
+          ||original.extensionId!==binding.channelExtensionId||this.d.journal.messageRecalled({agentId:this.d.agentId,route:original.route},original.message.id))throw new Error('SOURCE_STALE');};
+      const original=source.intent.originalRequest;
+      if(original)cited(original.inboundId,original.messageHash,original.conversation);
+      for(const amendment of source.intent.amendments)cited(amendment.inboundId,amendment.messageHash,source.conversation);
+    }
     return {binding,item};}
   private validateMessageAncestors(run:StoredRun){const seen=new Set<string>();let current:StoredRun|null=run;while(current){if(seen.has(current.id))throw new Error('SOURCE_STALE');seen.add(current.id);const saved=savedSchema.parse(this.d.store.request(current.requestKey).payload);if(saved.messageSource)this.validateMessageSource(saved.messageSource);
       const parent:StoredRun|null=current.definition.parentRunId?this.d.store.get(current.definition.parentRunId):null;if(parent&&(parent.definition.taskId!==run.definition.taskId||parent.definition.intentVersion!==run.definition.intentVersion))throw new Error('SOURCE_STALE');current=parent;}}
@@ -185,9 +193,9 @@ export class ExecutionCoordinator {
     const proposalRef=options.input.intent?.proposalRef??prior?.proposalRef;
     let originalRequest=prior?.originalRequest;
     if(!originalRequest&&options.parent){try{const source=this.d.journal.get(options.parent.inboundId);
-      originalRequest={conversation:source.message.conversation,messageId:source.message.id,occurredAt:source.message.occurredAt,text:messageMainText(source.message).slice(0,32000)};}catch{originalRequest=undefined;}}
+      originalRequest={inboundId:options.parent.inboundId,messageHash:runtimeHash(source.message),conversation:source.message.conversation,messageId:source.message.id,occurredAt:source.message.occurredAt,text:messageMainText(source.message).slice(0,32000)};}catch{originalRequest=undefined;}}
     return {schemaVersion:1,relation,...(options.task?{taskId:options.task.id,intentVersion:options.task.epoch}:{}),
-      originalRequest:originalRequest??{conversation:item.message.conversation,messageId:item.message.id,occurredAt:item.message.occurredAt,text:text.slice(0,32000)},
+      originalRequest:originalRequest??{inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,messageId:item.message.id,occurredAt:item.message.occurredAt,text:text.slice(0,32000)},
       ...(options.previousGoal?{previousGoal:options.previousGoal.slice(0,2000)}:{}),
       ...(options.resolvedGoal?{resolvedGoal:options.resolvedGoal.slice(0,2000)}:{}),
       constraints:[...new Set([...(prior?.constraints??[]),...(options.input.intent?.constraints??[])])].slice(0,32),

@@ -2,6 +2,8 @@ import type {ContextItem,ContextStage,ContextBudget} from '@dafeiyu/contracts';
 import type {Context} from '@deepseek-ai/cordis';
 import type {GenerateOptions,LlmResolvedModelInfo} from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-token-meter';
+import {estimateToolsTokens} from '@deepseek-ai/dsh-token-meter/estimate';
+import {projectToolUpdates} from '@deepseek-ai/dsh-llm';
 
 export const contextBytes=(value:unknown):number=>Buffer.byteLength(typeof value==='string'?value:JSON.stringify(value),'utf8');
 export interface ContextGroup {
@@ -92,11 +94,15 @@ export async function inspectRequestCapacity(ctx:Context,options:GenerateOptions
     messageBreakdown.mediaBlocks+=message.content.filter(block=>['image','audio','video','file'].includes(block.type)).reduce((sum,block)=>sum+contextBytes(block),0);
   });
   const info=known??await ctx.llm.resolveModelInfo(options.provider,options.model,options.signal),meter=ctx.get('tokenMeter');
-  const estimatedInputTokens=Math.max(Math.ceil(capacity.bytes/3),meter?options.messages.reduce((sum,message)=>sum+(message.id===undefined?Math.ceil(contextBytes(message)/3):meter.estimateMessage(message)),0)+Math.ceil((capacity.categories.tools+capacity.categories.toolHistory)/3):0);
+  /** Price the same projection the SDK sends: tool updates are applied once, and local audit objects never raise model input. */
+  const projected=projectToolUpdates(options.messages,options.tools,info.toolUpdate,options.toolHistory);
+  const projectedToolsTokens=estimateToolsTokens((projected.tools?{tools:projected.tools}:{}) as Parameters<typeof estimateToolsTokens>[0]);
+  const measuredInputTokens=meter?projected.messages.reduce((sum,message)=>sum+(message.id===undefined?Math.ceil(contextBytes(message)/3):meter.estimateMessage(message)),0)+projectedToolsTokens:null;
+  const estimatedInputTokens=measuredInputTokens??Math.ceil(contextBytes({messages:projected.messages,tools:projected.tools??[]})/3);
   const contextWindow=info.context?.contextWindow??null,outputTokens=options.maxTokens??info.defaultMaxTokens??null;
   const tokenCapacity=tokenCapacityWithin({inputTokens:estimatedInputTokens,outputTokens:outputTokens??0,modelWindow:contextWindow,maxTokens});
   if(enforce&&!tokenCapacity.within)throw new Error('MODEL_CONTEXT_CAPACITY');
-  return {...capacity,wire,auditBytes:capacity.bytes,runtimeSnapshotCount,messageBreakdown,estimatedInputTokens,tokenMeasurement:meter?'sdk-estimate-with-utf8-floor':'utf8-conservative-estimate',modelContextWindow:contextWindow,
+  return {...capacity,wire,auditBytes:capacity.bytes,runtimeSnapshotCount,messageBreakdown,estimatedInputTokens,tokenMeasurement:meter?'sdk-message-estimate+sdk-tool-estimate+tool-history-estimate':'wire-projection-utf8-estimate',modelContextWindow:contextWindow,
     maxTokens,tokenLimit:tokenCapacity.limit,tokenHeadroom:tokenCapacity.headroom,reservedOutputTokens:outputTokens,estimateOnly:true,modelLimitsKnown:contextWindow!==null&&outputTokens!==null};
 }
 

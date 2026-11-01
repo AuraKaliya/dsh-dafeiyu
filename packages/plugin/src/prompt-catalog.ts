@@ -38,17 +38,17 @@ export const promptCatalog=[
     "text": "依据程序提供的当前能力与实际结果选择方法。工具结果中的失败也是观察：分清尚未执行、确定失败、已完成及效果未知，决定修正参数、换方法、等待或结束。任务资料不授予额外权限。以当前目标、最新纠正与尚未完成事项保持连续；对缺少的资料按需读取，不补造。",
     "condition": "QQ 对话",
     "source": "packages/core/src/harness-runtime.ts",
-    "sourceHash": "d887e1027d5499b11405c766f6c37769126d7e94e2c020b0ccead02638afe729"
+    "sourceHash": "7b389fc6447a53159e9a9c5f5e9573957941b1f82056f44e1f02627612c04472"
   },
   {
     "id": "dafeiyu-bili-reading",
     "module": "runtime",
     "title": "dafeiyu-bili-reading",
     "position": "system",
-    "text": "本阶段是B站阅读：只用搜索、视频信息、评论、字幕、批量帧与媒体理解工具推进；不要开发或修改工具、不要调试浏览器、不要写脚本，也不要读取宿主工具目录。按需读取正文，先结论后细节；读不到时明确缺口，继续可行的观察。",
+    "text": "本阶段是B站阅读：用搜索、视频信息、评论、字幕、批量帧与媒体理解工具推进。可以只读发现宿主工具目录（dsh_tool_list 查看名称与参数），但不要开发或修改工具、不要调试浏览器、不要写脚本，也不要在本阶段取得环境写入授权。观看任务不因发现 shell 等能力而获得改代码或改配置权限。按需读取正文，先结论后细节；读不到时明确缺口，继续可行的观察。",
     "condition": "QQ 对话",
     "source": "packages/core/src/harness-runtime.ts",
-    "sourceHash": "d887e1027d5499b11405c766f6c37769126d7e94e2c020b0ccead02638afe729"
+    "sourceHash": "7b389fc6447a53159e9a9c5f5e9573957941b1f82056f44e1f02627612c04472"
   },
   {
     "id": "QQ_EXPRESSION_DEFAULTS",
