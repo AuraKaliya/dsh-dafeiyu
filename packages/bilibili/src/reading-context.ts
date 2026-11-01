@@ -3,32 +3,42 @@ import { BiliStore,biliHash,biliOwner } from './store.js';
 import {readingResume} from './reading-resume.js';
 
 type Scope=Pick<ExecutionContext,'scope'|'intentVersion'>&{expiresAt?:string;guard():void;historyGuard?():void};
+const MAX_TEXT_BYTES=15000;
+const MAX_PAGES=15;
 
 /** Current task state is refreshed once per request; full readings remain in the task-scoped store. */
 export function readingContext(store:BiliStore,grant:(view:ExecutionView)=>Scope|null,ready:()=>boolean):TaskContextContributor {
   const scopes=new Map<string,Scope>();
-  const render=(scope:Scope)=>{
-    let text='';for(let limit=8;limit>=1;limit--){const view=store.readingView(scope,limit),resumed=readingResume(store,scope),resume=resumed.resume.slice(0,1);text=JSON.stringify({kind:'bilibili-reading-progress',instructionAuthority:false,...view,
+  /** Text and sources come from the same filtered projection, so every displayed frame/search page
+   * has a matching validated source and history validation covers all visible material. */
+  const project=(scope:Scope,limit=8)=>{
+    const view=store.readingView(scope,limit),resumed=readingResume(store,scope);
+    const resume=resumed.resume.slice(0,1),search=(resumed.search??[]).slice(0,2);
+    const versions=[...new Map([...view.recent,...(view.open?[view.open]:[])].map(record=>[record.bvid,record])).values()];
+    const pages=[...new Map([...resume.flatMap(record=>record.sources),...search.map(group=>({pageId:group.pageId,hash:group.hash}))].map(source=>[source.pageId,source])).values()].slice(0,Math.max(0,MAX_PAGES-versions.length));
+    const visible=new Set(pages.map(source=>source.pageId));
+    const frames=resume[0]?.frames.filter(frame=>visible.has(frame.pageId))??[],omittedFrames=(resume[0]?.frames.length??0)-frames.length;
+    const viewed=resume.map(record=>({...record,frames})),shownSearch=search.filter(group=>visible.has(group.pageId)).map(group=>({...group,items:group.items.slice(0,4)}));
+    const text=JSON.stringify({kind:'bilibili-reading-progress',instructionAuthority:false,...view,
       open:view.open?{...view.open,title:view.open.title.slice(0,80),nextStep:view.open.nextStep?.slice(0,100)??null}:null,
-      recent:view.recent.map(record=>({...record,title:record.title.slice(0,80),conclusion:record.conclusion?.slice(0,120)??null})),resume,
-      ...(resumed.search?.length?{search:resumed.search.slice(0,2).map(group=>({...group,items:group.items.slice(0,4)}))}:{}),
-      note:'resume 是实际已观察页面，未保存判断也保留。复用 videoPageId/cid/track/nextOffset 续读；judgementSaved=false 不等于未读过。frames 是已获取画面，sourceKey 非空时继续视觉理解而不是重复抓图。search 是已返回候选，不要无理由重搜第一页。字幕不是完整观看，详情用 bili_reading_get。'});if(Buffer.byteLength(text)<=3800)break;}return text;
+      recent:view.recent.map(record=>({...record,title:record.title.slice(0,80),conclusion:record.conclusion?.slice(0,120)??null})),resume:viewed,
+      ...(shownSearch.length?{search:shownSearch}:{}),...(omittedFrames>0?{omittedFrames,continueEntry:'bili_reading_get 分页读取完整来源'}:{}),
+      note:'resume 是实际已观察页面，未保存判断也保留。复用 videoPageId/cid/track/nextOffset 续读；judgementSaved=false 不等于未读过。frames 是已获取画面，framesState 表示理解状态未知，不把抓图当已理解，也不把结论当视觉回执。search 是已返回候选，不要无理由重搜第一页。字幕不是完整观看，详情用 bili_reading_get。'});
+    return {text,pages,versions};
   };
+  const bounded=(scope:Scope)=>{let projected=project(scope,8);for(let limit=7;limit>=1&&Buffer.byteLength(projected.text)>MAX_TEXT_BYTES;limit--)projected=project(scope,limit);return projected;};
   return {id:'reading',prepare:async view=>{
     if(!ready())return [];const scope=grant(view);if(!scope)return [];scope.guard();
     scopes.set(view.runId,scope);if(scopes.size>256)scopes.delete(scopes.keys().next().value!);
-    const text=render(scope),version=biliHash(text),owner=biliOwner(scope);
-    const resumed=readingResume(store,scope),resume=resumed.resume.slice(0,1),shownSearch=(resumed.search??[]).slice(0,2);
-    const visible=JSON.parse(text) as {recent:{bvid:string;version:number}[];open:{bvid:string;version:number}|null;resume:{sources:{pageId:string;hash:string}[]}[]};
-    const versions=[...new Map([...visible.recent,...(visible.open?[visible.open]:[])].map(record=>[record.bvid,record])).values()];
-    const pageSources=[...new Map([...resume.flatMap(record=>record.sources),...shownSearch.map(group=>({pageId:group.pageId,hash:group.hash}))].map(source=>[source.pageId,source])).values()].slice(0,Math.max(0,15-versions.length));
+    const {text,pages,versions}=bounded(scope),version=biliHash(text),owner=biliOwner(scope);
     return [{id:'bilibili-reading:'+owner,version,text,sources:[{ref:'bilibili-reading:'+owner,version:String(scope.intentVersion),hash:version},
       ...versions.map(record=>({ref:'reading:'+record.bvid,version:String(record.version),hash:biliHash(store.readingVersion(scope,record.bvid,record.version))})),
-      ...pageSources.map(source=>({ref:'page:'+source.pageId,version:'1',hash:source.hash}))].slice(0,16),
+      ...pages.map(source=>({ref:'page:'+source.pageId,version:'1',hash:source.hash}))].slice(0,16),
       expiresAt:scope.expiresAt??'9999-12-31T23:59:59.999Z'}];
   },validate:(view:ExecutionView,item:ContextItem)=>{
     try{if(!ready())return false;const scope=scopes.get(view.runId);if(!scope||biliHash(scope.scope)!==biliHash(view.scope))return false;
-      (scope.historyGuard??scope.guard)();return item.id==='bilibili-reading:'+biliOwner(scope)&&item.version===biliHash(render(scope))&&item.text===render(scope);
+      (scope.historyGuard??scope.guard)();const projected=bounded(scope);
+      return item.id==='bilibili-reading:'+biliOwner(scope)&&item.version===biliHash(projected.text)&&item.text===projected.text;
     }catch{return false;}
   },validateHistorical:(view,item)=>{
     try{if(!ready())return false;const scope=scopes.get(view.runId);if(!scope)return false;(scope.historyGuard??scope.guard)();

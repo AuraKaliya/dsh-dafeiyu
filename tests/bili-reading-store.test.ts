@@ -34,6 +34,29 @@ const record = (over: Record<string, unknown> = {}) => ({
   frames: [], sources: [], conclusion: null, gaps: [], nextStep: '继续读评论区', ...over,
 });
 
+test('a large resume keeps every displayed frame/search source and stays within one context item',async()=>{
+  const f=await fixture();try{
+    const add=(kind:'video'|'search'|'browser',data:Record<string,unknown>)=>{
+      const id=randomUUID();f.store.begin(f.first,id,{kind});
+      const page=f.store.complete(f.first,id,{kind,sourceKey:kind+':'+randomUUID(),data:JSON.parse(JSON.stringify(data)),coverage:[],fields:[]});
+      f.store.bindObservation(page,{id:randomUUID(),agentId:'fish',scopeKey:f.first.scope.kind==='task'?f.first.scope.scopeKey:'',version:1,contentHash:'a'.repeat(64),kind:'execution-source'});return page;
+    };
+    add('video',{bvid,aid:'900',pages:[{cid:'123',durationSeconds:60}]});
+    const points=Array.from({length:30},(_,index)=>({positionMs:1000+index*1000,requestedMs:1000+index*1000,sourceKey:'frame:large-'+index,ok:true,errorCode:null}));
+    add('browser',{bvid,section:'frames',points});
+    for(let page=0;page<3;page++)add('search',{keyword:'很长关键词'+page,order:'pubdate',page:1,limit:5,nextPage:page+2,nextPageReason:'next-page',coverage:[],items:Array.from({length:8},(_,index)=>({bvid,aid:null,title:'很长的候选标题'.repeat(10)+index,author:'UP主'.repeat(10),publishedAt:null,views:100,durationSeconds:60}))});
+    for(const [index,suffix] of ['wH','HJ','JK','KL','LM','MN','NP','PQ'].entries())f.store.saveReading(f.first,randomUUID(),record({bvid:'BV1xNpFedE'+suffix,title:'很长的阅读标题'.repeat(12),conclusion:'结论'.repeat(80)}));
+    const scope={...f.first,guard:()=>{}},items=await readingContext(f.store,()=>scope,()=>true).prepare(f.first),item=items[0]!;
+    assert.ok(Buffer.byteLength(item.text)<=16000);
+    assert.ok(item.sources.length<=16);
+    const parsed=JSON.parse(item.text) as {resume:{frames:{pageId:string}[]}[];search?:{pageId:string}[];omittedFrames?:number};
+    const refs=new Set(item.sources.filter(source=>source.ref.startsWith('page:')).map(source=>source.ref.slice(5)));
+    for(const frame of parsed.resume[0]?.frames??[])assert.ok(refs.has(frame.pageId),'Every displayed frame must have a validated page source');
+    for(const group of parsed.search??[])assert.ok(refs.has(group.pageId),'Every displayed search group must have a validated page source');
+    assert.ok((parsed.omittedFrames??0)>=0);
+  }finally{f.store.close();}
+});
+
 test('search resume keeps the newest three pages and the selected video survives long pagination',async()=>{
   const f=await fixture();try{
     const add=(kind:'video'|'search'|'browser',data:Record<string,unknown>)=>{

@@ -96,7 +96,7 @@ export class ContextRuntime {
   begin(item:PendingMessage,agent:Agent):void{this.item=item;this.agent=agent;this.preparing=true;this.retired=0;this.repairRounds=0;this.retryPending=false;this.allowanceOverride=undefined;this.capacityRepairUsed=false;}
   end():void{this.coordinator.release(this.prepared);this.prepared=[];this.item=undefined;this.preparing=true;}
   async measure(options:GenerateOptions):Promise<boolean>{
-    try{this.capacity={request:options,data:await inspectRequestCapacity(this.scope,options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes)};return true;}
+    try{this.capacity={request:options,data:await inspectRequestCapacity(this.scope,options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes,undefined,true,this.coordinator.config.maxTokens)};return true;}
     catch(error){
       if(error instanceof Error&&error.message==='CONTEXT_REQUEST_CAPACITY'&&!this.capacityRepairUsed&&this.item){
         const raw=requestCapacity(options,this.coordinator.config.requestMaxBytes,this.coordinator.config.outputReserveBytes),excess=raw.bytes+raw.reserveBytes-raw.maximumBytes,next=shrinkControlledAllowance(this.allowance,excess);

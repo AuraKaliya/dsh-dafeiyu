@@ -109,7 +109,7 @@ export class HarnessRuntime {
     const disposeRules=scope.systemPrompt.section({name:'dafeiyu-harness-principles',order:10,interpolate:false,text:rules});
     const disposeReading=stage===BILI_READING_STAGE?scope.systemPrompt.section({name:'dafeiyu-bili-reading',order:11,interpolate:false,text:readingRules}):undefined;
     const manifest=()=>renderCapabilityIndex({configured:this.configured(),callable:scope.tools.schemas(agent),
-      host:canInspect?{configured:!!this.provider,available,code:unavailableCode,execution:dispatch?'authorized-task':stage===BILI_READING_STAGE?'read-only-discovery':'requires-authorized-task',stage,
+      host:canInspect?{configured:!!this.provider,available,code:unavailableCode,execution:stage===BILI_READING_STAGE?'read-only-discovery':dispatch?'authorized-task':'requires-authorized-task',stage,
         version:available?catalog?.version??null:null,tools:available?catalog?.tools??[]:[],skills:available?catalog?.skills??[]:[],skillsComplete:available?catalog?.skillsComplete??true:false}:null});
     const disposeContext=scope.systemPrompt.context({name:CAPABILITY_CONTEXT,order:0,required:true,interpolate:false,text:manifest});
     const disposeAssembly=scope.on('system-prompt/assemble',async(_assembly,_context,next)=>{
