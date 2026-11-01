@@ -23,7 +23,7 @@ export const MaintenanceRequestInputSchema = z.strictObject({requestId:PersonaRe
 export const MaintenanceSnapshotSchema = z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),
   scope:ExecutionScopeSchema,taskEpoch:version,runId:z.uuid(),requestId:PersonaRequestIdSchema,
   reason:short,goal:z.string().max(2000),motivation:MotivationSchema,
-  sources:z.array(PersonaSourceRefSchema).max(64),history:z.array(SourceDependencySchema).max(4096),
+  sources:z.array(PersonaSourceRefSchema).max(64),history:z.array(SourceDependencySchema),
   targets:z.array(z.strictObject({id:z.uuid(),version})).max(8),
   watermark:hash,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),
 });

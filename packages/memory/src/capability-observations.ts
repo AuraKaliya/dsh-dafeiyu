@@ -14,7 +14,7 @@ const textHash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const recordSchema=z.strictObject({schemaVersion:z.literal(1),kind:z.enum(['observed','selected']),scope:ExecutionScopeSchema,origin:RunOriginSchema,
   runId:z.uuid(),operationId:z.uuid(),producer:z.string(),proof:ResourceProofSchema,observedHash:z.string().length(64),occurredAt:z.iso.datetime(),
   counts:z.strictObject({received:z.number().int().nonnegative(),processed:z.number().int().nonnegative()}),coverage:z.array(z.string()),
-  history:z.array(SourceDependencySchema).max(4096),parent:PersonaSourceRefSchema.nullable(),selection:z.strictObject({mode:z.enum(['original','fragment','summary']),outputHash:z.string().length(64)}).nullable(),
+  history:z.array(SourceDependencySchema),parent:PersonaSourceRefSchema.nullable(),selection:z.strictObject({mode:z.enum(['original','fragment','summary']),outputHash:z.string().length(64)}).nullable(),
   rawRetained:z.literal(false)});
 type RecordBody=z.infer<typeof recordSchema>;
 type Validator=(scope:TimelineScope,body:RecordBody,access:PersonaAccess|undefined)=>boolean;
@@ -91,7 +91,7 @@ export class CapabilityObservations {
     return {source:this.reference(scope,id)!,duplicate:false};}
   record(authority:CapabilityObservationAccess,input:z.output<typeof CapabilityObservationSchema>){const access=authority.execution;
     return this.withAccess(access,()=>this.memory.atomic(()=>{authority.guard();if(redactJson(input).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
-      const history=authority.inheritExecutionHistory?z.array(SourceDependencySchema).max(4096).parse(access.historyDependencies??[]):[];
+      const history=authority.inheritExecutionHistory?z.array(SourceDependencySchema).parse(access.historyDependencies??[]):[];
       if(authority.inheritExecutionHistory&&(!access.historyTracked||history.some(dep=>['unavailable','ephemeral'].includes(dep.kind))||!access.validateHistory?.(history)))throw new Error('HISTORY_UNTRACKED');
       const {text,...metadata}=input,body=recordSchema.parse({schemaVersion:1,kind:'observed',scope:access.view.scope,origin:access.view.origin,runId:access.view.runId,operationId:access.operationId,
         producer:access.producer,proof:input.proof,observedHash:textHash(text),occurredAt:input.occurredAt,counts:input.counts,coverage:input.coverage,history,parent:null,selection:null,rawRetained:false});

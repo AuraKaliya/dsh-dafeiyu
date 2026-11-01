@@ -9,7 +9,7 @@ import { personaDigest,personaScope,uniqueSources } from './persona-digest.js';
 
 const observedSchema=z.strictObject({schemaVersion:z.literal(2),kind:z.enum(['primary','digest','self-report']),text:z.string().min(1).max(32000),scope:ExecutionScopeSchema,
   runId:z.uuid(),producer:z.string(),operationId:z.string(),dependencies:z.array(PersonaSourceRefSchema).max(64),rootSources:z.array(z.string().max(2200)).max(64),
-  history:z.array(SourceDependencySchema).max(4096),occurredAt:z.iso.datetime({offset:true}),resource:z.string(),coverage:z.array(z.string()),completeness:z.enum(['complete','partial','unknown']),nature:PersonaSourceNatureSchema.optional()});
+  history:z.array(SourceDependencySchema),occurredAt:z.iso.datetime({offset:true}),resource:z.string(),coverage:z.array(z.string()),completeness:z.enum(['complete','partial','unknown']),nature:PersonaSourceNatureSchema.optional()});
 const storedSchema=observedSchema;
 export class ExecutionSources {
   private readonly sourceReadStatements=new Map<string,import('node:sqlite').StatementSync>();

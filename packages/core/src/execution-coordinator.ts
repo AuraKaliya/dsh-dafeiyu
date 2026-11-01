@@ -310,7 +310,7 @@ export class ExecutionCoordinator {
     const intent=this.d.memory()?.intent(access),output=run.result?await this.d.runtime.readResult(run.result):(intent?.events.filter(event=>event.kind==='objection'&&event.blocking&&!intent.events.some(resolved=>resolved.resolves===event.id)).map(event=>`${event.category}：${event.reason}`).join('\n')||'任务处于等待状态，尚未完成。');guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=source.kind==='self-exploration',derivedInputComplete=!opaque;
     const wake=this.wakeOrigins(run)[0],operationalEvidence:import('@dafeiyu/contracts').NativeExpressionPacket['evidence']=wake?[{id:'WAKE',kind:'reported',text:JSON.stringify({kind:'scheduled-wake',goal:task.goal,dueAt:wake.dueAt,note:'由真实计划触发的新一次唤醒；只向原QQ会话整理本次安排，不把旧聊天当成新命令或补回复。'})}]:[];
     const add=(ref:PersonaSourceRef)=>{const key=runtimeHash(ref);candidates.set(key,{source:ref,view:views.get(key)??null});};
-    const visit=(dependencies:readonly SourceDependency[])=>{for(const dependency of dependencies){const key=runtimeHash(dependency);if(visited.has(key))continue;if(visited.size>=4096)throw new Error('CAPACITY_EXCEEDED');visited.add(key);
+    const visit=(dependencies:readonly SourceDependency[])=>{for(const dependency of dependencies){const key=runtimeHash(dependency);if(visited.has(key))continue;visited.add(key);
       if(dependency.kind==='execution-source')add(dependency.ref);
       else if(dependency.kind==='execution-input'){const body=z.object({sources:z.array(PersonaSourceRefSchema),continuity:z.object({id:z.uuid()}).nullable()}).parse(this.d.store.readInput(dependency.runId,'native-program'));body.sources.forEach(add);
         const resumed=z.array(SourceDependencySchema).parse(this.d.store.readInput(dependency.runId,'segment-dependencies')??[]);
@@ -324,10 +324,10 @@ export class ExecutionCoordinator {
         const media=z.object({text:z.string(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
         if(media.success&&operation.plugin==='media'&&operation.action==='dafeiyu_media_read'){const key=runtimeHash(media.data.observation.source);views.set(key,media.data.text);add(media.data.observation.source);}
         else if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
-          if(!(operation.plugin==='qq-capabilities'&&['qq_browse','qq_forward_read'].includes(operation.action))&&!(operation.plugin==='dsh-tools'&&['dsh_tool_call','dsh_result_read'].includes(operation.action)))opaque=true;}
+          if(!(operation.plugin==='qq-capabilities'&&['qq_browse','qq_forward_read'].includes(operation.action))&&!(operation.plugin==='dsh-tools'&&['dsh_tool_call','dsh_tool_read','dsh_result_read'].includes(operation.action)))opaque=true;}
         else if(operation.plugin==='dsh-tools'&&operation.action==='dsh_tool_list'){/* Capability schemas are operational, not evidence about the task result. */}
         else if(outcome?.status==='succeeded'&&outcome.effects!=='unknown'&&(operation.plugin==='qq-progress'&&operation.action==='qq_progress'||operation.plugin==='memory-persona'&&['dafeiyu_qq_expression_save','dafeiyu_memory_pending','dafeiyu_memory_reflect','dafeiyu_memory_self_update','dafeiyu_memory_self_withdraw'].includes(operation.action)||operation.plugin==='activity'&&['dafeiyu_activity_plan','dafeiyu_activity_update'].includes(operation.action))){
-          const body=z.record(z.string(),z.json()).parse(outcome.data),allowed=new Set(['id','version','slot','saved','removed','status','receiptId','state']);
+          const parsed=z.record(z.string(),z.json()).safeParse(outcome.data),body=parsed.success?parsed.data:{},allowed=new Set(['id','version','slot','saved','removed','status','receiptId','state']);
           operationalEvidence.push({id:'O'+operationalEvidence.length,kind:'reported',text:JSON.stringify({action:operation.action,status:outcome.status,effects:outcome.effects,data:Object.fromEntries(Object.entries(body).filter(([key,value])=>allowed.has(key)&&(typeof value==='string'||typeof value==='number'||typeof value==='boolean'))),note:'程序保存的实际操作回执；不由此推断未返回的内容。'})});
         }
         else if(operation.plugin===CAPABILITY_OWNER&&operation.action==='dafeiyu_task_outcome'){/* Agent disposition, not a world fact. */}
@@ -355,7 +355,6 @@ export class ExecutionCoordinator {
           if(!(dependency.owner==='memory'&&dependency.region==='growth'))derivedInputComplete=false;}
       }else {opaque=true;derivedInputComplete=false;}
     }};visit(proof);for(const [key,candidate] of candidates)candidate.view=views.get(key)??candidate.view;
-    if(candidates.size>64)throw new Error('CAPACITY_EXCEEDED');
     const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
     const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
     const progress=this.d.store.readInput(run.id,'automatic-progress');

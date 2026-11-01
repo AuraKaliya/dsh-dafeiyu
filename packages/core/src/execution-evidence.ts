@@ -9,7 +9,7 @@ import type { PersonaRuntime } from './persona-runtime.js';
 import type { CapabilityRegistry } from './capability-registry.js';
 import type { ContextEvidenceView } from './context-runtime.js';
 
-const dependencies=z.array(SourceDependencySchema).max(4096);
+const dependencies=z.array(SourceDependencySchema);
 const inputProof=z.strictObject({schemaVersion:z.literal(1),epoch:z.number().int().positive(),inputHash:z.string(),sources:z.array(PersonaSourceRefSchema),continuity:z.strictObject({id:z.uuid(),hash:z.string()}).nullable(),authorities:z.array(ActivityAnchorSchema).max(64).optional()});
 const contextRecord=z.strictObject({owner:z.string(),region:z.string(),item:ContextItemSchema});
 export interface NativeContext {owner:string;region:string;item:ContextItem}
@@ -22,6 +22,10 @@ export class ExecutionEvidence {
   private readonly validationMemo=new Map<string,boolean>();
   private accessMemo=new WeakMap<PersonaAccess,PersonaAccess>();
   private readonly operationMemo=new Map<string,ReturnType<RuntimeStore['operation']>>();
+  private immutableVersion=-1;
+  private readonly inputMemo=new Map<string,import('@dafeiyu/contracts').Json>();
+  private readonly operationProofMemo=new Map<string,{hash:string;inputHash:string;dependencies:z.infer<typeof dependencies>}>();
+  private readonly contextMemo=new Map<string,z.infer<typeof contextRecord>>();
   private readonly runMemo=new Map<string,StoredRun>();
   private validationDepth=0;
   private invalidated=false;
@@ -33,6 +37,9 @@ export class ExecutionEvidence {
     private readonly rules:readonly string[],private readonly base:PersonaAccess,private readonly authorityValid:(anchor:ActivityAnchor)=>boolean=()=>false,private readonly authorityRequired:(run:StoredRun)=>boolean=()=>false){}
   access(base=this.base):PersonaAccess{const cached=this.validationDepth>0?this.accessMemo.get(base):undefined;if(cached)return cached;
     const access:PersonaAccess={...base,sourceRules:this.rules,historyDependencies:this.admitted,historyTracked:true,
+    // A synchronous source batch checks the complete authority at both boundaries.
+    // Repeating the same task/message/policy traversal for every nested proof makes long tasks quadratic.
+    guard:()=>{if(this.validationDepth>0){base.view.signal.throwIfAborted();if(this.invalidated)throw new Error('SOURCE_STALE');}else base.guard();},
     validateHistory:deps=>this.validate(deps),operationFinished:id=>{try{const op=this.readOperation(id),run=this.readRun(op.runId);return run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&['succeeded','partial'].includes(op.outcome?.status??'');}catch{return false;}},
     verifyMemorySource:ref=>{try{if(ref.kind!=='memory'||!ref.selectionId||!ref.authorization||!this.rules.includes(ref.authorization.policyId))return null;
       const input=this.repository.readSelectedInputs(ref.agentId,this.run.definition.taskId!,[`task-link:${ref.selectionId}`],this.rules)[0];
@@ -50,10 +57,13 @@ export class ExecutionEvidence {
   exposed(){return structuredClone(this.admitted);}
   contextView():ContextEvidenceView{return {sourceItems:()=>this.contexts,nativeDependencies:()=>[],validateHistorical:dep=>this.validate([dep])};}
   sourceRefs(deps=this.admitted):PersonaSourceRef[]{return [...new Map(deps.filter((dep):dep is Extract<SourceDependency,{kind:'execution-source'}>=>dep.kind==='execution-source').map(dep=>[runtimeHash(dep.ref),dep.ref])).values()];}
-  private clearValidation(){this.validationMemo.clear();this.accessMemo=new WeakMap();this.operationMemo.clear();this.runMemo.clear();}
-  private readOperation(id:string){const cached=this.validationDepth?this.operationMemo.get(id):undefined;if(cached)return cached;const value=this.store.operation(id);if(this.validationDepth)this.operationMemo.set(id,value);return value;}
+  private clearValidation(){this.validationMemo.clear();this.accessMemo=new WeakMap();this.runMemo.clear();}
+  private syncImmutable(){const version=this.store.immutableDataVersion();if(version===this.immutableVersion)return;this.immutableVersion=version;this.operationMemo.clear();this.operationProofMemo.clear();this.inputMemo.clear();this.contextMemo.clear();}
+  private readInput(runId:string,id:string){const key=runId+':'+id,cached=this.inputMemo.get(key);if(cached!==undefined)return cached;const value=this.store.readInput(runId,id);
+    if(value!==null){if(this.inputMemo.size>=1024)this.inputMemo.delete(this.inputMemo.keys().next().value!);this.inputMemo.set(key,value);}return value;}
+  private readOperation(id:string){const cached=this.operationMemo.get(id);if(cached)return cached;const value=this.store.operation(id);if(value.state==='finished'){if(this.operationMemo.size>=1024)this.operationMemo.delete(this.operationMemo.keys().next().value!);this.operationMemo.set(id,value);}return value;}
   private readRun(id:string){const cached=this.validationDepth?this.runMemo.get(id):undefined;if(cached)return cached;const value=this.store.get(id);if(this.validationDepth)this.runMemo.set(id,value);return value;}
-  readSources(read:()=>void):void{const outer=this.validationDepth++===0;try{read();}finally{this.validationDepth--;if(outer)this.clearValidation();}}
+  readSources(read:()=>void):void{const outer=this.validationDepth++===0;try{if(outer){this.base.guard();this.syncImmutable();}read();if(outer)this.base.guard();}finally{this.validationDepth--;if(outer)this.clearValidation();}}
   /** Coalesces read validation across short async steps; every store/provider change and authority guard still applies. */
   validateAdmitted():boolean {
     this.base.guard();const port=this.memory(),epoch=runtimeHash([this.store.validationEpoch(),port?.generation(this.access())??0,port?.resourceEpoch?.(this.access())??null]);
@@ -62,21 +72,23 @@ export class ExecutionEvidence {
     this.admissionCache=valid?{dependencies:this.admitted,epoch,until:Math.min(Date.now()+250,this.contextExpiry),valid}:undefined;
     return valid;
   }
-  validate(deps:readonly SourceDependency[]):boolean{if(this.invalidated)return false;const outer=this.validationDepth++===0;try{return deps.every(dep=>{const key=runtimeHash(dep),cached=this.validationMemo.get(key);if(cached!==undefined)return cached;if(this.checking.has(key)||this.checking.size>=128)return false;this.checking.add(key);
-    try{const valid=this.valid(dep);this.validationMemo.set(key,valid);return valid;}catch{return false;}finally{this.checking.delete(key);}});}finally{this.validationDepth--;if(outer)this.clearValidation();}}
+  validate(deps:readonly SourceDependency[]):boolean{if(this.invalidated)return false;const outer=this.validationDepth++===0;try{if(outer){this.base.guard();this.syncImmutable();}const valid=deps.every(dep=>{const key=runtimeHash(dep),cached=this.validationMemo.get(key);if(cached!==undefined)return cached;if(this.checking.has(key))return false;this.checking.add(key);
+    try{const valid=this.valid(dep);this.validationMemo.set(key,valid);return valid;}catch{return false;}finally{this.checking.delete(key);}});if(outer)this.base.guard();return valid;}finally{this.validationDepth--;if(outer)this.clearValidation();}}
   private valid(dep:SourceDependency):boolean{
-    if(dep.agentId!==this.base.view.scope.agentId||dep.route!==this.route())return false;this.base.guard();
+    if(dep.agentId!==this.base.view.scope.agentId||dep.route!==this.route())return false;
     if(dep.kind==='execution-source')return this.memory()?.validate(this.access(),dep.ref)??false;
-    if(dep.kind==='execution-input'){const run=this.readRun(dep.runId),body=inputProof.safeParse(this.store.readInput(dep.runId,'native-program'));
+    if(dep.kind==='execution-input'){const run=this.readRun(dep.runId),body=inputProof.safeParse(this.readInput(dep.runId,'native-program'));
       return run.definition.taskId===this.run.definition.taskId&&body.success&&body.data.epoch===run.definition.intentVersion&&runtimeHash(body.data)===dep.hash
         &&(!this.authorityRequired(run)||!!body.data.authorities?.length)&&(body.data.authorities??[]).every(anchor=>this.authorityValid(anchor))
         &&body.data.sources.every(ref=>this.memory()?.validate(this.access(),ref))
         &&(!body.data.continuity||(()=>{const checkpoint=this.memory()?.checkpoint(this.access(),body.data.continuity.id,true);return !!checkpoint&&runtimeHash(checkpoint)===body.data.continuity.hash;})());}
-    if(dep.kind==='execution-operation'){const op=this.readOperation(dep.operationId),run=this.readRun(op.runId),body=this.store.readInput(op.runId,`operation-inputs:${op.id}`);
-      return op.runId===dep.runId&&run.definition.taskId===this.run.definition.taskId&&op.state==='finished'&&!!op.outcome&&runtimeHash(op.outcome)===dep.hash
-        &&body!==null&&runtimeHash(body)===dep.inputHash&&this.validate(dependencies.parse(body));}
+    if(dep.kind==='execution-operation'){const op=this.readOperation(dep.operationId),run=this.readRun(op.runId);if(op.runId!==dep.runId||run.definition.taskId!==this.run.definition.taskId||op.state!=='finished'||!op.outcome)return false;
+      let proof=this.operationProofMemo.get(op.id);if(!proof){const body=this.readInput(op.runId,`operation-inputs:${op.id}`);if(body===null)return false;
+        proof={hash:runtimeHash(op.outcome),inputHash:runtimeHash(body),dependencies:dependencies.parse(body)};if(this.operationProofMemo.size>=1024)this.operationProofMemo.delete(this.operationProofMemo.keys().next().value!);this.operationProofMemo.set(op.id,proof);}
+      return proof.hash===dep.hash&&proof.inputHash===dep.inputHash&&this.validate(proof.dependencies);}
     if(dep.kind==='context'){
-      const record=contextRecord.safeParse(this.store.findContext(`context:${runtimeHash(dep)}`));if(!record.success||Date.parse(record.data.item.expiresAt)<=Date.now()||runtimeHash(this.dependency(record.data))!==runtimeHash(dep))return false;
+      const key=runtimeHash(dep),stored=this.contextMemo.get(key),record=contextRecord.safeParse(stored??this.store.findContext(`context:${key}`));if(!record.success||Date.parse(record.data.item.expiresAt)<=Date.now()||runtimeHash(this.dependency(record.data))!==key)return false;
+      if(!stored){if(this.contextMemo.size>=1024)this.contextMemo.delete(this.contextMemo.keys().next().value!);this.contextMemo.set(key,record.data);}
       this.contextExpiry=Math.min(this.contextExpiry,Date.parse(record.data.item.expiresAt));
       if(dep.owner==='memory'&&dep.region==='growth')return dep.id==='persona:availability'||this.personas.historical(this.access(),dep);
       if(dep.owner==='memory'&&dep.region==='execution')return this.memory()?.validateContext(this.access(),record.data.item)??false;

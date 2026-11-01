@@ -14,11 +14,11 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
   const root=await mkdtemp(join(testTempDir(),'message-intent-')),file=join(root,'host.json');
   process.env.DSH_HOME=join(root,'data/core/dsh-home');
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');
-  let channel:ExtensionHandle|undefined;const actions:string[]=[];let toolRequests=0;const results:any[]=[];
+  let channel:ExtensionHandle|undefined;const actions:string[]=[];let toolRequests=0,nativeDeliveries=0;const nativeReads=new Set<string>();const results:any[]=[];
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
     if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
-    if(!request.tools?.some(tool=>tool.name==='fixture_task_submit'))return textResponse('已依据当前对话答复。');
+    if(!request.tools?.some(tool=>tool.name==='fixture_task_submit')){if(request.tools?.some(tool=>tool.name==='dafeiyu_memory_pending')&&!nativeReads.has(session)){nativeReads.add(session);return toolResponse('dafeiyu_memory_pending',{});}return textResponse('已依据当前对话答复。');}
     toolRequests++;
     if(toolRequests>12)throw new Error('SCRIPTED_TOOL_LOOP');
     const textOf=(message:any)=>Array.isArray(message.content)?message.content.filter((block:any)=>block.type==='text').map((block:any)=>block.text).join('\n'):String(message.content??'');
@@ -41,12 +41,12 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
     modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},
     plugins:[{id:'model-scripted',required:true},{id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true}],
     authorityPolicies:[{id:'conversation',producers:['fixture-channel'],actions:['fixture_task_submit'],allowLocalWrite:true},
-      {id:'intent-task',producers:['fixture-tasks'],actions:[],allowLocalWrite:false}]}));
+      {id:'intent-task',producers:['fixture-tasks'],actions:['dafeiyu_memory_pending'],allowLocalWrite:false}]}));
   const config=loadHostConfig(file),coordination=join(root,'coordination.sqlite');initializeProfile(config,coordination);
   const options:Parameters<typeof ManagedHost.start>[1]={coordination,adapter,signal:t.signal,installChannels:ctx=>{
     channel=ctx.dafeiyu.registerExtension({id:'fixture-channel',version:'1',protocolVersion:API_VERSION,agentId:'fish',channels:[{
       channel:'fixture',account:'local',deliver:async(_reply,_signal,authority)=>{authority?.();return {status:'sent' as const,receiptId:'ack'};},
-      deliverTaskResult:async(_reply,_anchor,_signal,authority,writeWindow)=>{authority();const end=writeWindow();try{return {status:'sent' as const,receiptId:'result'};}finally{end();}}}]});
+      deliverTaskResult:async(_reply,_anchor,_signal,authority,writeWindow)=>{authority();const end=writeWindow();try{nativeDeliveries++;return {status:'sent' as const,receiptId:'result'};}finally{end();}}}]});
     ctx.dafeiyu.registerExtension({id:'fixture-tasks',version:'1',protocolVersion:API_VERSION,agentId:'fish',actions:[{
       id:'fixture_task_submit',version:'1',description:'受理当前真实任务',inputSchema:MessageInstructionSubmitSchema,
       outputSchema:z.json(),effects:'local-write',scope:'conversation',execute:async(input,context)=>({
@@ -115,5 +115,6 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
       const plan=JSON.parse(String(decisions.at(-1)!.body));assert.equal(plan.expectedVersion,1);assert.equal(plan.source.intent.originalRequest.messageId,'inbound-0');assert.equal(plan.source.intent.amendments.at(-1).text,amendment);
       const requests=persisted.prepare("SELECT body FROM execution_requests WHERE producer='fixture-tasks'").all();assert.equal(requests.length,2,'Duplicate submission never creates a second amendment run');const states=persisted.prepare("SELECT state FROM runs JOIN execution_requests ON runs.request_key=execution_requests.id WHERE execution_requests.producer='fixture-tasks'").all();assert.ok(states.every(row=>row.state==='completed'),'Replaying after receipt failure must not cancel its already accepted child');}
     finally{persisted.close();}
+    assert.equal(nativeDeliveries,2,'A list-valued pending-memory receipt and a long amended goal must both survive final delivery');
   }finally{await host.close();}
 });

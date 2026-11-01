@@ -101,6 +101,7 @@ export class RuntimeStore {
   });}
   pendingMessageIntents(){this.open();return this.db.prepare('SELECT inbound_id FROM message_intents WHERE result IS NULL ORDER BY rowid').all().map(row=>({inboundId:string(row.inbound_id),...this.messageIntent(string(row.inbound_id))!}));}
   validationEpoch(){this.open();return runtimeHash([this.db.prepare('PRAGMA data_version').get(),this.db.prepare('SELECT total_changes() AS changes').get()]);}
+  immutableDataVersion(){this.open();return Number(this.sourceRead('PRAGMA data_version').get()?.data_version??0);}
   private transaction<T>(work:()=>T):T {this.open();this.db.exec('BEGIN IMMEDIATE');try{const result=work();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   private event(runId:string,type:string,data:Record<string,Json>={}):string {
     const value=eventSchema.parse({id:randomUUID(),runId,type,at:new Date().toISOString(),data});this.db.prepare('INSERT INTO runtime_outbox(id,body) VALUES(?,?)').run(value.id,JSON.stringify(value));return value.id;

@@ -9,29 +9,31 @@ import type {ExtensionHandle,Reply} from '@dafeiyu/contracts';
 import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
-test('a message task crosses a segment and delivers exactly one verified leaf result',{timeout:30000},async t=>{
+const large=process.env.DAFEIYU_LARGE_ACCEPTANCE==='1';
+test('a message task reads multiple videos and delivers exactly one verified result',{timeout:large?600000:30000},async t=>{
   const root=await mkdtemp(join(testTempDir(),'bili-delivery-')),file=join(root,'host.json');
   process.env.DSH_HOME=join(root,'data/core/dsh-home');
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');
   let step=0,submitted=false,channel:ExtensionHandle|undefined;
-  const delivered:Reply[]=[],videos=['BV1xNpFedE11','BV1xNpFedE12','BV1xNpFedE13','BV1xNpFedE14'];
+  const delivered:Reply[]=[],label=large?'七十条':'四条',alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',videos=Array.from({length:large?70:4},(_,i)=>'BV1xNpFedE'+alphabet[Math.floor(i/alphabet.length)]+alphabet[i%alphabet.length]);
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
     if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
     if(session.startsWith('dafeiyu-delivery-')){
       assert.match(JSON.stringify(request.messages),/bilibili-reading-progress/);
-      return textResponse('已保存四条视频的阅读记录。本轮依据视频资料，未完整观看视频或音轨。');
+      return textResponse(`已保存${label}视频的阅读记录。本轮依据视频资料，未完整观看视频或音轨。`);
     }
     if(request.tools?.some(tool=>tool.name==='fixture_task_submit')){
       if(submitted)return textResponse('已受理。');submitted=true;
       return toolResponse('fixture_task_submit',{requestId:'submit-reading',title:'B站阅读验收'});
     }
     assert.ok(!session.startsWith('dafeiyu-progress-'),'Task unexpectedly failed');
-    if(step>=8)return textResponse('已保存四条视频阅读记录。');
+    if(step>=videos.length*2)return textResponse(`已保存${label}视频阅读记录。`);
     const index=Math.floor(step/2),read=step++%2===0,bvid=videos[index]!;
     return read?toolResponse('bili_video',{requestId:'video-'+index,bvid}):toolResponse('bili_reading_save',{
       requestId:'save-'+index,bvid,status:'closed',conclusion:'观察'+index,gaps:[],nextStep:null});
   });
+  const resolveModel=adapter.resolveModel.bind(adapter);adapter.resolveModel=async(provider,model)=>({...await resolveModel(provider,model),context:{contextWindow:1000000}});
   await writeFile(join(root,'persona.md'),'本机虚构验收人格。');
   await writeFile(file,JSON.stringify({schemaVersion:1,profileId:'reading-delivery',agent:{id:'fish'},
     paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},
@@ -63,8 +65,9 @@ test('a message task crosses a segment and delivers exactly one verified leaf re
     return {status:200,headers:{'content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};
   }};
   let host=await ManagedHost.start(config,options);
+  t.signal.addEventListener('abort',()=>host.core.cancelRunning(),{once:true});
   try{
-    const text='读取四条B站视频并保存阅读记录';
+    const text=`读取${label}B站视频并保存阅读记录`;
     channel!.ingest({id:'inbound-reading',occurredAt:new Date().toISOString(),conversation:{channel:'fixture',account:'local',kind:'private',id:'owner'},
       sender:{id:'owner',displayName:'验收'},text,mainText:text});
     await host.ctx.dafeiyu.whenIdle();
@@ -72,11 +75,11 @@ test('a message task crosses a segment and delivers exactly one verified leaf re
     try{
       const runs=db.prepare('SELECT id,state,error FROM runs').all();
       assert.equal(delivered.length,1,JSON.stringify({runs,deliveries:db.prepare('SELECT state,error FROM native_deliveries').all()}));
-      assert.equal(runs.filter(run=>run.state==='continued').length,0,'Four videos no longer force a segment handoff');
+      assert.equal(runs.filter(run=>run.state==='continued').length,0,'Many videos do not force a count-based segment handoff');
       assert.equal(runs.find(run=>run.id===delivered[0]!.taskResult?.runId)?.state,'completed');
       assert.equal(db.prepare("SELECT COUNT(*) AS n FROM native_deliveries WHERE state='sent'").get()!.n,1);
     }finally{db.close();}
-    assert.match(delivered[0]!.text,/四条/);
+    assert.match(delivered[0]!.text,new RegExp(label));
     assert.ok(adapter.requests.some(request=>String(request.sessionId).startsWith('memory-expression-verify-')));
     const runId=delivered[0]!.taskResult!.runId;
     await host.close();host=await ManagedHost.start(config,options);

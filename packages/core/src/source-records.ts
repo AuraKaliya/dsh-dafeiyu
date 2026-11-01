@@ -6,7 +6,7 @@ import { SourceDependencySchema } from '@dafeiyu/contracts';
 import type { SourceDependency } from '@dafeiyu/contracts';
 
 export const digestSource=(text:string)=>createHash('sha256').update(text).digest('hex');
-export const dependenciesSchema=z.array(SourceDependencySchema).max(4096);
+export const dependenciesSchema=z.array(SourceDependencySchema);
 export function unionDependencies(...groups:readonly (readonly SourceDependency[])[]):SourceDependency[]{
   const items=new Map<string,SourceDependency>();for(const group of groups)for(const dep of group)items.set(JSON.stringify(dep),dep);
   return dependenciesSchema.parse([...items].sort(([a],[b])=>a.localeCompare(b)).map(([,dep])=>dep));

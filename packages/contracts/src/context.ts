@@ -7,7 +7,7 @@ export type ContextStage=z.infer<typeof ContextStageSchema>;
 const requestSource=z.strictObject({conversation:ConversationSchema,messageId:z.string(),occurredAt:z.iso.datetime(),text:z.string().max(32000)});
 export const ContextHandoffSchema=z.strictObject({schemaVersion:z.literal(1),stage:ContextStageSchema,
   task:z.strictObject({taskId:z.uuid(),runId:z.uuid(),intentVersion:z.number().int().nonnegative()}).nullable(),
-  goal:z.string().max(32000),originalRequest:requestSource.nullable(),latestRequest:requestSource.nullable(),
+  goal:z.string(),originalRequest:requestSource.nullable(),latestRequest:requestSource.nullable(),
   facts:z.record(z.string(),z.json()),note:z.string().max(2000)});
 export type ContextHandoff=z.infer<typeof ContextHandoffSchema>;
 export const ContextAssemblySchema=z.strictObject({

@@ -21,7 +21,7 @@ export class NativeExpression implements NativeExpressionPort {
     // This read is synchronous: retain per-source checks and validate the entire authority/history
     // before and after the batch, rather than repeating that traversal for every nested read.
     const readAccess={...access.execution,guard:()=>{access.execution.view.signal.throwIfAborted();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');}};
-    const candidates=z.array(NativeExpressionCandidateSchema).max(64).parse(access.candidates),proofs:unknown[]=[],targetInferences:number[]=[];let forbidden=false,evidence:NativeExpressionPacket['evidence']=[];
+    const candidates=z.array(NativeExpressionCandidateSchema).parse(access.candidates),proofs:unknown[]=[],targetInferences:number[]=[];let forbidden=false,evidence:NativeExpressionPacket['evidence']=[];
     const read=()=>{for(const candidate of candidates){const source=candidate.source;let material:string|null=null,fence:string|null=null,kind:'reported'|'inference'='reported',mediaStamp:string|null=null,targetStamp:string|null=null;
       if(source.kind==='memory')material=source.collection==='autobiography'?this.store.autobiography(scope.agentId).material(source)?.text??null:this.expression.nativeMemoryMaterial(scope.agentId,source,anchor.target,access.expressionPolicy??null);
       else if(candidate.view!==null){const observed=this.store.capabilities.withAccess(readAccess,()=>{const media=this.ctx.dafeiyu.nativeMediaObservedMaterial(readAccess,source,anchor.target,candidate.view!);if(media){kind=media.kind;mediaStamp=media.stamp;}
@@ -49,7 +49,7 @@ export class NativeExpression implements NativeExpressionPort {
     if(!evidence.length)throw new Error('NATIVE_EXPRESSION_NO_PUBLIC_MATERIAL');
     if(access.handoff)evidence.push({id:'CONTEXT',kind:'reported',text:JSON.stringify({kind:'stage-handoff',...access.handoff})});
     evidence=packNativeEvidence(evidence);
-    const question=z.string().min(1).max(2000).parse(access.question);if(Buffer.byteLength(JSON.stringify({question,evidence}))>128000)throw new Error('NATIVE_EXPRESSION_CAPACITY');
+    const question=z.string().min(1).parse(access.question);
     if(redactJson(z.json().parse({question,evidence})).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
     access.guard();return {anchor,question,evidence,resultIncluded,...(access.media?{media:access.media}:{}),sourceStamp:hash({anchor,proofs,...(access.handoff?{handoff:access.handoff}:{}),outputHash:resultIncluded?hash(access.output):null,opaque:access.opaqueInfluence,policy:access.expressionPolicy??null,...(access.media?{media:access.media}:{})})};
   }
@@ -61,7 +61,7 @@ export class NativeExpression implements NativeExpressionPort {
     if(packet.sourceStamp!==current.sourceStamp||JSON.stringify(packet.anchor)!==JSON.stringify(current.anchor)||JSON.stringify(packet.evidence)!==JSON.stringify(current.evidence)||JSON.stringify(packet.media)!==JSON.stringify(current.media)||packet.question!==current.question||packet.resultIncluded!==current.resultIncluded)throw new Error('SOURCE_STALE');return packet;
   }
   withdraw(access:NativeExpressionAccess,id:string,version:number){try{this.store.atomic(()=>{const packet=this.open(access,id);if(packet.version!==version)throw new Error('VERSION_CONFLICT');this.db.prepare('UPDATE native_expression_packets SET version=version+1,withdrawn=1 WHERE id=? AND version=?').run(id,version);this.audit(access,'native.expression.withdrawn',{packetId:id,version:version+1});});}finally{this.flush();}}
-  async verify(access:NativeExpressionAccess,id:string,answer:string,signal:AbortSignal,guard:()=>void){const packet=this.open(access,id),work=verifyPersonaDelivery(this.ctx,{question:packet.question,evidence:packet.evidence},answer,AbortSignal.any([signal,this.stop.signal]),()=>{guard();this.open(access,id);},{maxAnswerChars:32000,maxInputBytes:Math.min(256000,access.requestMaxBytes)});this.pending.add(work);try{await work;}finally{this.pending.delete(work);}}
+  async verify(access:NativeExpressionAccess,id:string,answer:string,signal:AbortSignal,guard:()=>void){const packet=this.open(access,id),work=verifyPersonaDelivery(this.ctx,{question:packet.question,evidence:packet.evidence},answer,AbortSignal.any([signal,this.stop.signal]),()=>{guard();this.open(access,id);},{maxAnswerChars:32000,maxInputBytes:access.requestMaxBytes});this.pending.add(work);try{await work;}finally{this.pending.delete(work);}}
   cancel(){this.stop.abort();}
   async whenIdle(){await Promise.allSettled([...this.pending]);}
   async close(){this.cancel();await this.whenIdle();}

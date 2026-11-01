@@ -6,5 +6,5 @@ export const ActivityAuthoritySchema=ActivityAnchorSchema.omit({hash:true}).exte
   policy:z.strictObject({producer:z.string(),id:z.string(),hash:z.string().length(64)}),
   action:z.strictObject({owner:z.string(),id:z.string(),version:z.string(),pluginVersion:z.string(),hash:z.string().length(64)}).nullable(),
   foundationHash:z.string().length(64).nullable(),
-  dependencies:z.array(SourceDependencySchema).max(4096),sources:z.array(PersonaSourceRefSchema).max(64),
+  dependencies:z.array(SourceDependencySchema),sources:z.array(PersonaSourceRefSchema).max(64),
 });

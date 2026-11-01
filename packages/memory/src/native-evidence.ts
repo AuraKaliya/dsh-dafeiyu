@@ -15,6 +15,5 @@ export function packNativeEvidence(items:Evidence[]):Evidence[]{
     }
     flush();
   }
-  if(packed.length>19)throw new Error('NATIVE_EXPRESSION_CAPACITY');
   return packed;
 }

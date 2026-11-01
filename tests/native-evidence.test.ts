@@ -11,8 +11,8 @@ test('many admitted observations retain every source label and inference distinc
   assert.ok(packed.every(item=>item.text.length<=32000));assert.deepEqual(packNativeEvidence(packed),packed);
 });
 
-test('large individual records keep their exact content and excessive capacity still fails',()=>{
+test('large admitted records keep exact content beyond the old nineteen-item packet ceiling',()=>{
   const items:NativeExpressionPacket['evidence']=Array.from({length:20},(_,i)=>({id:'S'+i,kind:'reported',text:'"'.repeat(31000)}));
-  assert.throws(()=>packNativeEvidence(items),/NATIVE_EXPRESSION_CAPACITY/);
+  assert.deepEqual(packNativeEvidence(items),items);
   const small=items.slice(0,19);assert.equal(packNativeEvidence(small),small);
 });
