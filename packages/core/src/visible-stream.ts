@@ -3,7 +3,7 @@ import { redactContent,redactJson } from '@dafeiyu/contracts';
 import { z } from 'zod';
 import type {Json} from '@dafeiyu/contracts';
 
-export interface RejectedModelInput {readonly tool:string;readonly fields:readonly string[]}
+export interface RejectedModelInput {readonly tool:string;readonly fields:readonly string[];readonly reason?:'private-field'|'invalid-json'}
 function changedFields(before:Json,after:Json,path='$'):string[]{
   if(JSON.stringify(before)===JSON.stringify(after))return [];
   if(before&&after&&typeof before==='object'&&typeof after==='object'&&!Array.isArray(before)&&!Array.isArray(after))
@@ -32,7 +32,9 @@ export async function* visibleStream(input:AsyncIterable<StreamChunk>,onRejected
       if(!entry||chunk.block.type!==entry.kind)throw new Error('INVALID_MODEL_STREAM');
       if(chunk.block.type==='text'){const text=redactContent(chunk.block.text).value;yield {type:'text-delta',index:entry.index,text};yield {type:'block-end',index:entry.index,block:{type:'text',text}};}
       else if(chunk.block.type==='tool-call'){
-        let args;try{args=z.json().parse(JSON.parse(chunk.block.arguments));}catch{throw new Error('INVALID_MODEL_ARGUMENTS');}
+        let args;try{args=z.json().parse(JSON.parse(chunk.block.arguments));}catch{
+          onRejected?.({tool:redactContent(chunk.block.name).value,fields:['$'],reason:'invalid-json'});
+          yield {type:'finish',reason:{kind:'error',failure:{code:'INVALID_MODEL_ARGUMENTS',message:'Tool arguments were not valid JSON; no calls from this attempt were dispatched.'}}};return;}
         const safe=redactJson(args);
         if(safe.redacted){onRejected?.({tool:chunk.block.name,fields:changedFields(args,safe.value)});
           yield {type:'finish',reason:{kind:'error',failure:{code:'PRIVATE_INPUT_REJECTED',message:'Tool arguments included a restricted field; no calls from this attempt were dispatched.'}}};return;}

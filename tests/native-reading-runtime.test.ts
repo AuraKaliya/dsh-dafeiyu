@@ -4,6 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import {ToolCallId} from '@deepseek-ai/dsh-llm';
 import { taskScopeKey } from '@dafeiyu/contracts';
 import { NativeRuntime } from '../packages/core/lib/native-runtime.js';
 import { readingStage } from '../packages/core/lib/reading-stage.js';
@@ -37,6 +38,19 @@ test('a transient model connection failure retries the request without replaying
   const adapter=new FixtureAdapter((_request,call)=>call===1?toolResponse('bili_reading_save',{bvid:'video-1'}):call===2?(async function*(){yield {type:'finish' as const,reason:{kind:'error' as const,failure:{code:'TRANSPORT',message:'fixture connection lost'}}};})():textResponse('恢复后完成。'));
   const ctx=await sdkFixture(root,adapter),runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
   try{const result=await runtime.run(frame([action(()=>{executed++;return {bvid:'video-1',status:'closed'};})]));assert.equal(executed,1);assert.equal(adapter.requests.length,3);assert.match(result.text,/完成/);}
+  finally{await runtime.close();await ctx.fiber.dispose();}
+});
+
+test('malformed JSON repairs the whole unexecuted attempt without duplicating its valid earlier call',async()=>{
+  const root=await mkdtemp(join(testTempDir(),'native-json-repair-'));let executed=0;
+  const adapter=new FixtureAdapter((request,call)=>{
+    if(call===1)return (async function*(){for(const [index,argumentsJson] of ['{"bvid":"first"}','{"bvid":'].entries()){
+      yield {type:'block-start' as const,index,blockType:'tool-call' as const};yield {type:'block-end' as const,index,block:{type:'tool-call' as const,id:ToolCallId(randomUUID()),name:'bili_reading_save',arguments:argumentsJson}};
+    }yield {type:'finish' as const,reason:{kind:'tool-calls' as const}};})();
+    assert.match(JSON.stringify(request.messages),/invalid-json/);return call===2?toolResponse('bili_reading_save',{bvid:'first'}):textResponse('恢复完成。');
+  });
+  const ctx=await sdkFixture(root,adapter),runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
+  try{const result=await runtime.run(frame([action(()=>{executed++;return {bvid:'first',status:'closed'};})]));assert.equal(executed,1);assert.equal(adapter.requests.length,3);assert.match(result.text,/完成/);}
   finally{await runtime.close();await ctx.fiber.dispose();}
 });
 
