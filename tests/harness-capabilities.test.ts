@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {CAPABILITY_INDEX_MAX_BYTES,renderCapabilityIndex} from '../packages/core/lib/harness-runtime.js';
+import {CAPABILITY_INDEX_MAX_BYTES,renderCapabilityIndex,HarnessRuntime} from '../packages/core/lib/harness-runtime.js';
 
 test('capability index keeps names, short purposes and real versions without full descriptions or skill payloads',()=>{
   const huge='x'.repeat(5000);
@@ -35,4 +35,27 @@ test('capability index is hard capped and degrades to a queryable shell instead 
   assert.ok(parsed.callable.length>0&&parsed.callable.length<300);
   assert.equal(parsed.counts.callable,300);
   assert.ok(Buffer.byteLength(text)<=CAPABILITY_INDEX_MAX_BYTES);
+});
+
+test('reading-stage install exposes a readable catalog but no dispatch authority even when dispatch actions exist',async()=>{
+  const agent={},handlers=new Map<string,(...args:any[])=>any>(),manifests:string[]=[],registered:string[]=[];
+  const scope={
+    tools:{schemas:()=>[{name:'scoped-tool',description:'scoped',parameters:{type:'object'}}],register:(tool:{name:string})=>{registered.push(tool.name);return ()=>{};}},
+    systemPrompt:{section:()=>()=>{},context:(spec:{text:string|(()=>string)})=>{manifests.push(typeof spec.text==='function'?spec.text():spec.text);return ()=>{};}},
+    on:(name:string,handler:(...args:any[])=>any)=>{handlers.set(name,handler);return ()=>{};},
+  } as never;
+  const runtime=new HarnessRuntime(()=>({features:[],actions:[]}));
+  runtime.bind({catalog:async()=>({version:'a'.repeat(64),tools:[{name:'host-read',description:'read host state',parameters:{type:'object',properties:{}}}],skills:[],skillsComplete:true})});
+  const action=(id:string)=>({definition:{id,owner:'dsh-tools',active:()=>true,metadata:()=>null}});
+  const dispose=runtime.install(scope,agent as never,[action('dsh_tool_call'),action('dsh_tool_list')] as never,new AbortController().signal,'task-1','bili-reading');
+  try{
+    const assemble=handlers.get('system-prompt/assemble')!;
+    const assembled=await assemble({},{},async()=>({sections:[],contexts:[],tools:[]}));
+    const host=JSON.parse(assembled.contexts.find((context:any)=>context.name==='dafeiyu:configured-capabilities:v1').text).host;
+    assert.equal(host.available,true);
+    assert.equal(host.execution,'read-only-discovery');
+    assert.equal(host.stage,'bili-reading');
+    assert.equal(host.tools[0].name,'host-read');
+    assert.deepEqual(registered,[],'Reading stage must not register host dispatch aliases');
+  }finally{dispose();}
 });
