@@ -105,7 +105,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
   }
   let revision=null;try{const options={cwd:repository,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']};if(resolve(execFileSync('git',['rev-parse','--show-toplevel'],options).trim())===repository)revision=execFileSync('git',['rev-parse','HEAD'],options).trim();}catch{/* A source archive may have no Git metadata. */}
   const contentHash=hash(JSON.stringify(files(destination).map(file=>[portable(relative(destination,file)),hash(readFileSync(file))]).sort((a,b)=>a[0].localeCompare(b[0]))));
-  put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:6,runtime:2}},null,2)+'\n');
+  put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:6,runtime:3}},null,2)+'\n');
   const inventory=files(destination).map(file=>({path:portable(relative(destination,file)),bytes:lstatSync(file).size,sha256:hash(readFileSync(file))}));
   return {directory:destination,version:plugin.version,files:inventory.length,bytes:inventory.reduce((sum,file)=>sum+file.bytes,0),inventory};
 }

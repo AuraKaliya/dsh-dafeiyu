@@ -7,7 +7,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { ContextFormed,GenerateOptions } from '@deepseek-ai/dsh-llm';
 import type { TaskExecutionFrame } from './execution-frame.js';
 import { openAgentSession,runAgentTurn } from './agent-session.js';
-import { visibleStream } from './visible-stream.js';
+import { ModelInputRepair,ARGUMENT_REPAIR_CONTEXT } from './model-input-repair.js';
 import { createHash,randomUUID } from 'node:crypto';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { CompactionRuntime } from './compaction-runtime.js';
@@ -19,8 +19,7 @@ export const EXECUTION_MESSAGE_SOURCE='dafeiyu-execution' as const;
 declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {
   'dafeiyu-execution':{kind:'dafeiyu-execution';taskId:string;runId:string;inputId:string;originKind:string}&ContextFormed;
 }}
-interface Owned {handle:AgentHandle;scope:Context;frame:TaskExecutionFrame|undefined;compaction:CompactionRuntime;lastRequest:GenerateOptions|undefined;retryPending?:boolean;repairs?:number;
-  segment?:{reason:string|null;blocked:boolean;requests:number;units:Set<string>;softTokens?:number}}
+interface Owned {handle:AgentHandle;scope:Context;frame:TaskExecutionFrame|undefined;compaction:CompactionRuntime;inputRepair:ModelInputRepair;lastRequest:GenerateOptions|undefined}
 export class NativeRuntime {
   private readonly sessions=new Map<string,Owned>();
   private meterLoading:Promise<unknown>|undefined;
@@ -35,8 +34,7 @@ export class NativeRuntime {
       if(carriers.at(-1)?.text!==current)throw new Error('NATIVE_CONTEXT_SNAPSHOT_MISMATCH');
       frame.contextAudit?.({manifest:frame.contextPlan?.()??null,capacity:z.json().parse(capacity)});owned.compaction.guard(options,true);frame.evidence?.expose(owned.compaction.exposedDependencies());
       const guard=()=>{frame.view.signal.throwIfAborted();frame.guard();owned.compaction.guard(options);};guard();
-      if(owned.segment)owned.segment.requests++;
-      for await(const chunk of visibleStream(next())){frame.view.signal.throwIfAborted();yield chunk;}guard();
+      for await(const chunk of owned.inputRepair.stream(next())){frame.view.signal.throwIfAborted();yield chunk;}guard();
     });
   }
   async run(frame:TaskExecutionFrame){
@@ -44,7 +42,7 @@ export class NativeRuntime {
     if(frame.evidence?.binding().provider.policy.enabled!==false&&!this.ctx.get('tokenMeter'))await(this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter,{})));
     let owned=this.sessions.get(frame.sessionId);
     if(!owned){let scope:Context|undefined,compaction:CompactionRuntime|undefined;const slot:{frame:TaskExecutionFrame|undefined}={frame};
-      const handle=await openAgentSession(this.ctx,frame.sessionId,{...this.model,...(frame.toolStage==='bili-reading'?{maxTokens:8192}:{})},this.cwd,ctx=>{scope=ctx;ctx.tools.presentAs('native');ctx.on('agent/request-error',async(payload,next)=>{const active=this.sessions.get(frame.sessionId);if(payload.failure.code==='DAFEIYU_NATIVE_CONTEXT_REASSEMBLE'&&active?.retryPending){active.retryPending=false;return {kind:'retry' as const};}return next();});
+      const handle=await openAgentSession(this.ctx,frame.sessionId,this.model,this.cwd,ctx=>{scope=ctx;ctx.tools.presentAs('native');
         ctx.systemPrompt.section({name:'dafeiyu-persona',order:0,interpolate:false,text:()=>slot.frame?.persona.text??''});
         ctx.systemPrompt.context({name:'dafeiyu:persona-context:v1',order:10000,interpolate:false,text:()=>slot.frame?.contexts?.length?JSON.stringify({kind:'native-context',regions:slot.frame.contexts}):slot.frame?.personaItems?.length?JSON.stringify({kind:'stage-persona',items:slot.frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]})});
         compaction=new CompactionRuntime(ctx,frame.view.scope.agentId,()=>slot.frame?.evidence?.binding(),(_item,data)=>slot.frame?.audit?.(data),{
@@ -59,13 +57,13 @@ export class NativeRuntime {
           'B站阅读阶段用bili_reading_save记录视频结论和下一步；未提供普通记忆工具时不寻找其他记忆入口。',
         ].join('\n')});
         // Keep standard DSH instruction sections. Unrelated runtime data is not a task handoff.
-        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const active=this.sessions.get(frame.sessionId);if(active?.frame){active.repairs=0;await active.frame.refreshContexts?.();const text=active.frame.contexts?.length?JSON.stringify({kind:'native-context',regions:active.frame.contexts}):active.frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:active.frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]});retireContextCarrier(ctx,active.handle.agent,'dafeiyu:persona-context:v1',text);}const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>this.harness.acceptsSection(section.name)),contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT].includes(context.name))};});
+        ctx.on('system-prompt/assemble',async(_assembly,_context,next)=>{const active=this.sessions.get(frame.sessionId);if(active?.frame){await active.frame.refreshContexts?.();const text=active.frame.contexts?.length?JSON.stringify({kind:'native-context',regions:active.frame.contexts}):active.frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:active.frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]});retireContextCarrier(ctx,active.handle.agent,'dafeiyu:persona-context:v1',text);}const assembled=await next();return {...assembled,sections:assembled.sections.filter(section=>this.harness.acceptsSection(section.name)),contexts:assembled.contexts.filter(context=>['dafeiyu:persona-context:v1',CAPABILITY_CONTEXT,ARGUMENT_REPAIR_CONTEXT].includes(context.name))};});
       });
       if(!scope||!compaction){await handle.dispose();throw new Error('DSH_SCOPE_MISSING');}
-      owned={handle,scope,compaction,lastRequest:undefined,get frame(){return slot.frame;},set frame(value){slot.frame=value;}};this.sessions.set(frame.sessionId,owned);
+      owned={handle,scope,compaction,inputRepair:new ModelInputRepair(scope),lastRequest:undefined,get frame(){return slot.frame;},set frame(value){slot.frame=value;}};this.sessions.set(frame.sessionId,owned);
     }
     if(owned.handle.agent.status!=='idle')throw new Error('SESSION_BUSY');owned.frame=frame;
-    if(frame.toolStage==='bili-reading')owned.segment={reason:null,blocked:false,requests:0,units:new Set()};else delete owned.segment;
+    owned.inputRepair.begin(event=>frame.audit?.({status:'model-input-rejected',tool:event.tool,fields:[...event.fields]}));
     const disposers:(()=>void)[]=[];
     try{
       if(frame.lease)disposers.push(owned.scope.on('agent/pre-step',async(_payload,next)=>{frame.guard();await frame.lease!.yieldIfContended();frame.guard();return next();}));
@@ -77,25 +75,18 @@ export class NativeRuntime {
         parameters:action.definition.parameters,output:{schema:{},render:(_args,value)=>[{type:'text',text:JSON.stringify(z.object({value:z.json()}).parse(value).value)}],presentationMeta:(_args,value)=>z.json().parse({dafeiyuExecution:z.object({receipt:z.json()}).parse(value).receipt})},
         execute:async(raw,exec)=>{if(exec.agent!==owned!.handle.agent)throw new Error('SCOPE_DENIED');frame.guard();
           const value=await action.execute(raw,String(exec.callId),AbortSignal.any([frame.view.signal,exec.signal]));
-          if(owned!.segment&&action.definition.id==='bili_reading_save'){
-            const closed=z.object({status:z.literal('succeeded'),data:z.object({bvid:z.string(),status:z.literal('closed')})}).safeParse(value);
-            if(closed.success)owned!.segment.units.add(closed.data.data.bvid);
-          }
           return z.json().parse({value,receipt:action.metadata?.(value)??null});}}));}
       disposers.push(this.harness.install(owned.scope,owned.handle.agent,frame.actions,frame.view.signal,frame.view.taskId,stage));
       const input=createUserMessage({source:{kind:'dafeiyu-execution',form:'notice',summary:'大肥鱼内部任务输入',taskId:frame.view.taskId,runId:frame.view.runId,inputId:randomUUID(),originKind:frame.view.origin.kind},
         content:[{type:'text',text:JSON.stringify(frame.program??{goal:frame.goal,inputs:frame.inputs})}]});
       owned.compaction.expectInput(input);
-      let result:Awaited<ReturnType<typeof runAgentTurn>>;
-      try{result=await runAgentTurn(this.ctx,owned.handle.agent,input,frame.view.signal,()=>owned!.compaction.seal());}
-      catch(error){frame.view.signal.throwIfAborted();if(owned.segment?.blocked)throw new Error('READING_CONTEXT_CAPACITY');if(!owned.segment?.reason)throw error;frame.guard();return {text:'',resultRef:null,segmentYield:{reason:owned.segment.reason}};}
+      const result=await runAgentTurn(this.ctx,owned.handle.agent,input,frame.view.signal,()=>owned!.compaction.seal());
       frame.guard();
       if(owned.lastRequest)owned.compaction.guard(owned.lastRequest);
       frame.checkpoint?.(frame.sessionId,Number(owned.handle.agent.session.seq),owned.compaction.exposedDependencies(),result.text);
       return {text:result.text,resultRef:{sessionId:frame.sessionId,messageSeq:result.messageSeq,turnEndSeq:result.turnEndSeq,textHash:createHash('sha256').update(result.text).digest('hex')}};
     }finally{try{owned.compaction.seal();await this.ctx.sessions.flush(owned.handle.agent.session);}finally{owned.compaction.end();for(const dispose of disposers.reverse())dispose();owned.frame=undefined;owned.lastRequest=undefined;
-      if(owned.segment){this.sessions.delete(frame.sessionId);await owned.handle.dispose();}}}
+      if(frame.toolStage==='bili-reading'){this.sessions.delete(frame.sessionId);await owned.handle.dispose();}}}
   }
   async close(){const sessions=[...this.sessions.values()];this.sessions.clear();for(const owned of sessions)await owned.handle.dispose();}
 }
-function requestBytes(options:GenerateOptions):number{return Buffer.byteLength(JSON.stringify({messages:options.messages,tools:options.tools??[],toolHistory:options.toolHistory??null}),'utf8');}

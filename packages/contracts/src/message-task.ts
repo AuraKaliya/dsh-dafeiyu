@@ -15,11 +15,11 @@ const MessageTaskIntentSchema=z.strictObject({
   relation:z.enum(['new','amend','confirm','continue','retry','status']).default('new'),
   targetTaskId:z.uuid().optional(),
   expectedVersion:z.number().int().positive().optional(),
-  resolvedGoal:z.string().trim().min(1).max(2000).optional(),
+  resolvedGoal:z.string().trim().min(1).describe('已有任务修订后的完整目标；新任务仍以当前用户原话为准。').optional(),
   constraints:z.array(z.string().trim().min(1).max(500)).max(32).optional(),
   delegatedDecisions:z.array(z.string().trim().min(1).max(200)).max(16).optional(),
   proposalRef:z.string().trim().min(1).max(200).optional(),
-}).refine(value=>value.relation==='new'?value.targetTaskId===undefined&&value.resolvedGoal===undefined:true,'A new task cannot retarget or rewrite an existing goal');
+}).refine(value=>value.relation==='new'?value.targetTaskId===undefined:true,'A new task cannot retarget an existing task');
 export type MessageTaskIntent=z.infer<typeof MessageTaskIntentSchema>;
 export const MessageTaskSubmitSchema=z.strictObject({requestId:PersonaRequestIdSchema,title:z.string().trim().min(1).max(200).optional(),kind:z.enum(['explicit-task','self-exploration']).default('explicit-task'),goal:z.string().trim().min(1).max(2000).optional(),voiceExposureId:z.uuid().optional(),toolStage:ToolStageSchema.optional(),intent:MessageTaskIntentSchema.optional()})
   .refine(value=>value.kind==='self-exploration'?value.goal!==undefined&&value.voiceExposureId===undefined:value.goal===undefined,'Explicit goals must come from the real message');
@@ -35,12 +35,12 @@ const MessageIntentSnapshotSchema=z.strictObject({schemaVersion:z.literal(1),
   relation:z.enum(['new','amend','confirm','continue','retry','status']),
   taskId:z.uuid().optional(),intentVersion:z.number().int().positive().optional(),
   originalRequest:intentRequestSource.nullable(),
-  previousGoal:z.string().max(2000).optional(),
-  resolvedGoal:z.string().max(2000).optional(),
-  constraints:z.array(z.string().max(500)).max(32).default([]),
-  delegatedDecisions:z.array(z.string().max(200)).max(16).default([]),
-  amendments:z.array(z.strictObject({inboundId:z.uuid(),messageHash:z.string().length(64),text:z.string().min(1).max(2000),
-    kind:z.enum(['amend','confirm','continue','retry','status']),at:z.iso.datetime({offset:true})})).max(32).default([]),
+  previousGoal:z.string().optional(),
+  resolvedGoal:z.string().optional(),
+  constraints:z.array(z.string().max(500)).default([]),
+  delegatedDecisions:z.array(z.string().max(200)).default([]),
+  amendments:z.array(z.strictObject({inboundId:z.uuid(),messageHash:z.string().length(64),text:z.string().min(1).max(32000),
+    kind:z.enum(['amend','confirm','continue','retry','status']),at:z.iso.datetime({offset:true})})).default([]),
   proposalRef:z.string().max(200).optional()});
 export type MessageIntentSnapshot=z.infer<typeof MessageIntentSnapshotSchema>;
 export const MessageTaskSourceSchema=z.strictObject({schemaVersion:z.literal(1),bindingId:z.string(),authorityVersion:z.string().length(64),inboundId:z.uuid(),messageHash:z.string().length(64),

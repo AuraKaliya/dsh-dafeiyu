@@ -16,6 +16,7 @@ export const HostConfigSchema = z.strictObject({
     requires: z.array(FeatureSchema).max(64).default([]), config: z.record(z.string(), z.json()).default({}) })).max(64),
   runtime: z.strictObject({ maxConcurrentRuns: z.number().int().min(1).max(16).default(2), maxConcurrentPerTask: z.literal(1).default(1),
     maxConcurrentPerSession: z.literal(1).default(1), maxPendingRuns: z.number().int().min(1).max(1000).default(100),
+    taskTimeoutMs:z.number().int().min(1000).max(3600000).optional(),
     turnTimeoutMs: z.number().int().min(50).max(3600000).default(600000),phaseTimeouts:PhaseTimeoutsSchema, shutdownGraceMs: z.number().int().min(50).max(300000).default(30000) }).prefault({}),
   persona: z.strictObject({ fixedFile: path, kind: z.enum(['test', 'formal']),
     growthRegion: z.strictObject({ maxBytes: z.number().int().min(0).max(32000).default(4000), priority: z.number().int().min(0).max(1000).default(400) }).prefault({}) }),

@@ -30,6 +30,17 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
     }catch(e){return {status:'partial',effects:effect,completeness:'unknown',data:{execution:{receiptId,effect,failed},processing:{state:'failed',code:errorCode(e)},resultId:receiptId},sources:[],receipts:[{kind:'dsh-operation',id:receiptId}],errorCode:errorCode(e)};}
   };
   const actions:ActionCapability[]=[{
+    id:DSH_TOOL_ACTIONS[3],version:'1',effects:'read',scope:'task',
+    description:'在当前任务中执行宿主明确允许的只读工具。先用 dsh_tool_list 查名称、catalogVersion 和参数；不能执行 shell、写文件或安装插件。结果可用 dsh_result_read 继续读取。',
+    inputSchema:DshToolCallSchema,outputSchema:z.json(),execute:async(raw,context)=>{
+      ctx.dafeiyu.executionAuthority(context,'dsh-tools');
+      if(!port.read)return {status:'failed',effects:'none',completeness:'unknown',data:{dispatched:false},sources:[],receipts:[],errorCode:'DSH_READ_UNAVAILABLE'};
+      try{const result=await port.read(DshToolCallSchema.parse(raw),{agentId,taskId:context.taskId!,runId:context.runId,operationId:context.operationId,intentVersion:context.intentVersion},context.signal);
+        ctx.dafeiyu.executionAuthority(context,'dsh-tools');const target=scene(context);results.save(context.operationId,context.taskId!,target,result);
+        return observe(context,target,results.read(context.taskId!,target,DshResultReadSchema.parse({resultId:context.operationId})),context.operationId,'none',execution.safeParse(result).data?.isError===true);
+      }catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:{stage:'read',next:'inspect-error-before-retry'},sources:[],receipts:[],errorCode:errorCode(error)};}
+    },
+  },{
     id:DSH_TOOL_ACTIONS[0],version:'1',effects:'read',scope:'any',
     description:'分页查看DSH实际工具或技能目录。默认只列名称与用途；query筛选，name查询单项参数/加载入口，按next继续读取。失败或截断不等于工具未安装。目录有版本，环境变化后重新查询。',
     inputSchema:DshCatalogQuerySchema,outputSchema:z.json(),execute:async(input,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');try{const data=catalogView(await port.catalog(context.signal,context.taskId??undefined),DshCatalogQuerySchema.parse(input));ctx.dafeiyu.executionAuthority(context,'dsh-tools');return {status:'succeeded',effects:'none',completeness:'partial',data:z.json().parse({...z.record(z.string(),z.json()).parse(data),availability:{catalog:'available',dependencies:'not-probed',execution:context.taskId?'check-task-authority':'requires-authorized-task'}}),sources:[],receipts:[]};}

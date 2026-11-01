@@ -19,7 +19,8 @@ export const InstallationSettingsSchema=z.strictObject({
   foundationFile:path.optional(),
   dshTools:z.boolean().default(false),
   context:ContextAssemblySchema.prefault({}),
-  contextBudget:ContextBudgetSchema.omit({assembly:true}).optional(),
+  contextCapacity:z.strictObject({maxTokens:ContextBudgetSchema.shape.maxTokens}).prefault({}),
+  contextSelection:ContextBudgetSchema.pick({maxBytes:true,regions:true,prepareTimeoutMs:true}).optional(),
   growthMaxBytes:z.number().int().min(0).max(32000).optional(),
   localOwnerControl:z.boolean().default(false),
   taskTimeoutMs:z.number().int().min(1000).max(3600000).optional(),
@@ -41,8 +42,7 @@ export const InstallationSettingsSchema=z.strictObject({
 }).superRefine((value,ctx)=>{
   if(value.media){const media=MediaPluginConfigSchema.safeParse(value.media);if(!media.success)for(const issue of media.error.issues)ctx.addIssue({code:'custom',path:['media',...issue.path],message:'Invalid media configuration'});}
 
-  if(value.contextBudget&&value.contextBudget.outputReserveBytes>=value.contextBudget.requestMaxBytes)ctx.addIssue({code:'custom',path:['contextBudget','outputReserveBytes'],message:'Output reserve must fit within the request capacity'});
-  if(value.contextBudget?.regions['memory:growth'])ctx.addIssue({code:'custom',path:['contextBudget','regions'],message:'Use growthMaxBytes for personality capacity'});
+  if(value.contextSelection?.regions['memory:growth'])ctx.addIssue({code:'custom',path:['contextSelection','regions'],message:'Use growthMaxBytes for personality selection'});
   if(value.bilibili?.browser&&!value.dshTools)ctx.addIssue({code:'custom',path:['dshTools'],message:'Bilibili browser reads require the desktop bridge'});
   if(value.bilibili&&!value.bilibili.capabilities&&!value.bilibili.channel)ctx.addIssue({code:'custom',path:['bilibili'],message:'Enable a platform interface or omit the plugin'});
   if(value.qq.media&&!value.media)ctx.addIssue({code:'custom',path:['media'],message:'QQ media interfaces require media configuration'});
@@ -67,10 +67,20 @@ export function checkInstallationFiles(settings:InstallationSettings,scripted=fa
   if(settings.bilibili?.session&&!file(settings.bilibili.session.file))missing.push('bilibili.session.file');
   if(missing.length)throw new SettingsError(missing);
 }
+/** Read old configuration once into the current shape. Removed byte gates never override tokens. */
+export function normalizeInstallationSettings(raw:unknown):unknown {
+  const record=z.record(z.string(),z.unknown()).safeParse(raw);if(!record.success)return raw;
+  const {contextBudget,...current}=record.data;if(contextBudget===undefined)return current;
+  const old=ContextBudgetSchema.omit({assembly:true}).safeParse(contextBudget);if(!old.success)throw new SettingsError(['contextBudget']);
+  const declared=z.object({maxTokens:z.number()}).safeParse(current.contextCapacity);
+  if(declared.success&&declared.data.maxTokens!==old.data.maxTokens)throw new SettingsError(['contextCapacity.maxTokens']);
+  return {...current,contextCapacity:current.contextCapacity??{maxTokens:old.data.maxTokens},
+    contextSelection:current.contextSelection??{prepareTimeoutMs:old.data.prepareTimeoutMs,regions:old.data.regions}};
+}
 /** Returns field paths only on failure. Never includes credentials or user values. */
 export function readInstallationSettings(file:string):InstallationSettings {
   let raw:unknown;try{const bytes=readFileSync(file);if(bytes.length>262144)throw new Error();raw=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));}catch{throw new SettingsError(['settingsFile']);}
-  const parsed=InstallationSettingsSchema.safeParse(raw);if(!parsed.success)throw new SettingsError([...new Set(parsed.error.issues.map(issue=>issue.path.join('.')||'settings'))]);
+  const parsed=InstallationSettingsSchema.safeParse(normalizeInstallationSettings(raw));if(!parsed.success)throw new SettingsError([...new Set(parsed.error.issues.map(issue=>issue.path.join('.')||'settings'))]);
   const settings=parsed.data,base=dirname(resolve(file)),absolute=(value:string)=>resolve(base,value);
   settings.dataDir=absolute(settings.dataDir);settings.model.credentialStore=absolute(settings.model.credentialStore);settings.qq.tokenFile=absolute(settings.qq.tokenFile);
   if(settings.qq.service){settings.qq.service.command=absolute(settings.qq.service.command);if(settings.qq.service.cwd)settings.qq.service.cwd=absolute(settings.qq.service.cwd);if(settings.qq.service.webui)settings.qq.service.webui.passwordFile=absolute(settings.qq.service.webui.passwordFile);}

@@ -97,6 +97,7 @@ export function validateImageObservations(observations:readonly {image:number}[]
     ctx.effect(()=>()=>this.close(),'media.close');
   }
   ready(){return this.gate.active&&!this.controller.signal.aborted;}
+  readingProgress(scope:import('@dafeiyu/contracts').ExecutionScope,scene:import('@dafeiyu/contracts').Conversation){return this.ready()?this.store.readingProgress(scope,scene,source=>this.sourceCurrent(source)):[];}
   private sourceCurrent(source:MediaSourceDescription){try{return mediaHash(this.providers.get(source.ref.provider)?.describe(source.ref.key)??null)===mediaHash(source)&&this.ctx.dafeiyu.capabilityResourceCurrent(source.origin);}catch{return false;}}
   registerProvider(provider:MediaSourceProvider){if(this.providers.has(provider.id))throw new Error('DUPLICATE_PROVIDER');if(provider.id==='media'||!MediaSourceDescriptionSchema.shape.ref.shape.provider.safeParse(provider.id).success)throw new Error('MEDIA_PROVIDER_INVALID');
     const bound=Object.freeze({id:provider.id,describe:provider.describe.bind(provider),open:provider.open.bind(provider)});this.providers.set(provider.id,bound);return ()=>{if(this.providers.get(provider.id)===bound)this.providers.delete(provider.id);};}
@@ -112,11 +113,14 @@ export function validateImageObservations(observations:readonly {image:number}[]
     const ref=request.source??this.store.sourceForAsset(request.asset!.id).description.ref,{provider,description}=this.describe(ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
     const cancel=new AbortController(),signal=AbortSignal.any([context.signal,this.controller.signal,cancel.signal,AbortSignal.timeout(this.config.timeoutMs)]);let broker:MediaRangeBroker|null=null,lease:string|null=null,parent=request.asset??null;
     try{let input:DecoderInput;
-      if(!parent&&description.rangeReadable&&description.bytesHint!==null&&description.bytesHint>0&&['audio','video'].includes(description.kind)){
+      // Small streams are materialized once. Reopening a signed CDN URL for every probe/frame causes
+      // needless range traffic and can exhaust its lease or trigger a resource hold mid-analysis.
+      if(!parent&&description.rangeReadable&&description.bytesHint!==null&&description.bytesHint>this.config.maxAssetBytes&&['audio','video'].includes(description.kind)){
         broker=await MediaRangeBroker.open({bytes:description.bytesHint,maxBytes:this.config.maxAssetBytes,signal,guard:access.guard,read:(range,s)=>provider.open(ref.key,range,s)});input={broker};
       }else{if(!parent)parent=await this.acquireWithin(context,owner,{requestId:'input:'+mediaHash([request.requestId,source.id]),source:ref},signal);
         this.store.requireRef(access,parent);lease=this.store.lease(access,parent,'process',Date.now()+this.config.timeoutMs+60000);input={file:await this.files.verified(parent)};}
-      access.guard();return await work({input,access,source,parent,broker,signal});
+      access.guard();try{return await work({input,access,source,parent,broker,signal});}
+      catch(error){if(broker?.failureCode)throw new Error(broker.failureCode,{cause:error});throw error;}
     }finally{cancel.abort();if(broker)await broker.close();if(lease)this.store.releaseLease(lease,'process');}
   }
   private async readImages(context:ExecutionContext,owner:string,input:Input){

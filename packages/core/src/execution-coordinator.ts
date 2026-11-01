@@ -34,6 +34,8 @@ import { mediaAuthorityBodySchema } from './media-authority.js';
 import { ExternalTaskAuthorizationSchema } from '@dafeiyu/contracts';
 import type { ExternalTaskAuthority,ExternalTaskAuthorization,ExternalTaskSource } from '@dafeiyu/contracts';
 import {CAPABILITY_OWNER,CAPABILITY_QUERY,BILI_READING_ACTIONS} from './harness-runtime.js';
+import {MessageIntentPlanSchema} from './message-intent.js';
+import type {MessageIntentPlan} from './message-intent.js';
 const basicCapability=(action:BoundAction)=>action.owner===CAPABILITY_OWNER&&action.id===CAPABILITY_QUERY&&action.effects==='read'&&action.scope!=='task';
 
 export const ExecutionOptionsSchema=z.strictObject({profileId:ProducerSchema,createStore:z.boolean().default(false),
@@ -46,7 +48,7 @@ interface Dependencies {
   personas:PersonaRuntime;
   memory:()=>ExecutionMemoryPort|undefined;
   accepting:()=>boolean;assertAccepting:()=>void;persona:()=>FoundationSnapshot;model:HostConfig['modelRoutes']['chat'];
-  turnTimeoutMs:number;context:import('@dafeiyu/contracts').ContextBudget;signal:AbortSignal;
+  taskTimeoutMs?:number|undefined;turnTimeoutMs:number;context:import('@dafeiyu/contracts').ContextBudget;signal:AbortSignal;
   reviewTimeoutMs?:number;
   projectConversation?:()=>Promise<void>;
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
@@ -57,7 +59,7 @@ interface Dependencies {
 interface Active {controller:AbortController;mode:'cancel'|'pause'|null;lease?:RunLeaseControl}
 type Request=z.output<typeof ExecutionRequestSchema>;
 const savedSchema=z.strictObject({kind:z.literal('execution'),input:ExecutionRequestSchema,origin:RunOriginSchema,parentRunId:z.uuid().nullable(),checkpointId:z.uuid().nullable(),motivation:MotivationSchema.optional(),messageSource:MessageTaskSourceSchema.optional()});
-const segmentLineageSchema=z.strictObject({rootRunId:z.uuid(),index:z.number().int().min(0).max(64),deadlineAt:z.number().int().positive(),toolStage:ToolStageSchema});
+const segmentLineageSchema=z.strictObject({rootRunId:z.uuid(),index:z.number().int().min(0),deadlineAt:z.number().int().positive().nullable(),toolStage:ToolStageSchema});
 
 /** Durable acceptance and authority; DSH remains the sole model loop. */
 export class ExecutionCoordinator {
@@ -95,7 +97,7 @@ export class ExecutionCoordinator {
     const historyGuard=()=>{const current=this.d.store.get(view.runId),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
       if(task.epoch!==run.definition.intentVersion||task.status!=='active'||!this.allowedResource(current,scene))throw new Error('SOURCE_STALE');};
     const guard=()=>{view.signal.throwIfAborted();historyGuard();};
-    guard();return {scope:run.definition.scope,intentVersion:run.definition.intentVersion,expiresAt:new Date(this.lineage(run).deadlineAt+900000).toISOString(),guard,historyGuard};
+    guard();return {scope:run.definition.scope,intentVersion:run.definition.intentVersion,expiresAt:'9999-12-31T23:59:59.999Z',guard,historyGuard};
   }
   quoteReplySource(context:ExecutionContext,pluginId:string){this.authority(context,pluginId);const run=this.d.store.get(context.runId);
     if(run.definition.origin.kind==='message'){const item=this.d.journal.get(run.definition.origin.inboundId);return {key:item.id+':reply',target:item.message.conversation,inboundId:item.id};}
@@ -108,7 +110,7 @@ export class ExecutionCoordinator {
   messageCapabilities(message:import('@dafeiyu/contracts').InboundMessage){return {kind:'task-capability-catalog',
     bindings:[...this.messageBindings.values()].filter(binding=>binding.active()&&binding.channel===message.conversation.channel&&binding.account===message.conversation.account).map(binding=>{
       const policy=this.policy(binding.id,binding.policyId);return {id:binding.id,ownerTaskAuthorized:message.sender.id===binding.ownerId,actions:this.d.registry.actions().filter(action=>policy.actions.includes(action.id)).map(action=>({name:action.id,registered:true,ready:action.active(),scope:action.scope}))};}),
-    note:'这是任务阶段的真实能力目录，不是本轮直接调用的工具。普通聊天通过当前任务入口受理主人指示或形成自主探索；当前工具子集缺少某项不能推断插件未加载。ready只说明组件就绪，平台成功须以实际回执为准。'};}
+    note:'主人对原任务的方法、范围或自主决策责任作补充时，通过任务入口的 amend 传给执行器，不能只在当前聊天里表示同意。查询进度用 status，确认方案用 confirm，不重新创建任务。这是任务阶段的真实能力目录，不是本轮直接调用的工具。普通聊天通过当前任务入口受理主人指示或形成自主探索；当前工具子集缺少某项不能推断插件未加载。ready只说明组件就绪，平台成功须以实际回执为准。'};}
   private messageDirective(binding:MessageTaskBinding,context:ExecutionContext,message:import('@dafeiyu/contracts').InboundMessage,exposureId?:string){
     const directive=binding.classify(message);if(messageMainText(message).trim()||exposureId===undefined)return {directive,voice:undefined};
     if(message.sender.id!==binding.ownerId)throw new Error('TASK_DIRECTIVE_REQUIRED');if(!binding.voice)throw new Error('VOICE_DIRECTIVES_NOT_CONFIGURED');
@@ -128,7 +130,7 @@ export class ExecutionCoordinator {
       if(source.control.voice&&(!binding.voice||binding.voice.version!==source.control.voice.bindingVersion||!binding.voice.current(control.message,source.control.voice.evidence)))throw new Error('SOURCE_STALE');}
     if(source.intent){
       const cited=(inboundId:string,messageHash:string,conversation:Conversation)=>{const original=this.d.journal.get(inboundId);
-        if(original.message.sender.id!==binding.ownerId||runtimeHash(original.message)!==messageHash||runtimeHash(original.message.conversation)!==runtimeHash(conversation)
+        if(original.message.sender.id!==binding.ownerId||runtimeHash(original.message)!==messageHash||runtimeHash(original.message.conversation)!==runtimeHash(conversation)||runtimeHash(conversation)!==runtimeHash(source.conversation)
           ||original.extensionId!==binding.channelExtensionId||this.d.journal.messageRecalled({agentId:this.d.agentId,route:original.route},original.message.id))throw new Error('SOURCE_STALE');};
       const original=source.intent.originalRequest;
       if(original)cited(original.inboundId,original.messageHash,original.conversation);
@@ -155,28 +157,22 @@ export class ExecutionCoordinator {
     if(taskId)return {run:this.findMessageTask(binding,scene,taskId),ambiguous:false,candidates:[taskId]};
     const all=this.messageSceneTasks(binding,scene);
     if(all.length<=1)return {run:all[0]??null,ambiguous:false,candidates:all.map(run=>run.definition.taskId!)};
-    const unfinished=all.filter(run=>{const task=this.repository().readState(this.d.agentId,run.definition.taskId!);return task.status!=='completed'||run.state!=='completed';});
+    const unfinished=all.filter(run=>{const task=this.repository().readState(this.d.agentId,run.definition.taskId!);return task.status!=='completed'&&!['completed','cancelled'].includes(run.state);});
     if(unfinished.length===1)return {run:unfinished[0]!,ambiguous:false,candidates:[unfinished[0]!.definition.taskId!]};
     return {run:null,ambiguous:true,candidates:(unfinished.length?unfinished:all).map(run=>run.definition.taskId!)};
   }
-  private deliveredConversationReply(route:string,after:string):{traceId:string;messageId:string}|null{
-    let latest:{traceId:string;messageId:string}|null=null;
-    for(const event of this.d.journal.events(route)){if(event.type!=='delivery.sent')continue;
-      try{const source=this.d.journal.get(event.traceId);if(source.route!==route||source.message.occurredAt<after)continue;
-        latest={traceId:event.traceId,messageId:source.message.id};}catch{/* A missing trace cannot prove delivery. */}}
-    return latest;
-  }
-  private proposalIsDelivered(proposalRef:string|undefined,taskId:string,scene:Conversation,route:string,after:string):boolean{
-    if(proposalRef){
-      const native=/^task-result:([0-9a-f-]{36})$/u.exec(proposalRef)?.[1]??(/^[0-9a-f-]{36}$/u.test(proposalRef)?proposalRef:null);
-      if(native){const delivery=this.d.store.nativeDeliveries.get(native);
-        return !!delivery&&delivery.state==='sent'&&delivery.anchor.taskId===taskId&&runtimeHash(delivery.anchor.target)===runtimeHash(scene);}
-      const reply=/^reply:(.+)$/u.exec(proposalRef)?.[1];if(!reply)return false;
-      try{return this.d.journal.events(route).some(event=>{if(event.type!=='delivery.sent')return false;
-        const source=this.d.journal.get(event.traceId);return event.traceId===reply||source.message.id===reply||source.id===reply;});}catch{return false;}
-    }
-    // No explicit reference: only a reply delivered in this same conversation after the task started can be the proposal.
-    return this.deliveredConversationReply(route,after)!==null;
+  private proposalIsDelivered(proposalRef:string|undefined,taskId:string,scene:Conversation,route:string,_after:string):boolean {
+    const native=proposalRef?(/^task-result:([0-9a-f-]{36})$/u.exec(proposalRef)?.[1]??(/^[0-9a-f-]{36}$/u.test(proposalRef)?proposalRef:null)):null;
+    if(native){const delivery=this.d.store.nativeDeliveries.get(native);return !!delivery&&delivery.state==='sent'&&delivery.anchor.taskId===taskId&&runtimeHash(delivery.anchor.target)===runtimeHash(scene);}
+    const reply=proposalRef?/^reply:(.+)$/u.exec(proposalRef)?.[1]:undefined;if(proposalRef&&!reply)return false;
+    return this.d.journal.events(route).some(event=>{if(event.type!=='delivery.sent')return false;
+      try{const source=this.d.journal.get(event.traceId);if(source.route!==route||!source.reply?.text||source.state!=='delivered'||runtimeHash(source.message.conversation)!==runtimeHash(scene))return false;
+        if(reply&&![event.traceId,source.message.id,source.id,source.reply.id].includes(reply))return false;
+        const receipt=this.d.store.messageIntent(source.id)?.result;
+        if(z.object({taskId:z.literal(taskId)}).safeParse(receipt).success)return true;
+        return this.d.store.list().filter(run=>run.definition.origin.kind==='message'&&run.definition.origin.inboundId===source.id).some(run=>this.d.store.operations(run.id)
+          .some(op=>op.state==='finished'&&op.outcome?.status==='succeeded'&&z.object({taskId:z.literal(taskId)}).safeParse(op.outcome.data).success));
+      }catch{return false;}});
   }
   /** Bare acknowledgements never form their own goal. The program maps them to a durable prior task; the model may also declare the relation explicitly. */
   private continuationIntent(text:string):'confirm'|'continue'|'retry'|'status'|null{
@@ -184,102 +180,105 @@ export class ExecutionCoordinator {
     if(/^(可以|行|好|好的|好吧|同意|没问题|就这样|按这个来|就这么办|你决定|你看着办)$/u.test(value))return 'confirm';
     if(/^(继续|接着来|接着做|继续吧|继续执行)$/u.test(value))return 'continue';
     if(/^(重试|再试一次|重新试|重新试一下|再试试)$/u.test(value))return 'retry';
-    if(/^(进度|进度怎么样|进度如何|进展如何|进行得怎么样|做到哪了|怎么样了|什么情况)$/u.test(value))return 'status';
+    if(/^(进度|进度怎么样了?|进度如何|进展如何|进行得怎么样|做到哪了|怎么样了|什么情况)$/u.test(value))return 'status';
     return null;
   }
   private intentSnapshot(relation:'new'|'amend'|'confirm'|'continue'|'retry'|'status',item:{id:string;message:import('@dafeiyu/contracts').InboundMessage},text:string,
     options:{input:z.output<typeof MessageTaskSubmitSchema>;task?:{id:string;epoch:number};parent?:MessageTaskSource;resolvedGoal?:string|undefined;previousGoal?:string|undefined}):NonNullable<MessageTaskSource['intent']>{
-    const prior=options.parent?.intent,amendment=relation==='new'?null:{inboundId:item.id,messageHash:runtimeHash(item.message),text:text.slice(0,2000),kind:relation,at:item.message.occurredAt};
+    const prior=options.parent?.intent,amendment=relation==='new'?null:{inboundId:item.id,messageHash:runtimeHash(item.message),text,kind:relation,at:item.message.occurredAt};
     const proposalRef=options.input.intent?.proposalRef??prior?.proposalRef;
     let originalRequest=prior?.originalRequest;
     if(!originalRequest&&options.parent){try{const source=this.d.journal.get(options.parent.inboundId);
       originalRequest={inboundId:options.parent.inboundId,messageHash:runtimeHash(source.message),conversation:source.message.conversation,messageId:source.message.id,occurredAt:source.message.occurredAt,text:messageMainText(source.message).slice(0,32000)};}catch{originalRequest=undefined;}}
     return {schemaVersion:1,relation,...(options.task?{taskId:options.task.id,intentVersion:options.task.epoch}:{}),
       originalRequest:originalRequest??{inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,messageId:item.message.id,occurredAt:item.message.occurredAt,text:text.slice(0,32000)},
-      ...(options.previousGoal?{previousGoal:options.previousGoal.slice(0,2000)}:{}),
-      ...(options.resolvedGoal?{resolvedGoal:options.resolvedGoal.slice(0,2000)}:{}),
-      constraints:[...new Set([...(prior?.constraints??[]),...(options.input.intent?.constraints??[])])].slice(0,32),
-      delegatedDecisions:[...new Set([...(prior?.delegatedDecisions??[]),...(options.input.intent?.delegatedDecisions??[])])].slice(0,16),
-      amendments:amendment?[...(prior?.amendments??[]),amendment].slice(-32):(prior?.amendments??[]),...(proposalRef?{proposalRef}:{})};
+      ...(options.previousGoal?{previousGoal:options.previousGoal}:{}),
+      ...(options.resolvedGoal?{resolvedGoal:options.resolvedGoal}:{}),
+      constraints:[...new Set(options.input.intent?.constraints??prior?.constraints??[])],
+      delegatedDecisions:[...new Set(options.input.intent?.delegatedDecisions??prior?.delegatedDecisions??[])],
+      amendments:amendment?[...(prior?.amendments??[]).filter(old=>old.inboundId!==item.id),amendment]:(prior?.amendments??[]),...(proposalRef?{proposalRef}:{})};
   }
   private mergedGoal(previous:string,instruction:string,resolved?:string){
-    if(resolved)return resolved.slice(0,2000);
-    const suffix=`\n本次修订：${instruction}`,room=Math.max(0,2000-suffix.length-1);
-    return previous.length+suffix.length<=2000?previous+suffix:(previous.slice(0,room)+'…'+suffix).slice(0,2000);
+    return resolved??`${previous}\n本次补充（保留上文仍兼容的要求）：${instruction}`;
   }
   private messageTaskState(taskId:string,run:StoredRun,relation:string,extra:Record<string,import('@dafeiyu/contracts').Json>={}){
     const task=this.repository().readState(this.d.agentId,taskId);
     return {accepted:false,relation,taskId,runId:run.id,taskState:task.status,runState:run.state,version:task.version,intentVersion:task.epoch,
-      goal:task.goal,error:run.error,...extra};
+      goal:task.goal,error:run.error,phase:this.d.store.phaseStatus(run.id),review:this.reviewStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),...extra};
   }
-  private recordIntentDecision(binding:MessageTaskBinding,item:{id:string;message:import('@dafeiyu/contracts').InboundMessage},relation:string,data:Record<string,import('@dafeiyu/contracts').Json>):boolean{
-    const producer=`message-intent:${binding.id}`,requestId=runtimeHash([item.id,relation]);
-    if(this.d.store.findRequest(producer,requestId))return false;
-    this.d.store.prepareRequest(producer,requestId,{kind:'message-intent-decision',relation,inboundId:item.id,messageHash:runtimeHash(item.message),...data});return true;
-  }
-  submitMessageTask(context:ExecutionContext,pluginId:string,raw:unknown){
-    const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
+  submitMessageTask(context:ExecutionContext,pluginId:string,raw:unknown):Json {
+    const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw);
+    const old=this.d.store.messageIntent(item.id);
+    if(old){const plan=MessageIntentPlanSchema.parse(old.body);if(old.route!==item.route||plan.bindingId!==binding.id||plan.messageHash!==runtimeHash(item.message))throw new Error('SCOPE_DENIED');
+      this.validateMessageSource(plan.source);return old.result??this.applyMessageIntent(plan);}
+    const {directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
     if(input.kind==='explicit-task'&&(item.message.sender.id!==binding.ownerId||directive.kind!=='submit'))throw new Error('TASK_DIRECTIVE_REQUIRED');
     const declared=input.intent?.relation??'new',detected=input.kind==='explicit-task'?this.continuationIntent(directive.text):null;
     const relation=input.kind==='explicit-task'?(declared!=='new'?declared:(detected??'new')):'new';
-    const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:binding.explorationResources??[])].map(scene=>[runtimeHash(scene),scene])).values()];
-    const resolution=input.kind==='explicit-task'&&relation!=='new'?this.messageTaskTarget(binding,item.message.conversation,input.intent?.targetTaskId):{run:null,ambiguous:false,candidates:[]};
-    if(resolution.ambiguous)
-      return {accepted:false,relation,reason:'TASK_AMBIGUOUS',candidates:resolution.candidates,note:'当前会话有多个可关联任务，无法唯一确定这条消息属于哪一个；没有创建或修订任何任务。请说明目标任务，或直接回答并保留原任务状态。'};
+    const resolution=relation!=='new'?this.messageTaskTarget(binding,item.message.conversation,input.intent?.targetTaskId):{run:null,ambiguous:false,candidates:[]};
+    if(resolution.ambiguous)return {accepted:false,relation,reason:'TASK_AMBIGUOUS',candidates:resolution.candidates,note:'当前会话有多个任务，须确定目标任务；未新建或修改任务。'};
     const target=resolution.run;
-    if(input.kind==='explicit-task'&&relation!=='new'&&!target)
-      return {accepted:false,relation,taskId:null,reason:'NO_RELATED_TASK',note:'当前会话没有可关联的已受理任务或已送达方案。不要创建以确认词、状态询问或继续词作为目标的新任务；请依据当前对话直接回答，或让主人说明具体要做什么。'};
-    if(target&&(relation==='status'||relation==='confirm'||relation==='continue'||relation==='retry')){
-      const taskId=target.definition.taskId!,task=this.repository().readState(this.d.agentId,taskId);
-      if(input.intent?.expectedVersion!==undefined&&input.intent.expectedVersion!==task.version)throw new Error('VERSION_CONFLICT');
-      if(relation==='status')return this.messageTaskState(taskId,target,relation,{alreadyCompleted:task.status==='completed',candidates:resolution.candidates,note:'仅返回当前任务与运行状态，没有创建新任务，也没有隐式重试。'});
-      if(task.status==='completed'||target.state==='completed'){
-        const alreadyCompleted=task.status==='completed',fresh=this.recordIntentDecision(binding,item,relation,{taskId,decision:'not-rerun',reason:alreadyCompleted?'task-completed':'run-completed',taskVersion:task.version});
-        if(fresh)this.d.store.appendExecutionEvent(target.id,'task.intent.decision',{relation,inboundId:item.id,messageHash:runtimeHash(item.message),taskId,
-          taskState:task.status,runState:target.state,alreadyCompleted,reason:alreadyCompleted?'task-completed':'run-completed',goal:task.goal});
-        this.flushEvents();
-        return this.messageTaskState(taskId,target,relation,{alreadyCompleted,resultPending:task.status==='active',decisionRecorded:true,note:'任务已经完成；确认或重试不会再次运行，也不会重复交付。'});
+    if(relation!=='new'&&!target)return {accepted:false,relation,taskId:null,reason:'NO_RELATED_TASK',note:'没有可关联的已受理任务；不要把确认、状态或继续词作为新目标。'};
+    const task=target?this.repository().readState(this.d.agentId,target.definition.taskId!):null;
+    if(task&&input.intent?.expectedVersion!==undefined&&input.intent.expectedVersion!==task.version)throw new Error('VERSION_CONFLICT');
+    const parent=target?savedSchema.parse(this.d.store.request(target.requestKey).payload).messageSource:undefined;
+    if(target&&!parent)throw new Error('MESSAGE_REQUIRED');
+    const changed=!!task&&input.intent?.resolvedGoal!==undefined&&input.intent.resolvedGoal!==task.goal;
+    const revise=relation==='amend'||relation==='confirm'&&changed;
+    if(task&&target&&relation==='confirm'&&(revise||!['completed','accepted','queued','running'].includes(target.state))
+      &&!this.proposalIsDelivered(input.intent?.proposalRef,task.id,item.message.conversation,item.route,target.createdAt))
+      return {accepted:false,relation,reason:'PROPOSAL_UNVERIFIED',taskId:task.id,note:'确认所引用的方案尚未在本会话送达，未修订或排队。'};
+    const goal=task?(revise?this.mergedGoal(task.goal,directive.text,input.intent?.resolvedGoal):task.goal):input.kind==='explicit-task'?directive.text:input.goal!;
+    const intent=this.intentSnapshot(relation,item,directive.text,{input,...(parent?{parent}:{}),...(task?{task:{id:task.id,epoch:task.epoch},previousGoal:task.goal}:{}),resolvedGoal:goal});
+    const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:binding.explorationResources??[])].map(scene=>[runtimeHash(scene),scene])).values()];
+    const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),
+      conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{}),...(input.kind==='explicit-task'?{intent}:{})});
+    this.validateMessageSource(source);
+    const plan=MessageIntentPlanSchema.parse({schemaVersion:1,bindingId:binding.id,inboundId:item.id,messageHash:runtimeHash(item.message),relation,targetRunId:target?.id??null,
+      taskId:task?.id??null,expectedVersion:task?.version??null,revise,goal,title:input.title??task?.title??(input.kind==='explicit-task'?Array.from(goal).slice(0,80).join(''):'自主探索'),source,...(input.toolStage??binding.toolStage?{toolStage:input.toolStage??binding.toolStage}:{})});
+    this.d.store.prepareMessageIntent(item.id,item.route,z.json().parse(plan));
+    return this.applyMessageIntent(plan);
+  }
+  /** Replay the frozen decision, including its original repository version and request ids. */
+  private applyMessageIntent(plan:MessageIntentPlan):Json {
+    const prior=this.d.store.messageIntent(plan.inboundId);if(prior?.result!==null&&prior?.result!==undefined)return prior.result;
+    const {binding}=this.validateMessageSource(plan.source),target=plan.targetRunId?this.d.store.get(plan.targetRunId):null;
+    const finish=(result:Json)=>{this.d.store.finishMessageIntent(plan.inboundId,result);return result;};
+    const relation=plan.relation,taskId=plan.taskId;
+    const scheduled=this.d.store.findRequest(binding.id,runtimeHash([plan.inboundId,'message-intent-run']));
+    if(scheduled?.runId){const run=this.d.store.get(scheduled.runId);
+      return finish({accepted:true,taskId:run.definition.taskId!,runId:run.id,state:run.state,motivation:plan.source.kind,relation,sourceInboundId:plan.inboundId,...(taskId?{reusedTask:true,amended:plan.revise}:{})});}
+    if(taskId&&target){
+      const task=this.repository().readState(this.d.agentId,taskId);
+      if(relation==='status')return finish(z.json().parse(this.messageTaskState(taskId,target,relation,{note:'只查询状态，未重试或排队。'})));
+      if(!plan.revise&&(task.status==='completed'||target.state==='completed')){
+        this.d.store.appendExecutionEvent(target.id,'task.intent.decision',{relation,inboundId:plan.inboundId,messageHash:plan.messageHash,taskId,decision:'not-rerun',reason:'completed'});this.flushEvents();
+        return finish(z.json().parse(this.messageTaskState(taskId,target,relation,{alreadyCompleted:task.status==='completed',resultPending:task.status==='active',decisionRecorded:true,note:'已有完成的运行；本次确认不重复执行或交付。'})));
       }
-      const proposal=this.proposalIsDelivered(input.intent?.proposalRef,taskId,item.message.conversation,item.route,target.createdAt);
-      if(!proposal)return {accepted:false,relation,reason:'PROPOSAL_UNVERIFIED',taskId,note:'引用的方案不是本会话已送达的任务结果或普通回复；没有把这条确认当成可执行授权，也没有创建或修订任务。'};
-      const activeRun=this.d.store.list(['accepted','queued','running','cancelling']).find(run=>run.definition.taskId===taskId);
-      if(activeRun)return this.messageTaskState(taskId,activeRun,relation,{note:'同一任务已有进行中的运行，没有重复排队。'});
-      const parent=savedSchema.parse(this.d.store.request(target.requestKey).payload).messageSource;if(!parent)throw new Error('MESSAGE_REQUIRED');
-      let taskVersion=task.version,taskEpoch=task.epoch;
-      if(task.status==='paused'){const reopened=this.repository().update(this.d.agentId,taskId,{requestId:`message-resume:${binding.id}:${item.id}`,expectedVersion:task.version,status:'active'});taskVersion=reopened.version;taskEpoch=reopened.epoch;}
-      const intent=this.intentSnapshot(relation,item,directive.text,{input,parent,task:{id:taskId,epoch:taskEpoch}});
-      const source=MessageTaskSourceSchema.parse({...parent,intent,control:{inboundId:item.id,messageHash:runtimeHash(item.message),...(voice?{voice}:{})}});
-      this.validateMessageSource(source);
-      const checkpoint=this.d.store.checkpoints(target.id).at(-1);
-      const resume=checkpoint&&['waiting','failed','interrupted'].includes(target.state)?checkpoint:null;
-      const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,'message-continue',relation,taskId]),taskId,expectedVersion:taskVersion,policyId:binding.policyId,inputRefs:[]});
-      const accepted=this.submit(binding.id,request,resume?{kind:'continuation',parentRunId:target.id,checkpointId:resume}:undefined,resume?target.id:null,resume,
-        {kind:'explicit-task',basis:[`message:${item.id}`,`task:${taskId}`]},source);
-      return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:'explicit-task',relation,sourceInboundId:item.id,reusedTask:true};
-    }
-    if(target&&relation==='amend'){
-      const taskId=target.definition.taskId!,task=this.repository().readState(this.d.agentId,taskId);
-      if(input.intent?.expectedVersion!==undefined&&input.intent.expectedVersion!==task.version)throw new Error('VERSION_CONFLICT');
-      const parent=savedSchema.parse(this.d.store.request(target.requestKey).payload).messageSource;if(!parent)throw new Error('MESSAGE_REQUIRED');
-      const instruction=directive.text.trim(),resolved=input.intent?.resolvedGoal,goal=this.mergedGoal(task.goal,instruction,resolved);
-      this.repository().update(this.d.agentId,taskId,{requestId:`message-amend:${binding.id}:${item.id}`,expectedVersion:task.version,
-        title:input.title??task.title,goal,status:'active'});
-      for(const previous of this.d.store.list(['accepted','queued','running','waiting']))if(previous.definition.taskId===taskId)
-        this.control(binding.id,previous,{requestId:runtimeHash([item.id,'amend-cancel',previous.id]),expectedVersion:previous.version,reason:'主人补充或纠正任务意图'},'cancel');
+      const active=this.d.store.list(['accepted','queued','running','cancelling']).find(run=>run.definition.taskId===taskId);
+      if(active&&!plan.revise)return finish(z.json().parse(this.messageTaskState(taskId,active,relation,{note:'同一任务正在执行，未重复排队。'})));
+      // Never turn an uncertain external effect into a fresh operation on retry or revision.
+      if(this.d.store.list().filter(run=>run.definition.taskId===taskId).some(run=>this.d.store.operations(run.id).some(op=>op.state==='unknown'||op.outcome?.effects==='unknown')))
+        return finish({accepted:false,relation,taskId,reason:'OPERATION_UNCERTAIN',note:'存在尚未核实的外部操作，须先核对其结果。'});
+      let version=plan.expectedVersion!;
+      if(plan.revise){
+        const revised=this.repository().update(this.d.agentId,taskId,{requestId:`message-intent:${binding.id}:${plan.inboundId}`,expectedVersion:plan.expectedVersion!,title:plan.title,goal:plan.goal,status:'active'});version=revised.version;
+        if(this.repository().readState(this.d.agentId,taskId).version!==version)throw new Error('CONTROL_SUPERSEDED');
+        for(const previous of this.d.store.list(['accepted','queued','running','waiting']))if(previous.definition.taskId===taskId)
+          this.control(binding.id,previous,{requestId:runtimeHash([plan.inboundId,'amend-cancel',previous.id]),expectedVersion:previous.version,reason:'主人补充或纠正任务意图'},'cancel');
+      }else if(task.status==='paused'){
+        version=this.repository().update(this.d.agentId,taskId,{requestId:`message-intent:${binding.id}:${plan.inboundId}`,expectedVersion:plan.expectedVersion!,status:'active'}).version;
+      }
       const current=this.repository().readState(this.d.agentId,taskId);
-      const intent=this.intentSnapshot('amend',item,instruction,{input,parent,task:{id:taskId,epoch:current.epoch},resolvedGoal:resolved,previousGoal:task.goal});
-      const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),
-        conversation:item.message.conversation,kind:'explicit-task',resources,intent,...(voice?{voice}:{})});
-      this.validateMessageSource(source);
-      const accepted=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,'message-amend-run',taskId]),taskId,expectedVersion:current.version,policyId:binding.policyId,inputRefs:[]}),
-        undefined,null,null,{kind:'explicit-task',basis:[`message:${item.id}`,`task:${taskId}`]},source);
-      return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:'explicit-task',relation,sourceInboundId:item.id,reusedTask:true,amended:true};
+      const source=MessageTaskSourceSchema.parse({...plan.source,intent:{...plan.source.intent,taskId,intentVersion:current.epoch}});
+      const checkpoint=!plan.revise&&target.definition.intentVersion===current.epoch&&['waiting','failed','interrupted'].includes(target.state)?this.d.store.checkpoints(target.id).at(-1):undefined;
+      const accepted=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([plan.inboundId,'message-intent-run']),taskId,expectedVersion:version,policyId:binding.policyId,inputRefs:[],data:{...(plan.toolStage?{toolStage:plan.toolStage}:{}),previousRunId:target.id}}),
+        checkpoint?{kind:'continuation',parentRunId:target.id,checkpointId:checkpoint}:undefined,checkpoint?target.id:null,checkpoint??null,{kind:source.kind,basis:[`message:${plan.inboundId}`,`task:${taskId}`]},source);
+      return finish({accepted:true,taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:source.kind,relation,sourceInboundId:plan.inboundId,reusedTask:true,amended:plan.revise});
     }
-    const intent=this.intentSnapshot('new',item,directive.text,{input});
-    const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{}),...(input.kind==='explicit-task'?{intent}:{})});
-    const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:relation]),title:input.kind==='explicit-task'?(input.title??Array.from(directive.text).slice(0,80).join('')):'自主探索',goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId,...(input.toolStage??binding.toolStage?{data:{toolStage:input.toolStage??binding.toolStage}}:{})});
-    this.validateMessageSource(source);const accepted=this.submit(binding.id,request,undefined,null,null,{kind:input.kind,basis:[`message:${item.id}`]},source);
-    return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:input.kind,sourceInboundId:item.id};
+    const accepted=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([plan.inboundId,'message-intent-run']),title:plan.title,goal:plan.goal,policyId:binding.policyId,...(plan.toolStage?{data:{toolStage:plan.toolStage}}:{})}),
+      undefined,null,null,{kind:plan.source.kind,basis:[`message:${plan.inboundId}`]},plan.source);
+    return finish({accepted:true,taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:plan.source.kind,relation,sourceInboundId:plan.inboundId});
   }
   private findMessageTask(binding:MessageTaskBinding,scene:Conversation,taskId:string){
     const run=this.d.store.list().findLast(run=>{if(run.definition.taskId!==taskId)return false;const request=this.d.store.request(run.requestKey),saved=savedSchema.safeParse(request.payload);return request.producer===binding.id&&saved.success&&saved.data.messageSource&&runtimeHash(saved.data.messageSource.conversation)===runtimeHash(scene);});
@@ -399,7 +398,8 @@ export class ExecutionCoordinator {
         goalLabel:label,goalCoverage:{shown:Array.from(label).length,total:Array.from(goal).length},review:reviewed.success?reviewed.data.review.goalStatus:null,
         unfinished:reviewed.success?reviewed.data.review.unfinished.length:null,confirmedOperationRecords:operations.filter(operation=>operation.outcome?.effects==='confirmed').length,unknownEffectRecords:operations.filter(operation=>operation.outcome?.effects==='unknown'||!operation.outcome&&run.state!=='running').length,delivery:delivery?.state??null,asOf:run.updatedAt,
         note:'本会话任务的时点索引；完整目标和约束以任务记录为准，运行结束不等于已完成或送达。需要时查询任务状态；本索引不创建新承诺。'});
-      const guard=()=>{this.validateMessageSource(source);const current=this.repository().readState(this.d.agentId,task.id);if(current.status==='completed'||current.epoch!==task.epoch||this.d.store.get(run.id).state==='cancelled')throw new Error('SOURCE_STALE');};
+      // A dated status remains a valid historical observation after the task progresses; message authority is still live.
+      const guard=()=>{this.validateMessageSource(source);};
       result.push({id:task.id,version:runtimeHash(data),data,proof:{runId:run.id,taskId:task.id,sourceHash:runtimeHash(source)},guard});
     }catch{/* A revoked source cannot supply a fallback goal. */}}return result;
   }
@@ -737,11 +737,11 @@ export class ExecutionCoordinator {
     return run;
   }
   recover():void{this.d.store.recover();this.d.store.nativeDeliveries.recover();for(const request of this.d.store.pendingRequests())if(savedSchema.safeParse(request.payload).success)this.accept(request.id);this.flushEvents();}
-  activate():void{this.resumeSegments();this.resumeInterruptedReadings();for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
+  activate():void{for(const pending of this.d.store.pendingMessageIntents()){try{this.applyMessageIntent(MessageIntentPlanSchema.parse(pending.body));}catch(error){this.d.store.finishMessageIntent(pending.inboundId,{accepted:false,reason:safeCode(error),note:'恢复意图时权限或任务版本已变化，保留原记录供核对。'});}}this.resumeSegments();this.resumeInterruptedReadings();for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
   private resumeInterruptedReadings(){
     for(const run of this.d.store.list(['interrupted'])){
       const lineage=segmentLineageSchema.safeParse(this.d.store.readInput(run.id,'segment-lineage'));
-      if(run.error!=='PROCESS_INTERRUPTED'||!lineage.success||lineage.data.toolStage!=='bili-reading'||lineage.data.deadlineAt<=Date.now()||lineage.data.index>=7)continue;
+      if(run.error!=='PROCESS_INTERRUPTED'||!lineage.success||lineage.data.toolStage!=='bili-reading'||lineage.data.deadlineAt!==null&&lineage.data.deadlineAt<=Date.now())continue;
       if(this.d.store.operations(run.id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))continue;
       try{this.continueSegment(run,'process-recovery');}catch(error){this.d.store.appendExecutionEvent(run.id,'segment.recovery.blocked',{code:safeCode(error)});}
     }
@@ -788,7 +788,7 @@ export class ExecutionCoordinator {
     const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),policy=this.policy(this.d.store.request(run.requestKey).producer,run.definition.policyId);
     const declared=z.object({toolStage:ToolStageSchema.optional()}).safeParse(saved.input.data??{});
     const task=this.repository().readState(this.d.agentId,run.definition.taskId!);
-    const value=segmentLineageSchema.parse({rootRunId:run.id,index:0,deadlineAt:Date.now()+this.d.turnTimeoutMs,
+    const value=segmentLineageSchema.parse({rootRunId:run.id,index:0,deadlineAt:this.d.taskTimeoutMs?Date.now()+this.d.taskTimeoutMs:null,
       toolStage:readingStage(task.goal,policy.resources,declared.success?declared.data.toolStage:undefined)});
     this.d.store.bindInput(run.id,'segment-lineage',value);return value;
   }
@@ -796,8 +796,7 @@ export class ExecutionCoordinator {
     if(run.definition.scope.kind!=='task')throw new Error('TASK_REQUIRED');const route=run.definition.scope.scopeKey;
     const task=this.repository().readState(this.d.agentId,run.definition.taskId!),lineage=this.lineage(run);
     if(task.status!=='active'||task.epoch!==run.definition.intentVersion)throw new Error('TASK_NOT_ACTIVE');
-    if(Date.now()>=lineage.deadlineAt)throw new Error('TASK_TIME_BUDGET_EXHAUSTED');
-    if(lineage.index>=7)throw new Error('SEGMENT_LIMIT_REACHED');
+    if(lineage.deadlineAt!==null&&Date.now()>=lineage.deadlineAt)throw new Error('TASK_TIME_BUDGET_EXHAUSTED');
     const original=this.d.store.request(run.requestKey),saved=savedSchema.parse(original.payload),checkpointId=randomUUID();
     if(saved.messageSource)this.validateMessageAncestors(run);
     const data=z.record(z.string(),z.json()).safeParse(saved.input.data??{});
@@ -817,7 +816,6 @@ export class ExecutionCoordinator {
         runId:run.id,operationId:operation.id,hash:receipt.data.outcomeHash,inputHash:receipt.data.inputHash})]:[];
     });
     const resumeDependencies=[...new Map([...(this.evidence.get(run.id)?.exposed()??[]),...operationDependencies].map(dependency=>[runtimeHash(dependency),dependency])).values()];
-    if(resumeSources.length>512)throw new Error('SEGMENT_SOURCE_CAPACITY');
     const child=this.d.store.handoffSegment(run.id,run.version,{checkpointId,checkpoint:{kind:'segment',reason,...lineage,segment:lineage.index+1,depth:lineage.index},
       producer:original.producer,requestId,payload:z.json().parse(payload),definition:{...run.definition,origin,parentRunId:run.id},lineage:{...lineage,index:lineage.index+1},resumeSources:z.json().parse(resumeSources),resumeDependencies:z.json().parse(resumeDependencies)});
     this.flushEvents();this.schedule(child);return child;
@@ -842,8 +840,8 @@ export class ExecutionCoordinator {
         const registryVersion=runtimeHash({actions:actions.map(action=>[action.id,action.owner,action.pluginVersion,action.version,action.input,action.effects]),contexts:contributors.map(entry=>[entry.owner,entry.version,entry.context.id])});
         const persona=this.d.persona();
         const messageSignal=saved.messageSource?this.d.messageSignal?.(saved.messageSource.inboundId):run.definition.origin.kind==='message'?this.d.messageSignal?.(run.definition.origin.inboundId):undefined;
-        const lineage=this.lineage(run),remainingMs=lineage.deadlineAt-Date.now();if(remainingMs<=0)throw new Error('TASK_TIME_BUDGET_EXHAUSTED');
-        const signal=AbortSignal.any([this.d.signal,controller.signal,...(messageSignal?[messageSignal]:[]),...actions.map(action=>action.signal),...contributors.map(entry=>entry.signal),AbortSignal.timeout(remainingMs)]);
+        const lineage=this.lineage(run),remainingMs=lineage.deadlineAt===null?null:lineage.deadlineAt-Date.now();if(remainingMs!==null&&remainingMs<=0)throw new Error('TASK_TIME_BUDGET_EXHAUSTED');
+        const signal=AbortSignal.any([this.d.signal,controller.signal,...(messageSignal?[messageSignal]:[]),...actions.map(action=>action.signal),...contributors.map(entry=>entry.signal),...(remainingMs===null?[]:[AbortSignal.timeout(remainingMs)])]);
         const guard=()=>{signal.throwIfAborted();if(!repository.ready()||this.d.repository()!==repository)throw new Error('DEPENDENCY_UNAVAILABLE');
           if(saved.messageSource)this.validateMessageAncestors(run);
           const current=repository.readState(this.d.agentId,task.id);if(current.epoch!==task.epoch||current.status!=='active')throw new Error('TASK_NOT_ACTIVE');
@@ -885,7 +883,7 @@ export class ExecutionCoordinator {
         const wake=this.wakeOrigins(run)[0],wakeProvider=wake?this.wakes.get(wake.producerId):undefined;
         const work=access.motivation.kind==='maintenance'&&wake?WakeWorkSchema.parse(wakeProvider?.work?.(wake,task)):null;
         const runGoal=work?.goal??task.goal;
-        const intent=memory?.intent(access),program=z.json().parse({goal:runGoal,workflow:{taskAccepted:true,currentPhase:work?'memory-maintenance':'task-execution',taskId:task.id,runId:id,timing:{deadlineAt:new Date(lineage.deadlineAt).toISOString(),remainingMs:Math.max(0,lineage.deadlineAt-Date.now()),segment:lineage.index},
+        const intent=memory?.intent(access),program=z.json().parse({goal:runGoal,ownerIntent:saved.messageSource?.intent??null,previousWork:this.previousWork(run),workflow:{taskAccepted:true,currentPhase:work?'memory-maintenance':'task-execution',taskId:task.id,runId:id,timing:{deadlineAt:lineage.deadlineAt===null?null:new Date(lineage.deadlineAt).toISOString(),remainingMs:lineage.deadlineAt===null?null:Math.max(0,lineage.deadlineAt-Date.now()),segment:lineage.index},
           resultDelivery:saved.messageSource?{automatic:this.messageBindings.get(saved.messageSource.bindingId)?.autoDeliver===true,target:saved.messageSource.conversation,stage:'after-source-admission',candidate:'agent-final-answer',capabilities:this.d.channelDescription(saved.messageSource.inboundId)}:{automatic:false},
           note:'任务入口已完成受理。本轮由你完成目标判断、操作和最终表达。需要等待时调用dafeiyu_task_outcome；结束前用记忆工具留下本次经历的看法，再输出面向原会话的回答。程序只校验资料范围并执行已配置的交付。'},...(work?{work:{...work,taskId:task.id,toolArguments:{dafeiyu_memory_maintenance_status:{id:work.requestId},dafeiyu_memory_consolidate:{id:work.requestId},dafeiyu_memory_maintenance_result:{id:work.requestId}},backgroundTaskGoal:task.goal,
           note:'本轮只整理该请求已保存的经历，不执行背景任务。requestId是整理请求ID，不能用taskId替代。当前工具是维护阶段的授权子集，不表示其他阶段能力未安装。'}}:{}),inputs,operationalCapabilities,...(saved.input.data===undefined?{}:{providedData:{producer:request.producer,content:saved.input.data,note:'本轮提交的数据，不改变任务目标或授予额外权限'}}),motivation:access.motivation,intent:intent??null,
@@ -895,12 +893,13 @@ export class ExecutionCoordinator {
             note:'完整回执保存在运行账本；已读视频与下一步以当前阅读工作视图为准，不重新执行已确认操作。'}:null,
           continuity:prior?{checkpointId:prior.id,previousRunId:prior.runId,sessionChanged:prior.sessionId!==sessionId,completedOperations:prior.completedOperations,unknownOperations:prior.unknownOperations,summary:prior.summary,gaps:prior.gaps}:null,
           gaps:[...(omitted?[`${omitted}项上下文未进入本轮，不能猜测其内容`]:[]),...(!prior?['未取得可核验接续检查点；不据此虚构过去']:[])]});
-        const handoff=stageHandoff('exploration',runGoal,{taskId:task.id,runId:id,intentVersion:task.epoch},trigger?.message??null,{state:'running',continuation:prior?.id??null});
+        const originalMessage=saved.messageSource?.intent?.originalRequest?this.d.journal.get(saved.messageSource.intent.originalRequest.inboundId).message:trigger?.message??null;
+        const handoff=stageHandoff('exploration',runGoal,{taskId:task.id,runId:id,intentVersion:task.epoch},originalMessage,{state:'running',continuation:prior?.id??null},trigger?.message??null);
         if(handoff)this.d.store.bindInput(id,'stage-handoff',handoff);
         evidence.recordInput(program,[...inputs.flatMap(input=>input.sourceRef?[input.sourceRef]:[]),...z.array(PersonaSourceRefSchema).parse(this.d.store.readInput(id,'segment-evidence')??[])],prior?{id:prior.id,hash:runtimeHash(prior)}:null,this.wakeSources(run,task));
         const admittedGuard=()=>{guard();runPersona!.guard();if(!evidence.validateAdmitted())throw new Error('SOURCE_STALE');},bound=actions.map(action=>this.bindAction(run,action,signal,admittedGuard,guard));
         let contextUsed=false;
-        this.d.store.appendExecutionEvent(id,'task.stage',{phase:'execution',deadlineAt:new Date(lineage.deadlineAt).toISOString(),toolStage:lineage.toolStage,segment:lineage.index});this.flushEvents();
+        this.d.store.appendExecutionEvent(id,'task.stage',{phase:'execution',deadlineAt:lineage.deadlineAt===null?null:new Date(lineage.deadlineAt).toISOString(),toolStage:lineage.toolStage,segment:lineage.index});this.flushEvents();
         let checkpoint:{session:string;seq:number;deps:readonly SourceDependency[];text:string}|undefined;
         const frame:TaskExecutionFrame={mode:'task',toolStage:lineage.toolStage,sessionId,view,persona,personaItems:runPersona.items,goal:runGoal,inputs,actions:bound,guard:admittedGuard,
           work:{workItemId:`task:${scheduled.definition.taskId}`,runId:run.id,scopeKey:scope.kind==='task'?scope.scopeKey:scope.route,class:cls,targetVersion:run.definition.intentVersion,stage:'execution'},lease:releaseLease,
@@ -925,16 +924,31 @@ export class ExecutionCoordinator {
         if(waiting)this.d.store.waitWithResult(id,run.version,result.resultRef,memory?.intent(access).blocking?'TASK_OBJECTION_UNRESOLVED':decision?.requiredCapabilities.length?'TASK_CAPABILITY_CHANGE_PENDING':'TASK_WAITING');
         else this.d.store.complete(id,run.version,result.resultRef);
       }catch(error){run=this.d.store.get(id);
+        const operations=this.d.store.operations(id);
+        if(safeCode(error)==='MODEL_CONTEXT_CAPACITY'&&run.state==='running'&&!this.d.signal.aborted&&!entry.mode
+          &&operations.some(op=>op.state==='finished'&&op.outcome?.status==='succeeded')&&!operations.some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
+          this.continueSegment(run,'provider-context-capacity');return;
+        }
         if(entry.mode==='pause'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown')){
           this.d.store.checkpoint(id,{kind:'paused',operations:this.d.store.operations(id).map(op=>op.id)});this.d.store.transition(id,run.version,'waiting');
         }else if(entry.mode==='cancel'&&run.state==='cancelling'&&!this.d.store.operations(id).some(op=>op.state==='started'||op.state==='unknown'||op.outcome?.effects==='unknown'))this.d.store.transition(id,run.version,'cancelled');
         else if(['queued','running','cancelling'].includes(run.state)){
           const deadline=segmentLineageSchema.safeParse(this.d.store.readInput(id,'segment-lineage'));
-          const exhausted=!this.d.signal.aborted&&!entry.mode&&deadline.success&&Date.now()>=deadline.data.deadlineAt;
+          const exhausted=!this.d.signal.aborted&&!entry.mode&&deadline.success&&deadline.data.deadlineAt!==null&&Date.now()>=deadline.data.deadlineAt;
           this.d.store.transition(id,run.version,run.state==='queued'?'failed':this.d.signal.aborted||entry.mode?'interrupted':'failed',exhausted?'TASK_TIME_BUDGET_EXHAUSTED':safeCode(error));
         }
       }finally{const settledState=this.d.store.get(id).state;if(['continued','completed','waiting','failed','cancelled','interrupted'].includes(settledState))this.d.experience()?.settle(id,settledState);this.evidence.delete(id);{runPersona?.dispose();this.active.delete(id);this.evidence.delete(id);this.flushEvents();if(['completed','waiting','failed'].includes(this.d.store.get(id).state))this.d.settled?.(id);}}
     }finally{releaseLease.close();}
+  }
+  private previousWork(run:StoredRun){
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),data=z.object({previousRunId:z.uuid()}).safeParse(saved.input.data);
+    const previous=data.success?this.d.store.get(data.data.previousRunId):run.definition.parentRunId?this.d.store.get(run.definition.parentRunId):null;
+    if(!previous||previous.definition.taskId!==run.definition.taskId)return null;
+    const old=savedSchema.parse(this.d.store.request(previous.requestKey).payload);if(old.messageSource)this.validateMessageSource(old.messageSource);
+    return {runId:previous.id,state:previous.state,operations:this.d.store.operations(previous.id).map(op=>{
+      const receipt=ExecutionToolReceiptSchema.safeParse(this.d.store.readInput(previous.id,'operation-receipt:'+op.id));
+      return {operationId:op.id,action:op.action,status:op.outcome?.status??null,error:op.outcome?.errorCode??null,sources:receipt.success?receipt.data.sources:[]};}),
+      note:'这是同一任务先前版本的实际工作索引。先按来源读取已有结果，再补做新要求或失效部分；不要仅因本轮没展示全文就重新请求平台。'};
   }
   private previousContinuity(run:StoredRun,access:PersonaAccess,foundationHash:string){const memory=this.d.memory();if(!memory)return null;
     for(const previous of this.d.store.list(['completed','waiting']).reverse()){
@@ -979,6 +993,18 @@ export class ExecutionCoordinator {
       if(operation.state==='finished'&&operation.outcome)return result(operation.id,callId,operation.outcome);if(operation.state==='unknown')throw new Error('OPERATION_UNCERTAIN');
       if(operation.reused)throw new Error('OPERATION_IN_PROGRESS');
       this.d.store.bindInput(run.id,`operation-inputs:${operation.id}`,this.evidence.get(run.id)?.exposed()??[]);
+      const params=z.record(z.string(),z.json()).safeParse(input);
+      const {requestId:_requestId,...stableInput}=params.success?params.data:{input:z.json().parse(input)};
+      const workKey=runtimeHash({action:action.id,version:action.version,input:stableInput,intentVersion:run.definition.intentVersion});
+      this.d.store.bindInput(run.id,'operation-work:'+operation.id,{key:workKey,at:Date.now()});
+      if(action.effects==='read'){
+        const repeated=this.d.store.operations(run.id).filter(previous=>previous.id!==operation.id&&previous.action===action.id&&previous.outcome?.status==='failed'&&previous.outcome.errorCode!=='TOOL_NO_PROGRESS'
+          &&(()=>{const work=z.object({key:z.string(),at:z.number()}).safeParse(this.d.store.readInput(run.id,'operation-work:'+previous.id));return work.success&&work.data.key===workKey&&Date.now()-work.data.at<60000;})());
+        if(repeated.length>=2&&new Set(repeated.slice(-2).map(previous=>previous.outcome?.errorCode)).size===1){
+          const outcome={status:'failed',effects:'none',completeness:'unknown',data:{dispatched:false,previousError:repeated.at(-1)!.outcome!.errorCode??null,retryAfter:new Date(Date.now()+60000).toISOString(),next:'相同输入连续失败且条件未改变。请改用可用通道、继续独立步骤，或汇报具体阻碍；不要只更换 requestId。'},sources:[],receipts:[],errorCode:'TOOL_NO_PROGRESS'};
+          this.d.store.finishOperation(operation.id,outcome);this.flushEvents();return result(operation.id,callId,outcome);
+        }
+      }
       if(run.definition.scope.kind==='task'&&action.effects!=='read'&&action.id!=='dafeiyu_task_object'){
         const intent=this.d.memory()?.intent(this.d.personas.access(run,this.inputsFor(run),signal,commitGuard));
         if(intent?.events.some(event=>event.kind==='objection'&&event.blocking&&(!event.actions?.length||event.actions.includes(action.id))&&!intent.events.some(resolved=>resolved.kind==='resolved'&&resolved.resolves===event.id))){

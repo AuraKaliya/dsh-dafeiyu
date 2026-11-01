@@ -33,11 +33,9 @@ export class PersonaRuntime {
   private select(access:PersonaAccess){
     access.guard();const provider=this.provider;if(!provider?.ready())throw new Error('DEPENDENCY_UNAVAILABLE');
     const prepared=provider.prepare(access),entries:PreparedPersonaEntry[]=[];
-    const limit=Math.min(this.config.maxBytes,this.config.regions['memory:growth']?.maxBytes??4000);
     for(const entry of prepared.entries){
       if(!provider?.validate(access,entry))throw new Error('SOURCE_STALE');
       entries.push({...structuredClone(entry),item:ContextItemSchema.parse(entry.item)});
-      if(Buffer.byteLength(JSON.stringify({owner:'memory',region:'growth',kind:'working-state',items:entries.map(value=>value.item)}))>limit)throw new Error('PERSONA_CONTEXT_CAPACITY');
     }
     return {provider,prepared,entries,guard:()=>{
       access.guard();if(this.provider!==provider||provider&&!provider.ready())throw new Error('DEPENDENCY_UNAVAILABLE');

@@ -14,6 +14,18 @@ import { inspectStorage } from '@dafeiyu/host';
 const identity={agentId:'fish',profileId:'fixture'};
 const path=async()=>join(await mkdtemp(join(tmpdir(),'dafeiyu-runtime-')),'runtime.sqlite');
 const outcome={status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:{value:'fictional'},sources:[],receipts:[{id:'fixture-receipt',kind:'fixture'}]};
+test('message intent decisions survive reopening and retain one immutable result',async()=>{
+  const file=await path(),id=randomUUID(),body={relation:'amend',expectedVersion:1,goal:'原始目标加补充要求'};
+  let store=new RuntimeStore(file,identity,{create:true});store.prepareMessageIntent(id,'owner-route',body);store.close();
+  store=new RuntimeStore(file,identity);try{
+    assert.deepEqual(store.pendingMessageIntents().map(row=>row.inboundId),[id]);
+    assert.deepEqual(store.prepareMessageIntent(id,'owner-route',{...body,expectedVersion:2}).body,body);
+    assert.throws(()=>store.prepareMessageIntent(id,'another-owner',body),/SCOPE_DENIED/);
+    const result={taskId:randomUUID(),runId:randomUUID()};store.finishMessageIntent(id,result);store.finishMessageIntent(id,result);
+    assert.throws(()=>store.finishMessageIntent(id,{taskId:randomUUID()}),/IDEMPOTENCY_CONFLICT/);
+    assert.equal(store.pendingMessageIntents().length,0);assert.deepEqual(store.messageIntent(id)?.result,result);
+  }finally{store.close();}
+});
 function accepted(store:RuntimeStore){const taskId=randomUUID(),requestId=randomUUID(),request=store.prepareRequest('native-fixture',requestId,{goal:'虚构目标'});store.bindTask(request.id,taskId);
   return store.acceptRun(request.id,{taskId,origin:{kind:'native',producerId:'native-fixture',requestId},scope:{kind:'task',agentId:'fish',taskId,scopeKey:taskScopeKey('fish',taskId)},intentVersion:1,policyId:'fixture'});}
 function start(store:RuntimeStore){const run=accepted(store),queued=store.transition(run.id,run.version,'queued'),sessionId=store.session('fixture:'+run.definition.taskId);

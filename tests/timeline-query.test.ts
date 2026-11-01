@@ -5,6 +5,8 @@ import { testTempDir as tmpdir } from './test-temp.js';
 import { join } from 'node:path';
 import { Journal, eventFor } from '@dafeiyu/journal';
 import { MessageSchema, redactContent } from '@dafeiyu/contracts';
+import {DatabaseSync} from 'node:sqlite';
+import {randomUUID} from 'node:crypto';
 
 async function fixture() {
   const root=await mkdtemp(join(tmpdir(),'dafeiyu-timeline-query-'));
@@ -24,6 +26,22 @@ test('timeline scopes before filtering, including a different agent with a forge
   assert.equal(page.items.length,1);assert.equal(page.items[0]?.traceId,a.id);
   assert.equal(f.journal.searchTimeline(scope,{traceId:b.id}).items.length,0);
   assert.equal(f.journal.scopedEvent(scope,f.journal.events(b.route)[0]!.id),null);
+});
+test('recall projection sees new revocations immediately and external changes invalidate cached results',async t=>{
+  const f=await fixture();t.after(f.close);const a=f.add('a','message'),b=f.add('b','message'),scope={agentId:'dafeiyu',route:a.route};
+  for(let i=0;i<100;i++)assert.equal(f.journal.messageRecalled(scope,'message'),false);
+  f.journal.append(eventFor('other-agent',a,'message.recalled','test','1','recall-other',null,{messageId:'message'}));
+  assert.equal(f.journal.messageRecalled(scope,'message'),false);
+  const recall=f.journal.append(eventFor('dafeiyu',a,'message.recalled','test','1','recall',null,{messageId:'message'}));
+  assert.equal(f.journal.messageRecalled(scope,'message'),true);assert.equal(f.journal.messageSourceEpoch(scope),recall.seq);
+  assert.equal(f.journal.messageRecalled({agentId:'dafeiyu',route:b.route},'message'),false);
+  const connection=new DatabaseSync(join(f.root,'journal.sqlite'));
+  try{assert.throws(()=>connection.prepare("UPDATE events SET body=json_set(body,'$.visibility.route','another-route') WHERE id=?").run(recall.id),/append-only/);
+    assert.equal(f.journal.messageRecalled(scope,'external-message'),false);
+    const body={...recall,id:randomUUID(),data:{messageId:'external-message'}};
+    connection.prepare('INSERT INTO events(id,route,trace_id,operation_id,body) VALUES(?,?,?,?,?)').run(body.id,body.route,body.traceId,body.operationId,JSON.stringify(body));
+    assert.equal(f.journal.messageRecalled(scope,'external-message'),true,'An external commit must be visible without a timeout');}
+  finally{connection.close();}
 });
 test('timeline filters plugin, type, actor, trace and operation by exact metadata',async t=>{
   const f=await fixture();t.after(f.close);const a=f.add('a','1'),b=f.add('a','2','bob');

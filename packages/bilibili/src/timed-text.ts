@@ -5,8 +5,11 @@ import { biliUrl } from './http.js';
 export function subtitleTracks(raw:unknown){const result=z.object({subtitle:z.object({subtitles:z.array(z.object({id_str:platformId.optional(),id:z.union([z.string(),z.number()]).optional(),lan:z.string().max(100),lan_doc:z.string().max(200),subtitle_url:z.string().max(8192),ai_type:z.number().optional()})).max(100)}).optional()}).parse(raw);
   return (result.subtitle?.subtitles??[]).map(t=>{const id=t.id_str??platformId.parse(t.id);return {id,language:t.lan,label:plain(t.lan_doc,100),automatic:t.ai_type===undefined?null:t.ai_type!==0,url:biliUrl(t.subtitle_url,'subtitle').href};});}
 export function subtitleText(raw:unknown,startMs:number,endMs:number,offset:number,limit:number){const value=z.object({body:z.array(z.object({from:z.number().nonnegative().finite(),to:z.number().nonnegative().finite(),content:z.string().max(100000)})).max(20000)}).parse(raw);
-  if(value.body.some(r=>r.to<r.from))throw new Error('BILI_SUBTITLE_RANGE_INVALID');const matching=value.body.filter(r=>r.from*1000<endMs&&r.to*1000>startMs),selected=matching.slice(offset,offset+limit);
-  return {entries:selected.map(r=>({startMs:r.from*1000,endMs:r.to*1000,text:plain(r.content,400)})),received:matching.length,nextOffset:offset+limit<matching.length?offset+limit:null,range:{startMs,endMs},coverage:['平台字幕文字；不代表音频识别','仅所选区间与分页，每条最多400字符']};}
+  if(value.body.some(r=>r.to<r.from))throw new Error('BILI_SUBTITLE_RANGE_INVALID');const matching=value.body.filter(r=>r.from*1000<endMs&&r.to*1000>startMs),entries:{startMs:number;endMs:number;text:string}[]=[];
+  let bytes=0;for(const row of matching.slice(offset,offset+limit)){const entry={startMs:row.from*1000,endMs:row.to*1000,text:plain(row.content,400)},size=JSON.stringify(entry).length;
+    if(entries.length&&bytes+size>5000)break;entries.push(entry);bytes+=size;}
+  return {entries,received:matching.length,nextOffset:offset+entries.length<matching.length?offset+entries.length:null,range:{startMs,endMs},coverage:['平台字幕文字；不代表音频识别','仅所选区间与分页，每条最多400字符；使用nextOffset继续，页面收束不会跳过条目']};}
+
 /** The fixed DmSegMobileReply/DanmakuElem fields we use; no code generation or schema fetch at runtime. */
 class Wire {
   offset=0;

@@ -55,6 +55,7 @@ export interface MediaSourceProvider {
   open(key:string,range:{start:number;end:number}|null,signal:AbortSignal):Promise<MediaByteStream>;
 }
 export interface MediaPort {
+  readingProgress?(scope:import('./execution.js').ExecutionScope,scene:import('./conversation.js').Conversation):readonly {exposureId:string;pageId:string;mode:string;at:string;source:import('./persona.js').PersonaSourceRef;coverage:MediaCoverage}[];
   ready():boolean;
   registerProvider(provider:MediaSourceProvider):()=>void;
   acquire(context:ExecutionContext,owner:string,input:z.infer<typeof MediaAcquireSchema>):Promise<MediaAssetRef>;

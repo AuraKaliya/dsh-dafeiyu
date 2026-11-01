@@ -44,7 +44,8 @@ export class ExecutionEvidence {
   private dependency({owner,region,item}:NativeContext):Extract<SourceDependency,{kind:'context'}>{return {kind:'context',agentId:this.base.view.scope.agentId,route:this.route(),owner,region,id:item.id,version:item.version,hash:digestSource(JSON.stringify([item.text,item.sources]))};}
   private route(){if(this.run.definition.scope.kind!=='task')throw new Error('TASK_REQUIRED');return this.run.definition.scope.scopeKey;}
   private unavailable(reason:string):SourceDependency[]{return [{kind:'unavailable',agentId:this.base.view.scope.agentId,route:this.route(),reason}];}
-  expose(value:readonly SourceDependency[]){this.admitted=unionDependencies(this.admitted,value);}
+  // This is the current projected request, not every snapshot ever seen by the run.
+  expose(value:readonly SourceDependency[]){this.admitted=unionDependencies(value);this.admissionCache=undefined;}
   invalidate(){this.invalidated=true;this.admissionCache=undefined;}
   exposed(){return structuredClone(this.admitted);}
   contextView():ContextEvidenceView{return {sourceItems:()=>this.contexts,nativeDependencies:()=>[],validateHistorical:dep=>this.validate([dep])};}
@@ -53,13 +54,13 @@ export class ExecutionEvidence {
   private readOperation(id:string){const cached=this.validationDepth?this.operationMemo.get(id):undefined;if(cached)return cached;const value=this.store.operation(id);if(this.validationDepth)this.operationMemo.set(id,value);return value;}
   private readRun(id:string){const cached=this.validationDepth?this.runMemo.get(id):undefined;if(cached)return cached;const value=this.store.get(id);if(this.validationDepth)this.runMemo.set(id,value);return value;}
   readSources(read:()=>void):void{const outer=this.validationDepth++===0;try{read();}finally{this.validationDepth--;if(outer)this.clearValidation();}}
-  /** Coalesces repeated synchronous authority guards; every store/provider change invalidates it. */
+  /** Coalesces read validation across short async steps; every store/provider change and authority guard still applies. */
   validateAdmitted():boolean {
     this.base.guard();const port=this.memory(),epoch=runtimeHash([this.store.validationEpoch(),port?.generation(this.access())??0,port?.resourceEpoch?.(this.access())??null]);
     const prior=this.admissionCache;if(prior?.dependencies===this.admitted&&prior.epoch===epoch&&Date.now()<prior.until)return prior.valid;
     this.contextExpiry=Infinity;const valid=this.validate(this.admitted);
-    const cached={dependencies:this.admitted,epoch,until:Math.min(Date.now()+2,this.contextExpiry),valid};this.admissionCache=cached;
-    queueMicrotask(()=>{if(this.admissionCache===cached)this.admissionCache=undefined;});return valid;
+    this.admissionCache=valid?{dependencies:this.admitted,epoch,until:Math.min(Date.now()+250,this.contextExpiry),valid}:undefined;
+    return valid;
   }
   validate(deps:readonly SourceDependency[]):boolean{if(this.invalidated)return false;const outer=this.validationDepth++===0;try{return deps.every(dep=>{const key=runtimeHash(dep),cached=this.validationMemo.get(key);if(cached!==undefined)return cached;if(this.checking.has(key)||this.checking.size>=128)return false;this.checking.add(key);
     try{const valid=this.valid(dep);this.validationMemo.set(key,valid);return valid;}catch{return false;}finally{this.checking.delete(key);}});}finally{this.validationDepth--;if(outer)this.clearValidation();}}

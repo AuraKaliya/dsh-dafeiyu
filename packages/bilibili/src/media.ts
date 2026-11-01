@@ -7,7 +7,13 @@ import { biliUrl,boundedBytes } from './http.js';
 import { BiliStore,biliHash } from './store.js';
 import type { BiliPage } from './store.js';
 
-const track=z.object({id:z.number().int().nonnegative(),baseUrl:z.string().max(8192).optional(),base_url:z.string().max(8192).optional(),codecs:z.string().max(100),mimeType:z.string().max(100).optional(),mime_type:z.string().max(100).optional(),bandwidth:z.number().nonnegative().finite()});
+const track=z.object({id:z.number().int().nonnegative(),baseUrl:z.string().max(8192).optional(),base_url:z.string().max(8192).optional(),backupUrl:z.array(z.string().max(8192)).max(16).optional(),backup_url:z.array(z.string().max(8192)).max(16).optional(),codecs:z.string().max(100),mimeType:z.string().max(100).optional(),mime_type:z.string().max(100).optional(),bandwidth:z.number().nonnegative().finite()});
+/** Select only official HTTPS CDN candidates; a disallowed primary does not hide an allowed backup. */
+export function allowedMediaUrl(value:{baseUrl?:string|undefined;base_url?:string|undefined;backupUrl?:string[]|undefined;backup_url?:string[]|undefined}){
+  const candidates=[value.baseUrl??value.base_url,...(value.backupUrl??value.backup_url??[])].filter((url):url is string=>!!url);
+  for(const candidate of candidates){try{return biliUrl(candidate,'media').href;}catch{}}
+  throw new Error(candidates.length?'BILI_URL_DENIED':'BILI_MEDIA_URL_MISSING');
+}
 const locatorSchema=z.strictObject({url:z.string().max(8192),bytes:z.number().int().positive().safe().nullable(),etag:z.string().max(220).nullable(),range:z.boolean(),accountStamp:z.string().length(64)});
 type Locator=z.infer<typeof locatorSchema>;
 const length=(raw:string|undefined)=>{if(raw===undefined)return null;const n=Number(raw);if(!Number.isSafeInteger(n)||n<1)throw new Error('BILI_MEDIA_LENGTH_INVALID');return n;};
@@ -34,7 +40,7 @@ export class BiliMedia implements MediaSourceProvider {
   async prepare(raw:unknown,part:{bvid:string;cid:string;durationMs:number},signal:AbortSignal,guard:()=>void){rejectRestricted(raw);rejectRestricted(z.object({dash:z.unknown()}).parse(raw).dash);const value=z.object({dash:z.object({video:z.array(track).max(128),audio:z.array(track).max(128).nullable().optional()}),timelength:z.number().positive().finite().optional()}).parse(raw);
     const choose=(tracks:z.infer<typeof track>[],codec:RegExp)=>tracks.filter(t=>codec.test(t.codecs)).sort((a,b)=>a.bandwidth-b.bandwidth)[0],video=choose(value.dash.video,/^avc1\./),audio=choose(value.dash.audio??[],/^mp4a\./);if(!video)throw new Error('BILI_VIDEO_CODEC_UNAVAILABLE');
     const available=[{kind:'video' as const,value:video},...(audio?[{kind:'audio' as const,value:audio}]:[])],pending: {key:string;kind:'video'|'audio';codec:string;quality:number;locator:Locator;expiresAt:number}[]=[];
-    for(const t of available){guard();const url=t.value.baseUrl??t.value.base_url;if(!url)throw new Error('BILI_MEDIA_URL_MISSING');const probe=await this.probe(url,signal,guard);pending.push({key:'stream:'+randomUUID(),kind:t.kind,codec:t.value.codecs,quality:t.value.id,...probe});}
+    for(const t of available){guard();const probe=await this.probe(allowedMediaUrl(t.value),signal,guard);pending.push({key:'stream:'+randomUUID(),kind:t.kind,codec:t.value.codecs,quality:t.value.id,...probe});}
     const coverage=['仅登记实际播放轨道和字节身份；尚未观看／听取',...(audio?[]:['未取得可用AAC音轨，不能声称完成声音理解']),...(pending.some(p=>!p.locator.range)?['部分轨道不具备强ETag区间证据，仅允许有界整文件读取']:[])];
     return {data:{bvid:part.bvid,cid:part.cid,durationMs:part.durationMs,streams:pending.map(p=>({source:{provider:'bilibili',key:p.key},kind:p.kind,codec:p.codec,quality:p.quality,bytes:p.locator.bytes,rangeReadable:p.locator.range}))},fields:[],coverage,
       register:(page:BiliPage)=>{for(const p of pending){const description:MediaSourceDescription={ref:{provider:'bilibili',key:p.key},origin:this.store.proof(page),kind:p.kind,name:`bilibili-${part.cid}-${p.kind}.${p.kind==='video'?'mp4':'m4a'}`,mimeHint:p.kind==='video'?'video/mp4':'audio/mp4',bytesHint:p.locator.bytes,durationMsHint:part.durationMs,rangeReadable:p.locator.range,publicContent:true};this.store.registerMedia(p.key,description,p.locator,p.expiresAt);}}};

@@ -17,7 +17,7 @@ test('management has one strict protocol and source-owned single-purpose groups'
   assert.equal(ManagementRequestSchema.safeParse({apiVersion:API_VERSION+1,kind:'describe'}).success,false);
   const paths=managementModules.flatMap(module=>module.sections.flatMap(section=>section.fields.map(field=>field.path)));
   assert.equal(new Set(paths).size,paths.length);assert.ok(managementModules.some(module=>module.id==='bilibili'));
-  assert.ok(paths.includes('contextBudget.maxTokens'),'The unified million-token capacity must be editable in the management UI');
+  assert.ok(paths.includes('contextCapacity.maxTokens'),'The unified million-token capacity must be editable in the management UI');
   assert.ok(promptCatalog.some(prompt=>prompt.id==='dafeiyu-execution-rules'&&prompt.text.includes('上下文快照')));
 });
 test('configuration edits use field ownership, revisions and the sole installation file',()=>{
@@ -27,7 +27,7 @@ test('configuration edits use field ownership, revisions and the sole installati
   assert.throws(()=>store.apply(before.revision,[{module:'qq',values:{'qq.replyDelay.minimumMs':20000}}]),/INSTALL_CONFIGURATION_REQUIRED/);
   const saved=store.apply(before.revision,[{module:'qq',values:{'qq.replyDelay.minimumMs':1000}}]);assert.notEqual(saved.revision,before.revision);
   assert.equal(store.describe().values['qq.replyDelay.minimumMs'],1000);assert.throws(()=>store.apply(before.revision,[{module:'qq',values:{'qq.ownerId':'123456'}}]),/REVISION_CONFLICT/);
-  const capacity=store.describe();store.apply(capacity.revision,[{module:'tasks',values:{'contextBudget.maxTokens':900000}}]);assert.equal(store.describe().values['contextBudget.maxTokens'],900000);
+  const capacity=store.describe();store.apply(capacity.revision,[{module:'tasks',values:{'contextCapacity.maxTokens':900000}}]);assert.equal(store.describe().values['contextCapacity.maxTokens'],900000);
 });
 test('reply delay uses Unicode characters and validated configurable bounds',()=>{
   const config=QqReplyDelaySchema.parse({minimumMs:100,perCharacterMs:50,maximumMs:250});assert.equal(qqReplyDelayMs('鱼🐟',config),200);assert.equal(qqReplyDelayMs('大肥鱼🐟',config),250);assert.equal(qqReplyDelayMs('鱼',{...config,enabled:false}),0);assert.equal(QqReplyDelaySchema.safeParse({minimumMs:300,maximumMs:200}).success,false);

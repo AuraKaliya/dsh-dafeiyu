@@ -33,6 +33,15 @@ const record = (over: Record<string, unknown> = {}) => ({
   watched: [{ cid: '123', startMs: 0, endMs: 60000 }], commentCursor: null,
   frames: [], sources: [], conclusion: null, gaps: [], nextStep: '继续读评论区', ...over,
 });
+test('media understanding remains historical evidence when validation receives the equivalent unleased view',async()=>{
+  const f=await fixture(),leased=f.first,scope={...f.first,guard:()=>{}};let current=true;
+  const receipt={exposureId:randomUUID(),pageId:randomUUID(),mode:'images',source:{id:randomUUID()},coverage:{exposed:true}};
+  const contributor=readingContext(f.store,()=>scope,()=>true,view=>view===leased&&current?[receipt]:[]);
+  try{const item=(await contributor.prepare(leased))[0]!;assert.deepEqual(JSON.parse(item.text).mediaReadings,[receipt]);
+    assert.equal(contributor.validateHistorical?.({...leased},item),true,'A different object for the same run must use its original program grant');
+    current=false;assert.equal(contributor.validateHistorical?.({...leased},item),false,'Revoking the media evidence still invalidates the history');
+  }finally{f.store.close();}
+});
 
 test('a large resume keeps every displayed frame/search source and stays within one context item',async()=>{
   const f=await fixture();try{

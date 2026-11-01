@@ -3,17 +3,23 @@ import { existsSync,mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { matchesSchema } from '@dafeiyu/journal';
 import { ownerAlive } from '@dafeiyu/journal/owner-identity';
-import { createStorageSchema } from './storage-schema.js';
+import { createStorageSchema,createStorageSchemaV2,addIntentReceiptsSchema } from './storage-schema.js';
 import { RUNTIME_APPLICATION_ID,RUNTIME_SCHEMA_VERSION,runtimeHash } from './runtime-store.js';
 import type { RuntimeIdentity } from './runtime-store.js';
 
-/** v2 records the continued-state and atomic-handoff semantics; SQL layout is unchanged. */
+function contents(db:DatabaseSync,names?:readonly string[]){
+  const tables=names??db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(row=>String(row.name));
+  return tables.map(table=>{const rows=db.prepare(`SELECT * FROM "${table.replaceAll('"','""')}"`).all();
+    return {table,count:rows.length,hash:runtimeHash(rows.map(row=>runtimeHash(row)).sort())};});
+}
+
+/** v3 adds durable message intent decisions and their idempotent receipts. */
 export function inspectRuntimeMigration(file:string,identity:RuntimeIdentity){
   if(!existsSync(file))return {state:'missing' as const,version:0,identityMatches:false,integrity:false,activeOwner:false};
   const db=new DatabaseSync(file,{readOnly:true});try{
     const version=Number(db.prepare('PRAGMA user_version').get()?.user_version),app=Number(db.prepare('PRAGMA application_id').get()?.application_id);
     const integrity=db.prepare('PRAGMA integrity_check').get()?.integrity_check==='ok';
-    const known=app===RUNTIME_APPLICATION_ID&&[1,RUNTIME_SCHEMA_VERSION].includes(version)&&matchesSchema(db,createStorageSchema);
+    const known=app===RUNTIME_APPLICATION_ID&&[1,2,RUNTIME_SCHEMA_VERSION].includes(version)&&matchesSchema(db,version===RUNTIME_SCHEMA_VERSION?createStorageSchema:createStorageSchemaV2);
     let identityMatches=false,activeOwner=false;
     if(known){const row=db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();identityMatches=!!row&&runtimeHash(JSON.parse(String(row.body)))===runtimeHash(identity);
       const owner=db.prepare('SELECT pid,nonce FROM runtime_ownership WHERE singleton=1').get();activeOwner=!!owner&&ownerAlive(Number(owner.pid),{nonce:String(owner.nonce)});}
@@ -28,14 +34,18 @@ export function migrateRuntimeStorage(file:string,identity:RuntimeIdentity,backu
   if(before.activeOwner)throw new Error('RUNTIME_ALREADY_OWNED');
   if(before.state==='current')return {migrated:false,version:before.version,backup:null};
   if(existsSync(backup))throw new Error('RUNTIME_BACKUP_EXISTS');mkdirSync(dirname(backup),{recursive:true});
-  const db=new DatabaseSync(file);try{
+  const db=new DatabaseSync(file);let verified:ReturnType<typeof contents>=[];try{
+    const original=contents(db);
     db.prepare('VACUUM INTO ?').run(backup);
     const copied=inspectRuntimeMigration(backup,identity);if(!copied.integrity||!copied.identityMatches)throw new Error('RUNTIME_BACKUP_INVALID');
+    const copy=new DatabaseSync(backup,{readOnly:true});try{if(runtimeHash(contents(copy))!==runtimeHash(original))throw new Error('RUNTIME_BACKUP_CONTENT_MISMATCH');}finally{copy.close();}
     db.exec('BEGIN IMMEDIATE');try{
       const current=inspectRuntimeMigration(file,identity);if(current.activeOwner||!current.identityMatches||current.version!==before.version)throw new Error('RUNTIME_MIGRATION_CHANGED');
+      addIntentReceiptsSchema(db);verified=contents(db,original.map(row=>row.table));
+      if(runtimeHash(verified)!==runtimeHash(original))throw new Error('RUNTIME_MIGRATION_CONTENT_MISMATCH');
       db.exec(`PRAGMA user_version=${RUNTIME_SCHEMA_VERSION};COMMIT;`);
     }catch(error){db.exec('ROLLBACK');throw error;}
   }finally{db.close();}
   const after=inspectRuntimeMigration(file,identity);if(after.state!=='current'||!after.integrity||!after.identityMatches)throw new Error('RUNTIME_MIGRATION_VERIFY_FAILED');
-  return {migrated:true,version:after.version,backup};
+  return {migrated:true,version:after.version,backup,verified};
 }

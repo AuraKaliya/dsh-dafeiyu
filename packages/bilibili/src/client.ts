@@ -155,7 +155,8 @@ export class BiliClient {
     const reject=(kind:BiliFailureKind,code:string,backoff=false):never=>{record.kind=kind;record.errorCode=code;
       if(backoff){const supplied=parseRetryAfter(response?.headers['retry-after'],Date.now()),policy={...this.config.retry,...(this.config.backoffMs===undefined?{}:{riskDelayMs:this.config.backoffMs,rateDelaysMs:[this.config.backoffMs]})};
         const failureEndpoint=kind==='login'&&query.scope==='verified-http'?'nav':endpoint;
-        const scope=['permission','verification'].includes(kind)?'shared':query.scope;
+        // A signed CDN resource denial is not evidence that the account or unrelated API endpoints are blocked.
+        const scope=query.scope!=='resource'&&['permission','verification'].includes(kind)?'shared':query.scope;
         const retry=this.store.diagnostics.failure(failureEndpoint,kind,Date.now(),policy,supplied?.at??null,scope,query.uid);record.retryAt=retry.at;record.waitSource=retry.source;}
       throw new Error(code);};
     try{await this.slot(record.id,signal,guard,routing,options.permit);record.networkSent=null;record.sentAt=Date.now();response=await this.transport(url,{...headers,...extra,...(cookie?{Cookie:cookie}:{})},signal);

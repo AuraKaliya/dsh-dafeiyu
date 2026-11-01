@@ -20,9 +20,9 @@ export const ContextAssemblySchema=z.strictObject({
   recentState:z.strictObject({enabled:z.boolean().default(true),shared:z.boolean().default(false),maxBytes:z.number().int().min(256).max(8000).default(3000)}).prefault({}),
 });
 export type ContextAssembly=z.infer<typeof ContextAssemblySchema>;
-export const ContextRegionPolicySchema=z.strictObject({maxBytes:z.number().int().min(0).max(128000).default(4000),
+export const ContextRegionPolicySchema=z.strictObject({maxBytes:z.number().int().min(0).max(67108864).default(4000000),
   priority:z.number().int().min(0).max(1000).default(100),required:z.boolean().default(false)});
-export const ContextBudgetSchema=z.strictObject({maxBytes:z.number().int().min(0).max(256000).default(16000),
+export const ContextBudgetSchema=z.strictObject({maxBytes:z.number().int().min(0).max(67108864).default(4000000),
   /** Unified model-facing capacity. The provider window and this value both apply; no smaller project threshold may override it. */
   maxTokens:z.number().int().min(1000).max(1000000).default(1000000),
   /** Serialization guard for the local runtime, not a model context quota. */

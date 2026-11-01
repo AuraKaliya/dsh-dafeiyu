@@ -13,6 +13,8 @@ export class MediaRangeBroker {
   private transferred=0;
   private readonly ranges:{start:number;end:number;sha256:string}[]=[];
   private readonly pending=new Set<Promise<void>>();
+  private failure:string|null=null;
+  get failureCode(){return this.failure;}
   private constructor(readonly bytes:number,private readonly maximum:number,private readonly read:(range:{start:number;end:number},signal:AbortSignal)=>Promise<MediaByteStream>,private readonly guard:()=>void,private readonly caller:AbortSignal){
     this.server=createServer((request,response)=>{
       const work=(async()=>{
@@ -38,7 +40,8 @@ export class MediaRangeBroker {
             const cleanup=()=>{signal.removeEventListener('abort',cancelled);response.off('drain',drained);};signal.addEventListener('abort',cancelled,{once:true});response.once('drain',drained);if(signal.aborted)cancelled();});}
           if(count!==end-start+1)throw new Error('MEDIA_SOURCE_TRUNCATED');this.guard();response.end();
         }finally{cancel.abort();void iterator?.return?.().catch(()=>{});if(count)this.ranges.push({start,end:start+count-1,sha256:hash.digest('hex')});}
-      })().catch(()=>{response.destroy();}).finally(()=>this.pending.delete(work));this.pending.add(work);
+      })().catch(error=>{if(!caller.aborted&&!this.abort.signal.aborted&&error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)&&!error.message.endsWith('_CANCELLED'))this.failure=error.message;
+        response.destroy();}).finally(()=>this.pending.delete(work));this.pending.add(work);
     });
   }
   static async open(options:{bytes:number;maxBytes:number;read:(range:{start:number;end:number},signal:AbortSignal)=>Promise<MediaByteStream>;guard:()=>void;signal:AbortSignal}){

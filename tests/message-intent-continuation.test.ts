@@ -6,6 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
 import {API_VERSION,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
 import type {ExtensionHandle} from '@dafeiyu/contracts';
+import {RuntimeStore} from '@dafeiyu/core/runtime-store';
 import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
@@ -19,19 +20,20 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
     if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
     if(!request.tools?.some(tool=>tool.name==='fixture_task_submit'))return textResponse('已依据当前对话答复。');
     toolRequests++;
-    if(toolRequests>8)throw new Error('SCRIPTED_TOOL_LOOP');
+    if(toolRequests>12)throw new Error('SCRIPTED_TOOL_LOOP');
     const textOf=(message:any)=>Array.isArray(message.content)?message.content.filter((block:any)=>block.type==='text').map((block:any)=>block.text).join('\n'):String(message.content??'');
     const lastUser=request.messages.findLastIndex((message:any)=>message.role==='user'&&(message.source?.kind==='user'||message.source===undefined));
-    const current=lastUser<0?'':textOf(request.messages[lastUser]);
+    const current=lastUser<0?'':textOf(request.messages[lastUser]).split('[消息正文]\n').at(-1)!;
     const acted=lastUser>=0&&request.messages.slice(lastUser+1).some((message:any)=>message.role==='tool'||message.source?.kind==='tool'
       ||(Array.isArray(message.content)&&message.content.some((block:any)=>block.type==='tool-result'||block.type==='tool-call-result')));
     if(acted){const toolMessage=request.messages.slice(lastUser+1).findLast((message:any)=>message.role==='tool'||message.source?.kind==='tool');
       if(toolMessage){try{results.push(JSON.parse(textOf(toolMessage)));}catch{results.push(null);}}return textResponse('已处理。');}
+    if(/补充/u.test(current)){actions.push('amend');return toolResponse('fixture_task_submit',{requestId:'submit-amend',intent:{relation:'amend',expectedVersion:1,delegatedDecisions:['自行过滤和选择视频']}});}
     if(/进度/u.test(current)){actions.push('status');return toolResponse('fixture_task_submit',{requestId:'submit-status',intent:{relation:'status',expectedVersion:1}});}
     if(/继续/u.test(current)){actions.push('continue');return toolResponse('fixture_task_submit',{requestId:'submit-continue',intent:{relation:'continue',expectedVersion:1,proposalRef:'task-result:00000000-0000-0000-0000-000000000000'}});}
     if(/可以/u.test(current)){actions.push('confirm');return toolResponse('fixture_task_submit',{requestId:'submit-confirm',intent:{relation:'confirm',expectedVersion:1}});}
     actions.push('new');
-    return toolResponse('fixture_task_submit',{requestId:'submit-original',title:'挑选并观看养鱼视频',intent:{relation:'new',delegatedDecisions:['由Agent选择视频']}});
+    return toolResponse('fixture_task_submit',{requestId:'submit-original',title:'挑选并观看养鱼视频',intent:{relation:'new',resolvedGoal:'模型整理不替换用户原话',delegatedDecisions:['由Agent选择视频']}});
   });
   await writeFile(join(root,'persona.md'),'本机虚构验收人格。');
   await writeFile(file,JSON.stringify({schemaVersion:1,profileId:'message-intent',agent:{id:'fish'},
@@ -49,7 +51,13 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
       id:'fixture_task_submit',version:'1',description:'受理当前真实任务',inputSchema:MessageInstructionSubmitSchema,
       outputSchema:z.json(),effects:'local-write',scope:'conversation',execute:async(input,context)=>({
         status:'succeeded',effects:'confirmed',completeness:'complete',sources:[],receipts:[],
-        data:z.json().parse(ctx.dafeiyu.submitMessageTask(context,'fixture-tasks',{...MessageInstructionSubmitSchema.parse(input),kind:'explicit-task'}))})}]});
+        data:(()=>{const submission={...MessageInstructionSubmitSchema.parse(input),kind:'explicit-task' as const};
+        let value;if(submission.intent?.relation==='amend'){
+          const original=RuntimeStore.prototype.finishMessageIntent;let interrupted=false;
+          RuntimeStore.prototype.finishMessageIntent=function(...args){if(!interrupted){interrupted=true;throw new Error('SIMULATED_RECEIPT_CRASH');}return original.apply(this,args);};
+          try{assert.throws(()=>ctx.dafeiyu.submitMessageTask(context,'fixture-tasks',submission),/SIMULATED_RECEIPT_CRASH/);}finally{RuntimeStore.prototype.finishMessageIntent=original;}
+          value=ctx.dafeiyu.submitMessageTask(context,'fixture-tasks',submission);
+        }else value=ctx.dafeiyu.submitMessageTask(context,'fixture-tasks',submission);const replay=ctx.dafeiyu.submitMessageTask(context,'fixture-tasks',{...MessageInstructionSubmitSchema.parse(input),requestId:'different-retry-id',kind:'explicit-task'});assert.deepEqual(replay,value,'The platform message, not a newly generated requestId, freezes acceptance');return z.json().parse(value);})()})}]});
     ctx.dafeiyu.bindMessageTasks({id:'fixture-tasks',pluginId:'fixture-tasks',channelExtensionId:'fixture-channel',channel:'fixture',account:'local',
       ownerId:'owner',policyId:'intent-task',version:'1',autoDeliver:true,classify:message=>({kind:'submit',text:message.mainText??''}),active:()=>true});
   }};
@@ -96,5 +104,16 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
         assert.ok(decisions.some(event=>event.data.relation==='continue'&&platform.get(event.data.inboundId)==='inbound-3'),'Continue against a completed task must be recorded without rerunning it');
       }finally{journal.close();}
     }finally{runtime.close();}
+    const amendment='补充：如何寻找、过滤和选择由你自行决定。'+ '保留最初的题材、热度和汇报要求。'.repeat(160);
+    await say(amendment);
+    const revised=new DatabaseSync(join(root,'data/memory/memory.sqlite'),{readOnly:true});
+    try{const tasks=revised.prepare('SELECT version,epoch,body FROM task_workspaces').all();assert.equal(tasks.length,1);assert.equal(tasks[0]!.version,2);assert.equal(tasks[0]!.epoch,2);
+      const body=JSON.parse(String(tasks[0]!.body));assert.match(body.goal,/找一个养鱼视频看看，看完汇报/);assert.ok(body.goal.endsWith(amendment),'No silent 2000-character truncation');}
+    finally{revised.close();}
+    const persisted=new DatabaseSync(join(root,'data/core/runtime.sqlite'),{readOnly:true});
+    try{const decisions=persisted.prepare('SELECT body,result FROM message_intents').all();assert.equal(decisions.length,5);assert.ok(decisions.every(row=>row.result));
+      const plan=JSON.parse(String(decisions.at(-1)!.body));assert.equal(plan.expectedVersion,1);assert.equal(plan.source.intent.originalRequest.messageId,'inbound-0');assert.equal(plan.source.intent.amendments.at(-1).text,amendment);
+      const requests=persisted.prepare("SELECT body FROM execution_requests WHERE producer='fixture-tasks'").all();assert.equal(requests.length,2,'Duplicate submission never creates a second amendment run');const states=persisted.prepare("SELECT state FROM runs JOIN execution_requests ON runs.request_key=execution_requests.id WHERE execution_requests.producer='fixture-tasks'").all();assert.ok(states.every(row=>row.state==='completed'),'Replaying after receipt failure must not cancel its already accepted child');}
+    finally{persisted.close();}
   }finally{await host.close();}
 });

@@ -11,7 +11,7 @@ import { z } from 'zod';
 export const InlineModelSettingsSchema=z.strictObject({
   contextWindow:z.number().int().min(1024).max(2000000),
   maxOutputTokens:z.number().int().positive().max(256000),
-  streamIdleTimeoutMs:z.number().int().min(100).max(300000).default(40000),
+  streamIdleTimeoutMs:z.number().int().min(100).max(1200000).default(300000),
   maxInlineImageBytes:z.number().int().min(1024).max(20*1024*1024).default(8*1024*1024),
   maxImages:z.number().int().min(1).max(8).default(8),
 }).refine(value=>value.maxOutputTokens<value.contextWindow,'Output reserve must be smaller than context');

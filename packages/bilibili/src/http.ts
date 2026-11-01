@@ -14,7 +14,7 @@ export const nativeTransport:HttpTransport=async(url,headers,signal)=>{
   signal.throwIfAborted();const addresses=await lookup(url.hostname,{all:true});signal.throwIfAborted();const address=addresses.find(a=>a.family===4&&publicAddress(a.address));
   if(!address||addresses.some(a=>a.family===4&&!publicAddress(a.address)||a.family===6&&!/^[23][0-9a-f]{3}:/i.test(a.address)))throw new Error('BILI_ADDRESS_DENIED');
   const pinned:NonNullable<RequestOptions['lookup']>=(_host,options,callback)=>{if(options.all)callback(null,[address]);else callback(null,address.address,4);};
-  const response=await new Promise<IncomingMessage>((done,reject)=>{const req=request(url,{method:'GET',lookup:pinned,headers:{...headers,'Accept-Encoding':'identity',Connection:'close'},signal},done);req.on('error',()=>reject(new Error(signal.aborted?'BILI_CANCELLED':'BILI_HTTP_FAILED')));req.end();});response.on('error',()=>{});
+  const response=await new Promise<IncomingMessage>((done,reject)=>{const req=request(url,{method:'GET',lookup:pinned,headers:{...headers,'Accept-Encoding':'identity',Connection:'close'},signal},done);req.on('error',(error:NodeJS.ErrnoException)=>reject(new Error(signal.aborted?'BILI_CANCELLED':error.code&&/^[A-Z][A-Z0-9_]{1,60}$/.test(error.code)?'BILI_HTTP_'+error.code:'BILI_HTTP_FAILED')));req.end();});response.on('error',()=>{});
   return {status:response.statusCode??0,headers:Object.fromEntries(Object.entries(response.headers).map(([k,v])=>[k,Array.isArray(v)?v.join(','):v])),body:response,close:()=>response.destroy()};
 };
 export async function boundedBytes(response:HttpResponse,maximum:number,signal:AbortSignal,guard:()=>void){const chunks:Buffer[]=[];let length=0;

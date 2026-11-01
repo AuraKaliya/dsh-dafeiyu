@@ -11,7 +11,7 @@ import { ownerAlive, ownerNonce } from '@dafeiyu/journal/owner-identity';
 import { NativeDeliveryStore } from './native-delivery-store.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
-export const RUNTIME_SCHEMA_VERSION = 2;
+export const RUNTIME_SCHEMA_VERSION = 3;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
@@ -83,6 +83,23 @@ export class RuntimeStore {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   private open():void{if(this.closed)throw new Error('RUNTIME_CLOSED');}
+  messageIntent(inboundId:string):{route:string;body:Json;result:Json|null}|null {
+    this.open();const row=this.db.prepare('SELECT route,body,body_hash,result FROM message_intents WHERE inbound_id=?').get(uuidValue.parse(inboundId));
+    if(!row)return null;const body=jsonValue.parse(JSON.parse(string(row.body)));
+    if(runtimeHash(body)!==row.body_hash)throw new Error('INTENT_RECEIPT_CORRUPT');
+    return {route:string(row.route),body,result:row.result===null?null:jsonValue.parse(JSON.parse(string(row.result)))};
+  }
+  prepareMessageIntent(inboundId:string,route:string,body:Json){return this.transaction(()=>{
+    const old=this.messageIntent(inboundId);if(old){if(old.route!==route)throw new Error('SCOPE_DENIED');return old;}
+    this.db.prepare('INSERT INTO message_intents VALUES(?,?,?,?,NULL)').run(uuidValue.parse(inboundId),route,canonical(body),runtimeHash(body));
+    return this.messageIntent(inboundId)!;
+  });}
+  finishMessageIntent(inboundId:string,result:Json):void {this.transaction(()=>{
+    const old=this.messageIntent(inboundId);if(!old)throw new Error('INTENT_RECEIPT_MISSING');
+    if(old.result!==null){if(runtimeHash(old.result)!==runtimeHash(result))throw new Error('IDEMPOTENCY_CONFLICT');return;}
+    this.db.prepare('UPDATE message_intents SET result=? WHERE inbound_id=? AND result IS NULL').run(canonical(result),inboundId);
+  });}
+  pendingMessageIntents(){this.open();return this.db.prepare('SELECT inbound_id FROM message_intents WHERE result IS NULL ORDER BY rowid').all().map(row=>({inboundId:string(row.inbound_id),...this.messageIntent(string(row.inbound_id))!}));}
   validationEpoch(){this.open();return runtimeHash([this.db.prepare('PRAGMA data_version').get(),this.db.prepare('SELECT total_changes() AS changes').get()]);}
   private transaction<T>(work:()=>T):T {this.open();this.db.exec('BEGIN IMMEDIATE');try{const result=work();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   private event(runId:string,type:string,data:Record<string,Json>={}):string {

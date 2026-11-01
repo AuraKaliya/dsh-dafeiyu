@@ -33,5 +33,8 @@
     "timeZone": "Asia/Shanghai",
     "roundTokens": 100000,
     "roundDurationMs": 900000
+  },
+  "contextCapacity": {
+    "maxTokens": 1000000
   }
 }

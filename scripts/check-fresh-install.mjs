@@ -89,7 +89,7 @@ try{
   extended.bilibili={capabilities:true};extended.media={ffmpeg:process.execPath,ffprobe:process.execPath};extended.activity.enabled=true;
   writeFileSync(settings,JSON.stringify(extended,null,2));assert.equal(command('init').code,'INSTALL_INITIALIZED');
   const versions={};for(const name of ['runtime','bilibili','media','activity']){const db=new DatabaseSync(join(work,'data/core',name+'.sqlite'),{readOnly:true});try{versions[name]=db.prepare('PRAGMA user_version').get().user_version;}finally{db.close();}}
-  assert.equal(versions.bilibili,6);assert.equal(versions.runtime,2);
+  assert.equal(versions.bilibili,6);assert.equal(versions.runtime,JSON.parse(readFileSync(join(packageRoot,'release.json'),'utf8')).stores.runtime);
   extended.activity.enabled=false;writeFileSync(settings,JSON.stringify(extended,null,2));assert.equal(command('init').code,'INSTALL_INITIALIZED');
   await start();await stop();assert.deepEqual(JSON.parse(readFileSync(metadata,'utf8')),identity);
   assert.equal(counts.modelGenerations,0,JSON.stringify(counts));assert.equal(counts.platformSends,0,JSON.stringify(counts));

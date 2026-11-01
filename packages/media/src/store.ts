@@ -5,7 +5,7 @@ import { randomUUID,createHash } from 'node:crypto';
 import { z } from 'zod';
 import { configureSqlite } from '@dafeiyu/journal';
 import { MediaAssetRefSchema,MediaAssetRecordSchema,MediaSourceDescriptionSchema,MediaCoverageSchema,ExecutionScopeSchema,SourceDependencySchema,PersonaSourceRefSchema,redactJson } from '@dafeiyu/contracts';
-import type { MediaAssetRef,MediaAssetRecord,MediaSourceDescription,MediaAccess,MediaCoverage,ResourceProof } from '@dafeiyu/contracts';
+import type { Json,MediaAssetRef,MediaAssetRecord,MediaSourceDescription,MediaAccess,MediaCoverage,ResourceProof } from '@dafeiyu/contracts';
 import { MediaReplyStore,createMediaReplySchema,MEDIA_REPLY_TABLES } from './reply-store.js';
 
 export const MEDIA_APPLICATION_ID=0x44464d35;
@@ -14,8 +14,10 @@ const MEDIA_BASE_TABLES=['media_metadata','media_sources','media_source_revision
 export const MEDIA_TABLES=[...MEDIA_BASE_TABLES,...MEDIA_REPLY_TABLES] as const;
 const identity=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const scopeKey=(scope:MediaAssetRecord['scope'])=>scope.kind==='task'?scope.scopeKey:scope.route;
-function canonical(raw:unknown):string {const v=z.json().parse(raw);if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(canonical).join(',')+']';return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';}
-export const mediaHash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest('hex');
+const jsonValue=z.json();
+function canonical(v:Json):string {if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(canonical).join(',')+']';return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k]!)).join(',')+'}';}
+// Validate once at the boundary, not once for every nested node of the same JSON tree.
+export const mediaHash=(value:unknown)=>createHash('sha256').update(canonical(jsonValue.parse(value))).digest('hex');
 const emptyCoverage:MediaCoverage={acquiredBytes:0,processed:[],exposed:false,gaps:[],completeness:'unknown'};
 const sourceRecord=z.strictObject({id:z.uuid(),version:z.number().int().positive(),deleted:z.boolean(),description:MediaSourceDescriptionSchema});
 export type StoredMediaSource=z.infer<typeof sourceRecord>;
@@ -179,6 +181,14 @@ export class MediaStore {
   exposureByObservation(raw:unknown){const ref=PersonaSourceRefSchema.parse(raw);if(ref.kind!=='execution-source')return null;
     const row=this.db.prepare("SELECT request_id,receipt FROM media_requests WHERE scope_key=? AND producer='media' AND request_id LIKE 'observation:%' AND json_extract(receipt,'$.id')=?").get(ref.scopeKey,ref.id);
     if(!row||mediaHash(PersonaSourceRefSchema.parse(JSON.parse(String(row.receipt))))!==mediaHash(ref))return null;return this.exposureWitness(String(row.request_id).slice('observation:'.length));}
+  readingProgress(scope:MediaAssetRecord['scope'],scene:ResourceProof['scene'],current:(source:MediaSourceDescription)=>boolean){
+    return this.db.prepare('SELECT id FROM media_exposures WHERE scope_key=? ORDER BY rowid DESC').all(scopeKey(scope)).flatMap(row=>{try{
+      const body=this.exposureWitness(String(row.id)),description=this.exposureOrigin(body.id);
+      if(body.scope.agentId!==scope.agentId||description.origin.provider!=='bilibili'||mediaHash(description.origin.scene)!==mediaHash(scene)||!current(description))return [];
+      const mode=z.object({mode:z.enum(['image','images','frames','audio'])}).safeParse(body.detail);if(!mode.success)return [];
+      const source=this.observation(body.id);return [{exposureId:body.id,pageId:description.origin.key,mode:mode.data.mode,at:body.occurredAt,source,coverage:body.coverage}];
+    }catch{return [];}});
+  }
   epoch(){return mediaHash([this.db.prepare('PRAGMA data_version').get(),this.db.prepare('SELECT total_changes() AS changes').get()]);}
   private contentCurrent(ref:MediaAssetRef,seen=new Set<string>()):boolean {if(seen.has(ref.id)||seen.size>=32)return false;seen.add(ref.id);const asset=this.asset(ref.id),source=this.source(asset.sourceId);
     return !source.deleted&&source.version===asset.sourceVersion&&(asset.state==='ready'||asset.state==='evicted')&&asset.version===ref.version&&mediaHash(this.ref(asset))===mediaHash(ref)&&(!asset.parent||this.contentCurrent(asset.parent,seen));}

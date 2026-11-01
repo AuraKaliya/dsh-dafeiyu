@@ -32,8 +32,8 @@ export function admitContext(groups:readonly ContextGroup[],maxBytes:number,rend
       if(!valid){decision.invalid++;if(group.required)throw new Error('Required context stale');continue;}
       const identity=JSON.stringify([item.text,item.sources]);if(seen.has(identity))continue;seen.add(identity);
       output.items.push(item);
-      if(contextBytes(output)>group.maxBytes||contextBytes(render(regions))>Math.max(0,maxBytes)){
-        output.items.pop();decision.overBudget++;if(group.required)throw new Error('Required context exceeds budget');
+      if(!group.required&&(contextBytes(output)>group.maxBytes||contextBytes(render(regions))>Math.max(0,maxBytes))){
+        output.items.pop();decision.overBudget++;
       }
     }
     decision.selected=output.items.length;if(!output.items.length)regions.pop();
@@ -101,9 +101,10 @@ export async function inspectRequestCapacity(ctx:Context,options:GenerateOptions
   const estimatedInputTokens=measuredInputTokens??Math.ceil(contextBytes({messages:projected.messages,tools:projected.tools??[]})/3);
   const contextWindow=info.context?.contextWindow??null,outputTokens=options.maxTokens??info.defaultMaxTokens??null;
   const tokenCapacity=tokenCapacityWithin({inputTokens:estimatedInputTokens,outputTokens:outputTokens??0,modelWindow:contextWindow,maxTokens});
-  if(enforce&&!tokenCapacity.within)throw new Error('MODEL_CONTEXT_CAPACITY');
+  // A heuristic may overestimate CJK, media or SDK metadata. Only the provider can reject it as over capacity.
+  if(enforce&&(outputTokens??0)>tokenCapacity.limit)throw new Error('MODEL_CONTEXT_CAPACITY');
   return {...capacity,wire,auditBytes:capacity.bytes,runtimeSnapshotCount,messageBreakdown,estimatedInputTokens,tokenMeasurement:meter?'sdk-message-estimate+sdk-tool-estimate+tool-history-estimate':'wire-projection-utf8-estimate',modelContextWindow:contextWindow,
-    maxTokens,tokenLimit:tokenCapacity.limit,tokenHeadroom:tokenCapacity.headroom,reservedOutputTokens:outputTokens,estimateOnly:true,modelLimitsKnown:contextWindow!==null&&outputTokens!==null};
+    maxTokens,tokenLimit:tokenCapacity.limit,tokenHeadroom:tokenCapacity.headroom,reservedOutputTokens:outputTokens,estimateOnly:true,admission:'provider-enforced-input-window',modelLimitsKnown:contextWindow!==null&&outputTokens!==null};
 }
 
 export async function prepareWithin<T>(work:(signal:AbortSignal)=>Promise<T>,signal:AbortSignal,remainingMs:number):Promise<T>{

@@ -31,6 +31,23 @@ function state(value: unknown): MessageState {
 /** Single-process durable workflow ledger. DSH remains the owner of full session history. */
 export class Journal {
   private readonly db: DatabaseSync;
+  private recallThrough=0;
+  private recallDataVersion=-1;
+  private readonly recalls=new Map<string,{epoch:number;ids:Set<string>}>();
+  private readonly recallBatches=new Map<string,readonly string[]>();
+  private readonly recallStatements=new Map<string,import('node:sqlite').StatementSync>();
+  private recallStatement(sql:string){let value=this.recallStatements.get(sql);if(!value){value=this.db.prepare(sql);this.recallStatements.set(sql,value);}return value;}
+  private resetRecalls(){this.recallThrough=0;this.recalls.clear();this.recallBatches.clear();}
+  /** Scan new immutable events once. External commits and rolled-back local writes invalidate the projection. */
+  private refreshRecalls(){
+    const version=Number(this.recallStatement('PRAGMA data_version').get()?.data_version);
+    const through=Number(this.recallStatement('SELECT coalesce(max(seq),0) AS seq FROM events').get()?.seq??0);
+    if(version!==this.recallDataVersion||through<this.recallThrough){this.resetRecalls();this.recallDataVersion=version;}
+    if(through===this.recallThrough)return;
+    const rows=this.recallStatement("SELECT seq,route,json_extract(body,'$.agentId') AS agent,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE seq>? AND seq<=? AND json_extract(body,'$.type')='message.recalled' AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.visibility.route')=route").all(this.recallThrough,through);
+    for(const row of rows){const key=JSON.stringify([row.agent,row.route]),entry=this.recalls.get(key)??{epoch:0,ids:new Set<string>()};entry.epoch=Number(row.seq);if(typeof row.message_id==='string')entry.ids.add(row.message_id);this.recalls.set(key,entry);}
+    this.recallThrough=through;
+  }
   private readonly owner = ownerNonce();
   private closed = false;
   constructor(file: string) {
@@ -61,10 +78,11 @@ export class Journal {
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = run(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    catch (error) { this.db.exec('ROLLBACK'); this.resetRecalls(); throw error; }
   }
   /** Persists acceptance and its audit event in the same transaction; conflicting duplicates fail. */
   accept(agentId: string, extensionId: string, version: string, message: InboundMessage): Receipt {
+    this.recallBatches.clear();
     return this.transaction(() => {
       const route = conversationKey(agentId, message.conversation);
       const payload = JSON.stringify(message);
@@ -217,13 +235,14 @@ export class Journal {
   }
   /** Revocation facts remain in the audit log; the original inbox row is not erased. */
   messageRecalled(scope: TimelineScope, messageId: string): boolean {
-    const batch=this.db.prepare("SELECT payload FROM inbox WHERE route=? AND message_id=?").get(scope.route,messageId);
-    const message=batch?MessageSchema.parse(JSON.parse(text(batch.payload))):null;
-    const ids=message?.batch?.sources.map(part=>part.id)??[messageId];
-    return !!this.db.prepare(`SELECT 1 FROM events WHERE ${this.scopePredicate()} AND json_extract(body,'$.type')='message.recalled' AND json_extract(body,'$.data.messageId') IN (SELECT value FROM json_each(?)) LIMIT 1`).get(scope.route,scope.agentId,scope.route,JSON.stringify(ids));
+    this.refreshRecalls();const recalled=this.recalls.get(JSON.stringify([scope.agentId,scope.route]));if(!recalled?.ids.size)return false;
+    const key=JSON.stringify([scope.route,messageId]);let ids=this.recallBatches.get(key);
+    if(!ids){const batch=this.recallStatement('SELECT payload FROM inbox WHERE route=? AND message_id=?').get(scope.route,messageId),message=batch?MessageSchema.parse(JSON.parse(text(batch.payload))):null;
+      ids=message?.batch?.sources.map(part=>part.id)??[messageId];if(this.recallBatches.size>=512)this.recallBatches.delete(this.recallBatches.keys().next().value!);this.recallBatches.set(key,ids);}
+    return ids.some(id=>recalled.ids.has(id));
   }
   messageSourceEpoch(scope: TimelineScope): number {
-    return Number(this.db.prepare(`SELECT coalesce(max(seq),0) AS seq FROM events WHERE ${this.scopePredicate()} AND json_extract(body,'$.type')='message.recalled'`).get(scope.route,scope.agentId,scope.route)?.seq??0);
+    this.refreshRecalls();return this.recalls.get(JSON.stringify([scope.agentId,scope.route]))?.epoch??0;
   }
   /** Snapshot keyset pagination. Cursor binds the scope and normalized query; it grants no access. */
   searchTimeline(scope: TimelineScope, input: TimelineQuery) {

@@ -10,7 +10,7 @@ export const TaskReviewSchema=z.strictObject({
   next:z.enum(['deliver','continue','wait','capability-change']).describe('建议交付、继续探索、等待补充或等待能力变更；仅供主Agent参考，不改变任务状态。'),
 });
 export type TaskReview=z.infer<typeof TaskReviewSchema>;
-export const PhaseTimeoutsSchema=z.strictObject({review:z.number().int().min(50).max(120000).default(60000),render:z.number().int().min(50).max(120000).default(60000),verification:z.number().int().min(50).max(60000).default(30000),feedback:z.number().int().min(50).max(60000).default(15000)}).prefault({});
+export const PhaseTimeoutsSchema=z.strictObject({review:z.number().int().min(50).max(1200000).default(300000),render:z.number().int().min(50).max(1200000).default(300000),verification:z.number().int().min(50).max(1200000).default(300000),feedback:z.number().int().min(50).max(300000).default(60000)}).prefault({});
 export function outputContract(schema:z.ZodType){return z.toJSONSchema(schema,{io:'input'});}
 
 export const TaskDispositionSchema=z.strictObject({next:z.enum(['complete','wait']),reason:z.string().trim().min(1).max(1000),requiredCapabilities:z.array(z.string().min(1).max(160)).max(16).default([])}).refine(value=>value.next==='wait'||value.requiredCapabilities.length===0,'Only waiting work can require capabilities');

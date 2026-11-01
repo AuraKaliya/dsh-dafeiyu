@@ -23,7 +23,7 @@ export type ExternalTaskSource=z.infer<typeof ExternalTaskSourceSchema>;
 
 /** Plain evidence describes a live authorization; parsing or copying it grants no capability. */
 export const ExternalTaskAuthorizationSchema=z.strictObject({schemaVersion:z.literal(1),agentId:z.string().min(1).max(100),taskId:id,runId:id,
-  operationId:id,intentVersion:z.number().int().positive(),parentRunId:id.nullable(),scope:ExecutionScopeSchema.options[1],goal:z.string().min(1).max(2000),motivation:MotivationSchema,
+  operationId:id,intentVersion:z.number().int().positive(),parentRunId:id.nullable(),scope:ExecutionScopeSchema.options[1],goal:z.string().min(1),motivation:MotivationSchema,
   policy:z.strictObject({producer:ExtensionIdSchema,id:ExtensionIdSchema,hash}),
   action:z.strictObject({owner:ExtensionIdSchema,id:actionId,version,pluginVersion:version,effects:z.literal('external-write'),hash}),
   source:ExternalTaskSourceSchema})

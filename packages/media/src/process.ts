@@ -1,6 +1,8 @@
 import { spawn,execFile } from 'node:child_process';
-import { mkdtemp,writeFile,rm,realpath,lstat } from 'node:fs/promises';
-import { join,resolve,dirname,relative,isAbsolute,sep } from 'node:path';
+import { mkdtemp,writeFile,rm,realpath,lstat,mkdir } from 'node:fs/promises';
+import { join,resolve,dirname,relative,isAbsolute,sep,basename } from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {redactContent} from '@dafeiyu/contracts';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
@@ -42,8 +44,17 @@ export class BoundedProcess {
         child.on('close',()=>finish(reason?new MediaWorkerError(reason):null));if(raw.signal.aborted)abort();
       });
       raw.signal.throwIfAborted();let result:z.infer<typeof resultSchema>;try{result=resultSchema.parse(JSON.parse(envelope.toString('utf8').replace(/^\uFEFF/,'')));}catch{throw new MediaWorkerError('MEDIA_WORKER_PROTOCOL_INVALID');}
-      if(!result.guardApplied)throw new MediaWorkerError('MEDIA_MEMORY_GUARD_UNAVAILABLE');if(result.code)throw new MediaWorkerError(/^[A-Z0-9_]{1,100}$/.test(result.code)?result.code:'MEDIA_WORKER_FAILED');
+      if(!result.guardApplied)throw new MediaWorkerError('MEDIA_MEMORY_GUARD_UNAVAILABLE');
       const stdout=Buffer.from(result.stdoutBase64,'base64'),stderr=Buffer.from(result.stderrBase64,'base64');if(stdout.length>spec.maxStdoutBytes||stderr.length>spec.maxStderrBytes)throw new MediaWorkerError('MEDIA_WORKER_OUTPUT_LIMIT');
+      if(result.code){
+        const diagnosticRoot=process.env.DAFEIYU_MEDIA_DIAGNOSTICS_DIR;
+        if(diagnosticRoot&&isAbsolute(diagnosticRoot))try{
+          const lines=stderr.toString('utf8').split(/\r?\n/).filter(line=>/error|invalid|failed|cannot|could not|not found|denied|unavailable/i.test(line)).slice(-12)
+            .map(line=>redactContent(line.replace(/https?:\/\/[^\s'"]+/gi,'[media-resource]').replace(/[A-Za-z]:[\\/][^\r\n'"]+/g,'[local-media-file]')).value.slice(0,400));
+          await mkdir(diagnosticRoot,{recursive:true});await writeFile(join(diagnosticRoot,randomUUID()+'.json'),JSON.stringify({at:new Date().toISOString(),program:basename(program),exitCode:result.exitCode,code:result.code,peakCommitBytes:result.peakCommitBytes,lines}),{flag:'wx',mode:0o600});
+        }catch{/* Optional local diagnostics must not alter the worker outcome. */}
+        throw new MediaWorkerError(/^[A-Z0-9_]{1,100}$/.test(result.code)?result.code:'MEDIA_WORKER_FAILED');
+      }
       return {stdout,stderr,peakCommitBytes:result.peakCommitBytes,memoryLimitBytes:spec.memoryBytes};
     }finally{
       const workRoot=await realpath(this.workRoot);await contained(workRoot,directory);

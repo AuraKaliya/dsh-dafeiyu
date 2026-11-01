@@ -1,7 +1,7 @@
 import type {DatabaseSync} from 'node:sqlite';
 
 /** Complete current schema. Called only for an empty database. */
-export function createStorageSchema(db:DatabaseSync):void {
+export function createStorageSchemaV2(db:DatabaseSync):void {
   db.exec(`
 CREATE TABLE runtime_metadata(singleton INTEGER PRIMARY KEY CHECK(singleton=1),body TEXT NOT NULL);
 CREATE TABLE runtime_ownership(singleton INTEGER PRIMARY KEY CHECK(singleton=1),pid INTEGER NOT NULL,nonce TEXT NOT NULL);
@@ -33,3 +33,12 @@ CREATE TRIGGER native_delivery_body_immutable BEFORE UPDATE OF body,credential O
 CREATE TRIGGER native_delivery_retain BEFORE DELETE ON native_deliveries BEGIN SELECT RAISE(ABORT,'Retain native delivery'); END;
 `);
 }
+
+export function addIntentReceiptsSchema(db:DatabaseSync):void {
+  db.exec(`CREATE TABLE message_intents(inbound_id TEXT PRIMARY KEY,route TEXT NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,result TEXT);
+CREATE TRIGGER message_intent_immutable BEFORE UPDATE OF inbound_id,route,body,body_hash ON message_intents BEGIN SELECT RAISE(ABORT,'Immutable message intent');END;
+CREATE TRIGGER message_intent_result_immutable BEFORE UPDATE OF result ON message_intents WHEN OLD.result IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable intent receipt');END;
+CREATE TRIGGER message_intent_retain BEFORE DELETE ON message_intents BEGIN SELECT RAISE(ABORT,'Retain intent history');END;`);
+}
+
+export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV2(db);addIntentReceiptsSchema(db);}

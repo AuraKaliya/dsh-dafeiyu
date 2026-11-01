@@ -8,7 +8,7 @@ test('working view plan accounts for controlled, capability, history, tools and 
   const capacity:RequestCapacity={bytes:1000,reserveBytes:100,maximumBytes:2000,categories:{messages:800,tools:100,toolHistory:0},withinBudget:true,measurement:'utf8-serialized-bytes',
     wire:{bytes:600,categories:{messages:500,tools:100,toolHistory:0},measurement:'wire-projection-source-sections-excluded'},auditBytes:1000,runtimeSnapshotCount:1,
     messageBreakdown:{system:100,currentInput:100,history:100,toolResults:100,runtimeContext:400,mediaBlocks:0},estimatedInputTokens:300,tokenMeasurement:'sdk-estimate-with-utf8-floor',
-    modelContextWindow:100000,reservedOutputTokens:256000,estimateOnly:true,modelLimitsKnown:true,maxTokens:1000000,tokenLimit:100000,tokenHeadroom:99700};
+    modelContextWindow:100000,reservedOutputTokens:256000,estimateOnly:true,admission:"provider-enforced-input-window",modelLimitsKnown:true,maxTokens:1000000,tokenLimit:100000,tokenHeadroom:99700};
   const plan=buildWorkingViewPlan({packet,capacity,retired:3,capabilityBytes:300});
   assert.equal(plan.regions.find(region=>region.kind==='controlled')?.items,1);
   assert.equal(plan.regions.find(region=>region.kind==='capability')?.bytes,300);

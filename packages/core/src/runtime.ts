@@ -17,7 +17,7 @@ import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { CompactionRuntime } from './compaction-runtime.js';
 import type { CompactionBinding,CompactionAudit } from './compaction-runtime.js';
 import { openAgentSession,runAgentTurn,readPersistedResult,safeRunFailure } from './agent-session.js';
-import { visibleStream } from './visible-stream.js';
+import { ModelInputRepair } from './model-input-repair.js';
 import { NativeRuntime } from './native-runtime.js';
 import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame } from './execution-frame.js';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
@@ -25,7 +25,7 @@ import { conversationHistory } from './history-frame.js';
 import { reviewTask } from './task-review.js';
 import {HarnessRuntime} from './harness-runtime.js';
 
-interface OwnedSession {handle:AgentHandle;scope:Context;persona:PersonaSnapshot;context:ContextRuntime;compaction:CompactionRuntime;lastRequest?:GenerateOptions}
+interface OwnedSession {handle:AgentHandle;scope:Context;persona:PersonaSnapshot;context:ContextRuntime;compaction:CompactionRuntime;inputRepair:ModelInputRepair;lastRequest?:GenerateOptions}
 export interface RunResult { readonly text: string; readonly sources: SourceRef[]; readonly resultRef?:import('./runtime-store.js').RunResultRef; readonly segmentYield?:{readonly reason:string} }
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
@@ -46,12 +46,9 @@ export class DshRuntime {
     ctx.on('llm/stream',async function*(options,next){
       const owned=options.sessionId?sessions.get(options.sessionId):undefined;
       if(!owned){yield* next();return;}
-      await yieldEventLoop();owned.lastRequest=options;if(!await owned.context.measure(options)){yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;}
-      if(!owned.context.guard(options,true,true)){
-        yield {type:'finish',reason:{kind:'error',failure:{code:'DAFEIYU_CONTEXT_REASSEMBLE',message:'Rebuild the logged controlled context before dispatch'}}};return;
-      }
+      await yieldEventLoop();owned.lastRequest=options;await owned.context.measure(options);owned.context.guard(options,true);
       owned.compaction.guard(options,true);
-      for await(const chunk of visibleStream(next())){owned.context.guard(options,false,false,true);owned.compaction.guard(options);yield chunk;}
+      for await(const chunk of owned.inputRepair.stream(next())){owned.context.guard(options,false,true);owned.compaction.guard(options);yield chunk;}
       owned.context.guard(options);owned.compaction.guard(options);
     });
   }
@@ -85,9 +82,10 @@ export class DshRuntime {
         current.systemPrompt.section({name:'dafeiyu-memory-habit',order:10,interpolate:false,text:'在一段有意义的交流、探索或工作结束或暂停时，用dafeiyu_memory_reflect留下自己的看法、疑问或后续打算。普通闲聊可以简短，未形成判断也如实记录。不把外部工具报告当成自己的偏好；回顾已保存的反思后，需要时用记忆工具修订自我认识。内部经历笔记与面向对方的回答分开。'});current.tools.presentAs('native');
       });
       if(!scope||!context||!compaction){await handle.dispose();throw new Error('DSH_SCOPE_MISSING');}
-      owned={handle,scope,context,compaction,get persona(){return identity.persona;},set persona(value){identity.persona=value;}};this.handles.set(item.sessionId,owned);
+      owned={handle,scope,context,compaction,inputRepair:new ModelInputRepair(scope),get persona(){return identity.persona;},set persona(value){identity.persona=value;}};this.handles.set(item.sessionId,owned);
     }
     owned.persona=persona;const {agent}=owned.handle;
+    owned.inputRepair.begin();
     if(agent.status!=='idle')throw new Error('SESSION_BUSY');
     owned.context.begin(item,agent);owned.compaction.begin(conversationHistory(item),agent);
     const disposers:(()=>void)[]=[],before=agent.session.snapshotEvents().length;

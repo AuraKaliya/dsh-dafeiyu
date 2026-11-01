@@ -1,9 +1,19 @@
 import type { StreamChunk } from '@deepseek-ai/dsh-llm';
 import { redactContent,redactJson } from '@dafeiyu/contracts';
 import { z } from 'zod';
+import type {Json} from '@dafeiyu/contracts';
+
+export interface RejectedModelInput {readonly tool:string;readonly fields:readonly string[]}
+function changedFields(before:Json,after:Json,path='$'):string[]{
+  if(JSON.stringify(before)===JSON.stringify(after))return [];
+  if(before&&after&&typeof before==='object'&&typeof after==='object'&&!Array.isArray(before)&&!Array.isArray(after))
+    return Object.keys(before).flatMap(key=>changedFields(before[key]!,after[key]??null,path+'.'+redactContent(key).value.slice(0,100))).slice(0,16);
+  if(Array.isArray(before)&&Array.isArray(after))return before.flatMap((value,index)=>changedFields(value,after[index]??null,`${path}[${index}]`)).slice(0,16);
+  return [path];
+}
 
 /** Only public content reaches DSH JSONL; transport reasoning and replay stay out. */
-export async function* visibleStream(input:AsyncIterable<StreamChunk>):AsyncIterable<StreamChunk>{
+export async function* visibleStream(input:AsyncIterable<StreamChunk>,onRejected?:(event:RejectedModelInput)=>void):AsyncIterable<StreamChunk>{
   const visible=new Map<number,{index:number;kind:'text'|'tool-call'}>(),seen=new Set<number>();
   for await(const chunk of input){
     if(chunk.type==='block-start'){
@@ -23,7 +33,9 @@ export async function* visibleStream(input:AsyncIterable<StreamChunk>):AsyncIter
       if(chunk.block.type==='text'){const text=redactContent(chunk.block.text).value;yield {type:'text-delta',index:entry.index,text};yield {type:'block-end',index:entry.index,block:{type:'text',text}};}
       else if(chunk.block.type==='tool-call'){
         let args;try{args=z.json().parse(JSON.parse(chunk.block.arguments));}catch{throw new Error('INVALID_MODEL_ARGUMENTS');}
-        if(redactJson(args).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
+        const safe=redactJson(args);
+        if(safe.redacted){onRejected?.({tool:chunk.block.name,fields:changedFields(args,safe.value)});
+          yield {type:'finish',reason:{kind:'error',failure:{code:'PRIVATE_INPUT_REJECTED',message:'Tool arguments included a restricted field; no calls from this attempt were dispatched.'}}};return;}
         yield {type:'tool-call-delta',index:entry.index,id:chunk.block.id,name:chunk.block.name,argumentsDelta:chunk.block.arguments};
         yield {type:'block-end',index:entry.index,block:{type:'tool-call',id:chunk.block.id,name:chunk.block.name,arguments:chunk.block.arguments}};
       }

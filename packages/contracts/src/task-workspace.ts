@@ -6,8 +6,8 @@ import type { MemoryObservation,ObservationAuthority,ObservationReceipt } from '
 import type { TimelineScope } from './history.js';
 
 const key=z.string().regex(/^[a-zA-Z0-9._:-]{1,120}$/),version=z.number().int().nonnegative();
-export const TaskCreateSchema=z.strictObject({requestId:key,title:z.string().min(1).max(200),goal:z.string().min(1).max(2000)});
-export const TaskUpdateSchema=z.strictObject({requestId:key,expectedVersion:version,title:z.string().min(1).max(200).optional(),goal:z.string().min(1).max(2000).optional(),status:z.enum(['active','paused','completed']).optional()})
+export const TaskCreateSchema=z.strictObject({requestId:key,title:z.string().min(1).max(200),goal:z.string().min(1)});
+export const TaskUpdateSchema=z.strictObject({requestId:key,expectedVersion:version,title:z.string().min(1).max(200).optional(),goal:z.string().min(1).optional(),status:z.enum(['active','paused','completed']).optional()})
   .refine(v=>v.title!==undefined||v.goal!==undefined||v.status!==undefined,'Empty task update');
 export const TaskSceneSchema=z.strictObject({requestId:key,conversation:ConversationSchema});
 export const TaskActivateSchema=TaskSceneSchema.extend({expectedVersion:version});
