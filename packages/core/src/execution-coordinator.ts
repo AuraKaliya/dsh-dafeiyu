@@ -134,11 +134,142 @@ export class ExecutionCoordinator {
     const item=this.d.journal.get(run.definition.origin.inboundId),binding=[...this.messageBindings.values()].find(binding=>binding.pluginId===pluginId&&binding.channelExtensionId===item.extensionId);
     if(!binding?.active()||item.message.conversation.channel!==binding.channel||item.message.conversation.account!==binding.account||messageParts(item.message).some(part=>part.mainText===undefined||!part.text.startsWith(part.mainText))
       ||this.d.journal.messageRecalled({agentId:this.d.agentId,route:item.route},item.message.id))throw new Error('SCOPE_DENIED');return {binding,item};}
-  submitMessageTask(context:ExecutionContext,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
+  private messageSceneTasks(binding:MessageTaskBinding,scene:Conversation):StoredRun[]{
+    const expected=runtimeHash(scene),rows=new Map<string,StoredRun>();
+    for(const run of this.d.store.list()){const taskId=run.definition.taskId;if(!taskId)continue;
+      const request=this.d.store.request(run.requestKey);if(request.producer!==binding.id)continue;
+      const saved=savedSchema.safeParse(request.payload),source=saved.success?saved.data.messageSource:undefined;
+      if(!source||runtimeHash(source.conversation)!==expected)continue;
+      const prior=rows.get(taskId);if(!prior||prior.updatedAt<run.updatedAt)rows.set(taskId,run);}
+    return [...rows.values()].sort((a,b)=>a.updatedAt<b.updatedAt?1:-1);
+  }
+  private messageTaskTarget(binding:MessageTaskBinding,scene:Conversation,taskId?:string):{run:StoredRun|null;ambiguous:boolean;candidates:string[]}{
+    if(taskId)return {run:this.findMessageTask(binding,scene,taskId),ambiguous:false,candidates:[taskId]};
+    const all=this.messageSceneTasks(binding,scene);
+    if(all.length<=1)return {run:all[0]??null,ambiguous:false,candidates:all.map(run=>run.definition.taskId!)};
+    const unfinished=all.filter(run=>{const task=this.repository().readState(this.d.agentId,run.definition.taskId!);return task.status!=='completed'||run.state!=='completed';});
+    if(unfinished.length===1)return {run:unfinished[0]!,ambiguous:false,candidates:[unfinished[0]!.definition.taskId!]};
+    return {run:null,ambiguous:true,candidates:(unfinished.length?unfinished:all).map(run=>run.definition.taskId!)};
+  }
+  private deliveredConversationReply(route:string,after:string):{traceId:string;messageId:string}|null{
+    let latest:{traceId:string;messageId:string}|null=null;
+    for(const event of this.d.journal.events(route)){if(event.type!=='delivery.sent')continue;
+      try{const source=this.d.journal.get(event.traceId);if(source.route!==route||source.message.occurredAt<after)continue;
+        latest={traceId:event.traceId,messageId:source.message.id};}catch{/* A missing trace cannot prove delivery. */}}
+    return latest;
+  }
+  private proposalIsDelivered(proposalRef:string|undefined,taskId:string,scene:Conversation,route:string,after:string):boolean{
+    if(proposalRef){
+      const native=/^task-result:([0-9a-f-]{36})$/u.exec(proposalRef)?.[1]??(/^[0-9a-f-]{36}$/u.test(proposalRef)?proposalRef:null);
+      if(native){const delivery=this.d.store.nativeDeliveries.get(native);
+        return !!delivery&&delivery.state==='sent'&&delivery.anchor.taskId===taskId&&runtimeHash(delivery.anchor.target)===runtimeHash(scene);}
+      const reply=/^reply:(.+)$/u.exec(proposalRef)?.[1];if(!reply)return false;
+      try{return this.d.journal.events(route).some(event=>{if(event.type!=='delivery.sent')return false;
+        const source=this.d.journal.get(event.traceId);return event.traceId===reply||source.message.id===reply||source.id===reply;});}catch{return false;}
+    }
+    // No explicit reference: only a reply delivered in this same conversation after the task started can be the proposal.
+    return this.deliveredConversationReply(route,after)!==null;
+  }
+  /** Bare acknowledgements never form their own goal. The program maps them to a durable prior task; the model may also declare the relation explicitly. */
+  private continuationIntent(text:string):'confirm'|'continue'|'retry'|'status'|null{
+    const value=text.replace(/[。.!！?？~～\s]+$/u,'').trim();if(!value||[...value].length>24)return null;
+    if(/^(可以|行|好|好的|好吧|同意|没问题|就这样|按这个来|就这么办|你决定|你看着办)$/u.test(value))return 'confirm';
+    if(/^(继续|接着来|接着做|继续吧|继续执行)$/u.test(value))return 'continue';
+    if(/^(重试|再试一次|重新试|重新试一下|再试试)$/u.test(value))return 'retry';
+    if(/^(进度|进度怎么样|进度如何|进展如何|进行得怎么样|做到哪了|怎么样了|什么情况)$/u.test(value))return 'status';
+    return null;
+  }
+  private intentSnapshot(relation:'new'|'amend'|'confirm'|'continue'|'retry'|'status',item:{id:string;message:import('@dafeiyu/contracts').InboundMessage},text:string,
+    options:{input:z.output<typeof MessageTaskSubmitSchema>;task?:{id:string;epoch:number};parent?:MessageTaskSource;resolvedGoal?:string|undefined;previousGoal?:string|undefined}):NonNullable<MessageTaskSource['intent']>{
+    const prior=options.parent?.intent,amendment=relation==='new'?null:{inboundId:item.id,messageHash:runtimeHash(item.message),text:text.slice(0,2000),kind:relation,at:item.message.occurredAt};
+    const proposalRef=options.input.intent?.proposalRef??prior?.proposalRef;
+    let originalRequest=prior?.originalRequest;
+    if(!originalRequest&&options.parent){try{const source=this.d.journal.get(options.parent.inboundId);
+      originalRequest={conversation:source.message.conversation,messageId:source.message.id,occurredAt:source.message.occurredAt,text:messageMainText(source.message).slice(0,32000)};}catch{originalRequest=undefined;}}
+    return {schemaVersion:1,relation,...(options.task?{taskId:options.task.id,intentVersion:options.task.epoch}:{}),
+      originalRequest:originalRequest??{conversation:item.message.conversation,messageId:item.message.id,occurredAt:item.message.occurredAt,text:text.slice(0,32000)},
+      ...(options.previousGoal?{previousGoal:options.previousGoal.slice(0,2000)}:{}),
+      ...(options.resolvedGoal?{resolvedGoal:options.resolvedGoal.slice(0,2000)}:{}),
+      constraints:[...new Set([...(prior?.constraints??[]),...(options.input.intent?.constraints??[])])].slice(0,32),
+      delegatedDecisions:[...new Set([...(prior?.delegatedDecisions??[]),...(options.input.intent?.delegatedDecisions??[])])].slice(0,16),
+      amendments:amendment?[...(prior?.amendments??[]),amendment].slice(-32):(prior?.amendments??[]),...(proposalRef?{proposalRef}:{})};
+  }
+  private mergedGoal(previous:string,instruction:string,resolved?:string){
+    if(resolved)return resolved.slice(0,2000);
+    const suffix=`\n本次修订：${instruction}`,room=Math.max(0,2000-suffix.length-1);
+    return previous.length+suffix.length<=2000?previous+suffix:(previous.slice(0,room)+'…'+suffix).slice(0,2000);
+  }
+  private messageTaskState(taskId:string,run:StoredRun,relation:string,extra:Record<string,import('@dafeiyu/contracts').Json>={}){
+    const task=this.repository().readState(this.d.agentId,taskId);
+    return {accepted:false,relation,taskId,runId:run.id,taskState:task.status,runState:run.state,version:task.version,intentVersion:task.epoch,
+      goal:task.goal,error:run.error,...extra};
+  }
+  private recordIntentDecision(binding:MessageTaskBinding,item:{id:string;message:import('@dafeiyu/contracts').InboundMessage},relation:string,data:Record<string,import('@dafeiyu/contracts').Json>):boolean{
+    const producer=`message-intent:${binding.id}`,requestId=runtimeHash([item.id,relation]);
+    if(this.d.store.findRequest(producer,requestId))return false;
+    this.d.store.prepareRequest(producer,requestId,{kind:'message-intent-decision',relation,inboundId:item.id,messageHash:runtimeHash(item.message),...data});return true;
+  }
+  submitMessageTask(context:ExecutionContext,pluginId:string,raw:unknown){
+    const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw),{directive,voice}=this.messageDirective(binding,context,item.message,input.voiceExposureId);
     if(input.kind==='explicit-task'&&(item.message.sender.id!==binding.ownerId||directive.kind!=='submit'))throw new Error('TASK_DIRECTIVE_REQUIRED');
+    const declared=input.intent?.relation??'new',detected=input.kind==='explicit-task'?this.continuationIntent(directive.text):null;
+    const relation=input.kind==='explicit-task'?(declared!=='new'?declared:(detected??'new')):'new';
     const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:binding.explorationResources??[])].map(scene=>[runtimeHash(scene),scene])).values()];
-    const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{})});
-    const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:null]),title:input.kind==='explicit-task'?Array.from(directive.text).slice(0,80).join(''):'自主探索',goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId,...(input.toolStage??binding.toolStage?{data:{toolStage:input.toolStage??binding.toolStage}}:{})});
+    const resolution=input.kind==='explicit-task'&&relation!=='new'?this.messageTaskTarget(binding,item.message.conversation,input.intent?.targetTaskId):{run:null,ambiguous:false,candidates:[]};
+    if(resolution.ambiguous)
+      return {accepted:false,relation,reason:'TASK_AMBIGUOUS',candidates:resolution.candidates,note:'当前会话有多个可关联任务，无法唯一确定这条消息属于哪一个；没有创建或修订任何任务。请说明目标任务，或直接回答并保留原任务状态。'};
+    const target=resolution.run;
+    if(input.kind==='explicit-task'&&relation!=='new'&&!target)
+      return {accepted:false,relation,taskId:null,reason:'NO_RELATED_TASK',note:'当前会话没有可关联的已受理任务或已送达方案。不要创建以确认词、状态询问或继续词作为目标的新任务；请依据当前对话直接回答，或让主人说明具体要做什么。'};
+    if(target&&(relation==='status'||relation==='confirm'||relation==='continue'||relation==='retry')){
+      const taskId=target.definition.taskId!,task=this.repository().readState(this.d.agentId,taskId);
+      if(input.intent?.expectedVersion!==undefined&&input.intent.expectedVersion!==task.version)throw new Error('VERSION_CONFLICT');
+      if(relation==='status')return this.messageTaskState(taskId,target,relation,{alreadyCompleted:task.status==='completed',candidates:resolution.candidates,note:'仅返回当前任务与运行状态，没有创建新任务，也没有隐式重试。'});
+      if(task.status==='completed'||target.state==='completed'){
+        const alreadyCompleted=task.status==='completed',fresh=this.recordIntentDecision(binding,item,relation,{taskId,decision:'not-rerun',reason:alreadyCompleted?'task-completed':'run-completed',taskVersion:task.version});
+        if(fresh)this.d.store.appendExecutionEvent(target.id,'task.intent.decision',{relation,inboundId:item.id,messageHash:runtimeHash(item.message),taskId,
+          taskState:task.status,runState:target.state,alreadyCompleted,reason:alreadyCompleted?'task-completed':'run-completed',goal:task.goal});
+        this.flushEvents();
+        return this.messageTaskState(taskId,target,relation,{alreadyCompleted,resultPending:task.status==='active',decisionRecorded:true,note:'任务已经完成；确认或重试不会再次运行，也不会重复交付。'});
+      }
+      const proposal=this.proposalIsDelivered(input.intent?.proposalRef,taskId,item.message.conversation,item.route,target.createdAt);
+      if(!proposal)return {accepted:false,relation,reason:'PROPOSAL_UNVERIFIED',taskId,note:'引用的方案不是本会话已送达的任务结果或普通回复；没有把这条确认当成可执行授权，也没有创建或修订任务。'};
+      const activeRun=this.d.store.list(['accepted','queued','running','cancelling']).find(run=>run.definition.taskId===taskId);
+      if(activeRun)return this.messageTaskState(taskId,activeRun,relation,{note:'同一任务已有进行中的运行，没有重复排队。'});
+      const parent=savedSchema.parse(this.d.store.request(target.requestKey).payload).messageSource;if(!parent)throw new Error('MESSAGE_REQUIRED');
+      let taskVersion=task.version,taskEpoch=task.epoch;
+      if(task.status==='paused'){const reopened=this.repository().update(this.d.agentId,taskId,{requestId:`message-resume:${binding.id}:${item.id}`,expectedVersion:task.version,status:'active'});taskVersion=reopened.version;taskEpoch=reopened.epoch;}
+      const intent=this.intentSnapshot(relation,item,directive.text,{input,parent,task:{id:taskId,epoch:taskEpoch}});
+      const source=MessageTaskSourceSchema.parse({...parent,intent,control:{inboundId:item.id,messageHash:runtimeHash(item.message),...(voice?{voice}:{})}});
+      this.validateMessageSource(source);
+      const checkpoint=this.d.store.checkpoints(target.id).at(-1);
+      const resume=checkpoint&&['waiting','failed','interrupted'].includes(target.state)?checkpoint:null;
+      const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,'message-continue',relation,taskId]),taskId,expectedVersion:taskVersion,policyId:binding.policyId,inputRefs:[]});
+      const accepted=this.submit(binding.id,request,resume?{kind:'continuation',parentRunId:target.id,checkpointId:resume}:undefined,resume?target.id:null,resume,
+        {kind:'explicit-task',basis:[`message:${item.id}`,`task:${taskId}`]},source);
+      return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:'explicit-task',relation,sourceInboundId:item.id,reusedTask:true};
+    }
+    if(target&&relation==='amend'){
+      const taskId=target.definition.taskId!,task=this.repository().readState(this.d.agentId,taskId);
+      if(input.intent?.expectedVersion!==undefined&&input.intent.expectedVersion!==task.version)throw new Error('VERSION_CONFLICT');
+      const parent=savedSchema.parse(this.d.store.request(target.requestKey).payload).messageSource;if(!parent)throw new Error('MESSAGE_REQUIRED');
+      const instruction=directive.text.trim(),resolved=input.intent?.resolvedGoal,goal=this.mergedGoal(task.goal,instruction,resolved);
+      this.repository().update(this.d.agentId,taskId,{requestId:`message-amend:${binding.id}:${item.id}`,expectedVersion:task.version,
+        title:input.title??task.title,goal,status:'active'});
+      for(const previous of this.d.store.list(['accepted','queued','running','waiting']))if(previous.definition.taskId===taskId)
+        this.control(binding.id,previous,{requestId:runtimeHash([item.id,'amend-cancel',previous.id]),expectedVersion:previous.version,reason:'主人补充或纠正任务意图'},'cancel');
+      const current=this.repository().readState(this.d.agentId,taskId);
+      const intent=this.intentSnapshot('amend',item,instruction,{input,parent,task:{id:taskId,epoch:current.epoch},resolvedGoal:resolved,previousGoal:task.goal});
+      const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),
+        conversation:item.message.conversation,kind:'explicit-task',resources,intent,...(voice?{voice}:{})});
+      this.validateMessageSource(source);
+      const accepted=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,'message-amend-run',taskId]),taskId,expectedVersion:current.version,policyId:binding.policyId,inputRefs:[]}),
+        undefined,null,null,{kind:'explicit-task',basis:[`message:${item.id}`,`task:${taskId}`]},source);
+      return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:'explicit-task',relation,sourceInboundId:item.id,reusedTask:true,amended:true};
+    }
+    const intent=this.intentSnapshot('new',item,directive.text,{input});
+    const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{}),...(input.kind==='explicit-task'?{intent}:{})});
+    const request=ExecutionRequestSchema.parse({requestId:runtimeHash([item.id,input.kind,input.kind==='self-exploration'?input.goal:relation]),title:input.kind==='explicit-task'?(input.title??Array.from(directive.text).slice(0,80).join('')):'自主探索',goal:input.kind==='explicit-task'?directive.text:input.goal,policyId:binding.policyId,...(input.toolStage??binding.toolStage?{data:{toolStage:input.toolStage??binding.toolStage}}:{})});
     this.validateMessageSource(source);const accepted=this.submit(binding.id,request,undefined,null,null,{kind:input.kind,basis:[`message:${item.id}`]},source);
     return {taskId:accepted.task.id,runId:accepted.run.id,state:accepted.state,motivation:input.kind,sourceInboundId:item.id};
   }

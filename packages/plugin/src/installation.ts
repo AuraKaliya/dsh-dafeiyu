@@ -1,4 +1,4 @@
-﻿import { existsSync,mkdirSync,readFileSync,writeFileSync,renameSync,readdirSync } from 'node:fs';
+import { existsSync,mkdirSync,readFileSync,writeFileSync,renameSync,readdirSync } from 'node:fs';
 import { dirname,join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash,randomUUID } from 'node:crypto';
@@ -63,7 +63,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   if(bili?.channel&&bili.capabilities)policies.push({id:'bili-owner-task',producers:['bili-owner-tasks'],actions:[...BILI_OWNER_NATIVE_ACTIONS],allowLocalWrite:true,resources:[BILI_PUBLIC_SCENE,biliOwnerScene(bili.channel)]});
   return HostConfigSchema.parse(JSON.parse(JSON.stringify({schemaVersion:1,profileId:meta.profileId,agent:{id:meta.agentId},paths:{core:join(root,'core'),memory:join(root,'memory'),sessions:join(root,'sessions'),query:join(root,'query.sqlite'),channels:{qq:join(root,'qq',hash(JSON.stringify([settings.qq.botId,settings.qq.ownerId])).slice(0,24))}},
     modelRoutes:{chat:options.scripted?{provider:'local-test',model:'scripted'}:{provider:settings.model.auth==='dsh-account'?'deepseek-account':'deepseek-official',model:settings.model.model,...(settings.model.reasoningEffort?{reasoningEffort:settings.model.reasoningEffort}:{})}},
-    persona:{fixedFile:foundationFile,kind:options.scripted?'test':'formal',...(settings.growthMaxBytes===undefined?{}:{growthRegion:{maxBytes:settings.growthMaxBytes}})},...(settings.taskTimeoutMs||settings.phaseTimeouts?{runtime:{...(settings.taskTimeoutMs?{turnTimeoutMs:settings.taskTimeoutMs}:{}),...(settings.phaseTimeouts?{phaseTimeouts:settings.phaseTimeouts}:{})}}:{}),context:{compactionInputTokens:48000,...settings.contextBudget,assembly:settings.context??{},regions:{'memory:qq-expression':{maxBytes:6000,priority:420},...settings.contextBudget?.regions}},plugins,authorityPolicies:policies})));
+    persona:{fixedFile:foundationFile,kind:options.scripted?'test':'formal',...(settings.growthMaxBytes===undefined?{}:{growthRegion:{maxBytes:settings.growthMaxBytes}})},...(settings.taskTimeoutMs||settings.phaseTimeouts?{runtime:{...(settings.taskTimeoutMs?{turnTimeoutMs:settings.taskTimeoutMs}:{}),...(settings.phaseTimeouts?{phaseTimeouts:settings.phaseTimeouts}:{})}}:{}),context:{...settings.contextBudget,assembly:settings.context??{},regions:{'memory:qq-expression':{maxBytes:6000,priority:420},...settings.contextBudget?.regions}},plugins,authorityPolicies:policies})));
 }
 
 export interface InstallationMigration{code:'INSTALL_MIGRATED'|'INSTALL_CURRENT'|'INSTALL_NO_STORE';version:number;backup:string|null;runtimeVersion?:number;backups?:readonly string[]}

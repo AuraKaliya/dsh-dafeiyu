@@ -58,6 +58,12 @@ export function requestCapacity(request:{messages:unknown;tools?:unknown;toolHis
   return {bytes:total,reserveBytes:reserve,maximumBytes:maximum,categories,withinBudget:total+reserve<=maximum,measurement:'utf8-serialized-bytes' as const};
 }
 
+/** Model admission is token-based. Bytes are only a local transport/serialization audit. */
+export function tokenCapacityWithin(input:{inputTokens:number;outputTokens:number;modelWindow:number|null|undefined;maxTokens:number}){
+  const limit=Math.min(input.maxTokens,input.modelWindow??input.maxTokens);
+  return {limit,within:input.inputTokens+input.outputTokens<=limit,headroom:limit-input.inputTokens-input.outputTokens};
+}
+
 /** Read-only projection of the provider wire shape used for the capacity probe. It removes
  * `source.sections`, which is local provenance metadata and is not serialized by the provider
  * adapter; the authoritative local/audit measurement remains `requestCapacity`. */
@@ -72,8 +78,8 @@ export function wireProjection(request:{messages:readonly unknown[];tools?:unkno
   return {bytes,categories,measurement:'wire-projection-source-sections-excluded' as const};
 }
 
-export async function inspectRequestCapacity(ctx:Context,options:GenerateOptions,maximum:number,reserve:number,known?:LlmResolvedModelInfo,enforce=true){
-  const capacity=requestCapacity(options,maximum,reserve);if(enforce&&!capacity.withinBudget)throw new Error('CONTEXT_REQUEST_CAPACITY');
+export async function inspectRequestCapacity(ctx:Context,options:GenerateOptions,maximum:number,reserve:number,known?:LlmResolvedModelInfo,enforce=true,maxTokens=1000000){
+  const capacity=requestCapacity(options,maximum,reserve);
   const wire=wireProjection(options),runtimeSnapshotCount=options.messages.filter(message=>message.role==='user'&&message.source?.kind==='runtime-context'&&message.source.form==='snapshot').length;
   const messageBreakdown={system:0,currentInput:0,history:0,toolResults:0,runtimeContext:0,mediaBlocks:0};
   const currentInput=options.messages.findLastIndex(message=>message.role==='user'&&(!message.source||['user','dafeiyu-execution'].includes(message.source.kind)));
@@ -88,9 +94,10 @@ export async function inspectRequestCapacity(ctx:Context,options:GenerateOptions
   const info=known??await ctx.llm.resolveModelInfo(options.provider,options.model,options.signal),meter=ctx.get('tokenMeter');
   const estimatedInputTokens=Math.max(Math.ceil(capacity.bytes/3),meter?options.messages.reduce((sum,message)=>sum+(message.id===undefined?Math.ceil(contextBytes(message)/3):meter.estimateMessage(message)),0)+Math.ceil((capacity.categories.tools+capacity.categories.toolHistory)/3):0);
   const contextWindow=info.context?.contextWindow??null,outputTokens=options.maxTokens??info.defaultMaxTokens??null;
-  if(enforce&&contextWindow!==null&&estimatedInputTokens+(outputTokens??0)>=contextWindow)throw new Error('MODEL_CONTEXT_CAPACITY');
+  const tokenCapacity=tokenCapacityWithin({inputTokens:estimatedInputTokens,outputTokens:outputTokens??0,modelWindow:contextWindow,maxTokens});
+  if(enforce&&!tokenCapacity.within)throw new Error('MODEL_CONTEXT_CAPACITY');
   return {...capacity,wire,auditBytes:capacity.bytes,runtimeSnapshotCount,messageBreakdown,estimatedInputTokens,tokenMeasurement:meter?'sdk-estimate-with-utf8-floor':'utf8-conservative-estimate',modelContextWindow:contextWindow,
-    reservedOutputTokens:outputTokens,estimateOnly:true,modelLimitsKnown:contextWindow!==null&&outputTokens!==null};
+    maxTokens,tokenLimit:tokenCapacity.limit,tokenHeadroom:tokenCapacity.headroom,reservedOutputTokens:outputTokens,estimateOnly:true,modelLimitsKnown:contextWindow!==null&&outputTokens!==null};
 }
 
 export async function prepareWithin<T>(work:(signal:AbortSignal)=>Promise<T>,signal:AbortSignal,remainingMs:number):Promise<T>{

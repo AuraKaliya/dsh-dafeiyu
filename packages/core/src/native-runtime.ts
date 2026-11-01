@@ -1,6 +1,6 @@
-﻿import {SNAPSHOT_RULE} from './context-snapshots.js';
+import {SNAPSHOT_RULE} from './context-snapshots.js';
 import {retireContextCarrier} from './context-runtime.js';
-import {requestCapacity,inspectRequestCapacity} from './context-plan.js';
+import {inspectRequestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle,AgentOptions } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
@@ -13,7 +13,6 @@ import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { CompactionRuntime } from './compaction-runtime.js';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { z } from 'zod';
-import {segmentBudgetDecision} from './segment-budget.js';
 import {BILI_READING_ACTIONS,BILI_READING_STAGE,CAPABILITY_CONTEXT,HarnessRuntime} from './harness-runtime.js';
 export const EXECUTION_MESSAGE_SOURCE='dafeiyu-execution' as const;
 
@@ -30,32 +29,12 @@ export class NativeRuntime {
 
     ctx.on('llm/stream',async function*(options,next){const owned=options.sessionId?sessions.get(options.sessionId):undefined;
       if(!owned){yield* next();return;}await yieldEventLoop();const frame=owned.frame;if(!frame)throw new Error('RUN_NOT_RUNNING');
-      owned.lastRequest=options;const capacity=await inspectRequestCapacity(owned.scope,options,frame.requestMaxBytes,frame.outputReserveBytes,undefined,!owned.segment);
-      if(owned.segment){
-        const budget=frame.readingBudget??{softTokens:24000,hardTokens:32000,maxCompletedUnits:3};
-        let decision=segmentBudgetDecision({inputTokens:capacity.estimatedInputTokens,outputReserveTokens:capacity.reservedOutputTokens??8192,
-          ...(capacity.modelContextWindow===null?{}:{modelWindowTokens:capacity.modelContextWindow}),budget:{softTokens:budget.softTokens,hardTokens:budget.hardTokens}});
-        if(owned.segment.requests===0){
-          // Static persona/schema cost is not new reading. Leave room for useful work in every fresh segment.
-          if(capacity.estimatedInputTokens+1000>=decision.hardTokens){owned.segment.blocked=true;throw new Error('READING_CONTEXT_CAPACITY');}
-          owned.segment.softTokens=Math.min(decision.hardTokens-1,Math.max(decision.softTokens,capacity.estimatedInputTokens+4000));
-        }
-        decision=segmentBudgetDecision({inputTokens:capacity.estimatedInputTokens,outputReserveTokens:capacity.reservedOutputTokens??8192,
-          ...(capacity.modelContextWindow===null?{}:{modelWindowTokens:capacity.modelContextWindow}),
-          budget:{softTokens:owned.segment.softTokens!,hardTokens:budget.hardTokens}});
-        if(!capacity.withinBudget||decision.decision==='block'||decision.decision==='yield'||decision.decision==='compact-then-send'&&owned.segment.requests>0){
-          if(owned.segment.requests===0){owned.segment.blocked=true;throw new Error('READING_CONTEXT_CAPACITY');}
-          owned.segment.reason=decision.decision==='compact-then-send'?'soft-token-budget':'hard-token-budget';
-          frame.audit?.({status:'segment-yield',reason:owned.segment.reason,inputTokens:capacity.estimatedInputTokens,dispatched:false});
-          throw new Error('SEGMENT_YIELD');
-        }
-      }
+      owned.lastRequest=options;const capacity=await inspectRequestCapacity(owned.scope,options,frame.requestMaxBytes,frame.outputReserveBytes,undefined,true,frame.maxTokens??1000000);
       const current=frame.contexts?.length?JSON.stringify({kind:'native-context',regions:frame.contexts}):frame.personaItems?.length?JSON.stringify({kind:'stage-persona',items:frame.personaItems}):JSON.stringify({kind:'native-context',regions:[]});
       const carriers=options.messages.flatMap(message=>message.role==='user'&&'source'in message&&message.source.kind==='runtime-context'&&message.source.form==='snapshot'?message.source.sections.filter(section=>section.name==='dafeiyu:persona-context:v1'):[]);
       if(carriers.at(-1)?.text!==current)throw new Error('NATIVE_CONTEXT_SNAPSHOT_MISMATCH');
       frame.contextAudit?.({manifest:frame.contextPlan?.()??null,capacity:z.json().parse(capacity)});owned.compaction.guard(options,true);frame.evidence?.expose(owned.compaction.exposedDependencies());
       const guard=()=>{frame.view.signal.throwIfAborted();frame.guard();owned.compaction.guard(options);};guard();
-      if(!requestCapacity(options,frame.requestMaxBytes,frame.outputReserveBytes).withinBudget)throw new Error('CAPACITY_EXCEEDED');
       if(owned.segment)owned.segment.requests++;
       for await(const chunk of visibleStream(next())){frame.view.signal.throwIfAborted();yield chunk;}guard();
     });
@@ -107,9 +86,6 @@ export class NativeRuntime {
       const input=createUserMessage({source:{kind:'dafeiyu-execution',form:'notice',summary:'大肥鱼内部任务输入',taskId:frame.view.taskId,runId:frame.view.runId,inputId:randomUUID(),originKind:frame.view.origin.kind},
         content:[{type:'text',text:JSON.stringify(frame.program??{goal:frame.goal,inputs:frame.inputs})}]});
       owned.compaction.expectInput(input);
-      if(owned.segment)disposers.push(owned.scope.on('agent/pre-step',async(_payload,next)=>{
-        frame.guard();if(owned!.segment!.units.size>=(frame.readingBudget?.maxCompletedUnits??3)){owned!.segment!.reason='reading-unit-boundary';throw new Error('SEGMENT_YIELD');}return next();
-      }));
       let result:Awaited<ReturnType<typeof runAgentTurn>>;
       try{result=await runAgentTurn(this.ctx,owned.handle.agent,input,frame.view.signal,()=>owned!.compaction.seal());}
       catch(error){frame.view.signal.throwIfAborted();if(owned.segment?.blocked)throw new Error('READING_CONTEXT_CAPACITY');if(!owned.segment?.reason)throw error;frame.guard();return {text:'',resultRef:null,segmentYield:{reason:owned.segment.reason}};}

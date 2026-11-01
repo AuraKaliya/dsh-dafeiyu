@@ -33,37 +33,28 @@ test('reading stage follows the goal, not the presence of Bili resources',()=>{
   assert.equal(readingStage('看B站',[]),'general');
 });
 
-test('real DSH agent seals a segment after three completed videos without a fourth model request',async()=>{
+test('eight completed videos stay in one task instead of forcing a three-video segment boundary',async()=>{
   const root=await mkdtemp(join(testTempDir(),'native-units-'));
-  const adapter=new FixtureAdapter((_request,call)=>toolResponse('bili_reading_save',{bvid:'video-'+call})),ctx=await sdkFixture(root,adapter);
+  const adapter=new FixtureAdapter((_request,call)=>call<=8?toolResponse('bili_reading_save',{bvid:'video-'+call}):textResponse('八条读完。')),ctx=await sdkFixture(root,adapter);
   const runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
   try{const result=await runtime.run(frame([action(input=>({bvid:z.object({bvid:z.string()}).parse(input).bvid,status:'closed'}))]));
-    assert.equal(result.segmentYield?.reason,'reading-unit-boundary');assert.equal(result.resultRef,null);assert.equal(adapter.requests.length,3);
+    assert.equal(result.segmentYield,undefined);assert.ok(result.resultRef);assert.equal(adapter.requests.length,9);
   }finally{await runtime.close();await ctx.fiber.dispose();}
 });
 
-test('real request admission yields before an oversized second request reaches the model',async()=>{
+test('a tool result beyond the old 32k reading threshold is still dispatched to the model',async()=>{
   const root=await mkdtemp(join(testTempDir(),'native-budget-'));
-  const adapter=new FixtureAdapter((_request,call)=>call===1?toolResponse('bili_reading_save',{bvid:'video-1'}):textResponse('must not dispatch'));
+  const adapter=new FixtureAdapter((_request,call)=>call===1?toolResponse('bili_reading_save',{bvid:'video-1'}):textResponse('大结果已处理。'));
   const ctx=await sdkFixture(root,adapter),runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
-  try{const input=frame([action(()=>({bvid:'video-1',status:'open',material:'材料'.repeat(18000)}))]);
-    const result=await runtime.run(input);assert.ok(result.segmentYield);assert.equal(adapter.requests.length,1);
+  try{const input=frame([action(()=>({bvid:'video-1',status:'open',material:'材料'.repeat(12000)}))]);
+    const result=await runtime.run(input);assert.equal(result.segmentYield,undefined);assert.match(result.text,/大结果/u);assert.equal(adapter.requests.length,2);
   }finally{await runtime.close();await ctx.fiber.dispose();}
 });
 
-test('unshrinkable first request stops instead of creating endless empty segments',async()=>{
+test('a request estimated beyond the real model window is rejected before dispatch',async()=>{
   const root=await mkdtemp(join(testTempDir(),'native-minimum-')),adapter=new FixtureAdapter(()=>textResponse('not reached'));
   const ctx=await sdkFixture(root,adapter),runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
-  try{const input=frame();input.program={required:'材料'.repeat(20000)};
-    await assert.rejects(runtime.run(input),/READING_CONTEXT_CAPACITY/);assert.equal(adapter.requests.length,0);
-  }finally{await runtime.close();await ctx.fiber.dispose();}
-});
-
-test('a large fixed prompt leaves useful reading headroom instead of yielding after one small result',async()=>{
-  const root=await mkdtemp(join(testTempDir(),'native-headroom-'));
-  const adapter=new FixtureAdapter((_request,call)=>call<4?toolResponse('bili_reading_save',{bvid:'video-1'}):textResponse('当前视频已读完。'));
-  const ctx=await sdkFixture(root,adapter),runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
-  try{const input={...frame([action(()=>({bvid:'video-1',status:'open',nextOffset:5}))]),readingBudget:{softTokens:1000,hardTokens:10000,maxCompletedUnits:3}};
-    const result=await runtime.run(input);assert.equal(result.segmentYield,undefined);assert.equal(adapter.requests.length,4);assert.match(result.text,/读完/);
+  try{const input=frame();input.program={required:'材料'.repeat(40000)};
+    await assert.rejects(runtime.run(input),/MODEL_CONTEXT_CAPACITY/);assert.equal(adapter.requests.length,0);
   }finally{await runtime.close();await ctx.fiber.dispose();}
 });

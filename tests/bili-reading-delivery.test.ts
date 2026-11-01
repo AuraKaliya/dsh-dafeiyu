@@ -72,7 +72,7 @@ test('a message task crosses a segment and delivers exactly one verified leaf re
     try{
       const runs=db.prepare('SELECT id,state,error FROM runs').all();
       assert.equal(delivered.length,1,JSON.stringify({runs,deliveries:db.prepare('SELECT state,error FROM native_deliveries').all()}));
-      assert.equal(runs.filter(run=>run.state==='continued').length,1);
+      assert.equal(runs.filter(run=>run.state==='continued').length,0,'Four videos no longer force a segment handoff');
       assert.equal(runs.find(run=>run.id===delivered[0]!.taskResult?.runId)?.state,'completed');
       assert.equal(db.prepare("SELECT COUNT(*) AS n FROM native_deliveries WHERE state='sent'").get()!.n,1);
     }finally{db.close();}
