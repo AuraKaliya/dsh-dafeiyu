@@ -13,7 +13,7 @@ import { readPersistedResult } from './agent-session.js';
 import { z } from 'zod';
 export const NATIVE_RENDER_ATTEMPTS=2;
 interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:string;signal:AbortSignal;timeoutMs:number;sendTimeoutMs:number;
-  feedbackSource(runId:string):{item:PendingMessage;taskId:string;state:string;error:string|null;operations:readonly {state:string;status:string|null;effects:string|null}[]}|null;
+  feedbackSource(runId:string):{item:PendingMessage;taskId:string;state:string;error:string|null;operations:readonly {action?:string;state:string;status:string|null;effects:string|null}[]}|null;
   describe(runId:string):{item:PendingMessage;anchor:TaskResultAnchor;autoDeliver:boolean|undefined}|null;
   access(runId:string):Promise<NativeExpressionAccess>;expression():NativeExpressionPort|undefined;
   persona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
@@ -66,7 +66,7 @@ export class NativeTaskDelivery {
   async whenIdle(){while(this.active.size||this.notices.size)await Promise.allSettled([...this.active.values(),...this.notices.values()]);}
   get pending(){return this.active.size+this.notices.size;}
   progress(runId:string):Promise<import('@dafeiyu/contracts').Json>{const existing=this.notices.get(runId);if(existing)return existing;const work=this.statusNotice(runId).finally(()=>this.notices.delete(runId));this.notices.set(runId,work);return work;}
-  private failureSummary(code:string|null):string{switch(code){case 'MODEL_INCOMPLETE':return '任务执行没有正常收尾，已经完成的工作仍保留';case 'SOURCE_STALE':return '执行中引用的资料失效，需要重新核对后再继续';case 'CAPACITY_EXCEEDED':return '本轮容量不足，需要缩小范围';default:return '任务执行中断，已经完成的工作仍保留';}}
+  private failureSummary(code:string|null):string{switch(code){case 'MODEL_INCOMPLETE':return '模型本轮没有正常收尾，不能据此认定平台连接失败';case 'SOURCE_STALE':return '执行中引用的资料失效，需要重新核对后再继续';case 'SEGMENT_LIMIT_REACHED':return '阅读接续次数达到上限，之前成功的读取仍然有效，不代表B站连接失败';case 'READING_CONTEXT_CAPACITY':case 'CAPACITY_EXCEEDED':return '本轮上下文容量不足，需要缩小范围，不能据此认定平台连接失败';default:return '任务执行中断，已经完成的工作仍保留';}}
   private async statusNotice(runId:string):Promise<import('@dafeiyu/contracts').Json>{
     const source=this.host.feedbackSource(runId);if(!source||this.host.signal.aborted)return {status:'not-sent',code:'STATUS_SOURCE_UNAVAILABLE'};
     const channel=this.host.channel(source.item);if(!channel)return {status:'not-sent',code:'STATUS_CHANNEL_UNAVAILABLE'};

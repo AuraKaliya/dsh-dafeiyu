@@ -21,7 +21,7 @@ declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {
   'dafeiyu-execution':{kind:'dafeiyu-execution';taskId:string;runId:string;inputId:string;originKind:string}&ContextFormed;
 }}
 interface Owned {handle:AgentHandle;scope:Context;frame:TaskExecutionFrame|undefined;compaction:CompactionRuntime;lastRequest:GenerateOptions|undefined;retryPending?:boolean;repairs?:number;
-  segment?:{reason:string|null;blocked:boolean;requests:number;units:Set<string>}}
+  segment?:{reason:string|null;blocked:boolean;requests:number;units:Set<string>;softTokens?:number}}
 export class NativeRuntime {
   private readonly sessions=new Map<string,Owned>();
   private meterLoading:Promise<unknown>|undefined;
@@ -33,8 +33,16 @@ export class NativeRuntime {
       owned.lastRequest=options;const capacity=await inspectRequestCapacity(owned.scope,options,frame.requestMaxBytes,frame.outputReserveBytes,undefined,!owned.segment);
       if(owned.segment){
         const budget=frame.readingBudget??{softTokens:24000,hardTokens:32000,maxCompletedUnits:3};
-        const decision=segmentBudgetDecision({inputTokens:capacity.estimatedInputTokens,outputReserveTokens:capacity.reservedOutputTokens??8192,
+        let decision=segmentBudgetDecision({inputTokens:capacity.estimatedInputTokens,outputReserveTokens:capacity.reservedOutputTokens??8192,
           ...(capacity.modelContextWindow===null?{}:{modelWindowTokens:capacity.modelContextWindow}),budget:{softTokens:budget.softTokens,hardTokens:budget.hardTokens}});
+        if(owned.segment.requests===0){
+          // Static persona/schema cost is not new reading. Leave room for useful work in every fresh segment.
+          if(capacity.estimatedInputTokens+1000>=decision.hardTokens){owned.segment.blocked=true;throw new Error('READING_CONTEXT_CAPACITY');}
+          owned.segment.softTokens=Math.min(decision.hardTokens-1,Math.max(decision.softTokens,capacity.estimatedInputTokens+4000));
+        }
+        decision=segmentBudgetDecision({inputTokens:capacity.estimatedInputTokens,outputReserveTokens:capacity.reservedOutputTokens??8192,
+          ...(capacity.modelContextWindow===null?{}:{modelWindowTokens:capacity.modelContextWindow}),
+          budget:{softTokens:owned.segment.softTokens!,hardTokens:budget.hardTokens}});
         if(!capacity.withinBudget||decision.decision==='block'||decision.decision==='yield'||decision.decision==='compact-then-send'&&owned.segment.requests>0){
           if(owned.segment.requests===0){owned.segment.blocked=true;throw new Error('READING_CONTEXT_CAPACITY');}
           owned.segment.reason=decision.decision==='compact-then-send'?'soft-token-budget':'hard-token-budget';

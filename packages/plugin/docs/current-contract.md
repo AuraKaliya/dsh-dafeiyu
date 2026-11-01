@@ -1,6 +1,6 @@
 # 当前接口与记忆驱动架构
 
-本文件依据本轮源代码整理。自有模块统一为 0.26.1（API_VERSION = 5），扩展协议由 contracts 的 API_VERSION 唯一定义。
+本文件依据本轮源代码整理。自有模块统一为 0.26.2（API_VERSION = 5），扩展协议由 contracts 的 API_VERSION 唯一定义。
 
 ## 单一当前接口
 
@@ -10,6 +10,10 @@
 - 无法通过当前校验的数据不能进入执行。程序不识别或转换所谓“旧请求”。
 
 ## 执行与交付
+
+QQ 使用 `qq_messages` 编排一到十二个文字/媒体位置项，每条文字通常一到两句话。显式条目是消息边界，800 字符传输上限可能进一步分条；旧的普通正文采用按句兼容分条。实际条数来自渠道持久化发送账本，`qq-delivery-counts` 最多提供当前会话最近六次的 total、confirmed、pending、sending、unknown 和回执。计划条数不代表已发条数，已发也不代表已读。
+
+`dsh_tool_list` 默认分页返回名称和简短用途；`kind` 选择 tools/skills，`query` 筛选，`name` 查询单项详情。按响应 `next` 继续，携带 `catalogVersion` 防止跨版本拼接。详情先整体脱敏再按字符分页；声明可读、实际执行授权和外部依赖健康分别判断。通用工具执行仍需原有任务权限，B站阅读阶段不引入通用执行工具。
 
 Core 负责身份、权限和模块绑定；ConversationCoordinator 负责会话调度、消息处理、恢复与发送；ExecutionCoordinator 负责任务运行和授权。DSH 负责实际模型循环、会话及工具调用。
 

@@ -5,6 +5,9 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { BiliStore } from '../packages/bilibili/lib/store.js';
+import {readingResume,publicReadingRecord} from '../packages/bilibili/lib/reading-resume.js';
+import {readingContext} from '../packages/bilibili/lib/reading-context.js';
+import {redactJson} from '@dafeiyu/contracts';
 import { taskScopeKey } from '@dafeiyu/contracts';
 import type { ExecutionContext, ExecutionGrant } from '@dafeiyu/contracts';
 import { testTempDir } from './test-temp.js';
@@ -29,6 +32,31 @@ const record = (over: Record<string, unknown> = {}) => ({
   schemaVersion: 1, bvid, title: '养鱼第一年', author: 'UP甲', status: 'checkpoint',
   watched: [{ cid: '123', startMs: 0, endMs: 60000 }], commentCursor: null,
   frames: [], sources: [], conclusion: null, gaps: [], nextStep: '继续读评论区', ...over,
+});
+
+test('observed page handles survive a segment before judgement, remain task-scoped and validate invalidation',async()=>{
+  const f=await fixture();try{
+    const add=(kind:'video'|'subtitles',data:Record<string,unknown>)=>{
+      const id=randomUUID();f.store.begin(f.first,id,{kind});
+      const page=f.store.complete(f.first,id,{kind,sourceKey:kind+':fixture',data:JSON.parse(JSON.stringify(data)),coverage:[],fields:[]});
+      f.store.bindObservation(page,{id:randomUUID(),agentId:'fish',scopeKey:f.first.scope.kind==='task'?f.first.scope.scopeKey:'',version:1,contentHash:'a'.repeat(64),kind:'execution-source'});return page;
+    };
+    const video=add('video',{bvid,aid:'900',pages:[{cid:'123',durationSeconds:60}]}),subtitle=add('subtitles',{bvid,cid:'123',track:{id:'456'},range:{startMs:0,endMs:60000},offset:0,nextOffset:5});
+    assert.equal(f.store.reading(f.first,bvid),null);
+    const resume=readingResume(f.store,f.first)[0]!;assert.equal(resume.videoPageId,video.id);assert.equal(resume.subtitle?.nextOffset,5);assert.equal(resume.judgementSaved,false);assert.deepEqual(readingResume(f.store,f.second),[]);
+    const scope={...f.first,guard:()=>{}},contributor=readingContext(f.store,()=>scope,()=>true),items=await contributor.prepare(f.first);
+    assert.ok(Buffer.byteLength(JSON.stringify(items))<6000);assert.equal(contributor.validate(f.first,items[0]!),true);
+    f.store.unavailable(subtitle.sourceKey);assert.equal(contributor.validateHistorical?.(f.first,items[0]!),false);
+  }finally{f.store.close();}
+});
+
+test('a saved comment cursor remains readable without being confused with a credential',async()=>{
+  const f=await fixture();try{
+    const cursorId=randomUUID(),saved=f.store.saveReading(f.first,randomUUID(),record({commentCursor:{aid:'900',parent:null,sort:'hot',page:2,seen:[],token:cursorId}}));
+    const visible=publicReadingRecord(saved);assert.equal(redactJson(JSON.parse(JSON.stringify(visible))).redacted,false);
+    assert.equal('cursor' in visible.commentCursor!&&visible.commentCursor.cursor,cursorId);
+    assert.equal(f.store.reading(f.first,bvid)?.commentCursor?.token,cursorId);
+  }finally{f.store.close();}
 });
 
 test('reading records are scoped to the task and carry a record version', async () => {

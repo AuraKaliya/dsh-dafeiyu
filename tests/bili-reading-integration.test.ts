@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { FixtureAdapter,textResponse,toolResponse } from './sdk-fixture.js';
 import { testTempDir } from './test-temp.js';
-import { BILI_ACTIONS } from '@dafeiyu/bilibili';
+import { biliActionIds } from '@dafeiyu/bilibili';
 
 test('twenty readings use the real Host, tool loop, source ledger and seven bounded sessions',{timeout:45000},async t=>{
   const root=await mkdtemp(join(testTempDir(),'bili-long-host-')),file=join(root,'host.json');
@@ -31,7 +31,7 @@ test('twenty readings use the real Host, tool loop, source ledger and seven boun
     plugins:[{id:'model-scripted',required:true},{id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true},
       {id:'media',required:true,config:{ffmpeg:process.execPath,ffprobe:process.execPath}},
       {id:'bilibili',required:true,config:{capabilities:{minIntervalMs:100}}}],
-    authorityPolicies:[{id:'reading',producers:['host-cli'],actions:BILI_ACTIONS,allowLocalWrite:true,
+    authorityPolicies:[{id:'reading',producers:['host-cli'],actions:biliActionIds(false),allowLocalWrite:true,
       resources:[{channel:'bilibili',account:'public',kind:'local',id:'public'}]}]}));
   const config=loadHostConfig(file),coordination=join(root,'coordination.sqlite');initializeProfile(config,coordination);
   const host=await ManagedHost.start(config,{coordination,adapter,signal:t.signal,biliTransport:async url=>{
@@ -41,6 +41,7 @@ test('twenty readings use the real Host, tool loop, source ledger and seven boun
     return {status:200,headers:{'content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};
   }});
   try{
+    assert.ok(!host.ctx.dafeiyu.capabilityManifest().actions.some(action=>action.id==='bili_frames'),'browser-only frames must not be advertised without a browser');
     const result=await host.run({requestId:randomUUID(),title:'B站阅读验收',goal:'读取二十条B站视频并保存结论',policyId:'reading'});
     assert.equal(result.state,'completed',result.error??'');assert.match(result.result??'',/二十/);assert.equal(platformCalls,20);
     assert.equal(adapter.requests.length,41);

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync,writeFileSync,readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DshResultStore } from './dsh-result-store.js';
+import {DshCatalogQuerySchema,catalogView} from './dsh-catalog-view.js';
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const execution=z.object({isError:z.boolean().optional(),effect:z.enum(['none','confirmed','unknown']).optional()});
 const errorCode=(e:unknown)=>e instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(e.message)?e.message:'DSH_RESULT_PROCESSING_FAILED';
@@ -30,8 +31,8 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
   };
   const actions:ActionCapability[]=[{
     id:DSH_TOOL_ACTIONS[0],version:'1',effects:'read',scope:'any',
-    description:'查看当前执行环境的实际能力、精确参数与可用说明。目录有版本，环境变化后重新取得当前声明。',
-    inputSchema:z.strictObject({}),outputSchema:z.json(),execute:async(_input,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');try{const data=await port.catalog(context.signal,context.taskId??undefined);ctx.dafeiyu.executionAuthority(context,'dsh-tools');return {status:'succeeded',effects:'none',completeness:'complete',data:z.json().parse({...data,availability:{catalog:'available',dependencies:'not-probed',execution:context.taskId?'check-task-authority':'requires-authorized-task'}}),sources:[],receipts:[]};}
+    description:'分页查看DSH实际工具或技能目录。默认只列名称与用途；query筛选，name查询单项参数/加载入口，按next继续读取。失败或截断不等于工具未安装。目录有版本，环境变化后重新查询。',
+    inputSchema:DshCatalogQuerySchema,outputSchema:z.json(),execute:async(input,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');try{const data=catalogView(await port.catalog(context.signal,context.taskId??undefined),DshCatalogQuerySchema.parse(input));ctx.dafeiyu.executionAuthority(context,'dsh-tools');return {status:'succeeded',effects:'none',completeness:'partial',data:z.json().parse({...z.record(z.string(),z.json()).parse(data),availability:{catalog:'available',dependencies:'not-probed',execution:context.taskId?'check-task-authority':'requires-authorized-task'}}),sources:[],receipts:[]};}
       catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:{stage:'catalog',dispatched:false,next:'refresh-or-wait'},sources:[],receipts:[],errorCode:errorCode(error)};}},
   },{
     id:DSH_TOOL_ACTIONS[1],version:'1',effects:'external-write',scope:'task',

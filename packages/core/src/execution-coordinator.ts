@@ -271,7 +271,10 @@ export class ExecutionCoordinator {
     if(!source||source.kind!=='explicit-task'||!['qq','local-owner'].includes(source.conversation.channel)||run.definition.scope.kind!=='task')return null;
     const {item}=this.validateMessageSource(source),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
     if(task.epoch!==run.definition.intentVersion||task.status!=='active')return null;
-    return {item,taskId:task.id,state:run.state,error:run.error,operations:this.d.store.operations(run.id).map(op=>({state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null}))};
+    const lineage:StoredRun[]=[run];let parent=run.definition.parentRunId;
+    while(parent&&lineage.length<8){const previous=this.d.store.get(parent);if(previous.definition.taskId!==task.id||previous.definition.intentVersion!==run.definition.intentVersion)break;lineage.push(previous);parent=previous.definition.parentRunId;}
+    const operations=lineage.reverse().flatMap(segment=>this.d.store.operations(segment.id)).map(op=>({action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null}));
+    return {item,taskId:task.id,state:run.state,error:run.error,operations:operations.slice(-64)};
   }
   private progressFacts(receipt:Json|null){return {kind:'program-feedback-receipt',purpose:'intermediate-status-only',doesNotDescribeFinalDelivery:true,receipt,
     note:'这里只记录执行中的阶段通知；未发送阶段通知不表示最终结果发送失败。最终正文仍须经人格整理和核验。'};}

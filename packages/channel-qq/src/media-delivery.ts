@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { ConversationSchema,TaskResultAnchorSchema,ReplyMediaManifestSchema,ReplyMediaPartSchema,qqMessageSequence } from '@dafeiyu/contracts';
 import type { Reply } from '@dafeiyu/contracts';
-import { splitQqText } from './delivery.js';
+import { splitQqMessages } from './text-segments.js';
 
 function canonical(value:unknown):string{const valid=z.json().parse(value);if(valid===null||typeof valid!=='object')return JSON.stringify(valid);if(Array.isArray(valid))return '['+valid.map(canonical).join(',')+']';return '{'+Object.keys(valid).sort().map(key=>JSON.stringify(key)+':'+canonical(valid[key])).join(',')+'}';}
 export const qqMediaHash=(value:unknown)=>createHash('sha256').update(canonical(value)).digest('hex');
@@ -21,7 +21,7 @@ export function qqMediaDeliveryPlan(reply:Reply):QqMediaDeliveryPlan {const mani
   if(manifest.replyId!==reply.id||qqMediaHash(manifest.target)!==qqMediaHash(reply.conversation)||manifest.sourceMessageId!==reply.sourceMessageId||manifest.textHash!==qqTextHash(reply.text))throw new Error('DELIVERY_MANIFEST_MISMATCH');
   if(reply.taskResult){const anchor=TaskResultAnchorSchema.parse(reply.taskResult);if(manifest.anchor.kind!=='task-result'||qqMediaHash(anchor)!==qqMediaHash(manifest.anchor)||manifest.runId!==anchor.runId)throw new Error('DELIVERY_MANIFEST_MISMATCH');}
   else if(manifest.anchor.kind!=='reply'||reply.id!==manifest.anchor.inboundId+':reply')throw new Error('DELIVERY_MANIFEST_MISMATCH');
-  const sequence=qqMessageSequence(reply.text),before=sequence.messages.slice(0,sequence.mediaAt).flatMap(splitQqText).map(text=>({kind:'text' as const,text})),after=sequence.messages.slice(sequence.mediaAt).flatMap(splitQqText).map(text=>({kind:'text' as const,text}));
+  const sequence=qqMessageSequence(reply.text),messages=splitQqMessages(sequence.messages,sequence.structured),before=messages.slice(0,sequence.mediaAt).flat().map(text=>({kind:'text' as const,text})),after=messages.slice(sequence.mediaAt).flat().map(text=>({kind:'text' as const,text}));
   return planSchema.parse({version:2,replyId:reply.id,target:reply.conversation,sourceMessageId:reply.sourceMessageId,textHash:manifest.textHash,manifest,parts:[...before,...manifest.parts,...after],...(sequence.structured?{originalText:reply.text}:{})});
 }
 export class QqMediaDeliveryLedger {

@@ -39,16 +39,20 @@ export function renderCapabilityIndex(input:CapabilityIndexInput):string {
     tools:input.host.tools.map(tool=>({name:tool.name,purpose:short(tool.description)})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),
     skills:input.host.skills.map(skill=>({name:skill.name,purpose:short(skill.description)})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),skillsComplete:input.host.skillsComplete}:null;
   const base={kind:'configured-capabilities',instructionAuthority:false,configured:compactConfigured(input.configured),callable,host,
-    note:'这里只列名称、简短用途和版本；完整说明、参数与技能内容通过dafeiyu_capabilities、dsh_tool_list或技能加载按需查询。'};
+    counts:{callable:callable.length,hostTools:host?.tools.length??0,hostSkills:host?.skills.length??0},
+    note:'这里只列名称、简短用途和版本；truncated 表示仅显示样本，不是空目录或能力未安装。用 dsh_tool_list 分页、query 筛选或 name 查详情；本机插件详情用 dafeiyu_capabilities。失败码不能解释为没有工具。'};
   const render=(value:Record<string,Json>)=>stableJson({...value,version:createHash('sha256').update(stableJson(value)).digest('hex').slice(0,16)});
   let text=render({...base,truncated:false});
   if(Buffer.byteLength(text)>CAPABILITY_INDEX_MAX_BYTES){
-    const compactHost=base.host?{...base.host,tools:[],skills:[]}:null;
-    const configured=record(base.configured)&&Array.isArray(base.configured.actions)?{...base.configured,actions:[]}:base.configured;
-    text=render({...base,truncated:true,configured,callable:[],host:compactHost});
-    if(Buffer.byteLength(text)>CAPABILITY_INDEX_MAX_BYTES){
-      text=render({...base,truncated:true,configured:{features:[]},callable:[],host:compactHost});
+    const compactHost=base.host?{...base.host,tools:base.host.tools.slice(0,12),skills:base.host.skills.slice(0,6)}:null;
+    const configured=record(base.configured)&&Array.isArray(base.configured.actions)?{...base.configured,actions:base.configured.actions.slice(0,16)}:base.configured;
+    const compact={...base,truncated:true,configured,callable:callable.slice(0,20),host:compactHost};
+    text=render(compact);
+    const lists=[compact.callable,compactHost?.tools??[],compactHost?.skills??[],record(configured)&&Array.isArray(configured.actions)?configured.actions:[]];
+    while(Buffer.byteLength(text)>CAPABILITY_INDEX_MAX_BYTES&&lists.some(list=>list.length)){
+      lists.sort((a,b)=>JSON.stringify(b).length-JSON.stringify(a).length)[0]!.pop();text=render(compact);
     }
+    if(Buffer.byteLength(text)>CAPABILITY_INDEX_MAX_BYTES)text=render({...compact,configured:{features:[]}});
   }
   return text;
 }

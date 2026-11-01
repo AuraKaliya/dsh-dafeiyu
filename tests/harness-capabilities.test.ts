@@ -28,6 +28,7 @@ test('capability index is hard capped and degrades to a queryable shell instead 
   const text=renderCapabilityIndex({configured:{features:[],actions:[]},callable,host:{configured:true,available:true,code:null,execution:'authorized-task',version:'v',tools:[],skills:[],skillsComplete:true}});
   const parsed=JSON.parse(text);
   assert.equal(parsed.truncated,true);
-  assert.equal(parsed.callable.length,0);
+  assert.ok(parsed.callable.length>0&&parsed.callable.length<300);
+  assert.equal(parsed.counts.callable,300);
   assert.ok(Buffer.byteLength(text)<=CAPABILITY_INDEX_MAX_BYTES);
 });

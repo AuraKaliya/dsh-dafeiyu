@@ -3,6 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { ConversationSchema,TaskResultAnchorSchema,qqMessageSequence } from '@dafeiyu/contracts';
 import type { Reply } from '@dafeiyu/contracts';
+import {splitQqMessages} from './text-segments.js';
+export {splitQqText} from './text-segments.js';
 
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const replySchema=z.strictObject({id:z.string().min(1).max(200),conversation:ConversationSchema,sourceMessageId:z.string().min(1).max(80),text:z.string().min(1).max(32000),taskResult:TaskResultAnchorSchema.optional()});
@@ -12,22 +14,7 @@ const planSchema=z.strictObject({version:z.literal(1),replyId:z.string(),target:
 export type QqDeliveryPlan=z.infer<typeof planSchema>;
 export interface QqDeliveryProgress {replyId:string;planHash:string|null;state:'ready'|'sending'|'partial'|'uncertain'|'sent';total:number;confirmed:number;pending:number;unknown:number;segments:z.infer<typeof segmentSchema>[]}
 
-/** Conservative short-message budget, Unicode-safe boundaries, exact reconstruction. */
-export function splitQqText(text:string):string[]{
-  if(!text||text.length>32000)throw new Error('TEXT_SIZE_UNSUPPORTED');
-  for(const char of text){const code=char.codePointAt(0)!;if(code>=0xd800&&code<=0xdfff)throw new Error('INVALID_TEXT_ENCODING');}
-  const result:string[]=[];let start=0;
-  while(start<text.length){let end=Math.min(start+800,text.length);
-    if(end<text.length){if(text.charCodeAt(end-1)>=0xd800&&text.charCodeAt(end-1)<=0xdbff)end--;
-      const newline=text.lastIndexOf('\n',end-1);if(newline>=start+600||start===0&&newline>=start)end=newline+1;
-      // Keep a CRLF pair together even when no LF fits in this window.
-      if(text[end-1]==='\r'&&text[end]==='\n')end--;
-    }
-    result.push(text.slice(start,end));start=end;
-  }
-  return result;
-}
-export function qqDeliveryPlan(reply:Reply):QqDeliveryPlan {const value=replySchema.parse(reply),sequence=qqMessageSequence(value.text);if(!sequence.messages.length)throw new Error('QQ_MESSAGE_SEQUENCE_INVALID');return planSchema.parse({version:1,replyId:value.id,target:value.conversation,anchor:value.taskResult?{...value.taskResult,messageId:value.sourceMessageId}:{kind:'reply',messageId:value.sourceMessageId},bodyHash:digest(value.text),segments:sequence.messages.flatMap(splitQqText),...(sequence.structured?{originalText:value.text}:{})});}
+export function qqDeliveryPlan(reply:Reply):QqDeliveryPlan {const value=replySchema.parse(reply),sequence=qqMessageSequence(value.text);if(!sequence.messages.length)throw new Error('QQ_MESSAGE_SEQUENCE_INVALID');return planSchema.parse({version:1,replyId:value.id,target:value.conversation,anchor:value.taskResult?{...value.taskResult,messageId:value.sourceMessageId}:{kind:'reply',messageId:value.sourceMessageId},bodyHash:digest(value.text),segments:splitQqMessages(sequence.messages,sequence.structured).flat(),...(sequence.structured?{originalText:value.text}:{})});}
 
 /** Ledger only: no network, automatic retransmission, model calls or source authority. */
 export class QqDeliveryLedger {

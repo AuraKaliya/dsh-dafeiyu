@@ -1,7 +1,7 @@
 export { BiliConfigSchema,BiliPluginConfigSchema,BILI_SCENE } from './config.js';
 export { BiliStore,BILI_APPLICATION_ID,BILI_SCHEMA_VERSION,BILI_TABLES,BiliAuthMetaSchema,BiliVerificationSchema } from './store.js';
 export { BiliRetryPolicySchema,BiliScopeSchema } from './diagnostics.js';
-export { BiliService,BILI_ACTIONS,BILI_MANAGEMENT_ACTIONS } from './service.js';
+export { BiliService,BILI_ACTIONS,BILI_MANAGEMENT_ACTIONS,biliActionIds } from './service.js';
 export { BiliCredentials } from './login-state.js';
 export type { CredentialStatus,BiliIdentity } from './login-state.js';
 export type { Config } from './service.js';

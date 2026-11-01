@@ -22,6 +22,7 @@ import type {CompactionBinding} from './compaction-runtime.js';
 import type {FoundationSnapshot} from './foundation.js';
 import type {CoreRuntimeConfig} from './index.js';
 import {CORE_VERSION} from './version.js';
+import {DeliveryCountsSchema} from './delivery-counts.js';
 
 interface ConversationHost {
   ctx:Context;config:CoreRuntimeConfig;journal:Journal;runtime:DshRuntime;personas:PersonaRuntime;contexts:ContextCoordinator;
@@ -111,6 +112,7 @@ export class ConversationCoordinator {
     try{const result=await channel.capability.deliver({id:`recovery-notice:${item.id}`,conversation:item.message.conversation,sourceMessageId:item.message.id,text},signal,guard);
       this.journal.append(this.event(item,'recovery.notice.'+result.status,{noticeId:id,...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code??'DELIVERY_INCOMPLETE'})}));
     }catch{this.journal.append(this.event(item,'recovery.notice.unknown',{noticeId:id}));}
+    this.recordDeliveryCounts(item,`recovery-notice:${item.id}`);
   }
 
   private pendingReplyFacts(current:PendingMessage){
@@ -271,7 +273,20 @@ export class ConversationCoordinator {
       }}finally{if(mediaAccess)activeMedia?.releaseReply?.(mediaAccess);mediaAccess?.release();release();}}
     const next = result.status === 'sent' ? 'delivered' : result.status === 'not-sent' ? ['QQ_MESSAGE_SEQUENCE_INVALID','DELIVERY_PLAN_INVALID','TEXT_SIZE_UNSUPPORTED','INVALID_TEXT_ENCODING'].includes(result.code)?'failed':'reply-ready' : 'uncertain';
     this.journal.transition(id, 'sending', next, deliveryEvent(`delivery.${result.status}`, result.status === 'sent' ? { receiptId: result.receiptId } : { code: result.code }, sending.id));
+    this.recordDeliveryCounts(item,item.reply.id);
     if(mediaSettlementPending)this.journal.append(deliveryEvent('delivery.media-settlement-pending',{manifestId:mediaManifestId!,state:result.status},sending.id));
+  }
+
+  private recordDeliveryCounts(item:PendingMessage,deliveryId:string):void {
+    if(item.message.conversation.channel!=='qq')return;
+    const progress=this.deliveryChannel(item)?.capability.deliveryProgress?.(deliveryId);
+    if(progress?.total===undefined)return;
+    const parsed=DeliveryCountsSchema.safeParse({deliveryId,total:progress.total,confirmed:progress.confirmed,
+      pending:progress.pending,sending:progress.sending,unknown:progress.unknown,receiptIds:progress.receiptIds});
+    if(!parsed.success)return;
+    const previous=this.journal.recentEvents(item.route,'delivery.counts',64).findLast(event=>event.data.deliveryId===deliveryId);
+    if(previous&&runtimeHash(previous.data)===runtimeHash(parsed.data))return;
+    this.journal.append(this.event(item,'delivery.counts',parsed.data));
   }
 
   /** Explicit retry only for definitely-not-sent replies; never runs the model or replays tool operations. */
@@ -288,6 +303,7 @@ export class ConversationCoordinator {
    */
   recordNotice(item: PendingMessage, notice: SentNotice): void {
     try {
+      this.recordDeliveryCounts(item,notice.deliveryId);
       if (!notice.text.trim() || !notice.deliveryId.trim()) return;
       const text = redactContent(notice.text).value.slice(0, 4000);
       if (!text) return;

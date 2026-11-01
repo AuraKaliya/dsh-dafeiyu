@@ -19,6 +19,7 @@ import { DshRuntime, DshRunError } from './runtime.js';
 import {renderConversationRecovery,decidePendingReplies} from './conversation-recovery.js';
 import { ContextCoordinator,contextConfigSchema } from './context.js';
 import {registerSentNotices} from './notice-context.js';
+import {registerDeliveryCounts} from './delivery-counts.js';
 import type { ContextRequest } from '@dafeiyu/contracts';
 import { CORE_VERSION } from './version.js';
 import type { CompactionBinding } from './compaction-runtime.js';
@@ -240,6 +241,7 @@ export class DafeiyuService extends Service {
     this.feedback = new FeedbackLedger(this.journal, this.config.agentId);
     this.contexts=new ContextCoordinator(this.config.agentId,this.journal,this.config.context);
     registerSentNotices(this.contexts,this.journal,this.config.agentId);
+    registerDeliveryCounts(this.contexts,this.journal,this.config.agentId);
     {this.contexts.register('core-situation','1',[situationContributor(()=>true,scene=>this.executions?.responsibilityFacts(scene)??[],
       (request,item,proof)=>{const scope=this.contexts.scopeFor(request),runId=this.runStore?.findRequest('conversation',scope.traceId)?.runId;if(!runId||!this.runStore)throw new Error('RUN_NOT_RUNNING');if(this.runStore.get(runId).state!=='running')return;this.runStore.bindInput(runId,'operational-context:'+digestSource(JSON.stringify([item.text,item.sources])),{route:scope.route,item,proof});},
       (request,dependency)=>{try{const scope=this.contexts.scopeFor(request),record=z.object({route:z.string(),item:ContextItemSchema,proof:z.json()}).parse(this.runStore?.findContext('operational-context:'+dependency.hash));return record.route===scope.route&&record.item.id===dependency.id&&record.item.version===dependency.version&&digestSource(JSON.stringify([record.item.text,record.item.sources]))===dependency.hash&&(this.executions?.responsibilitySnapshotCurrent(record.proof,request.conversation)??false);}catch{return false;}})]);

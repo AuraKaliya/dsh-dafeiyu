@@ -9,7 +9,7 @@ import { HostConfigSchema,DSH_TOOL_ACTIONS } from '@dafeiyu/contracts';
 import { loadHostConfig,initializeProfile,initializeAdditionalStores,inspectHost,ManagedHost,pluginConfig,BILI_OWNER_NATIVE_ACTIONS,ProfileManifestSchema,layoutPaths,writeManifest } from '@dafeiyu/host';
 import type { HostRuntimeOptions } from '@dafeiyu/host';
 import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS,QQ_STICKER_ACTIONS,QQ_PROGRESS_ACTIONS } from '@dafeiyu/qq';
-import { BILI_ACTIONS,inspectBiliMigration,migrateBiliStorage } from '@dafeiyu/bilibili';
+import { biliActionIds,inspectBiliMigration,migrateBiliStorage } from '@dafeiyu/bilibili';
 import { BiliOwnerStore,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE,biliOwnerScene,createBiliOwnerProductionPorts } from '@dafeiyu/bilibili/channel';
 import { BILI_OWNER_AUTH_HASH } from '@dafeiyu/bilibili/channel/production-config';
 import { ACTIVITY_ACTIONS } from '@dafeiyu/activity';
@@ -34,7 +34,7 @@ export interface InstallationOptions {readonly scripted?:boolean;readonly founda
 export function installationProfile(settings:InstallationSettings,meta:InstallationMetadata,foundationFile:string,settingsFile:string,options:InstallationOptions={}) {
   const root=settings.dataDir,bili=settings.bilibili,activity=settings.activity.enabled;
   const resources=bili?.capabilities?[BILI_PUBLIC_SCENE]:[];
-  const biliActions=bili?.capabilities?[...BILI_ACTIONS,...(bili.browser?['bili_browser_read']:[])]:[];
+  const biliActions=bili?.capabilities?biliActionIds(!!bili.browser):[];
   const enabledMediaActions=settings.qq.media?.sendEnabled?MEDIA_ACTIONS:mediaActions;
   const stickerActions=settings.qq.stickers.enabled?[...QQ_STICKER_ACTIONS]:[];
   const {service:oneBotService,...qqHostConfig}=settings.qq;

@@ -58,3 +58,12 @@ test('unshrinkable first request stops instead of creating endless empty segment
     await assert.rejects(runtime.run(input),/READING_CONTEXT_CAPACITY/);assert.equal(adapter.requests.length,0);
   }finally{await runtime.close();await ctx.fiber.dispose();}
 });
+
+test('a large fixed prompt leaves useful reading headroom instead of yielding after one small result',async()=>{
+  const root=await mkdtemp(join(testTempDir(),'native-headroom-'));
+  const adapter=new FixtureAdapter((_request,call)=>call<4?toolResponse('bili_reading_save',{bvid:'video-1'}):textResponse('当前视频已读完。'));
+  const ctx=await sdkFixture(root,adapter),runtime=new NativeRuntime(ctx,{provider:'fixture',model:'fixture'},root);
+  try{const input={...frame([action(()=>({bvid:'video-1',status:'open',nextOffset:5}))]),readingBudget:{softTokens:1000,hardTokens:10000,maxCompletedUnits:3}};
+    const result=await runtime.run(input);assert.equal(result.segmentYield,undefined);assert.equal(adapter.requests.length,4);assert.match(result.text,/读完/);
+  }finally{await runtime.close();await ctx.fiber.dispose();}
+});

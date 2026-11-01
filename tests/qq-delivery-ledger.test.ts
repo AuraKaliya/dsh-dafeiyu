@@ -9,6 +9,14 @@ import { inspectStorage } from '@dafeiyu/host';
 import type { Reply } from '@dafeiyu/contracts';
 import { testTempDir } from './test-temp.js';
 const reply:Reply={id:'fictional-reply',conversation:{channel:'qq',account:'12345678',kind:'group',id:'11223344'},sourceMessageId:'-123',text:'鱼'.repeat(1601)};
+
+test('plain QQ prose uses one or two sentences per bubble without relying on blank lines',()=>{
+  assert.deepEqual(splitQqText('第一句。第二句！第三句？第四句。第五句。'),['第一句。第二句！','第三句？第四句。','第五句。']);
+  const document='```ts\nconst url="https://example.test/a.b";\n```\n保留代码。这里有说明。还有一句。';
+  assert.deepEqual(splitQqText(document),[document]);
+  const long='好。'.repeat(15000);const parts=splitQqText(long);
+  assert.equal(parts.join(''),long);assert.ok(parts.length<=64);assert.ok(parts.every(part=>part.length<=800));
+});
 async function file(){return join(await mkdtemp(join(testTempDir(),'dafeiyu-qq-delivery-')),'qq.sqlite');}
 
 test('QQ splitting preserves newlines, CRLF and surrogate pairs without adding or dropping any characters',()=>{

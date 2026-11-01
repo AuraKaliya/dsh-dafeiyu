@@ -1,5 +1,11 @@
 # B站登录与读取
 
+阅读失败先区分平台连接、内容读取、模型处理与交付。`MODEL_INCOMPLETE`、`SEGMENT_LIMIT_REACHED` 或上下文容量错误不表示 B站离线；先看同一任务及其接续中的实际成功读取。登录通过也不能证明所有接口可用。
+
+长阅读会话保留当前视频页、字幕轨和 `nextOffset`，即使尚未调用 `bili_reading_save` 也可通过 `bili_reading_get` 的 `resume` 继续。记录中的 `judgementSaved=false` 只表示没有保存判断，不表示没有读取。接续提示只带有界进度和来源入口，正文按需读取；原有任务来源、硬容量、时间及接续次数上限保持有效。
+
+`bili_subtitles` 不传 `track` 时只列轨道，不要求时间区间；读取正文时 `startMs` 默认零，`endMs` 默认视频末尾与六分钟上限中的较小值。使用返回的 `nextOffset` 翻当前区间。浏览器未配置时不会暴露 `bili_frames`；可用 `bili_media` 登记流，再用媒体工具读取画面和音轨。Cookie HTTP 登录态与浏览器登录态是不同配置，不能互相替代。
+
 开启公开能力需 `bilibili.capabilities: true`，并按配置校验准备 `media`。支持关键词搜索、视频资料、评论、字幕、弹幕和批量帧；不包含发表评论或发布弹幕。
 
 ## 本地 Cookie
