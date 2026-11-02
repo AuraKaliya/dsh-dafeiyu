@@ -123,7 +123,7 @@ npm install --prefix $deployDir --omit=dev --ignore-scripts --no-audit --no-fund
 
 ## 8. 升级与回退
 
-当前 B站库为 v6，运行库为 v2。新建库直接创建当前版本。已存在的受支持旧库使用：
+当前 B站库为 v6，运行库为 v3。新建库直接创建当前版本。已存在的受支持旧库使用：
 
 ```powershell
 & $nodeExe "$deployDir/bin/dafeiyu.mjs" migrate --settings $settingsFile
