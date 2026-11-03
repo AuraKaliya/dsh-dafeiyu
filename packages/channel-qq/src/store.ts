@@ -40,13 +40,13 @@ export class QqStore {
       this.stickers=new QqStickerStore(this.db,resolve(dirname(file),'stickers','objects'),QqStickersConfigSchema.parse(options.stickers??{}));
     } catch (error) { this.db.close(); throw error; }
   }
-  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];media?:readonly MediaAttachment[];groupGeneration?:number;forwardIds?:readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
+  remember(route: string, id: string, sender: string, text: string, metadata?: { occurredAt: string|null; unsupported: readonly string[];mentionedBot?:boolean;media?:readonly MediaAttachment[];groupGeneration?:number;forwardIds?:readonly string[] }): boolean { return this.cache.remember(route, id, sender, text, metadata); }
   selectReplyQuote(replyId:string,value:z.infer<typeof quoteSchema>){const next=quoteSchema.parse(value),old=this.db.prepare('SELECT body FROM qq_reply_quotes WHERE reply_id=?').get(replyId);
     if(old){if(quoteSchema.parse(JSON.parse(String(old.body))).messageId!==next.messageId)throw new Error('IDEMPOTENCY_CONFLICT');return;}
     this.db.prepare('INSERT INTO qq_reply_quotes VALUES(?,?)').run(replyId,JSON.stringify(next));}
   replyQuote(replyId:string,route:string){const row=this.db.prepare('SELECT body FROM qq_reply_quotes WHERE reply_id=?').get(replyId);if(!row)return null;const quote=quoteSchema.parse(JSON.parse(String(row.body)));
     if(quote.route!==route||Date.parse(quote.expiresAt)<=Date.now()||Date.parse(quote.occurredAt)<Date.parse(quote.observedAt)-86400000||Date.parse(quote.occurredAt)>Date.parse(quote.observedAt)||!this.cache.proofCurrent(quote.proof))throw new Error('SOURCE_STALE');return quote.messageId;}
-  appendHistory(route: string, id: string, sender: string, text: string, metadata: { occurredAt: string; unsupported: readonly string[];media?:readonly MediaAttachment[];forwardIds?:readonly string[] }): boolean {
+  appendHistory(route: string, id: string, sender: string, text: string, metadata: { occurredAt: string; unsupported: readonly string[];mentionedBot?:boolean;media?:readonly MediaAttachment[];forwardIds?:readonly string[] }): boolean {
     if(this.cache.known(route,id)){this.cache.completeHistoryMetadata(route,id,metadata.occurredAt,metadata.forwardIds);return false;}
     if (Number(this.db.prepare('SELECT count(*) AS n FROM messages WHERE route=?').get(route)?.n) >= 200) return false;
     return this.cache.remember(route, id, sender, text, { ...metadata, history: true });

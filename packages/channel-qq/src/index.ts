@@ -305,7 +305,7 @@ export class QqChannel extends Service {
     const media=this.media?.remember(conversation,message.message_id,message.user_id,message,message.message);
     const unsupported = [...new Set(message.message.filter((s,index) => !['text','at','reply',...(this.config.capabilities.enabled?['forward']:[])].includes(s.type)&&!media?.positions.has(index)).map(s => s.type))];
     const forwardIds=forwardHandles(message.message);
-    const retained=this.store.remember(route, message.message_id, message.user_id, plain || '[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,...(forwardIds.length?{forwardIds}:{}),...(media?.attachments.length?{media:media.attachments}:{}),...(conversation.kind==='group'?{groupGeneration:this.groups.generation(conversation.id)}:{})});
+    const retained=this.store.remember(route, message.message_id, message.user_id, plain || '[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,mentionedBot:mentioned,...(forwardIds.length?{forwardIds}:{}),...(media?.attachments.length?{media:media.attachments}:{}),...(conversation.kind==='group'?{groupGeneration:this.groups.generation(conversation.id)}:{})});
     if(!retained||this.store.handled(route,message.message_id)||this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},message.message_id)){
       this.store.acknowledge(route,message.message_id);this.counters.ignored++;return;
     }
@@ -341,7 +341,7 @@ export class QqChannel extends Service {
         const text=message.message.filter(part=>part.type==='text').map(part=>typeof part.data.text==='string'?part.data.text:'').join('');
         const unsupported=[...new Set(message.message.filter((part,index)=>!['text','at','reply'].includes(part.type)&&!media?.positions.has(index)).map(part=>part.type))];
         const forwardIds=forwardHandles(message.message);
-        return {added:this.store.appendHistory(route,message.message_id,message.user_id,text||'[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,...(forwardIds.length?{forwardIds}:{}),...(media?.attachments.length?{media:media.attachments}:{})}),media:media?.attachments.length??0};
+        return {added:this.store.appendHistory(route,message.message_id,message.user_id,text||'[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,mentionedBot:message.message.some(part=>part.type==='at'&&String(part.data.qq)===this.config.botId),...(forwardIds.length?{forwardIds}:{}),...(media?.attachments.length?{media:media.attachments}:{})}),media:media?.attachments.length??0};
       }},scene,AbortSignal.any([signal,this.controller.signal]));
   }
   private async readForward(scene:Conversation,messageId:string,index:number,signal:AbortSignal){const guard=()=>{signal.throwIfAborted();if(this.stopped||!this.verified||!this.allowed(scene))throw new Error('TARGET_NOT_ALLOWED');};guard();

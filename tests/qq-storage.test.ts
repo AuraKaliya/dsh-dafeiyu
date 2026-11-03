@@ -9,6 +9,18 @@ import {inspectStorage,loadHostConfig,initializeProfile,inspectHost} from '@dafe
 
 async function file() { return join(await mkdtemp(join(tmpdir(), 'dafeiyu-qq-storage-')), 'qq.sqlite'); }
 
+test('received mentions survive cache restart while historical unknown mention state stays unknown',async()=>{
+  const path=await file(),route=JSON.stringify(['100001','group','300001']),occurredAt=new Date().toISOString();let store=new QqStore(path);
+  store.remember(route,'1','200001','实际提及',{occurredAt,unsupported:[],mentionedBot:true});
+  store.remember(route,'2','200001','普通文字',{occurredAt,unsupported:[],mentionedBot:false});
+  store.remember(route,'3','200001','旧记录',{occurredAt,unsupported:[]});store.close();store=new QqStore(path);
+  try{const page=store.cache.browse(route,'owner',{requestId:'read',limit:20,includeRecentHistory:false}).page;
+    assert.equal(page.messages.find(message=>message.id==='1')?.mentionedBot,true);
+    assert.equal(page.messages.find(message=>message.id==='2')?.mentionedBot,false);
+    assert.equal(page.messages.find(message=>message.id==='3')?.mentionedBot,undefined);
+  }finally{store.close();}
+});
+
 test('QQ fresh storage has an application identity and reopens without losing receipts', async () => {
   const path = await file(), store = new QqStore(path);
   store.sent('reply-one', '-100'); store.remember('room', '-1', 'sender', '虚构'); store.acknowledge('room', '-1'); store.close();

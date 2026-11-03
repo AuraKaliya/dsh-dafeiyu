@@ -7,8 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import type { Context } from '@deepseek-ai/cordis';
 import type { DafeiyuService } from '@dafeiyu/core';
-import type { ExecutionContext,ExecutionGrant,Extension,PersonaAccess,PersonaSourceRef,ResourceProof } from '@dafeiyu/contracts';
-import { taskScopeKey,MediaReadSchema } from '@dafeiyu/contracts';
+import type { ExecutionContext,ExecutionGrant,Extension,PersonaAccess,PersonaSourceRef,ResourceProof,MediaSourceDescription } from '@dafeiyu/contracts';
+import { API_VERSION,taskScopeKey,MediaReadSchema } from '@dafeiyu/contracts';
 import { BiliService } from '@dafeiyu/bilibili';
 import { MediaService } from '@dafeiyu/media';
 import { readBiliBrowser } from '../packages/plugin/lib/bili-browser.js';
@@ -17,7 +17,7 @@ import { testTempDir } from './test-temp.js';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZ0AAAAASUVORK5CYII=','base64');
 const bvid='BV1xNpFedEwH';
-async function fixture(cancelVision=false){
+async function fixture(cancelVision=false,partialFrames=false){
   const root=await mkdtemp(join(testTempDir(),'bili-media-service-')),controller=new AbortController();
   let ctx:Context,modelImages=0,navigations=0,elapsed=0;
   const adapter=new FixtureAdapter(async function*(request){
@@ -27,8 +27,8 @@ async function fixture(cancelVision=false){
     if(cancelVision){controller.abort();request.signal?.throwIfAborted();}
     const user=request.messages.findLast(message=>message.role==='user')!;
     const input=JSON.parse(user.content.filter(block=>block.type==='text').map(block=>block.text).join('')) as {images:{image:number;requestedMs:number;ptsMs:number}[]};
-    assert.deepEqual(input.images.map(image=>image.requestedMs),[1000,2000,3000]);
-    assert.deepEqual(input.images.map(image=>image.ptsMs),[1040,2040,3040]);
+    assert.deepEqual(input.images.map(image=>image.requestedMs),partialFrames?[1000,3000]:[1000,2000,3000]);
+    assert.deepEqual(input.images.map(image=>image.ptsMs),partialFrames?[1040,3040]:[1040,2040,3040]);
     yield* textResponse(JSON.stringify({schemaVersion:1,observations:input.images.map(image=>({image:image.image,description:'Visible fixture frame',visibleText:[],uncertainties:[]})),gaps:[]}));
   });
   ctx=await sdkFixture(join(root,'host-sessions'),adapter);
@@ -52,8 +52,8 @@ async function fixture(cancelVision=false){
   ctx.provide('dafeiyu',core as unknown as DafeiyuService);
   media=new MediaService(ctx,{agentId:'fish',profileId:'fixture',dataDir:join(root,'media'),createStore:true,ffmpeg:process.execPath,ffprobe:process.execPath,
     vision:{provider:'fixture',model:'fixture'}},{decoder:{
-      inspect:async()=>({kind:'image',width:1,height:1,durationMs:null,startMs:0,videoCodec:'png',audioCodec:null,sampleRate:null,channels:null,format:'png_pipe',peakCommitBytes:0}),
-      image:async()=>({data:png,mime:'image/png',width:1,height:1,hasAlpha:true,requestedMs:null,ptsMs:null}),
+      inspect:async()=>({kind:partialFrames?'video':'image',width:1,height:1,durationMs:partialFrames?6000:null,startMs:0,videoCodec:'png',audioCodec:null,sampleRate:null,channels:null,format:'png_pipe',peakCommitBytes:0}),
+      image:async(_input,_signal,point)=>{if(partialFrames&&point===2000)throw new Error('MEDIA_WORKER_TIMEOUT');return {data:png,mime:'image/png',width:1,height:1,hasAlpha:true,requestedMs:partialFrames?point!:null,ptsMs:partialFrames?point!+40:null};},
       audio:async()=>{throw new Error('NOT_AUDIO');}}});
   const calls=new Map<number,number>(),url=`https://www.bilibili.com/video/${bvid}/`;
   const bili=new BiliService(ctx,{agentId:'fish',profileId:'fixture',dataDir:join(root,'bili'),createStore:true,settings:{browser:{expectedUid:'42'},minIntervalMs:100}},
@@ -73,9 +73,23 @@ async function fixture(cancelVision=false){
       if(count===1)return evaluated(null);
       return evaluated({url,title:'Fixture',text:'Frame',truncated:true,frame:{dataUrl:'data:image/jpeg;base64,/9j/2Q==',positionMs:point+40,durationMs:10000}});
     },controller.signal,{now:()=>elapsed,wait:async ms=>{elapsed+=ms;}})});
+  if(partialFrames){const description:MediaSourceDescription={ref:{provider:'fixture-video',key:'video'},origin:{provider:'fixture-video',scene:{channel:'bilibili',account:'public',kind:'local',id:'public'},key:'video',version:1,hash:'a'.repeat(64),roots:['fixture-video:video'],detail:{}},kind:'video',name:'fixture.mp4',mimeHint:'video/mp4',bytesHint:4,durationMsHint:6000,rangeReadable:false,publicContent:true};
+    extensions.set('fixture-video',{id:'fixture-video',version:'1',protocolVersion:API_VERSION,agentId:'fish',resourceProofs:{current:()=>true,epoch:()=> '1'}});
+    media.registerProvider({id:'fixture-video',describe:key=>key==='video'?description:null,open:async()=>({bytes:4,mime:'video/mp4',stream:(async function*(){yield Buffer.from('data');})()})});}
   await media.recover();media.activate();bili.recover();bili.activate();
   return {root,context,media,bili,adapter,extensions,controller,stats:()=>({modelImages,navigations}),close:async()=>{await bili.close();await media.close();await ctx.fiber.dispose();}};
 }
+
+test('one failed sampling point preserves successful frame evidence and a repeated read does not call vision again',async()=>{
+  const f=await fixture(false,true);try{const input=MediaReadSchema.parse({requestId:'partial-frames',mode:'frames',source:{provider:'fixture-video',key:'video'},pointsMs:[1000,2000,3000]});
+    const result=z.object({text:z.string(),coverage:z.object({processed:z.array(z.object({start:z.number()})),gaps:z.array(z.string()),completeness:z.string()}).passthrough()}).parse(await f.media.read(f.context,'media',input));
+    assert.deepEqual(result.coverage.processed.map(point=>point.start),[1040,3040]);assert.equal(result.coverage.completeness,'partial');
+    assert.ok(result.coverage.gaps.some(gap=>gap.includes('2000ms')&&gap.includes('MEDIA_WORKER_TIMEOUT')));assert.match(result.text,/failedPoints/);
+    assert.equal(f.media.health.diagnostics[0]?.stage,'decode');assert.equal(f.stats().modelImages,2);
+    const repeated=z.object({cacheHit:z.literal(true),coverage:z.unknown()}).parse(await f.media.read({...f.context,operationId:randomUUID()},'media',{...input,requestId:'same-points-new-id'}));
+    assert.equal(z.object({processed:z.array(z.unknown())}).parse(repeated.coverage).processed.length,2);assert.equal(f.adapter.requests.length,1);
+  }finally{await f.close();}
+});
 
 test('real browser adapter, Bili service and media service expose three frame sources in one vision call',async()=>{
   const f=await fixture();try{

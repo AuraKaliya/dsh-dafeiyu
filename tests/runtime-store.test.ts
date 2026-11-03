@@ -14,6 +14,18 @@ import { inspectStorage } from '@dafeiyu/host';
 const identity={agentId:'fish',profileId:'fixture'};
 const path=async()=>join(await mkdtemp(join(tmpdir(),'dafeiyu-runtime-')),'runtime.sqlite');
 const outcome={status:'succeeded' as const,effects:'confirmed' as const,completeness:'complete' as const,data:{value:'fictional'},sources:[],receipts:[{id:'fixture-receipt',kind:'fixture'}]};
+test('usage receipts remain deduplicated across restart and unknown attempts are never reported as free',async()=>{
+  const file=await path();let store=new RuntimeStore(file,identity,{create:true});const run=accepted(store);
+  const known={tokens:14,durationMs:10,provider:'fixture',model:'fixture',breakdown:{inputTokens:2,cacheReadTokens:3,cacheWriteTokens:4,outputTokens:5,totalTokens:14}};
+  store.bindInput(run.id,'model-usage:attempt-1',known);store.bindInput(run.id,'model-usage:attempt-1',known);
+  store.bindInput(run.id,'model-usage:legacy',{tokens:9,durationMs:4});
+  store.bindInput(run.id,'model-usage:failed-attempt',{tokens:null,durationMs:8});store.close();store=new RuntimeStore(file,identity);
+  try{store.bindInput(run.id,'model-usage:attempt-1',known);const usage=store.usage(run.id);
+    assert.equal(usage.calls,3);assert.equal(usage.knownTokens,23);assert.equal(usage.tokens,null);assert.equal(usage.unknownCalls,1);
+    assert.equal(usage.legacyCalls,1);assert.equal(usage.breakdownKnownCalls,1);assert.deepEqual(usage.breakdown,known.breakdown);
+    assert.throws(()=>store.bindInput(run.id,'model-usage:attempt-1',{...known,tokens:15}),/INPUT_BINDING_CONFLICT/);
+  }finally{store.close();}
+});
 test('message intent decisions survive reopening and retain one immutable result',async()=>{
   const file=await path(),id=randomUUID(),body={relation:'amend',expectedVersion:1,goal:'原始目标加补充要求'};
   let store=new RuntimeStore(file,identity,{create:true});store.prepareMessageIntent(id,'owner-route',body);store.close();

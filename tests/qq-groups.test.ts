@@ -5,6 +5,10 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 import { testTempDir as tmpdir } from './test-temp.js';
+import type {Context} from '@deepseek-ai/cordis';
+import type {Conversation,ExecutionContext,Extension} from '@dafeiyu/contracts';
+import {QqCapabilities} from '../packages/channel-qq/lib/capabilities.js';
+import {z} from 'zod';
 
 test('natural QQ address matching recognizes explicit Chinese addresses while ignoring quoted or incidental names', () => {
   const names = ['大肥鱼', '蓝色大肥鱼'];
@@ -35,6 +39,21 @@ async function fixture() {
     rejectIdentity: () => { platform.rejected++; } };
   return { store, platform, options };
 }
+
+test('owner query reply scope is reported separately from unprobed platform send permission',async()=>{
+  const f=await fixture(),groups=new GroupDirectory(f.options);await groups.start();
+  const owner:Conversation={channel:'qq',account:'12345678',kind:'private',id:'87654321'},group:Conversation={...owner,kind:'group',id:'11223344'};let extension:Extension|undefined;
+  const ctx={dafeiyu:{registerExtension:(value:Extension)=>{extension=value;return {dispose(){}};},executionAuthority:()=>{},capabilityResources:()=>[owner,group],journal:{get:()=>({message:{conversation:owner}})}}} as unknown as Context;
+  const capability=new QqCapabilities(ctx,{agentId:'fish',botId:owner.account,ownerId:owner.id,store:f.store,groups,allowed:()=>true,available:()=>true});
+  try{const action=extension!.actions!.find(value=>value.id==='qq_groups')!,context={origin:{kind:'message',inboundId:'fixture',conversation:owner},scope:{kind:'conversation',agentId:'fish',route:'fixture'},intentVersion:0} as ExecutionContext;
+    const result=await action.execute({},context);assert.equal(result.status,'succeeded');
+    const data=z.object({resources:z.array(z.object({scene:z.object({id:z.string()}),replyFromCurrentConversation:z.boolean(),replyViaAuthorizedGroupPatrol:z.boolean(),platformSendPermission:z.literal('not-probed')})),coverage:z.string()}).parse(result.data);
+    assert.equal(data.resources.find(row=>row.scene.id===owner.id)?.replyFromCurrentConversation,true);
+    assert.equal(data.resources.find(row=>row.scene.id===group.id)?.replyFromCurrentConversation,false);
+    assert.equal(data.resources.find(row=>row.scene.id===group.id)?.replyViaAuthorizedGroupPatrol,true);
+    assert.match(data.coverage,/false不表示群禁言/);assert.doesNotMatch(JSON.stringify(result.data),/"writable"/);
+  }finally{capability.close();groups.pause();await groups.whenIdle();f.store.close();}
+});
 
 test('group refresh intersects the allowlist, tolerates only a bounded stale window, and honors removals and empty lists', async () => {
   const f = await fixture(), directory = new GroupDirectory(f.options);
