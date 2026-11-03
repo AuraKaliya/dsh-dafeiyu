@@ -26,7 +26,7 @@ export class QqSegmentedTransport {
     const existing=this.active.get(reply.id);if(existing)return existing;
     const progress=this.host.ledger.progress(reply.id)!;if(!plan||progress.state==='sent'||progress.unknown||progress.state==='sending')return Promise.resolve(result(progress,'DELIVERY_NOT_RESUMABLE'));
     const {messageId,...anchor}=plan.anchor;
-    const snapshot:Reply=Object.freeze({id:plan.replyId,conversation:Object.freeze({...plan.target}),sourceMessageId:messageId,text:plan.originalText??plan.segments.join(''),...(anchor.kind==='task-result'?{taskResult:Object.freeze({...anchor,target:Object.freeze({...anchor.target})})}:{})});
+    const snapshot:Reply=Object.freeze({id:plan.replyId,conversation:Object.freeze({...plan.target}),sourceMessageId:messageId,text:plan.originalText??plan.segments.join(''),...(anchor.kind!=='reply'?{taskResult:Object.freeze({...anchor,target:Object.freeze({...anchor.target})})}:{})});
     const work=this.execute(snapshot,plan,signal,authority,writeWindow).finally(()=>this.active.delete(snapshot.id));this.active.set(snapshot.id,work);return work;
   }
   private async execute(reply:Reply,plan:QqDeliveryPlan,signal:AbortSignal,authority:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>{

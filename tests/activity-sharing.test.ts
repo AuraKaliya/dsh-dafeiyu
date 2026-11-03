@@ -5,12 +5,15 @@ import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {API_VERSION} from '@dafeiyu/contracts';
 import type {Reply} from '@dafeiyu/contracts';
+import {QqStore} from '@dafeiyu/qq';
+import {QqSegmentedTransport} from '../packages/channel-qq/lib/transport.js';
 import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
 test('an autonomous result uses verified native delivery without inventing an inbound and does not resend after restart',{timeout:30000},async t=>{
   const root=await mkdtemp(join(testTempDir(),'activity-sharing-'));process.env.DSH_HOME=join(root,'data/core/dsh-home');
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');const file=join(root,'host.json'),delivered:Reply[]=[],bvid='BV1xNpFedEwH';let step=0;
+  const qqStore=new QqStore(join(root,'qq.sqlite'));
   const adapter=new FixtureAdapter(request=>{
     if(String(request.sessionId).startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
     if(String(request.sessionId).startsWith('dafeiyu-delivery-'))return textResponse('{"qq_messages":[{"type":"text","text":"刚读到一条关于古画修复的视频资料，这轮还没有看画面。"}]}');
@@ -23,8 +26,13 @@ test('an autonomous result uses verified native delivery without inventing an in
   const config=loadHostConfig(file),coordination=join(root,'coordination.sqlite');initializeProfile(config,coordination);
   const options:Parameters<typeof ManagedHost.start>[1]={coordination,adapter,signal:t.signal,installChannels:ctx=>{
     ctx.dafeiyu.bindActivitySharing(()=>({enabled:true,cooldownMs:60000}));
+    const transport=new QqSegmentedTransport({ledger:qqStore.delivery,confirmed:()=>{},check:async reply=>{
+      assert.equal(reply.taskResult?.kind,'activity-result','the persisted transport snapshot must retain the autonomous result authority');
+      ctx.dafeiyu.verifyActivityShareReply(reply);
+    },send:async reply=>{delivered.push(reply);return '123456';}});
     ctx.dafeiyu.registerExtension({id:'fixture-qq',version:'1',protocolVersion:API_VERSION,agentId:'fish',ownerDirectory:{channelExtensionId:'fixture-qq',channel:'qq',account:'100001',ownerId:'200001',snapshot:()=>({revision:'1',available:true,resources:[{channel:'qq',account:'100001',kind:'private',id:'200001'}]})},channels:[{channel:'qq',account:'100001',deliver:async()=>assert.fail('native delivery must use its write window'),deliverTaskResult:async(reply,anchor,signal,authority,begin)=>{
-      signal.throwIfAborted();authority();ctx.dafeiyu.verifyActivityShareReply(reply);assert.equal(anchor.kind,'activity-result');assert.equal(reply.sourceMessageId,'');const finish=begin();try{delivered.push(reply);return {status:'sent',receiptId:'activity-result'};}finally{finish();}
+      signal.throwIfAborted();authority();ctx.dafeiyu.verifyActivityShareReply(reply);assert.equal(anchor.kind,'activity-result');assert.equal(reply.sourceMessageId,'');
+      return transport.deliver(reply,signal,authority,begin);
     }}]});
   },biliTransport:async()=>{const bytes=Buffer.from(JSON.stringify({code:0,data:{bvid,aid:'1',title:'古画修复',desc:'虚构资料',duration:60,pages:[{cid:'100',page:1,part:'第一部分',duration:60}],owner:{mid:42,name:'Fixture'}}}));return {status:200,headers:{'content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};}};
   let host=await ManagedHost.start(config,options);
@@ -35,5 +43,5 @@ test('an autonomous result uses verified native delivery without inventing an in
     host.ctx.dafeiyu.requestActivityShare(accepted.run.id,'public-video:'+bvid);await host.ctx.dafeiyu.whenIdle();assert.equal(delivered.length,1);
     await host.close();host=await ManagedHost.start(config,options);await host.ctx.dafeiyu.whenIdle();assert.equal(delivered.length,1);
     const db=new DatabaseSync(join(root,'data/core/journal.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT COUNT(*) n FROM inbox').get()!.n,0,'no artificial inbound was created');}finally{db.close();}
-  }finally{await host.close();}
+  }finally{await host.close();qqStore.close();}
 });
