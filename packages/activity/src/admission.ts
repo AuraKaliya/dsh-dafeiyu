@@ -4,8 +4,8 @@ import {z} from 'zod';
 
 const gateSchema=z.strictObject({until:z.number().int().nonnegative().nullable(),reason:z.string(),generation:z.number().int().nonnegative(),updatedAt:z.number().int().nonnegative()});
 const candidateSchema=z.strictObject({key:z.string(),revision:z.string(),state:z.enum(['claimed','complete','blocked']),claim:z.string(),runId:z.string().nullable(),updatedAt:z.number().int().nonnegative(),retryAt:z.number().int().nonnegative().nullable(),result:z.json().nullable()});
-export const ACTIVITY_ADMISSION_TABLES=['activity_control','activity_explorations'] as const;
-export function createAdmissionSchema(db:DatabaseSync){db.exec('CREATE TABLE activity_control(key TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE activity_explorations(key TEXT PRIMARY KEY,body TEXT NOT NULL);');}
+export const ACTIVITY_ADMISSION_TABLES=['activity_control','activity_explorations','activity_patrol_cursors','activity_patrol_receipts'] as const;
+export function createAdmissionSchema(db:DatabaseSync){db.exec('CREATE TABLE activity_control(key TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE activity_explorations(key TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE activity_patrol_cursors(plan_id TEXT NOT NULL,route TEXT NOT NULL,cursor INTEGER NOT NULL,PRIMARY KEY(plan_id,route)); CREATE TABLE activity_patrol_receipts(id TEXT PRIMARY KEY,plan_id TEXT NOT NULL,body TEXT NOT NULL);');}
 
 /** Durable scheduling gates; no model call is needed to test a rest, failure or unchanged candidate. */
 export class ActivityAdmission {

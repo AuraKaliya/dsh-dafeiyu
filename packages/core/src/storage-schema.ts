@@ -41,4 +41,6 @@ CREATE TRIGGER message_intent_result_immutable BEFORE UPDATE OF result ON messag
 CREATE TRIGGER message_intent_retain BEFORE DELETE ON message_intents BEGIN SELECT RAISE(ABORT,'Retain intent history');END;`);
 }
 
-export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV2(db);addIntentReceiptsSchema(db);}
+export function createStorageSchemaV3(db:DatabaseSync):void {createStorageSchemaV2(db);addIntentReceiptsSchema(db);}
+export function addActivitySharesSchema(db:DatabaseSync):void {db.exec('CREATE TABLE native_share_requests(id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),dedupe_key TEXT NOT NULL UNIQUE,body TEXT NOT NULL);');}
+export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV3(db);addActivitySharesSchema(db);}

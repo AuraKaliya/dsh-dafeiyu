@@ -4,15 +4,16 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { ActionOutcomeSchema, ExecutionScopeSchema, RunOriginSchema, conversationKey,PersonaManifestSchema } from '@dafeiyu/contracts';
+import { ActionOutcomeSchema, ExecutionScopeSchema, RunOriginSchema, conversationKey,PersonaManifestSchema,ConversationSchema } from '@dafeiyu/contracts';
 import type { Json } from '@dafeiyu/contracts';
 import { configureSqlite,matchesSchema } from '@dafeiyu/journal';
 import { ownerAlive, ownerNonce } from '@dafeiyu/journal/owner-identity';
 import { NativeDeliveryStore } from './native-delivery-store.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
-export const RUNTIME_SCHEMA_VERSION = 3;
+export const RUNTIME_SCHEMA_VERSION = 4;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const shareSchema=z.strictObject({id:z.uuid(),runId:z.uuid(),target:ConversationSchema,policyHash:hashSchema,notBefore:z.number().int().nonnegative(),expiresAt:z.iso.datetime(),createdAt:z.iso.datetime()});
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
 export type RuntimeIdentity = z.infer<typeof RuntimeIdentitySchema>;
 export const RunStateSchema = z.enum(['accepted','queued','running','waiting','cancelling','continued','completed','failed','cancelled','interrupted']);
@@ -45,6 +46,15 @@ export interface StoredRun {id:string;requestKey:string;definition:RunDefinition
 
 /** One-host execution ledger. Task definitions and complete DSH histories remain in their own stores. */
 export class RuntimeStore {
+  queueActivityShare(runId:string,dedupeKey:string,target:import('@dafeiyu/contracts').Conversation,policyHash:string,cooldownMs:number,now=Date.now()){
+    return this.transaction(()=>{const old=this.db.prepare('SELECT body FROM native_share_requests WHERE run_id=? OR dedupe_key=?').get(runId,dedupeKey);if(old)return shareSchema.parse(JSON.parse(String(old.body)));
+      const previous=this.db.prepare('SELECT MAX(json_extract(body,\'$.notBefore\')) at FROM native_share_requests').get(),notBefore=Math.max(now,previous?.at===null?0:Number(previous?.at)+cooldownMs);
+      const value=shareSchema.parse({id:randomUUID(),runId,target,policyHash,notBefore,expiresAt:new Date(notBefore+900000).toISOString(),createdAt:new Date(now).toISOString()});
+      this.db.prepare('INSERT INTO native_share_requests VALUES(?,?,?,?)').run(value.id,runId,dedupeKey,JSON.stringify(value));this.event(runId,'activity.share.queued',{shareId:value.id,notBefore});return value;
+    });
+  }
+  activityShare(runId:string){const row=this.db.prepare('SELECT body FROM native_share_requests WHERE run_id=?').get(runId);return row?shareSchema.parse(JSON.parse(String(row.body))):null;}
+  dueActivityShares(now=Date.now()){return this.db.prepare('SELECT run_id FROM native_share_requests WHERE json_extract(body,\'$.notBefore\')<=? AND NOT EXISTS(SELECT 1 FROM native_deliveries d WHERE d.run_id=native_share_requests.run_id) ORDER BY rowid').all(now).map(row=>String(row.run_id));}
   private readonly sourceReadStatements=new Map<string,import('node:sqlite').StatementSync>();
   private sourceRead(sql:string){let statement=this.sourceReadStatements.get(sql);if(!statement){statement=this.db.prepare(sql);this.sourceReadStatements.set(sql,statement);}return statement;}
   readonly nativeDeliveries:NativeDeliveryStore;
@@ -189,7 +199,7 @@ export class RuntimeStore {
     z.number().int().min(0).max(10000).parse(offset);z.number().int().min(1).max(64).parse(limit);
     return this.db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE r.rowid IN (SELECT max(rowid) FROM runs WHERE json_extract(definition,'$.taskId') IS NOT NULL GROUP BY json_extract(definition,'$.taskId')) AND json_extract(q.body,'$.messageSource.conversation.channel')=? AND json_extract(q.body,'$.messageSource.conversation.account')=? AND json_extract(q.body,'$.messageSource.conversation.kind')=? AND json_extract(q.body,'$.messageSource.conversation.id')=? ORDER BY r.rowid DESC LIMIT ? OFFSET ?")
       .all(scene.channel,scene.account,scene.kind,scene.id,limit,offset).map(row=>this.get(string(row.id)));}
-  nativeDeliveryCandidates():string[]{this.open();return this.db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key LEFT JOIN native_deliveries d ON d.run_id=r.id WHERE r.state IN ('completed','waiting') AND json_extract(q.body,'$.messageSource.schemaVersion')=1 AND (d.id IS NULL OR d.state IN ('accepted','ready')) ORDER BY r.rowid").all().map(row=>string(row.id));}
+  nativeDeliveryCandidates():string[]{this.open();return this.db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key LEFT JOIN native_deliveries d ON d.run_id=r.id WHERE r.state IN ('completed','waiting') AND (json_extract(q.body,'$.messageSource.schemaVersion')=1 OR EXISTS(SELECT 1 FROM native_share_requests s WHERE s.run_id=r.id)) AND (d.id IS NULL OR d.state IN ('accepted','ready')) ORDER BY r.rowid").all().map(row=>string(row.id));}
   session(keyValue:string):string {key.parse(keyValue);return this.transaction(()=>{const old=this.db.prepare('SELECT session_id FROM execution_sessions WHERE session_key=?').get(keyValue);if(old)return string(old.session_id);const id=`dafeiyu-task-${randomUUID()}`;this.db.prepare('INSERT INTO execution_sessions VALUES(?,?)').run(keyValue,id);return id;});}
   transition(id:string,expectedVersion:number,to:RunState,error:string|null=null):StoredRun{if(to==='running'||to==='completed')throw new Error('USE_DEDICATED_TRANSITION');return this.transaction(()=>this.transitionInside(id,expectedVersion,to,error));}
   private transitionInside(id:string,version:number,to:RunState,error:string|null=null):StoredRun {

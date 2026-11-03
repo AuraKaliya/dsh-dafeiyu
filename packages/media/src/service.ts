@@ -78,6 +78,8 @@ export function validateImageObservations(observations:readonly {image:number}[]
   private readonly unbind:()=>void;
   private tail:Promise<unknown>=Promise.resolve();
   private closing:Promise<void>|undefined;
+  private finalDiagnostics:ReturnType<MediaStore['diagnostics']['recent']>|undefined;
+  private finalPauses:ReturnType<MediaStore['diagnostics']['list']>|undefined;
   private finalCounts:{sources:number;assets:number;bytes:number;drafts:number;exports:number;jobs:Record<string,number>}|undefined;
   private reconciliation={settled:0,pending:0,conflicts:0};
   constructor(ctx:Context,raw:Config,testBackends?:{audioWorker?:AudioWorker;ttsWorker?:AudioWorker;decoder?:Pick<MediaDecoder,'inspect'|'image'|'audio'>}){super(ctx,'dafeiyuMedia');this.config=mediaConfigSchema.parse(raw);
@@ -304,6 +306,6 @@ export function validateImageObservations(observations:readonly {image:number}[]
   activate(){this.gate.activate();}
   whenIdle(){return this.tail;}
   cancelRunning(){this.controller.abort();}
-  get health(){return {lifecycle:this.gate.state,modalities:{vision:!!this.config.vision,asr:!!this.config.audio?.whisper,events:!!this.config.audio?.events,documents:!!this.config.documents,tts:!!this.config.tts},counts:this.finalCounts??{...this.store.counts(),...this.store.replies.counts(),jobs:this.store.jobs()},reconciliation:{...this.reconciliation}};}
-  close():Promise<void>{if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.closing=(async()=>{await this.tail;this.flush();this.finalCounts={...this.store.counts(),...this.store.replies.counts(),jobs:this.store.jobs()};this.unbind();this.handle.dispose();this.replySpeech?.close();this.images.close();this.store.close();this.gate.close();})();return this.closing;}
+  get health(){return {lifecycle:this.gate.state,diagnostics:this.finalDiagnostics??this.store.diagnostics.recent(),pauses:this.finalPauses??this.store.diagnostics.list(),modalities:{vision:!!this.config.vision,asr:!!this.config.audio?.whisper,events:!!this.config.audio?.events,documents:!!this.config.documents,tts:!!this.config.tts},counts:this.finalCounts??{...this.store.counts(),...this.store.replies.counts(),jobs:this.store.jobs()},reconciliation:{...this.reconciliation}};}
+  close():Promise<void>{if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.closing=(async()=>{await this.tail;this.flush();this.finalCounts={...this.store.counts(),...this.store.replies.counts(),jobs:this.store.jobs()};this.finalDiagnostics=this.store.diagnostics.recent();this.finalPauses=this.store.diagnostics.list();this.unbind();this.handle.dispose();this.replySpeech?.close();this.images.close();this.store.close();this.gate.close();})();return this.closing;}
 }

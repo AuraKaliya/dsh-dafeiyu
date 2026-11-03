@@ -98,3 +98,7 @@ ignoreWorkspaceRootCheck: true
 ```
 
 `virtualStoreDir` 可另设为该机器上的独立短路径；后续更新沿用相同目录。仅改变依赖安装布局，不移动或重新初始化 `dataDir`。入口等待DSH应用就绪后才加载运行模块与创建独立进程；启动故障只记录阶段、异常类型、标准错误码和有限模块元数据。插件入口已加载不代表独立实例已就绪，应检查实际状态。
+
+## 0.28 自主调度
+
+`activity.explorationIntervalMs` 默认 1800000，`activity.restMs` 默认 3600000。`activity.ownerSharing.enabled` 默认 true，`cooldownMs` 默认 1800000；仅 activity 已启用时生效。主人任务结果不受普通分享冷却影响。旧 roundTokens/roundDurationMs 只保留兼容及历史显示，不限制任务执行。群巡视通过主人任务创建 `group-watch` 持久计划，群间来源仍隔离。

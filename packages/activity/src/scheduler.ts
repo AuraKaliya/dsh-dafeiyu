@@ -2,6 +2,7 @@ import {IdleActivity} from './idle.js';
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { ContextItemSchema } from '@dafeiyu/contracts';
+import {quietAt} from './time.js';
 import type { ContextItem,ExecutionView,ExecutionLifecycle,MemoryMaintenanceSchedulingPort,RunOrigin,TaskState,ActivityDomainEvent } from '@dafeiyu/contracts';
 import { ActivityStore,activityHash } from './store.js';
 import type { StoredOccurrence,StoredSchedule } from './store.js';
@@ -120,6 +121,15 @@ export class ActivityScheduler {
     return {restAfterActivity:true,resumeAfter:new Date(resumeAfter).toISOString()};}
   private settleRounds(now:number){for(const id of this.store.rounds.pending()){if(id.startsWith('idle:'))continue;const occurrence=this.store.occurrence(id);if(!['completed','failed','cancelled','blocked'].includes(occurrence.state))continue;if(!occurrence.runId){this.store.rounds.settle(id,{tokens:0,knownTokens:0},0,now);continue;}const usages=this.store.occurrenceRuns(id).map(run=>this.ctx.dafeiyu.managementUsage(run)),knownTokens=usages.reduce((sum,usage)=>sum+usage.knownTokens,0);this.store.rounds.settle(id,{tokens:usages.length&&usages.every(usage=>usage.tokens!==null)?knownTokens:null,knownTokens},this.store.occurrenceUsed(id),now);}}
   private pressure(){const value=this.ctx.dafeiyu.activityPressure();const now=this.now(),busy=value.foregroundWaiting+value.foregroundRuns>0;if(busy)this.lastForegroundAt=now;return busy||now-this.lastForegroundAt<this.store.config.idleAfterMs;}
+  private patrol(plan:StoredSchedule,now:number){if(!plan.body.anchor||!plan.body.watch)throw new Error('PATROL_PLAN_INVALID');
+    if(quietAt(now,plan.body.timeZone,plan.body.quiet)){this.store.checkedPatrol(plan.body.id,plan.body.version,now);return;}
+    const watch=plan.body.watch,targets=this.ctx.dafeiyu.patrolResources(plan.body.anchor).filter(target=>watch.mode==='joined'||watch.groupIds.includes(target.id));
+    for(const target of targets){const route=JSON.stringify(target),cursor=this.store.patrolCursor(plan.body.id,route);
+      try{const result=this.ctx.dafeiyu.pollPatrol({planId:plan.body.id,version:plan.body.version,anchor:plan.body.anchor,target,cursor,reply:watch.reply});this.store.recordPatrol(plan.body.id,plan.body.version,route,cursor,result,now);}
+      catch{this.store.recordPatrol(plan.body.id,plan.body.version,route,cursor,{cursor,state:'channel-unavailable',inboundId:null},now);}
+    }
+    this.store.checkedPatrol(plan.body.id,plan.body.version,now);
+  }
   private reconcile(occurrence:StoredOccurrence,status:RunStatus){
     if(!['completed','waiting','failed','cancelled','interrupted'].includes(status.state)||!occurrence.runId)return;
     const events=this.ctx.dafeiyu.journal.executionRunStates(this.store.identity.agentId,occurrence.body.taskId,occurrence.runId),terminal=events.findLast(event=>event.type===`run.${status.state}`);
@@ -181,6 +191,7 @@ export class ActivityScheduler {
       this.dispatch(now);
       for(const id of this.store.due(now)){const plan=this.store.get(id);const source=this.source(plan);if(source.state==='pending')continue;
         if(source.state==='stale'){this.store.block(id,source.code??'SOURCE_STALE',now);this.retireOwnedTask(plan);continue;}
+        if(plan.body.purpose==='group-watch'){this.patrol(plan,now);continue;}
         if(plan.body.purpose==='maintenance'){const item=plan.body.maintenanceId?this.memory?.inspect(plan.body.maintenanceId):null;
           if(!item||!['ready'].includes(item.state)){this.store.block(id,'MAINTENANCE_NO_LONGER_PENDING',now);continue;}}
         this.ensureTask(plan);this.store.issue(id,now);

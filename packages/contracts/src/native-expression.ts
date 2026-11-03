@@ -6,8 +6,9 @@ import { PersonaSourceRefSchema } from './persona.js';
 import type { PersonaAccess } from './persona.js';
 import { NativeMediaMaterialSchema } from './media.js';
 import type { NativeMediaMaterial } from './media.js';
-export const TaskResultAnchorSchema=z.strictObject({kind:z.literal('task-result'),schemaVersion:z.literal(1),taskId:z.uuid(),runId:z.uuid(),inboundId:z.uuid(),target:ConversationSchema,
+const resultAnchor=z.strictObject({schemaVersion:z.literal(1),taskId:z.uuid(),runId:z.uuid(),target:ConversationSchema,
   intentVersion:z.number().int().positive(),authorityVersion:z.string().length(64),expiresAt:z.iso.datetime(),outcome:z.literal('waiting').optional()});
+export const TaskResultAnchorSchema=z.discriminatedUnion('kind',[resultAnchor.extend({kind:z.literal('task-result'),inboundId:z.uuid()}),resultAnchor.extend({kind:z.literal('activity-result'),shareId:z.uuid()})]);
 export type TaskResultAnchor=z.infer<typeof TaskResultAnchorSchema>;
 export const NativeExpressionCandidateSchema=z.strictObject({source:PersonaSourceRefSchema,view:z.string().max(32000).nullable()});
 export const NativeExpressionPacketSchema=z.strictObject({id:z.uuid(),version:z.number().int().positive(),anchor:TaskResultAnchorSchema,question:z.string(),

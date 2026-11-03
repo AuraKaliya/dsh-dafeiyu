@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
 import { NativeExpressionPacketSchema,NativeVerificationFeedbackSchema,ContextItemSchema,conversationKey,qqVisibleText,redactJson } from '@dafeiyu/contracts';
-import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply } from '@dafeiyu/contracts';
+import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply,Conversation } from '@dafeiyu/contracts';
 import type { ContextCoordinator } from './context.js';
 import type { RuntimeStore } from './runtime-store.js';
 import type { DeliveryChannel } from './delivery-channel.js';
@@ -14,10 +14,12 @@ import { z } from 'zod';
 export const NATIVE_RENDER_ATTEMPTS=2;
 interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:string;signal:AbortSignal;timeoutMs:number;sendTimeoutMs:number;
   feedbackSource(runId:string):{item:PendingMessage;taskId:string;state:string;error:string|null;operations:readonly {action?:string;state:string;status:string|null;effects:string|null}[]}|null;
-  describe(runId:string):{item:PendingMessage;anchor:TaskResultAnchor;autoDeliver:boolean|undefined}|null;
+  describe(runId:string):{item:PendingMessage|null;anchor:TaskResultAnchor;autoDeliver:boolean|undefined}|null;
   access(runId:string):Promise<NativeExpressionAccess>;expression():NativeExpressionPort|undefined;
   persona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
   model():AgentOptions;channel(item:PendingMessage):DeliveryChannel|null;accepting():boolean;flush():void;
+  activityChannel?(target:Conversation):DeliveryChannel|null;
+  activityPersona?(runId:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
   enqueue<T>(route:string,work:()=>Promise<T>):Promise<T>;acquire():Promise<()=>void>;
   notice(input:{item:PendingMessage;text:string;deliveryId:string;status:'sent'|'not-sent'|'unknown';kind:'progress'|'result'|'failure';receiptId?:string;code?:string}):void;
   feedback?:FeedbackLedger;
@@ -95,18 +97,19 @@ export class NativeTaskDelivery {
     }
   }
   close(){this.unregister();}
-  private async execute(runId:string,item:PendingMessage,notify:boolean){const release=await this.host.acquire(),deadlineAt=performance.now()+this.host.timeoutMs;let stage='source-admission',invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
+  private async execute(runId:string,item:PendingMessage|null,notify:boolean){const release=await this.host.acquire(),deadlineAt=performance.now()+this.host.timeoutMs;let stage='source-admission',invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
     try{let record=this.host.store.nativeDeliveries.get(runId)!;if(terminal.has(record.state))return this.host.store.nativeDeliveries.status(runId);
-      const access=await this.host.access(runId),provider=this.host.expression(),channel=this.host.channel(item);
+      const access=await this.host.access(runId),provider=this.host.expression(),target=record.anchor.target,route=conversationKey(access.execution.view.scope.agentId,target),channelAt=()=>item?this.host.channel(item):this.host.activityChannel?.(target)??null,channel=channelAt();
       if(!provider?.ready()||!channel?.capability.deliverTaskResult)throw new Error('DEPENDENCY_UNAVAILABLE');
       const sendTaskResult=channel.capability.deliverTaskResult.bind(channel.capability);
       signal=AbortSignal.any([signal,channel.signal,...(provider.signal?[provider.signal]:[])]);
-      if(nativeDeliveryHash(record.anchor)!==nativeDeliveryHash(access.anchor)||conversationKey(access.execution.view.scope.agentId,access.anchor.target)!==item.route)throw new Error('DELIVERY_BINDING_CONFLICT');
+      if(nativeDeliveryHash(record.anchor)!==nativeDeliveryHash(access.anchor)||item&&route!==item.route)throw new Error('DELIVERY_BINDING_CONFLICT');
       stage='packet-prepare';const packet=NativeExpressionPacketSchema.parse(record.material?provider.open(access,record.material.packetId):provider.prepare(access));
       if(nativeDeliveryHash(packet.anchor)!==nativeDeliveryHash(record.anchor))throw new Error('DELIVERY_BINDING_CONFLICT');
-      const guardMaterial=()=>{signal.throwIfAborted();access.guard();if(this.host.expression()!==provider||!provider.ready()||this.host.channel(item)?.identity!==channel.identity)throw new Error('DEPENDENCY_UNAVAILABLE');
+      const guardMaterial=()=>{signal.throwIfAborted();access.guard();if(this.host.expression()!==provider||!provider.ready()||channelAt()?.identity!==channel.identity)throw new Error('DEPENDENCY_UNAVAILABLE');
         if(provider.open(access,packet.id).sourceStamp!==packet.sourceStamp||Date.parse(record.anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');};
-      stage='persona-prepare';const persona=this.host.persona(item,record.id,signal,guardMaterial),model=this.host.model(),material={packetId:packet.id,sourceStamp:packet.sourceStamp,foundationHash:persona.foundationHash,personaHash:persona.stamp,modelHash:nativeDeliveryHash(model),...(packet.media?{mediaStamp:packet.media.sourceStamp}:{})};
+      stage='persona-prepare';const persona=item?this.host.persona(item,record.id,signal,guardMaterial):this.host.activityPersona?.(runId,signal,guardMaterial);if(!persona)throw new Error('DEPENDENCY_UNAVAILABLE');
+      const model=this.host.model(),material={packetId:packet.id,sourceStamp:packet.sourceStamp,foundationHash:persona.foundationHash,personaHash:persona.stamp,modelHash:nativeDeliveryHash(model),...(packet.media?{mediaStamp:packet.media.sourceStamp}:{})};
       const guard=()=>{persona.guard();if(nativeDeliveryHash(this.host.model())!==material.modelHash)throw new Error('SOURCE_STALE');};guard();
       if(record.state==='accepted'){
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
@@ -134,15 +137,15 @@ export class NativeTaskDelivery {
       }
       record=this.host.store.nativeDeliveries.get(runId)!;if(record.state!=='ready'||nativeDeliveryHash(record.material)!==nativeDeliveryHash(material)||!record.renderRef)throw new Error('SOURCE_STALE');
       const body=this.host.store.nativeDeliveries.verifyCredential(runId);if(await readPersistedResult(this.host.ctx,record.renderRef)!==body)throw new Error('DELIVERY_BODY_MISMATCH');guard();
-      const reply=Object.freeze({id:`native-delivery:${record.id}`,conversation:Object.freeze({...record.anchor.target}),sourceMessageId:item.message.id,text:body,taskResult:record.anchor});
+      const reply=Object.freeze({id:`native-delivery:${record.id}`,conversation:Object.freeze({...record.anchor.target}),sourceMessageId:item?.message.id??'',text:body,taskResult:record.anchor});
       let result:z.infer<typeof resultSchema>;
       if(packet.media){media=this.host.media();if(!media?.ready()||!media.replyDraft||!media.finalizeReply||!media.readReplyPart||!media.validateReply||!media.settleReply||channel.capability.mediaDelivery!=='parts-v1'||!channel.capability.deliverMedia)throw new Error('MEDIA_DELIVERY_NOT_CONFIGURED');
         const sendMedia=channel.capability.deliverMedia.bind(channel.capability);
         const draft=media.replyDraft(runId);if(!draft||draft.id!==packet.media.draftId||draft.version!==packet.media.draftVersion)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaAccess=await this.host.mediaAccess(draft.authority,reply,signal);
         const manifest=await media.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaId=manifest.id;const authorized=()=>{guard();mediaAccess!.guard();if(this.host.media()!==media)throw new Error('SOURCE_STALE');media!.validateReply!(mediaAccess!,manifest.id);};authorized();
-        result=await this.host.enqueue(item.route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();authorized();};check();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
+        result=await this.host.enqueue(route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();authorized();};check();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
           return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),sending,check,position=>{check();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));});
-      }else{result=await this.host.enqueue(item.route,async()=>{
+      }else{result=await this.host.enqueue(route,async()=>{
         const writeBudget=new AbortController(),sending=AbortSignal.any([signal,writeBudget.signal]),check=()=>{sending.throwIfAborted();guard();};let timer:ReturnType<typeof setTimeout>|undefined,remaining=this.host.sendTimeoutMs,active=false;
         const begin=()=>{check();if(active||remaining<=0||deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');
           if(!invoked){this.host.store.nativeDeliveries.sending(runId);this.host.flush();}if(deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');
@@ -155,21 +158,22 @@ export class NativeTaskDelivery {
       });}
       if(!invoked&&result.status==='not-sent'&&this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.notSentBeforeDispatch(runId,result.code);
       else this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
-      this.host.notice({item,text:body,deliveryId:`native-delivery:${record.id}`,status:result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':'unknown',kind:'result',...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code})});
+      if(item)this.host.notice({item,text:body,deliveryId:`native-delivery:${record.id}`,status:result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':'unknown',kind:'result',...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code})});
+      else this.host.store.appendExecutionEvent(runId,'activity.share.settled',{deliveryId:record.id,status:result.status});
     }catch(error){this.host.store.appendExecutionEvent(runId,'native.delivery.diagnostic',{stage,code:code(error),name:error instanceof Error?error.name:'Unknown',
       ...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(String).join('.')}))}:{})});
       const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
     }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');}catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
       finally{if(mediaAccess)media?.releaseReply?.(mediaAccess);mediaAccess?.release();release();this.host.flush();}}
-    const status=this.host.store.nativeDeliveries.get(runId);if(notify&&status&&['rejected','interrupted','not-sent'].includes(status.state))await this.feedback(item,runId);
+    const status=this.host.store.nativeDeliveries.get(runId);if(item&&notify&&status&&['rejected','interrupted','not-sent'].includes(status.state))await this.feedback(item,runId);
     return this.host.store.nativeDeliveries.status(runId);
   }
   private async feedback(item:PendingMessage,runId:string){
     if(this.host.signal.aborted||!this.host.accepting())return;
     const row=this.host.store.nativeDeliveries.get(runId),channel=this.host.channel(item);if(!row||!channel||row.error==='SOURCE_STALE')return;const sendAttempted=this.host.store.nativeDeliveries.sendAttempted(runId);
     const signal=AbortSignal.any([this.host.signal,channel.signal,AbortSignal.timeout(30000)]);
-    const guard=()=>{signal.throwIfAborted();const description=this.host.describe(runId);if(!description||description.item.id!==item.id||this.host.channel(item)?.identity!==channel.identity||this.host.store.nativeDeliveries.get(runId)?.version!==row.version)throw new Error('SOURCE_STALE');};
+    const guard=()=>{signal.throwIfAborted();const description=this.host.describe(runId);if(!description||description.item?.id!==item.id||this.host.channel(item)?.identity!==channel.identity||this.host.store.nativeDeliveries.get(runId)?.version!==row.version)throw new Error('SOURCE_STALE');};
     try{guard();const persona=this.host.persona(item,row.id,signal,guard),message=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,row.id,persona.text,persona.items,
       {target:row.anchor.target,taskId:row.anchor.taskId,runId,inboundId:item.id,question:'向原会话说明本次任务的实际交付状态及当前限制。',taskState:row.state,
         evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,sendAttempted,workPreserved:true,

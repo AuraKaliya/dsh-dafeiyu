@@ -11,19 +11,19 @@ import { visibleStream } from './visible-stream.js';
 import { createHash } from 'node:crypto';
 import { QQ_EXPRESSION_DEFAULTS,QQ_SEQUENCE_INSTRUCTIONS } from '@dafeiyu/contracts';
 import {phaseStream} from './phase-stream.js';
-declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {'dafeiyu-task-result':{kind:'dafeiyu-task-result';taskId:string;runId:string;inboundId:string;deliveryId:string}&ContextFormed}}
+declare module '@deepseek-ai/dsh-llm' {interface MessageSourceMap {'dafeiyu-task-result':{kind:'dafeiyu-task-result';taskId:string;runId:string;inboundId:string|null;deliveryId:string}&ContextFormed}}
 
 /** A real, persisted DSH turn in a new target-persona session; no executor or chat transcript is inherited. */
 export interface DeliveryRepair {previousAnswer:string;issues:readonly string[]}
 export async function renderTaskResult(ctx:Context,model:AgentOptions,cwd:string,id:string,foundation:string,growth:readonly ContextItem[],packet:NativeExpressionPacket,signal:AbortSignal,guard:()=>void,requestMaxBytes:number,repair?:DeliveryRepair,maxTokens=1000000){
-  return renderTargetMessage(ctx,model,cwd,id,foundation,growth,{target:packet.anchor.target,taskId:packet.anchor.taskId,runId:packet.anchor.runId,inboundId:packet.anchor.inboundId,question:packet.question,evidence:packet.evidence,taskState:packet.anchor.outcome??'execution-ended',...(repair?{repair}:{})},signal,guard,requestMaxBytes,maxTokens);
+  return renderTargetMessage(ctx,model,cwd,id,foundation,growth,{target:packet.anchor.target,taskId:packet.anchor.taskId,runId:packet.anchor.runId,inboundId:packet.anchor.kind==='task-result'?packet.anchor.inboundId:null,question:packet.question,evidence:packet.evidence,taskState:packet.anchor.outcome??'execution-ended',...(repair?{repair}:{})},signal,guard,requestMaxBytes,maxTokens);
 }
-interface TargetMaterial {target:Conversation;taskId:string;runId:string;inboundId:string;question:string;evidence:NativeExpressionPacket['evidence'];taskState:string;progress?:true;repair?:DeliveryRepair}
+interface TargetMaterial {target:Conversation;taskId:string;runId:string;inboundId:string|null;question:string;evidence:NativeExpressionPacket['evidence'];taskState:string;progress?:true;repair?:DeliveryRepair}
 export async function renderPublicProgress(ctx:Context,model:AgentOptions,cwd:string,id:string,foundation:string,growth:readonly ContextItem[],material:TargetMaterial,signal:AbortSignal,guard:()=>void,requestMaxBytes:number,maxTokens=1000000){return renderTargetMessage(ctx,model,cwd,id,foundation,growth,{...material,progress:true},signal,guard,requestMaxBytes,maxTokens);}
 async function renderTargetMessage(ctx:Context,model:AgentOptions,cwd:string,id:string,foundation:string,growth:readonly ContextItem[],material:TargetMaterial,signal:AbortSignal,guard:()=>void,requestMaxBytes:number,maxTokens=1000000){
   const timer=AbortSignal.timeout(material.progress?ctx.dafeiyu.phaseTimeouts().feedback:ctx.dafeiyu.phaseTimeouts().render);signal=AbortSignal.any([signal,timer]);
   let handoff:ReturnType<typeof stageHandoff>|undefined;
-  if(material.progress){const inbound=ctx.dafeiyu.journal.get(material.inboundId);if(JSON.stringify(inbound.message.conversation)!==JSON.stringify(material.target))throw new Error('DELIVERY_BINDING_CONFLICT');handoff=stageHandoff('feedback',material.question,null,inbound.message,{state:material.taskState});}
+  if(material.progress){if(!material.inboundId)throw new Error('MESSAGE_REQUIRED');const inbound=ctx.dafeiyu.journal.get(material.inboundId);if(JSON.stringify(inbound.message.conversation)!==JSON.stringify(material.target))throw new Error('DELIVERY_BINDING_CONFLICT');handoff=stageHandoff('feedback',material.question,null,inbound.message,{state:material.taskState});}
   const sessionId=`${material.progress?'dafeiyu-progress-v1':'dafeiyu-delivery-v3'}-${id}${material.repair?'-repair-1':''}`;guard();
   if(await ctx.sessionPersistence.stat(SessionId(sessionId)))throw new Error('DELIVERY_RENDER_ALREADY_EXISTS');
   const info=await ctx.llm.resolveModelInfo(model.provider!,model.model!,signal),effort=material.progress?'low':'high';

@@ -6,7 +6,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { ActivityConfigSchema,ActivityTriggerSchema,QuietWindowSchema,ActivityTimeZoneSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,ServiceGate } from '@dafeiyu/contracts';
+import { ActivityConfigSchema,ActivityTriggerSchema,QuietWindowSchema,ActivityTimeZoneSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,ServiceGate,GroupWatchSchema } from '@dafeiyu/contracts';
 import type { ActionCapability,ExecutionContext,PersonaSourceRef,ActivityScheduleBody,MemoryMaintenanceSchedulingPort,ActivityDomainEvent } from '@dafeiyu/contracts';
 import { ActivityStore,activityHash } from './store.js';
 import { ActivityScheduler } from './scheduler.js';
@@ -16,6 +16,7 @@ const trigger=z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('condition'),event:z.enum(['task-settled','memory-pending'])}),
 ]);
 const planSchema=z.strictObject({requestId:PersonaRequestIdSchema,goal:z.string().trim().min(1).max(2000),basis:z.array(PersonaSourceRefSchema).max(8).default([]),
+  kind:z.enum(['exploration','group-watch']).default('exploration'),watch:GroupWatchSchema.optional(),
   trigger,missed:z.enum(['skip','coalesce','run-once']).default('coalesce'),quiet:z.array(QuietWindowSchema).max(8).optional(),timeZone:ActivityTimeZoneSchema.optional()});
 const updateSchema=z.strictObject({id:z.uuid(),requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().positive(),
   state:z.enum(['active','paused','cancelled']).optional(),trigger:trigger.optional(),missed:z.enum(['skip','coalesce','run-once']).optional(),
@@ -27,7 +28,7 @@ declare module '@deepseek-ai/cordis' {interface Context {dafeiyuActivity:Activit
 export const ACTIVITY_ACTIONS=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status','dafeiyu_activity_rest'] as const;
 
 export class ActivityService extends Service {
-  management(action:string,raw:unknown){if(action==='plan.update'){const input=z.strictObject({id:z.uuid(),requestId:z.uuid(),expectedVersion:z.number().int().positive(),state:z.enum(['active','paused','cancelled'])}).parse(raw),plan=this.store.get(input.id);return this.store.update(input.id,plan.body.owner,{requestId:input.requestId,expectedVersion:input.expectedVersion,state:input.state},this.now());}if(action==='configure-budget')return this.store.rounds.configure(raw);if(action!=='status')throw new Error('MANAGEMENT_ACTION_INVALID');return {health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list()};}
+  management(action:string,raw:unknown){if(action==='plan.update'){const input=z.strictObject({id:z.uuid(),requestId:z.uuid(),expectedVersion:z.number().int().positive(),state:z.enum(['active','paused','cancelled'])}).parse(raw),plan=this.store.get(input.id);return this.store.update(input.id,plan.body.owner,{requestId:input.requestId,expectedVersion:input.expectedVersion,state:input.state},this.now());}if(action==='configure-budget')return this.store.rounds.configure(raw);if(action!=='status')throw new Error('MANAGEMENT_ACTION_INVALID');return {health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list(),admission:this.store.admission.gates(),explorations:this.store.admission.list().slice(0,20)};}
   pendingEvents(){return pendingActivityEvents(this.config.dataDir); }
   readonly store:ActivityStore;
   readonly config:z.output<typeof configSchema>;
@@ -46,6 +47,8 @@ export class ActivityService extends Service {
       contexts:[{id:'wake',prepare:async view=>this.scheduler.context(view),validate:(view,item)=>this.scheduler.contextCurrent(view,item)}]});}
     catch(error){this.store.close();throw error;}
     try{this.scheduler=new ActivityScheduler(ctx,this.store,this.configHash,()=>this.gate.active&&!this.closed,this.now,monotonic);}catch(error){this.handle.dispose();this.store.close();throw error;}
+    const releaseSharing=ctx.dafeiyu.bindActivitySharing(()=>({enabled:this.gate.active&&!this.closed&&this.config.settings.ownerSharing.enabled,cooldownMs:this.config.settings.ownerSharing.cooldownMs}));ctx.effect(()=>releaseSharing,'activity.sharing');
+    const releasePatrol=ctx.dafeiyu.bindPatrolValidator((id,version,target,reply)=>{try{const plan=this.store.get(id);return this.gate.active&&!this.closed&&plan.status==='active'&&plan.body.version===version&&plan.body.purpose==='group-watch'&&!!plan.body.watch&&(!reply||plan.body.watch.reply)&&!!plan.body.anchor&&ctx.dafeiyu.patrolResources(plan.body.anchor).some(scene=>activityHash(scene)===activityHash(target))&&(plan.body.watch.mode==='joined'||plan.body.watch.groupIds.includes(target.id));}catch{return false;}});ctx.effect(()=>releasePatrol,'activity.patrol');
     ctx.effect(()=>()=>this.close(),'activity.close');
   }
   private access(context:ExecutionContext,write:boolean){if(this.closed)throw new Error('DEPENDENCY_UNAVAILABLE');this.gate.assertActive();
@@ -56,7 +59,8 @@ export class ActivityService extends Service {
     return value.kind==='condition'?{...value,key:`task:${context.taskId}`}:value;
   }
   plan(context:ExecutionContext,raw:unknown){const input=planSchema.parse(raw),access=this.basis(context,input.basis),anchor=this.ctx.dafeiyu.captureActivityAnchor(context,'activity');
-    return this.store.create({schemaVersion:1,requestId:input.requestId,agentId:this.config.agentId,owner:access.view.scope,purpose:'exploration',goal:input.goal,basis:input.basis,anchor,maintenanceId:null,
+    if(input.kind==='group-watch'&&(!input.watch||!this.ctx.dafeiyu.isOwnerExecution(context,'activity')||input.watch.reply&&!this.ctx.dafeiyu.patrolReplyPermitted(context)))throw new Error('PATROL_AUTHORIZATION_REQUIRED');
+    return this.store.create({schemaVersion:1,requestId:input.requestId,agentId:this.config.agentId,owner:access.view.scope,purpose:input.kind,...(input.watch?{watch:input.watch}:{}),goal:input.goal,basis:input.basis,anchor,maintenanceId:null,
       policyId:this.config.settings.explorationPolicy,configHash:this.configHash,trigger:this.trigger(context,input.trigger),missed:input.missed,
       timeZone:input.timeZone??this.config.settings.timeZone,quiet:input.quiet??this.config.settings.quiet,state:'active'},this.now());
   }
@@ -68,7 +72,7 @@ export class ActivityService extends Service {
     return this.store.update(id,access.view.scope,{...patch,...(input.goal!==undefined?{basis:input.basis??[]}:{}),...(input.trigger?{trigger:this.trigger(context,input.trigger)}:{}),...(anchor?{anchor}:{}),configHash:this.configHash},this.now());
   }
   status(context:ExecutionContext,id?:string){
-    if(this.ctx.dafeiyu.isOwnerExecution(context,'activity'))return id?this.store.get(id):{health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list()};
+    if(this.ctx.dafeiyu.isOwnerExecution(context,'activity'))return id?this.store.get(id):{health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list(),admission:this.store.admission.gates(),explorations:this.store.admission.list().slice(0,20)};
     const access=this.access(context,false),plans=id?[this.store.get(id,access.view.scope)]:this.store.list(access.view.scope);
     return plans.map(plan=>{const source=plan.body.anchor?this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor):{state:'stale',code:'ACTIVITY_SOURCE_REQUIRED'};return {id:plan.body.id,version:plan.body.version,status:plan.status,purpose:plan.body.purpose,goal:source.state==='stale'?null:plan.body.goal,trigger:plan.body.trigger,
       quiet:plan.body.quiet,timeZone:plan.body.timeZone,nextDueAt:plan.nextDue===null?null:new Date(plan.nextDue).toISOString(),notBefore:new Date(plan.notBefore).toISOString(),error:plan.error,
@@ -79,7 +83,7 @@ export class ActivityService extends Service {
       execute:async(input,c)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(fn(input,c)),sources:[],receipts:[]};}
         catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'ACTIVITY_FAILED';
           return {status:'failed',effects:write&&!['INVALID_INPUT','SOURCE_NOT_EXPOSED','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','SCOPE_DENIED','ACTIVITY_CANCELLED','ACTIVITY_INTERVAL_TOO_SHORT','ACTIVITY_SOURCE_REQUIRED','ACTIVITY_REPLAN_REQUIRED','ACTIVITY_QUIET_ALL_DAY','PRIVATE_INPUT_REJECTED'].includes(code)?'unknown':'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});
-    return [make(ACTIVITY_ACTIONS[3],'当前活动完成后结束本轮并休息；不重置已经发生的用量。',z.strictObject({}),true,(_i,c)=>{this.access(c,true);return this.scheduler.rest(c.runId);}),make(ACTIVITY_ACTIONS[0],'为自己建立有来源的探索计划。时间安排不授予新的数据或平台权限；可以休息。',planSchema,true,(i,c)=>this.plan(c,i)),
+    return [make(ACTIVITY_ACTIONS[3],'当前活动完成后结束本轮并休息；不重置已经发生的用量。',z.strictObject({}),true,(_i,c)=>{this.access(c,true);return this.scheduler.rest(c.runId);}),make(ACTIVITY_ACTIONS[0],'创建持久计划。主人授权定期看群时 kind=group-watch，watch 指定 joined 或 fixed 与是否回复，trigger 使用 interval；兴趣探索使用 exploration。必须返回实际计划ID。计划不能扩大数据或发言权限。',planSchema,true,(i,c)=>this.plan(c,i)),
       make(ACTIVITY_ACTIONS[1],'持版本调整自己计划的时间、频率或暂停／取消。改变探索目标创建新的工作代次，原Task目标不改写。',updateSchema,true,(i,c)=>this.update(c,i)),
       make(ACTIVITY_ACTIONS[2],'查看当前Task拥有或正在执行的活动计划，不读取其它任务。',z.strictObject({id:z.uuid().optional()}),false,(i,c)=>this.status(c,z.object({id:z.uuid().optional()}).parse(i).id))];
   }

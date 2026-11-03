@@ -25,7 +25,7 @@ export const MessageTaskSubmitSchema=z.strictObject({requestId:PersonaRequestIdS
   .refine(value=>value.kind==='self-exploration'?value.goal!==undefined&&value.voiceExposureId===undefined:value.goal===undefined,'Explicit goals must come from the real message');
 export const MessageInstructionSubmitSchema=z.strictObject({requestId:MessageTaskSubmitSchema.shape.requestId,title:MessageTaskSubmitSchema.shape.title,kind:z.literal('explicit-task').optional(),voiceExposureId:MessageTaskSubmitSchema.shape.voiceExposureId,toolStage:MessageTaskSubmitSchema.shape.toolStage,intent:MessageTaskSubmitSchema.shape.intent});
 export const MessageExplorationSubmitSchema=z.strictObject({requestId:MessageTaskSubmitSchema.shape.requestId,title:MessageTaskSubmitSchema.shape.title,goal:MessageTaskSubmitSchema.shape.goal.unwrap()});
-export const MessageTaskStatusSchema=z.strictObject({taskId:z.uuid()});
+export const MessageTaskStatusSchema=z.strictObject({taskId:z.uuid().optional(),offset:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(50).default(20)});
 export const MessageTaskControlSchema=z.strictObject({requestId:PersonaRequestIdSchema,taskId:z.uuid(),expectedVersion:z.number().int().positive(),action:z.enum(['cancel','revise','resolve','resume']),objectionId:z.uuid().optional(),voiceExposureId:z.uuid().optional()})
   .refine(value=>value.action==='resolve'?value.objectionId!==undefined:value.objectionId===undefined);
 const voiceSourceSchema=z.strictObject({bindingVersion:z.string().min(1).max(100),evidence:MediaVoiceEvidenceSchema});

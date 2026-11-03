@@ -1,6 +1,6 @@
 # 当前接口与记忆驱动架构
 
-本文件依据本轮源代码整理。自有模块统一为 0.27.0（API_VERSION = 6），扩展协议由 contracts 的 API_VERSION 唯一定义。
+本文件依据本轮源代码整理。自有模块统一为 0.28.0（API_VERSION = 7），扩展协议由 contracts 的 API_VERSION 唯一定义。
 
 ## 单一当前接口
 

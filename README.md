@@ -1,6 +1,6 @@
 # 大肥鱼 · dsh-dafeiyu
 
-**0.27.0** · Windows · Node.js 24.13+（24.x）· DSH SDK 0.2.1-rc.2
+**0.28.0** · Windows · Node.js 24.13+（24.x）· DSH SDK 0.2.1-rc.2
 
 运行在 DeepSeek Harness 上的可成长智能体，整合 QQ、B站、媒体、持续任务、长期记忆和自主活动。程序管理身份、来源、权限、预算与交付；模型选择方法、理解材料并表达结果。
 

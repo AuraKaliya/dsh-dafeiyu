@@ -53,6 +53,7 @@ interface Dependencies {
   projectConversation?:()=>Promise<void>;
   messageResources?:(item:import('@dafeiyu/contracts').PendingMessage)=>readonly Conversation[];
   isOwnerMessage?:(item:import('@dafeiyu/contracts').PendingMessage)=>boolean;
+  activitySharing?:()=>{target:Conversation;policyHash:string;cooldownMs:number}|null;
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
   settled?:(runId:string)=>void;
   progress?:(runId:string)=>Promise<Json>;
@@ -103,6 +104,11 @@ export class ExecutionCoordinator {
     this.validateMessageSource(source);return this.d.isOwnerMessage?.(this.d.journal.get(source.inboundId))??false;
   }
   producerResources(producer:string,policyId:string){return this.policy(producer,policyId).resources;}
+  patrolResources(anchor:ActivityAnchor){if(this.activityAnchorStatus(anchor).state!=='valid')throw new Error('PATROL_SOURCE_STALE');const run=this.d.store.get(anchor.runId),source=savedSchema.parse(this.d.store.request(run.requestKey).payload).messageSource;
+    if(!source||source.kind!=='explicit-task')throw new Error('SCOPE_DENIED');const {item}=this.validateMessageSource(source);if(!this.d.isOwnerMessage?.(item))throw new Error('SCOPE_DENIED');return this.messageResources(item.id).filter(scene=>scene.channel==='qq'&&scene.kind==='group');}
+  patrolReplyPermitted(context:ExecutionContext){if(!this.isOwnerExecution(context,'activity'))return false;const run=this.d.store.get(context.runId),source=savedSchema.parse(this.d.store.request(run.requestKey).payload).messageSource;
+    if(!source)return false;const text=[source.intent?.originalRequest?.text??messageMainText(this.d.journal.get(source.inboundId).message),...(source.intent?.amendments.map(part=>part.text)??[])].filter(Boolean).join('\n');
+    return /群/u.test(text)&&/回复|发言|参与|聊/u.test(text)&&!/(不要|不许|禁止|不再).{0,12}(回复|发言|参与)|只.{0,6}看/u.test(text);}
   taskContextScope(view:ExecutionView,owner:string,scene:Conversation){
     const lease=this.contextLeases.get(view);if(!lease||lease.owner!==owner||lease.runId!==view.runId)return null;
     const run=this.d.store.get(view.runId);if(run.definition.scope.kind!=='task'||!this.allowedResource(run,scene))return null;
@@ -129,7 +135,9 @@ export class ExecutionCoordinator {
     const resolved=binding.voice.resolve(context,message,exposureId);if(!binding.voice.current(message,resolved.evidence))throw new Error('SOURCE_STALE');
     return {directive:binding.classify({...message,batch:undefined,mainText:resolved.text}),voice:{bindingVersion:binding.voice.version,evidence:resolved.evidence}};
   }
-  describeMessageResult(id:string){const run=this.d.store.get(id),source=savedSchema.safeParse(this.d.store.request(run.requestKey).payload);if(!['completed','waiting'].includes(run.state)||run.definition.scope.kind!=='task'||!source.success||!source.data.messageSource)return null;
+  describeMessageResult(id:string){const run=this.d.store.get(id),source=savedSchema.safeParse(this.d.store.request(run.requestKey).payload);if(!['completed','waiting'].includes(run.state)||run.definition.scope.kind!=='task'||!source.success)return null;
+    if(!source.data.messageSource){const share=this.d.store.activityShare(id),policy=this.d.activitySharing?.();if(!share||!policy||policy.policyHash!==share.policyHash||share.notBefore>Date.now())return null;
+      return {item:null,autoDeliver:true,anchor:TaskResultAnchorSchema.parse({kind:'activity-result',schemaVersion:1,taskId:run.definition.taskId,runId:run.id,shareId:share.id,target:share.target,intentVersion:run.definition.intentVersion,authorityVersion:share.policyHash,expiresAt:share.expiresAt})};}
     const provenance=source.data.messageSource,binding=this.messageBindings.get(provenance.bindingId),item=this.d.journal.get(provenance.inboundId);
     return {item,autoDeliver:binding?.active()&&binding.autoDeliver===true,anchor:TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:run.definition.taskId,runId:run.id,inboundId:item.id,target:provenance.conversation,intentVersion:run.definition.intentVersion,authorityVersion:provenance.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})})};}
   private validateMessageSource(source:MessageTaskSource){const binding=this.messageBindings.get(source.bindingId),item=this.d.journal.get(source.inboundId);
@@ -164,6 +172,10 @@ export class ExecutionCoordinator {
       if(!source||runtimeHash(source.conversation)!==expected)continue;
       const prior=rows.get(taskId);if(!prior||prior.updatedAt<run.updatedAt)rows.set(taskId,run);}
     return [...rows.values()].sort((a,b)=>a.updatedAt<b.updatedAt?1:-1);
+  }
+  requestActivityShare(runId:string,dedupeKey:string){const run=this.d.store.get(runId),policy=this.d.activitySharing?.();
+    if(!policy||run.state!=='completed'||!run.result||run.definition.origin.kind!=='native'||run.definition.origin.producerId!=='activity'||this.d.store.request(run.requestKey).producer!=='activity')return null;
+    return this.d.store.queueActivityShare(runId,runtimeHash([policy.target,dedupeKey]),policy.target,policy.policyHash,policy.cooldownMs);
   }
   private messageTaskTarget(binding:MessageTaskBinding,scene:Conversation,taskId?:string):{run:StoredRun|null;ambiguous:boolean;candidates:string[]}{
     if(taskId)return {run:this.findMessageTask(binding,scene,taskId),ambiguous:false,candidates:[taskId]};
@@ -306,9 +318,10 @@ export class ExecutionCoordinator {
     }catch{return false;}
   }
   async nativeResultAccess(id:string):Promise<NativeExpressionAccess>{const run=this.d.store.get(z.uuid().parse(id));if(run.definition.scope.kind!=='task'||!['completed','waiting'].includes(run.state)||run.state==='completed'&&!run.result)throw new Error('RESULT_UNAVAILABLE');
-    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;if(!source)throw new Error('MESSAGE_REQUIRED');this.validateMessageSource(source);
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
+    if(source)this.validateMessageSource(source);else if(!this.describeMessageResult(id))throw new Error('ACTIVITY_SHARING_UNAVAILABLE');
     const inputs=this.inputsFor(run),inputHash=runtimeHash(inputs),task=this.repository().readState(this.d.agentId,run.definition.taskId!),proof=z.array(SourceDependencySchema).parse(this.d.store.readInput(run.id,'result-sources'));
-    const structuralGuard=()=>{this.d.signal.throwIfAborted();this.validateMessageAncestors(run);const current=this.repository().readState(this.d.agentId,task.id);
+    const structuralGuard=()=>{this.d.signal.throwIfAborted();this.validateMessageAncestors(run);if(!source&&!this.describeMessageResult(id))throw new Error('SOURCE_STALE');const current=this.repository().readState(this.d.agentId,task.id);
       if(current.status!=='active'||current.epoch!==run.definition.intentVersion||runtimeHash(this.inputsFor(run))!==inputHash)throw new Error('SOURCE_STALE');};structuralGuard();
     const access=this.d.personas.access(run,inputs,this.d.signal,structuralGuard),evidence=this.evidenceFor(run,access);
     // Rebuild provider leases after a process restart before checking persisted context proofs.
@@ -319,7 +332,7 @@ export class ExecutionCoordinator {
       },this.d.signal,this.d.context.prepareTimeoutMs);
     }
     const guard=()=>{structuralGuard();if(this.d.store.get(run.id).state!==run.state||run.state==='waiting'&&this.d.store.list().some(next=>next.definition.parentRunId===run.id)||!evidence.validate(proof)||run.state==='completed'&&this.d.memory()?.intent(access).blocking)throw new Error('SOURCE_STALE');const persona=this.d.store.personaBinding(run.id);if(persona.kind==='bound')this.d.personas.validateStored(run,persona.manifest,inputs,this.d.signal,structuralGuard);};guard();
-    const intent=this.d.memory()?.intent(access),output=run.result?await this.d.runtime.readResult(run.result):(intent?.events.filter(event=>event.kind==='objection'&&event.blocking&&!intent.events.some(resolved=>resolved.resolves===event.id)).map(event=>`${event.category}：${event.reason}`).join('\n')||'任务处于等待状态，尚未完成。');guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=source.kind==='self-exploration',derivedInputComplete=!opaque;
+    const intent=this.d.memory()?.intent(access),output=run.result?await this.d.runtime.readResult(run.result):(intent?.events.filter(event=>event.kind==='objection'&&event.blocking&&!intent.events.some(resolved=>resolved.resolves===event.id)).map(event=>`${event.category}：${event.reason}`).join('\n')||'任务处于等待状态，尚未完成。');guard();const candidates=new Map<string,{source:PersonaSourceRef;view:string|null}>(),views=new Map<string,string>(),visited=new Set<string>();let opaque=!source||source.kind==='self-exploration',derivedInputComplete=!opaque;
     const wake=this.wakeOrigins(run)[0],operationalEvidence:import('@dafeiyu/contracts').NativeExpressionPacket['evidence']=wake?[{id:'WAKE',kind:'reported',text:JSON.stringify({kind:'scheduled-wake',goal:task.goal,dueAt:wake.dueAt,note:'由真实计划触发的新一次唤醒；只向原QQ会话整理本次安排，不把旧聊天当成新命令或补回复。'})}]:[];
     const add=(ref:PersonaSourceRef)=>{const key=runtimeHash(ref);candidates.set(key,{source:ref,view:views.get(key)??null});};
     const visit=(dependencies:readonly SourceDependency[])=>{for(const dependency of dependencies){const key=runtimeHash(dependency);if(visited.has(key))continue;visited.add(key);
@@ -367,15 +380,15 @@ export class ExecutionCoordinator {
           if(!(dependency.owner==='memory'&&dependency.region==='growth'))derivedInputComplete=false;}
       }else {opaque=true;derivedInputComplete=false;}
     }};visit(proof);for(const [key,candidate] of candidates)candidate.view=views.get(key)??candidate.view;
-    const anchor=TaskResultAnchorSchema.parse({kind:'task-result',schemaVersion:1,taskId:task.id,runId:run.id,inboundId:source.inboundId,target:source.conversation,intentVersion:run.definition.intentVersion,authorityVersion:source.authorityVersion,expiresAt:new Date(Date.parse(run.updatedAt)+900000).toISOString(),...(run.state==='waiting'?{outcome:'waiting'}:{})});
-    const expressionPolicy=this.validateMessageSource(source).binding.expressionPolicy;
+    const anchor=this.describeMessageResult(id)!.anchor;
+    const expressionPolicy=source?this.validateMessageSource(source).binding.expressionPolicy:undefined;
     const progress=this.d.store.readInput(run.id,'automatic-progress');
     if(progress)operationalEvidence.push({id:'PROGRESS',kind:'reported',text:JSON.stringify(this.progressFacts(progress))});
     operationalEvidence.push({id:'WORKFLOW',kind:'reported',text:JSON.stringify(this.resultWorkflow(run.id))});
     if(run.state==='waiting')operationalEvidence.push({id:'STATE',kind:'reported',text:JSON.stringify({state:run.state,error:run.error,note:'程序等待状态，不表示目标已经满足。'})});
     const reviewed=z.object({review:TaskReviewSchema}).safeParse(this.d.store.readInput(run.id,'task-review'));
-    const handoff=this.d.store.readInput(run.id,'stage-handoff')?stageHandoff('delivery',source.kind==='self-exploration'&&!wake?'向当前会话分享获准的探索结果':task.goal,{taskId:task.id,runId:run.id,intentVersion:run.definition.intentVersion},this.validateMessageSource(source).item.message,{state:run.state,answerVisibilityAtPreparation:'candidate-not-yet-sent'},source.control?this.d.journal.get(source.control.inboundId).message:null):undefined;
-    const expression:NativeExpressionAccess={execution:access,...(handoff?{handoff}:{}),readSources:read=>evidence.readSources(read),anchor,question:source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,maxTokens:this.d.context.maxTokens,...(expressionPolicy?{expressionPolicy}:{}),...(reviewed.success?{review:reviewed.data.review}:{}),guard};
+    const handoff=source&&this.d.store.readInput(run.id,'stage-handoff')?stageHandoff('delivery',source.kind==='self-exploration'&&!wake?'向当前会话分享获准的探索结果':task.goal,{taskId:task.id,runId:run.id,intentVersion:run.definition.intentVersion},this.validateMessageSource(source).item.message,{state:run.state,answerVisibilityAtPreparation:'candidate-not-yet-sent'},source.control?this.d.journal.get(source.control.inboundId).message:null):undefined;
+    const expression:NativeExpressionAccess={execution:access,...(handoff?{handoff}:{}),readSources:read=>evidence.readSources(read),anchor,question:!source?'向主人自然分享这次探索中一个具体的新发现，用一到两条QQ消息，每条一到两句。保留实际阅读范围，不发送内部长篇反思；没有读到画面或音轨时如实说明。':source.kind==='self-exploration'&&!wake?'根据当前会话可使用的原始资料整理自主探索发现；保留不确定性，不转述内部目标或理由。':task.goal,output,candidates:[...candidates.values()],operationalEvidence,opaqueInfluence:opaque,derivedInputComplete,requestMaxBytes:this.d.context.requestMaxBytes-this.d.context.outputReserveBytes,maxTokens:this.d.context.maxTokens,...(expressionPolicy?{expressionPolicy}:{}),...(reviewed.success?{review:reviewed.data.review}:{}),guard};
     const media=this.d.media?.()?.nativeMaterial?.(expression);return media?{...expression,media}:expression;
   }
   originRecallScope(view:ExecutionView,owner:string):{conversation:Conversation;query:string;stamp:string}|null{
@@ -414,7 +427,11 @@ export class ExecutionCoordinator {
       result.push({id:task.id,version:runtimeHash(data),data,proof:{runId:run.id,taskId:task.id,sourceHash:runtimeHash(source)},guard});
     }catch{/* A revoked source cannot supply a fallback goal. */}}return result;
   }
-  messageTaskStatus(context:ExecutionContext,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),{taskId}=MessageTaskStatusSchema.parse(raw),run=this.findMessageTask(binding,item.message.conversation,taskId);
+  messageTaskStatus(context:ExecutionContext,pluginId:string,raw:unknown){const {binding,item}=this.messageAuthority(context,pluginId,false),input=MessageTaskStatusSchema.parse(raw),scenes=this.isOwnerExecution(context,pluginId)?this.messageResources(item.id):[item.message.conversation];
+    const runs=[...new Map(scenes.flatMap(scene=>this.messageSceneTasks(binding,scene)).map(run=>[run.definition.taskId,run])).values()].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+    if(!input.taskId)return {total:runs.length,items:runs.slice(input.offset,input.offset+input.limit).map(run=>this.messageTaskStatusRecord(run,run.definition.taskId!)),nextOffset:input.offset+input.limit<runs.length?input.offset+input.limit:null};
+    const run=runs.find(run=>run.definition.taskId===input.taskId);if(!run)throw new Error('SCOPE_DENIED');return this.messageTaskStatusRecord(run,input.taskId);}
+  private messageTaskStatusRecord(run:StoredRun,taskId:string){
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
       resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',phase:this.d.store.phaseStatus(run.id),review:this.reviewStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
   feedbackSource(runId:string){const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
@@ -1036,7 +1053,9 @@ export class ExecutionCoordinator {
   }
   conversationActions(run:StoredRun,producer:string,signal:AbortSignal,guard:()=>void):NativeAction[]{
     const policy=this.conversationPolicy(producer);
+    const patrol=run.definition.origin.kind==='message'&&this.d.journal.events(run.definition.scope.kind==='conversation'?run.definition.scope.route:'').some(event=>event.traceId===(run.definition.origin.kind==='message'?run.definition.origin.inboundId:'')&&event.type==='patrol.selected');
     return this.d.registry.actions().filter(action=>basicCapability(action)||action.scope!=='task'&&policy?.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
+      .filter(action=>!patrol||['qq_groups','qq_browse','qq_forward_read','qq_reply_quote','dafeiyu_media_read','dafeiyu_media_inspect','dafeiyu_media_acquire','dafeiyu_memory_reflect'].includes(action.id))
       .map(action=>{const base=()=>{signal.throwIfAborted();guard();if(!action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');};return this.bindAction(run,action,signal,()=>{base();this.d.personas.current(run.id)?.guard();},base);});
   }
   async review(context:ExecutionContext,raw:unknown){

@@ -159,7 +159,7 @@ export class QqChannel extends Service {
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority,writeWindow)=>this.deliverTaskResult(reply,anchor,signal,authority,writeWindow) }] });
       this.batches=this.store.batches(this.config.messageBatch,{current:message=>{try{this.processingSignal(message).throwIfAborted();return true;}catch{return false;}},submit:message=>{const receipt=this.handle.ingest(message);if(!receipt.duplicate)this.counters.accepted++;},failed:()=>{this.error='BATCH_SUBMISSION_FAILED';}});
-      if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,
+      if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,ingestObserved:message=>this.handle.ingest(message),
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing),readHistory:(scene,signal)=>this.readHistory(scene,signal),readForward:(scene,messageId,index,signal)=>this.readForward(scene,messageId,index,signal)});
       if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,deliverResults:this.config.tasks.deliverResults,naturalNames:this.config.naturalNames,voiceDirectives:this.config.media.voiceDirectives,...(this.config.tasks.explorationResources?{explorationResources:this.config.tasks.explorationResources}:{}),...(this.config.tasks.expressionPolicy?{expressionPolicy:this.config.tasks.expressionPolicy}:{})});
       if(this.config.tasks.enabled)this.progress=bindQqProgress(ctx,this.config.agentId);
@@ -359,7 +359,7 @@ export class QqChannel extends Service {
       const scene=value.conversation;if(scene.channel!=='local-owner'||scene.account!==this.config.botId||scene.kind!=='local'||scene.id!==value.sourceMessageId||!/^local-owner:[a-f0-9-]{36}$/.test(scene.id))throw new Error('TARGET_NOT_ALLOWED');
       const source=this.ctx.dafeiyu.journal.messageFor({agentId:this.config.agentId,route:conversationKey(this.config.agentId,scene)},value.sourceMessageId);
       if(!source||source.extensionId!=='local-owner-tasks'||source.message.sender.id!==this.config.ownerId)throw new Error('SOURCE_MESSAGE_NOT_FOUND');
-      if(value.taskResult&&(value.taskResult.inboundId!==source.id||conversationKey(this.config.agentId,value.taskResult.target)!==conversationKey(this.config.agentId,scene)||Date.parse(value.taskResult.expiresAt)<=Date.now()))throw new Error('SOURCE_STALE');
+      if(value.taskResult&&(value.taskResult.kind!=='task-result'||value.taskResult.inboundId!==source.id||conversationKey(this.config.agentId,value.taskResult.target)!==conversationKey(this.config.agentId,scene)||Date.parse(value.taskResult.expiresAt)<=Date.now()))throw new Error('SOURCE_STALE');
       await this.api.verify(workSignal);authority();};
     // Each invocation supplies its own authority; the transport only retains immutable ledger state.
     this.localOwnerTransport??=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),
@@ -414,6 +414,7 @@ export class QqChannel extends Service {
     catch {if(signal.aborted)throw new Error(deliveryAbortCode(signal));this.verified=false;this.state = 'offline'; this.error = 'IDENTITY_UNAVAILABLE'; this.socket?.terminate();throw new Error('IDENTITY_UNAVAILABLE');}
     if(this.stopped||this.state!=='online')throw new Error('CHANNEL_OFFLINE');
     if (conversation.kind === 'group' && !this.groups.effective().includes(conversation.id)) throw new Error('TARGET_NOT_ALLOWED');
+    if(reply.taskResult?.kind==='activity-result'){if(conversation.kind!=='private'||reply.sourceMessageId!=='')throw new Error('TARGET_NOT_ALLOWED');this.ctx.dafeiyu.verifyActivityShareReply(reply);return;}
     if(this.ctx.dafeiyu.journal.messageRecalled({agentId:this.config.agentId,route:conversationKey(this.config.agentId,conversation)},reply.sourceMessageId))throw new Error('SOURCE_STALE');
     const route = this.cacheRoute(conversation);
     this.store.replyQuote(quoteKey(reply),route);

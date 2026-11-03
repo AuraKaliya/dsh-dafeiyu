@@ -25,6 +25,14 @@ const rowSchema = z.object({ seq: z.number().int().safe(), id: z.string(), sende
 
 /** Actual received text, bounded short-lived views, and durable version facts; no model or long-term memory decisions. */
 export class QqCache {
+  patrol(route:string,after:number,botId:string,generation:number){
+    z.number().int().nonnegative().safe().parse(after);
+    const rows=this.db.prepare("SELECT m.seq,m.id,m.sender,m.text,d.body FROM messages m JOIN qq_message_meta d ON m.route=d.route AND m.id=d.id WHERE m.route=? AND m.seq>? AND m.sender<>? AND d.deleted=0 ORDER BY m.seq DESC").all(route,after,botId);
+    const cursor=rows.length?Number(rows[0]!.seq):after;
+    for(const row of rows){const meta=metadataSchema.parse(JSON.parse(String(row.body)));if(!meta.occurredAt||Date.parse(meta.occurredAt)<this.now()-86400000||meta.groupGeneration!==generation)continue;
+      return {cursor,message:{...rowSchema.parse(row),metadata:meta}};
+    }return {cursor,message:null};
+  }
   private readonly instance = randomUUID();
   private readonly now: () => number;
   private readonly ttl: number;

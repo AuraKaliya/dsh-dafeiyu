@@ -3,7 +3,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ConversationSchema, CapabilitySelectionSchema, PersonaSourceRefSchema, redactContent } from '@dafeiyu/contracts';
-import type { Conversation, ExecutionContext, ActionCapability, ActionOutcome, PersonaSourceRef, ResourceProof, TimelineScope } from '@dafeiyu/contracts';
+import type { Conversation, ExecutionContext, ActionCapability, ActionOutcome, PersonaSourceRef, ResourceProof, TimelineScope,InboundMessage,Receipt } from '@dafeiyu/contracts';
 import { QqBrowseInputSchema, QqCacheProofSchema } from './cache.js';
 import type { QqStore } from './store.js';
 import type { GroupDirectory } from './groups.js';
@@ -17,6 +17,7 @@ const selectSchema = CapabilitySelectionSchema.omit({ observationId: true, versi
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const qqResourceRoute = (scene: Conversation) => JSON.stringify([scene.account, scene.kind, scene.id]);
 interface Host { agentId: string; botId: string; ownerId: string; store: QqStore; groups: GroupDirectory;
+  ingestObserved?(message:InboundMessage):Receipt;
   allowed(scene: Conversation): boolean; available(): boolean; readHistory?(scene:Conversation,signal:AbortSignal):Promise<unknown>;
   readForward?(scene:Conversation,messageId:string,index:number,signal:AbortSignal):Promise<unknown>; }
 
@@ -30,8 +31,13 @@ export class QqCapabilities {
       requires: ['memory.capability-observation.v1', 'execution.resource-scope.v1'], provides: ['qq.browse.v1'], lifecycleReady: () => !this.closed,
       resourceProofs: { current: proof => this.current(proof), epoch: scope => this.epoch(scope) },
       ownerDirectory:{channelExtensionId:'channel-qq',channel:'qq',account:host.botId,ownerId:host.ownerId,snapshot:()=>({
-        revision:this.epoch(),resources:[{channel:'qq',account:host.botId,kind:'private' as const,id:host.ownerId},
-          ...host.groups.effective().map(id=>({channel:'qq',account:host.botId,kind:'group' as const,id}))].filter(scene=>host.allowed(scene))})},actions: this.actions() });
+        revision:this.epoch(),available:host.available(),resources:[{channel:'qq',account:host.botId,kind:'private' as const,id:host.ownerId},
+        ...host.groups.effective().map(id=>({channel:'qq',account:host.botId,kind:'group' as const,id}))].filter(scene=>host.allowed(scene))}),
+        ...(host.ingestObserved?{patrol:{peek:(target:Conversation,cursor:number)=>{
+          if(target.kind!=='group'||!host.allowed(target)||!host.available())throw new Error('RESOURCE_SCOPE_DENIED');
+          const page=host.store.cache.patrol(qqResourceRoute(target),cursor,host.botId,host.groups.generation(target.id)),row=page.message;
+          return {cursor:page.cursor,message:row?{id:row.id,occurredAt:row.metadata.occurredAt!,conversation:target,sender:{id:row.sender,displayName:row.sender},text:row.text,mainText:row.text,...(row.metadata.media?{media:row.metadata.media}:{})}:null};
+        },ingest:(message:InboundMessage)=>host.ingestObserved!(message)}}:{})},actions: this.actions() });
   }
   private owner(context: ExecutionContext): string { this.ctx.dafeiyu.executionAuthority(context, 'qq-capabilities'); return JSON.stringify([context.scope, context.intentVersion]); }
   private assertAvailable(): void { if (this.closed || !this.host.available()) throw new Error('CHANNEL_UNAVAILABLE'); }

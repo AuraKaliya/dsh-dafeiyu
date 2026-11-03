@@ -1,7 +1,7 @@
 import {API_VERSION} from './protocol.js';
 import { z } from 'zod';
 import { ConversationSchema } from './conversation.js';
-import type { Json, ChannelCapability, Receipt } from './index.js';
+import type { Json, ChannelCapability, Receipt,InboundMessage } from './index.js';
 import type { ContextItem } from './context.js';
 import type { ResourceProofProvider } from './resource-observation.js';
 
@@ -69,7 +69,8 @@ export interface Extension {
   /** Trusted channel directory. Only the authenticated owner's private conversation may use it. */
   readonly ownerDirectory?: {
     readonly channelExtensionId:string;readonly channel:string;readonly account:string;readonly ownerId:string;
-    snapshot():{readonly resources:readonly z.output<typeof ConversationSchema>[];readonly revision:string};
+    snapshot():{readonly resources:readonly z.output<typeof ConversationSchema>[];readonly revision:string;readonly available?:boolean};
+    readonly patrol?:{peek(target:z.output<typeof ConversationSchema>,cursor:number):{cursor:number;message:InboundMessage|null};ingest(message:InboundMessage):Receipt};
   };
   readonly conversationContexts?: readonly import('./context.js').ContextContributor[];
   readonly compactionProvider?: import('./compaction.js').CompactionProvider;

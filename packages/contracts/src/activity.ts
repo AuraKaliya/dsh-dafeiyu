@@ -15,6 +15,7 @@ export const ActivityConfigSchema=z.strictObject({
   idleAfterMs:z.number().int().min(0).max(86400000).default(60000),
   tickMs:z.number().int().min(50).max(60000).default(5000),minIntervalMs:z.number().int().min(60000).max(86400000).default(60000),
   explorationIntervalMs:z.number().int().min(60000).max(7*86400000).default(1800000),restMs:z.number().int().min(60000).max(7*86400000).default(3600000),
+  ownerSharing:z.strictObject({enabled:z.boolean().default(true),cooldownMs:z.number().int().min(60000).max(86400000).default(1800000)}).prefault({}),
   maxPlans:z.number().int().min(1).max(1000).default(100),maxConcurrent:z.literal(1).default(1),
   roundTokens:z.number().int().min(1).max(100000000).default(100000),roundDurationMs:z.number().int().min(1).max(86400000).default(900000),
   backoffBaseMs:z.number().int().min(1000).max(3600000).default(60000),maxBackoffMs:z.number().int().min(1000).max(86400000).default(3600000),
@@ -26,8 +27,9 @@ export const ActivityConfigSchema=z.strictObject({
 export const ActivityAnchorSchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),runId:z.uuid(),operationId:z.uuid(),scope:ExecutionScopeSchema,
   intentVersion:version,kind:z.enum(['execution','maintenance']),hash});
 export type ActivityAnchor=z.infer<typeof ActivityAnchorSchema>;
+export const GroupWatchSchema=z.strictObject({mode:z.enum(['joined','fixed']).default('joined'),groupIds:z.array(z.string().regex(/^[1-9]\d{4,19}$/)).default([]),reply:z.boolean().default(false)});
 export const ActivityScheduleBodySchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),agentId:z.string().min(1).max(100),version,
-  owner:ExecutionScopeSchema,purpose:z.enum(['exploration','maintenance']),goal:z.string().trim().min(1).max(2000),
+  owner:ExecutionScopeSchema,purpose:z.enum(['exploration','maintenance','group-watch']),goal:z.string().trim().min(1).max(2000),watch:GroupWatchSchema.optional(),
   basis:z.array(PersonaSourceRefSchema).max(8),anchor:ActivityAnchorSchema.nullable(),maintenanceId:z.uuid().nullable(),
   policyId:ExtensionIdSchema,configHash:hash,taskGeneration:version,
   trigger:ActivityTriggerSchema,missed:z.enum(['skip','coalesce','run-once']),timeZone:ActivityTimeZoneSchema,

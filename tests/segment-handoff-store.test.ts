@@ -52,7 +52,7 @@ test('a crash after commit leaves one accepted child and replay preserves source
 });
 
 test('runtime v1 migrates explicitly with an intact snapshot and identity mismatches never write',async()=>{
-  const f=await fixture();f.store.close();const db=new DatabaseSync(f.file);db.exec('DROP TABLE message_intents; PRAGMA user_version=1');db.close();
+  const f=await fixture();f.store.close();const db=new DatabaseSync(f.file);db.exec('DROP TABLE native_share_requests; DROP TABLE message_intents; PRAGMA user_version=1');db.close();
   const before=await readFile(f.file),backup=join(f.root,'runtime-v1.sqlite');
   assert.equal(inspectRuntimeMigration(f.file,identity).state,'upgradable');
   assert.throws(()=>migrateRuntimeStorage(f.file,{...identity,agentId:'other'},backup),/IDENTITY_MISMATCH/);

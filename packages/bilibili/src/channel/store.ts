@@ -122,7 +122,7 @@ export class BiliOwnerStore {
   private logicalKey(plan:BiliOwnerDeliveryPlan){return plan.anchor?'task-result:'+plan.anchor.runId:'reply:'+plan.coreInboundId;}
   prepareReply(raw:Reply,now=Date.now()):BiliOwnerDelivery{const reply=BiliOwnerReplySchema.parse(raw);check(biliOwnerHash(reply.conversation)===biliOwnerHash(biliOwnerScene(this.identity)),'BILI_OWNER_TARGET_DENIED');return this.atomic(()=>{
     const source=this.source(reply.sourceMessageId);check(source?.state==='accepted'&&source.coreInboundId&&source.hash,'BILI_OWNER_SOURCE_NOT_READY');
-    if(reply.taskResult)check(reply.taskResult.inboundId===source.coreInboundId&&reply.taskResult.target.channel==='bilibili'&&biliOwnerHash(reply.taskResult.target)===biliOwnerHash(biliOwnerScene(this.identity)),'BILI_OWNER_TARGET_DENIED');
+    if(reply.taskResult)check(reply.taskResult.kind==='task-result'&&reply.taskResult.inboundId===source.coreInboundId&&reply.taskResult.target.channel==='bilibili'&&biliOwnerHash(reply.taskResult.target)===biliOwnerHash(biliOwnerScene(this.identity)),'BILI_OWNER_TARGET_DENIED');
     const text=reply.text.trim(),plan=BiliOwnerDeliveryPlanSchema.parse({schemaVersion:1,replyId:reply.id,requestId:'bili1_'+biliOwnerHash([this.identity,reply.id]),scene:biliOwnerScene(this.identity),sourceMessageId:reply.sourceMessageId,sourceHash:source.hash,
       coreInboundId:source.coreInboundId,anchor:reply.taskResult??null,bodyHash:biliOwnerTextHash(reply.text),wireHash:biliOwnerTextHash(text),text}),hash=biliOwnerHash(plan),old=this.delivery(reply.id);
     if(old){check(old.hash===hash,'BILI_OWNER_DELIVERY_CONFLICT');return old;}

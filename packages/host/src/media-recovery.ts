@@ -5,7 +5,7 @@ import { runtimeHash } from '@dafeiyu/core/runtime-store';
 
 /** Reconcile only matching persisted facts. This module never constructs OneBot or reads credentials. */
 export function reconcileMedia(core:DafeiyuService,media:MediaService,qqDirectory:string|undefined){
-    return media.reconcile(manifest=>{try{const item=core.deliveryFact(manifest.anchor.inboundId);if(item.sourceMessageId!==manifest.sourceMessageId||runtimeHash(item.target)!==runtimeHash(manifest.target))return 'conflict';
+    return media.reconcile(manifest=>{try{if(manifest.anchor.kind==='activity-result')return 'conflict';const item=core.deliveryFact(manifest.anchor.inboundId);if(item.sourceMessageId!==manifest.sourceMessageId||runtimeHash(item.target)!==runtimeHash(manifest.target))return 'conflict';
       const transport=readQqMediaDelivery(qqDirectory,manifest.replyId),progress=transport?.progress;
       if(transport&&runtimeHash(transport.manifest)!==runtimeHash(manifest))return 'conflict';
       if(progress?.state==='sent')return 'sent';if(progress&&(progress.unknown||progress.confirmed||progress.state==='sending'))return 'unknown';

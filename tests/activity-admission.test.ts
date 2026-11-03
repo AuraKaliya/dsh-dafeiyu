@@ -13,7 +13,7 @@ import {testTempDir} from './test-temp.js';
 test('unchanged exploration stays skipped across one hundred wakeups and a process restart',async()=>{
   const root=await mkdtemp(join(testTempDir(),'activity-admission-')),file=join(root,'activity.sqlite'),identity={agentId:'fish',profileId:'fixture'};
   let store=new ActivityStore(file,identity,{},true),submits=0,state='running';const runId=randomUUID();
-  const ctx={dafeiyu:{explorationCandidates:async()=>[{key:'bili:one',revision:'content-v1',provider:'bilibili',reference:'one',title:'One',prior:'none'}],managementUsage:()=>({tokens:12,knownTokens:12,calls:1}),executionProducer:()=>({submitTask:()=>{submits++;return {run:{id:runId}};},restoreRun:()=>({id:runId}),status:()=>({state,error:null,version:1,checkpoints:[]})})}} as unknown as Context;
+  const ctx={dafeiyu:{requestActivityShare:()=>null,explorationCandidates:async()=>[{key:'bili:one',revision:'content-v1',provider:'bilibili',reference:'one',title:'One',prior:'none'}],managementUsage:()=>({tokens:12,knownTokens:12,calls:1}),executionProducer:()=>({submitTask:()=>{submits++;return {run:{id:runId}};},restoreRun:()=>({id:runId}),status:()=>({state,error:null,version:1,checkpoints:[]})})}} as unknown as Context;
   try{let idle=new IdleActivity(ctx,store);assert.equal(await idle.start(0),true);idle.control(1,false);state='completed';idle.control(2,false);
     store.close();store=new ActivityStore(file,identity);idle=new IdleActivity(ctx,store);
     for(let n=1;n<=100;n++)assert.equal(await idle.start(n*1800000+2),false);

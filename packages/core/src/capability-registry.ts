@@ -61,7 +61,7 @@ export class CapabilityRegistry {
   }
   register(agentId: string, extension: Extension): {dispose():void} {
     if (Object.keys(extension).some(key => !allowedExtensionKeys.has(key))) throw new Error('INVALID_EXTENSION_FIELD');
-    if(extension.ownerDirectory)z.strictObject({channelExtensionId:z.string().min(1),channel:z.string().min(1),account:z.string().min(1),ownerId:z.string().min(1),snapshot:z.custom<()=>unknown>(value=>typeof value==='function')}).parse(extension.ownerDirectory);
+    if(extension.ownerDirectory)z.strictObject({channelExtensionId:z.string().min(1),channel:z.string().min(1),account:z.string().min(1),ownerId:z.string().min(1),snapshot:z.custom<()=>unknown>(value=>typeof value==='function'),patrol:z.object({peek:z.custom(value=>typeof value==='function'),ingest:z.custom(value=>typeof value==='function')}).optional()}).parse(extension.ownerDirectory);
     if(extension.explorationCatalog&&typeof extension.explorationCatalog.snapshot!=='function')throw new Error('INVALID_EXTENSION_CONTRACT');
     const metadata = ExtensionMetadataSchema.parse({ protocolVersion: extension.protocolVersion, id: extension.id, version: extension.version,
       agentId: extension.agentId, provides: extension.provides ?? [], requires: extension.requires ?? [] });

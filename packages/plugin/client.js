@@ -97,7 +97,7 @@ var h4 = import_react4.default.createElement;
 function ActivityPanel({ call, perform, ui: { Button: Button2, Detail: Detail2 } }) {
   const [value, setValue] = import_react4.default.useState(null);
   const load = async () => setValue(await call("status", null));
-  return h4("div", null, h4(Button2, { onClick: () => perform(load) }, "\u8BFB\u53D6\u8F6E\u6B21\u4E0E\u8BA1\u5212"), value && h4(import_react4.default.Fragment, null, h4("h4", null, "\u6700\u8FD1\u6D3B\u52A8\u8F6E\u6B21"), ...(value.rounds ?? []).map((round) => h4("article", { key: round.id, className: "df-record" }, h4("strong", null, round.endedAt === null ? "\u8FDB\u884C\u4E2D\u7684\u8F6E\u6B21" : "\u5DF2\u7ED3\u675F\u7684\u8F6E\u6B21"), h4("p", null, `\u5DF2\u5B8C\u6210 ${round.completed} \u9879 \xB7 ${(round.knownTokens / 1e4).toFixed(3)} \u4E07 Token${round.unknown ? "\uFF08\u53E6\u6709\u7528\u91CF\u5F85\u6838\u5B9E\uFF09" : ""} \xB7 ${(round.durationMs / 6e4).toFixed(2)} \u5206\u949F`), h4(Detail2, { title: "\u9884\u7B97\u5FEB\u7167\u4E0E\u7ED3\u675F\u539F\u56E0", value: round }))), h4("h4", null, "\u5DF2\u6709\u8BA1\u5212"), ...(value.plans ?? []).map((plan) => h4("article", { key: plan.body.id, className: "df-record" }, h4("strong", null, plan.body.goal), h4("p", { className: "df-muted" }, `${plan.status} \xB7 ${plan.body.purpose}`), h4(Detail2, { title: "\u89E6\u53D1\u6761\u4EF6\u4E0E\u6388\u6743\u4F9D\u636E", value: plan }), h4("div", { className: "df-actions" }, ...["paused", "active", "cancelled"].map((state) => h4(Button2, { key: state, disabled: plan.body.state === "cancelled" || plan.body.state === state, onClick: () => perform(async () => {
+  return h4("div", null, h4(Button2, { onClick: () => perform(load) }, "\u8BFB\u53D6\u8F6E\u6B21\u4E0E\u8BA1\u5212"), value && h4(import_react4.default.Fragment, null, h4("h4", null, "\u6700\u8FD1\u6D3B\u52A8\u8F6E\u6B21"), ...(value.rounds ?? []).map((round) => h4("article", { key: round.id, className: "df-record" }, h4("strong", null, round.endedAt === null ? "\u8FDB\u884C\u4E2D\u7684\u8F6E\u6B21" : "\u5DF2\u7ED3\u675F\u7684\u8F6E\u6B21"), h4("p", null, `\u5DF2\u5B8C\u6210 ${round.completed} \u9879 \xB7 ${(round.knownTokens / 1e4).toFixed(3)} \u4E07 Token${round.unknown ? "\uFF08\u53E6\u6709\u7528\u91CF\u5F85\u6838\u5B9E\uFF09" : ""} \xB7 ${(round.durationMs / 6e4).toFixed(2)} \u5206\u949F`), h4(Detail2, { title: "\u7528\u91CF\u8BB0\u5F55\u4E0E\u7ED3\u675F\u539F\u56E0", value: round }))), h4(Detail2, { title: "\u6682\u505C\u4E0E\u4F11\u606F\u72B6\u6001", value: value.admission }), h4(Detail2, { title: "\u63A2\u7D22\u5019\u9009\u8BB0\u5F55", value: value.explorations }), h4("h4", null, "\u5DF2\u6709\u8BA1\u5212"), ...(value.plans ?? []).map((plan) => h4("article", { key: plan.body.id, className: "df-record" }, h4("strong", null, plan.body.goal), h4("p", { className: "df-muted" }, `${plan.status} \xB7 ${plan.body.purpose}`), h4(Detail2, { title: "\u89E6\u53D1\u6761\u4EF6\u4E0E\u6388\u6743\u4F9D\u636E", value: plan }), h4("div", { className: "df-actions" }, ...["paused", "active", "cancelled"].map((state) => h4(Button2, { key: state, disabled: plan.body.state === "cancelled" || plan.body.state === state, onClick: () => perform(async () => {
     await call("plan.update", { id: plan.body.id, requestId: crypto.randomUUID(), expectedVersion: plan.body.version, state });
     await load();
   }) }, { paused: "\u6682\u505C\u540E\u7EED\u6267\u884C", active: "\u6062\u590D\u8BA1\u5212", cancelled: "\u53D6\u6D88\u8BA1\u5212" }[state])))))));
@@ -574,7 +574,7 @@ function createManagementApp(request) {
     const [view, setView] = import_react7.default.useState(null), [tab, setTab] = import_react7.default.useState("overview"), [selected, setSelected] = import_react7.default.useState(null), [busy, setBusy] = import_react7.default.useState(false), [notice, setNotice] = import_react7.default.useState(""), [drafts, setDrafts] = import_react7.default.useState({}), [foundation, setFoundation] = import_react7.default.useState(null);
     const describeSequence = import_react7.default.useRef(createSequenceGuard());
     const send = (body) => request(body).then(unwrapResponse);
-    const invoke = async (body) => send({ apiVersion: 6, ...body });
+    const invoke = async (body) => send({ apiVersion: 7, ...body });
     const refresh = async () => {
       const token = describeSequence.current.issue();
       const value = await invoke({ kind: "describe" });
@@ -15161,7 +15161,7 @@ async function apply(ctx) {
       throw new Error(result.error.code);
     return JSON.parse(result.value);
   };
-  const App = createManagementApp((body) => request({ apiVersion: 6, ...body }));
+  const App = createManagementApp((body) => request({ apiVersion: 7, ...body }));
   ctx.effect(() => {
     const style = document.createElement("style");
     style.textContent = style_default;

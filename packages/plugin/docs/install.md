@@ -123,7 +123,7 @@ npm install --prefix $deployDir --omit=dev --ignore-scripts --no-audit --no-fund
 
 ## 8. 升级与回退
 
-当前 B站库为 v6，运行库为 v3。新建库直接创建当前版本。已存在的受支持旧库使用：
+当前 B站库为 v6，运行库为 v4。新建库直接创建当前版本。已存在的受支持旧库使用：
 
 ```powershell
 & $nodeExe "$deployDir/bin/dafeiyu.mjs" migrate --settings $settingsFile
@@ -141,8 +141,10 @@ npm install --prefix $deployDir --omit=dev --ignore-scripts --no-audit --no-fund
 
 源码回归、独立发布包初始化、真实模型调用、QQ/B站真实交互分别记结果。缺少账号或真实平台仍受限时，不把离线测试通过写成全部平台验收完成。
 
-## 0.27 升级与长任务
+## 0.28 升级与长任务
 
-0.27 使用 API 6 与 runtime 数据库 v3；B站数据库仍为 v6。新装直接初始化当前结构。旧实例停机后运行发布包的显式迁移命令：迁移会检查身份、数据库完整性和占用，备份后逐表核对行数与内容摘要，再增加持久意图回执。不得直接修改 `user_version`。回退须同时恢复备份程序、配置和匹配数据库。
+0.28 使用 API 7 与 runtime 数据库 v4；B站数据库仍为 v6。新装直接初始化当前结构。旧实例停机后运行发布包的显式迁移命令：迁移会检查身份、数据库完整性和占用，备份后逐表核对行数与内容摘要，再增加持久意图回执。不得直接修改 `user_version`。回退须同时恢复备份程序、配置和匹配数据库。
 
 安装配置只保留一个模型容量入口：`contextCapacity: {"maxTokens": 1000000}`。阅读阶段用 `dsh_tool_list` 查参数，`dsh_tool_read` 执行宿主允许的只读工具，`dsh_result_read` 续读已有结果；本阶段不会取得 shell 或安装权限。已有任务的补充、确认和进度询问使用意图入口关联原任务，不把“可以”建立为新目标。
+
+0.28 升级还会显式迁移活动库 v2→v3、媒体库 v2→v3，并保留原表行数与内容摘要。新增的分享队列使用真实活动来源，不创建假的聊天消息；旧历史活动不会因升级批量补发。

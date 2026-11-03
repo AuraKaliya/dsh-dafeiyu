@@ -84,6 +84,17 @@ export class ActivityStore {
     this.rounds=new ActivityRounds(this.db,this.config,this.config.minIntervalMs);
   }
   management(){return this.db.prepare('SELECT id FROM activity_schedules ORDER BY rowid DESC LIMIT 100').all().map(row=>this.get(String(row.id)));}
+  patrolCursor(planId:string,route:string){return Number(this.db.prepare('SELECT cursor FROM activity_patrol_cursors WHERE plan_id=? AND route=?').get(planId,route)?.cursor??0);}
+  recordPatrol(planId:string,version:number,route:string,from:number,result:{cursor:number;state:string;inboundId:string|null},now:number){return this.transaction(()=>{
+    const plan=this.get(planId);if(plan.body.version!==version||plan.status!=='active')throw new Error('PATROL_SOURCE_STALE');
+    const previous=this.patrolCursor(planId,route);if(previous>result.cursor)return;
+    if(previous!==from&&previous!==result.cursor)throw new Error('PATROL_CURSOR_CONFLICT');
+    const id=activityHash([planId,version,route,plan.nextDue]);this.db.prepare('INSERT OR IGNORE INTO activity_patrol_receipts VALUES(?,?,?)').run(id,planId,JSON.stringify({route,from,...result,at:now}));
+    this.db.prepare('INSERT INTO activity_patrol_cursors VALUES(?,?,?) ON CONFLICT(plan_id,route) DO UPDATE SET cursor=excluded.cursor').run(planId,route,result.cursor);
+  });}
+  checkedPatrol(planId:string,version:number,now:number){this.transaction(()=>{const plan=this.get(planId),time=this.clock(now);if(plan.status!=='active'||plan.body.version!==version||plan.nextDue===null)throw new Error('PATROL_SOURCE_STALE');
+    const {next}=elapsedDue(plan.body,plan.nextDue,time,Math.max(this.config.minIntervalMs,this.config.tickMs*2));this.db.prepare('UPDATE activity_schedules SET next_due=?,status=? WHERE id=? AND version=?').run(next,next===null?'exhausted':'active',planId,version);
+  });}
   admitIdle(work:Parameters<IdleWorkStore['save']>[0],now:number){this.transaction(()=>{this.idle.save(work);this.rounds.admit('idle:'+work.id,now);});}
   private initialize(){createActivityStorageSchema(this.db);this.db.prepare('INSERT INTO activity_metadata VALUES(1,?)').run(JSON.stringify(this.identity));}
   private transaction<T>(work:()=>T):T {this.db.exec('BEGIN IMMEDIATE');try{const value=work();this.db.exec('COMMIT');return value;}catch(error){this.db.exec('ROLLBACK');throw error;}}
@@ -104,7 +115,8 @@ export class ActivityStore {
     if(body.agentId!==this.identity.agentId||body.owner.agentId!==this.identity.agentId)throw new Error('SCOPE_DENIED');
     if(body.anchor&&(activityScope(body.anchor.scope)!==activityScope(body.owner)&&body.purpose!=='exploration'))throw new Error('SCOPE_DENIED');
     if(body.trigger.kind==='interval'&&body.trigger.intervalMs<this.config.minIntervalMs)throw new Error('ACTIVITY_INTERVAL_TOO_SHORT');
-    if(body.purpose==='maintenance'&&!body.maintenanceId||body.purpose==='exploration'&&!body.anchor)throw new Error('ACTIVITY_SOURCE_REQUIRED');
+    if(body.purpose==='maintenance'&&!body.maintenanceId||body.purpose!=='maintenance'&&!body.anchor)throw new Error('ACTIVITY_SOURCE_REQUIRED');
+    if(body.purpose==='group-watch'&&(!body.watch||body.trigger.kind==='condition'))throw new Error('PATROL_PLAN_INVALID');
     validateQuiet(body.quiet);if(redactJson(z.json().parse(body)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');
   }
   private request<T>(scope:string,id:string,fingerprint:string,parse:(raw:unknown)=>T,write:()=>T):T {

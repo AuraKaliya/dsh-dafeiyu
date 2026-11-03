@@ -3,7 +3,7 @@ import { existsSync,mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { matchesSchema } from '@dafeiyu/journal';
 import { ownerAlive } from '@dafeiyu/journal/owner-identity';
-import { createStorageSchema,createStorageSchemaV2,addIntentReceiptsSchema } from './storage-schema.js';
+import { createStorageSchema,createStorageSchemaV2,createStorageSchemaV3,addIntentReceiptsSchema,addActivitySharesSchema } from './storage-schema.js';
 import { RUNTIME_APPLICATION_ID,RUNTIME_SCHEMA_VERSION,runtimeHash } from './runtime-store.js';
 import type { RuntimeIdentity } from './runtime-store.js';
 
@@ -19,7 +19,7 @@ export function inspectRuntimeMigration(file:string,identity:RuntimeIdentity){
   const db=new DatabaseSync(file,{readOnly:true});try{
     const version=Number(db.prepare('PRAGMA user_version').get()?.user_version),app=Number(db.prepare('PRAGMA application_id').get()?.application_id);
     const integrity=db.prepare('PRAGMA integrity_check').get()?.integrity_check==='ok';
-    const known=app===RUNTIME_APPLICATION_ID&&[1,2,RUNTIME_SCHEMA_VERSION].includes(version)&&matchesSchema(db,version===RUNTIME_SCHEMA_VERSION?createStorageSchema:createStorageSchemaV2);
+    const known=app===RUNTIME_APPLICATION_ID&&[1,2,3,RUNTIME_SCHEMA_VERSION].includes(version)&&matchesSchema(db,version===RUNTIME_SCHEMA_VERSION?createStorageSchema:version===3?createStorageSchemaV3:createStorageSchemaV2);
     let identityMatches=false,activeOwner=false;
     if(known){const row=db.prepare('SELECT body FROM runtime_metadata WHERE singleton=1').get();identityMatches=!!row&&runtimeHash(JSON.parse(String(row.body)))===runtimeHash(identity);
       const owner=db.prepare('SELECT pid,nonce FROM runtime_ownership WHERE singleton=1').get();activeOwner=!!owner&&ownerAlive(Number(owner.pid),{nonce:String(owner.nonce)});}
@@ -41,7 +41,7 @@ export function migrateRuntimeStorage(file:string,identity:RuntimeIdentity,backu
     const copy=new DatabaseSync(backup,{readOnly:true});try{if(runtimeHash(contents(copy))!==runtimeHash(original))throw new Error('RUNTIME_BACKUP_CONTENT_MISMATCH');}finally{copy.close();}
     db.exec('BEGIN IMMEDIATE');try{
       const current=inspectRuntimeMigration(file,identity);if(current.activeOwner||!current.identityMatches||current.version!==before.version)throw new Error('RUNTIME_MIGRATION_CHANGED');
-      addIntentReceiptsSchema(db);verified=contents(db,original.map(row=>row.table));
+      if(before.version<3)addIntentReceiptsSchema(db);addActivitySharesSchema(db);verified=contents(db,original.map(row=>row.table));
       if(runtimeHash(verified)!==runtimeHash(original))throw new Error('RUNTIME_MIGRATION_CONTENT_MISMATCH');
       db.exec(`PRAGMA user_version=${RUNTIME_SCHEMA_VERSION};COMMIT;`);
     }catch(error){db.exec('ROLLBACK');throw error;}

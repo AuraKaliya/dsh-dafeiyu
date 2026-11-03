@@ -89,31 +89,47 @@ export const managementDefinition={
       ]
     },
     {
-      "id": "budget",
-      "title": "活动预算",
-      "description": "有效触发后至少执行一次。每个活动完成后累计经费和时间，达到任一预算结束本轮；允许当前活动超出预算。用量未知时停止续行并标注待核实。",
+      "id": "scheduling",
+      "title": "探索、休息与分享",
+      "description": "上下文容量与调度分开。旧轮次预算仅保留历史记录，不作为任务总用量限制。",
       "fields": [
-        {
-          "path": "activity.roundTokens",
-          "label": "单轮经费",
-          "kind": "number",
-          "description": "运行中仅修改预算时，下轮生效；当前轮保留原预算。",
-          "unit": "万 Token",
-          "minimum": 0.0001,
-          "maximum": 10000,
-          "scale": 10000
-        },
-        {
-          "path": "activity.roundDurationMs",
-          "label": "单轮时间",
-          "kind": "number",
-          "description": "运行中仅修改预算时，下轮生效；当前轮保留原预算。",
-          "unit": "分钟",
-          "minimum": 0.001,
-          "maximum": 1440,
-          "scale": 60000
-        }
-      ],
+  {
+    "path": "activity.explorationIntervalMs",
+    "label": "自由探索候选检查间隔",
+    "kind": "number",
+    "unit": "分钟",
+    "scale": 60000,
+    "minimum": 1,
+    "maximum": 10080,
+    "description": "没有新材料不启动完整阅读；不限制已承接任务。"
+  },
+  {
+    "path": "activity.restMs",
+    "label": "默认休息时间",
+    "description": "保存后重启实例生效；不限制已经承接任务的上下文容量。",
+    "kind": "number",
+    "unit": "分钟",
+    "scale": 60000,
+    "minimum": 1,
+    "maximum": 10080
+  },
+  {
+    "path": "activity.ownerSharing.enabled",
+    "label": "向主人分享新发现",
+    "description": "保存后重启实例生效；不限制已经承接任务的上下文容量。",
+    "kind": "boolean"
+  },
+  {
+    "path": "activity.ownerSharing.cooldownMs",
+    "label": "普通分享最少间隔",
+    "description": "保存后重启实例生效；不限制已经承接任务的上下文容量。",
+    "kind": "number",
+    "unit": "分钟",
+    "scale": 60000,
+    "minimum": 1,
+    "maximum": 1440
+  }
+],
       "panel": "activity"
     }
   ],
