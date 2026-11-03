@@ -310,7 +310,7 @@ export class DafeiyuService extends Service {
         const native=tool?this.registry.actions().find(action=>action.id===tool):undefined;
         const details=native?{id:native.id,description:native.description,parameters:native.input}:null;
         return {status:'succeeded',effects:'none',completeness:'complete',data:z.json().parse({...catalog,details}),sources:[],receipts:[]};
-      }},{id:'dafeiyu_task_outcome',version:'1',description:'说明本轮应等待还是完成。依据实际工作自行判断；这条决定不会伪造操作成功或消息送达。',effects:'local-write',scope:'task',
+      }},{id:'dafeiyu_task_outcome',version:'1',description:'说明当前任务应等待还是完成。定期巡视计划已保存时，可以完成创建计划的任务，后续由计划独立触发；不要为了等下一轮把创建任务卡在能力缺失状态。requiredCapabilities只填尚未提供的具体工具名，不能填已有能力或协议标签。这条决定不代表操作成功或消息送达。',effects:'local-write',scope:'task',
         inputSchema:TaskDispositionSchema,outputSchema:z.json(),
         execute:async(input,context)=>{if(!this.executions)throw new Error('DEPENDENCY_UNAVAILABLE');return {status:'succeeded',effects:'confirmed',completeness:'complete',data:this.executions.setDisposition(context,input),sources:[],receipts:[]};}
       },{id:'dafeiyu_task_review',version:'1',description:'按需复核当前工作的草案与实际操作，获得有局限的建议。是否采纳、继续、等待和留下什么想法仍由你决定；不会自动修改任务或人格。',scope:'task',effects:'read',inputSchema:z.strictObject({proposal:z.string().trim().min(1).max(16000)}),outputSchema:z.json(),
