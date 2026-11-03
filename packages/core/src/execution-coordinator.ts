@@ -1,5 +1,5 @@
 import {withRunUsage} from './usage.js';
-import {TaskDispositionSchema} from '@dafeiyu/contracts';
+import {ActivityPlanReceiptSchema,TaskDispositionSchema} from '@dafeiyu/contracts';
 import {stageHandoff} from './context-handoff.js';
 import {readingStage} from './reading-stage.js';
 import {ExecutionToolReceiptSchema} from '@dafeiyu/contracts';
@@ -353,7 +353,8 @@ export class ExecutionCoordinator {
         else if(operation.plugin==='dsh-tools'&&operation.action==='dsh_tool_list'){/* Capability schemas are operational, not evidence about the task result. */}
         else if(outcome?.status==='succeeded'&&outcome.effects!=='unknown'&&(operation.plugin==='qq-progress'&&operation.action==='qq_progress'||operation.plugin==='memory-persona'&&['dafeiyu_qq_expression_save','dafeiyu_memory_pending','dafeiyu_memory_reflect','dafeiyu_memory_self_update','dafeiyu_memory_self_withdraw'].includes(operation.action)||operation.plugin==='activity'&&['dafeiyu_activity_plan','dafeiyu_activity_update'].includes(operation.action))){
           const parsed=z.record(z.string(),z.json()).safeParse(outcome.data),body=parsed.success?parsed.data:{},allowed=new Set(['id','version','slot','saved','removed','status','receiptId','state']);
-          operationalEvidence.push({id:'O'+operationalEvidence.length,kind:'reported',text:JSON.stringify({action:operation.action,status:outcome.status,effects:outcome.effects,data:Object.fromEntries(Object.entries(body).filter(([key,value])=>allowed.has(key)&&(typeof value==='string'||typeof value==='number'||typeof value==='boolean'))),note:'程序保存的实际操作回执；不由此推断未返回的内容。'})});
+          const plan=operation.plugin==='activity'?ActivityPlanReceiptSchema.safeParse(outcome.data):null;
+          operationalEvidence.push({id:'O'+operationalEvidence.length,kind:'reported',text:JSON.stringify({action:operation.action,status:outcome.status,effects:outcome.effects,data:plan?.success?plan.data:Object.fromEntries(Object.entries(body).filter(([key,value])=>allowed.has(key)&&(typeof value==='string'||typeof value==='number'||typeof value==='boolean'))),note:'程序保存的实际操作回执；计划字段描述该版本保存时的安排，不由此推断已巡视或已发送。'})});
         }
         else if(operation.plugin===CAPABILITY_OWNER&&operation.action==='dafeiyu_task_outcome'){/* Agent disposition, not a world fact. */}
         else if(!(operation.plugin==='qq-capabilities'&&['qq_observe_select','qq_reply_quote'].includes(operation.action))&&!(operation.plugin==='memory-execution'&&['dafeiyu_task_intent','dafeiyu_task_object','dafeiyu_execution_select'].includes(operation.action))){opaque=true;derivedInputComplete=false;}

@@ -6,7 +6,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { ActivityConfigSchema,ActivityTriggerSchema,QuietWindowSchema,ActivityTimeZoneSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,ServiceGate,GroupWatchSchema } from '@dafeiyu/contracts';
+import { ActivityConfigSchema,ActivityTriggerSchema,ActivityPlanReceiptSchema,QuietWindowSchema,ActivityTimeZoneSchema,PersonaSourceRefSchema,PersonaRequestIdSchema,ServiceGate,GroupWatchSchema } from '@dafeiyu/contracts';
 import type { ActionCapability,ExecutionContext,PersonaSourceRef,ActivityScheduleBody,MemoryMaintenanceSchedulingPort,ActivityDomainEvent } from '@dafeiyu/contracts';
 import { ActivityStore,activityHash } from './store.js';
 import { ActivityScheduler } from './scheduler.js';
@@ -58,18 +58,21 @@ export class ActivityService extends Service {
   private trigger(context:ExecutionContext,value:z.infer<typeof trigger>):ActivityScheduleBody['trigger']{
     return value.kind==='condition'?{...value,key:`task:${context.taskId}`}:value;
   }
+  private receipt(value:{id:string;version:number}){const body=this.store.snapshot(value.id,value.version);
+    return ActivityPlanReceiptSchema.parse({...value,purpose:body.purpose,state:body.state,trigger:body.trigger.kind==='condition'?{kind:body.trigger.kind,event:body.trigger.event}:body.trigger,
+      timeZone:body.timeZone,quiet:body.quiet,...(body.watch?{watch:{mode:body.watch.mode,reply:body.watch.reply}}:{}),recordedAt:body.updatedAt});}
   plan(context:ExecutionContext,raw:unknown){const input=planSchema.parse(raw),access=this.basis(context,input.basis),anchor=this.ctx.dafeiyu.captureActivityAnchor(context,'activity');
     if(input.kind==='group-watch'&&(!input.watch||!this.ctx.dafeiyu.isOwnerExecution(context,'activity')||input.watch.reply&&!this.ctx.dafeiyu.patrolReplyPermitted(context)))throw new Error('PATROL_AUTHORIZATION_REQUIRED');
-    return this.store.create({schemaVersion:1,requestId:input.requestId,agentId:this.config.agentId,owner:access.view.scope,purpose:input.kind,...(input.watch?{watch:input.watch}:{}),goal:input.goal,basis:input.basis,anchor,maintenanceId:null,
+    return this.receipt(this.store.create({schemaVersion:1,requestId:input.requestId,agentId:this.config.agentId,owner:access.view.scope,purpose:input.kind,...(input.watch?{watch:input.watch}:{}),goal:input.goal,basis:input.basis,anchor,maintenanceId:null,
       policyId:this.config.settings.explorationPolicy,configHash:this.configHash,trigger:this.trigger(context,input.trigger),missed:input.missed,
-      timeZone:input.timeZone??this.config.settings.timeZone,quiet:input.quiet??this.config.settings.quiet,state:'active'},this.now());
+      timeZone:input.timeZone??this.config.settings.timeZone,quiet:input.quiet??this.config.settings.quiet,state:'active'},this.now()));
   }
-  update(context:ExecutionContext,raw:unknown){const input=updateSchema.parse(raw),access=this.basis(context,input.basis??[]),plan=this.store.get(input.id,access.view.scope);
+  update(context:ExecutionContext,raw:unknown){const input=updateSchema.parse(raw),access=this.basis(context,input.basis??[]),ownerControl=this.ctx.dafeiyu.isOwnerExecution(context,'activity'),plan=this.store.get(input.id,ownerControl?undefined:access.view.scope);
     if(plan.body.purpose==='maintenance'&&(input.goal!==undefined||input.basis!==undefined))throw new Error('SCOPE_DENIED');
     const pauseOnly=(input.state==='paused'||input.state==='cancelled')&&input.goal===undefined&&input.basis===undefined&&input.trigger===undefined&&input.missed===undefined&&input.quiet===undefined&&input.timeZone===undefined;
     if(!pauseOnly&&plan.body.anchor&&this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor).state==='stale'&&input.goal===undefined)throw new Error('ACTIVITY_REPLAN_REQUIRED');
     const anchor=pauseOnly?undefined:this.ctx.dafeiyu.captureActivityAnchor(context,'activity');const {id,...patch}=input;
-    return this.store.update(id,access.view.scope,{...patch,...(input.goal!==undefined?{basis:input.basis??[]}:{}),...(input.trigger?{trigger:this.trigger(context,input.trigger)}:{}),...(anchor?{anchor}:{}),configHash:this.configHash},this.now());
+    return this.receipt(this.store.update(id,ownerControl?plan.body.owner:access.view.scope,{...patch,...(input.goal!==undefined?{basis:input.basis??[]}:{}),...(input.trigger?{trigger:this.trigger(context,input.trigger)}:{}),...(anchor?{anchor,...(ownerControl?{owner:access.view.scope}:{})}:{}),configHash:this.configHash},this.now()));
   }
   status(context:ExecutionContext,id?:string){
     if(this.ctx.dafeiyu.isOwnerExecution(context,'activity'))return id?this.store.get(id):{health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list(),admission:this.store.admission.gates(),explorations:this.store.admission.list().slice(0,20)};

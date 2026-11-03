@@ -36,6 +36,10 @@ export const ActivityScheduleBodySchema=z.strictObject({schemaVersion:z.literal(
   quiet:z.array(QuietWindowSchema).max(8),state:z.enum(['active','paused','cancelled']),createdAt:at,updatedAt:at,
 });
 export type ActivityScheduleBody=z.infer<typeof ActivityScheduleBodySchema>;
+/** Safe facts about the recorded plan revision, with no goal, source content or condition key. */
+export const ActivityPlanReceiptSchema=z.strictObject({id:z.uuid(),version,purpose:ActivityScheduleBodySchema.shape.purpose,state:ActivityScheduleBodySchema.shape.state,
+  trigger:z.discriminatedUnion('kind',[ActivityTriggerSchema.options[0],ActivityTriggerSchema.options[1],ActivityTriggerSchema.options[2].omit({key:true})]),
+  timeZone:ActivityTimeZoneSchema,quiet:z.array(QuietWindowSchema).max(8),watch:GroupWatchSchema.omit({groupIds:true}).optional(),recordedAt:at});
 export const ActivityDomainEventSchema=z.strictObject({id:PersonaRequestIdSchema,type:z.enum(['task-settled','memory-pending','resource-restored']),
   key:z.string().min(1).max(2000),watermark:z.string().min(1).max(200),occurredAt:at,origin:z.enum(['primary','activity','maintenance']),causedBy:z.string().max(200).nullable()});
 export type ActivityDomainEvent=z.infer<typeof ActivityDomainEventSchema>;

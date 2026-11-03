@@ -20,7 +20,7 @@ const createSchema=ActivityScheduleBodySchema.omit({id:true,version:true,created
 const updateSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().positive(),state:ActivityScheduleBodySchema.shape.state.optional(),
   trigger:ActivityScheduleBodySchema.shape.trigger.optional(),missed:ActivityScheduleBodySchema.shape.missed.optional(),quiet:ActivityScheduleBodySchema.shape.quiet.optional(),
   timeZone:ActivityScheduleBodySchema.shape.timeZone.optional(),goal:ActivityScheduleBodySchema.shape.goal.optional(),anchor:ActivityScheduleBodySchema.shape.anchor.optional(),
-  basis:ActivityScheduleBodySchema.shape.basis.optional(),configHash:ActivityScheduleBodySchema.shape.configHash.optional()})
+  basis:ActivityScheduleBodySchema.shape.basis.optional(),configHash:ActivityScheduleBodySchema.shape.configHash.optional(),owner:ActivityScheduleBodySchema.shape.owner.optional()})
   .refine(v=>[v.state,v.trigger,v.missed,v.quiet,v.timeZone,v.goal,v.anchor].some(value=>value!==undefined),'Empty activity update');
 const runEventSchema=z.strictObject({id:z.uuid(),occurrenceId:PersonaRequestIdSchema,runId:z.uuid(),state:z.enum(['running','continued','completed','waiting','failed','cancelled','interrupted']),
   at:z.iso.datetime({offset:true}),unknownEffects:z.boolean()});
@@ -138,12 +138,12 @@ export class ActivityStore {
   update(id:string,scope:ExecutionScope,raw:unknown,now:number){const input=updateSchema.parse(raw);return this.transaction(()=>{
     const current=this.get(id,scope),time=this.clock(now);return this.request(activityScope(scope),input.requestId,activityHash({kind:'update',id,input}),v=>z.object({id:z.uuid(),version:z.number()}).parse(v),()=>{
       if(current.body.version!==input.expectedVersion)throw new Error('VERSION_CONFLICT');if(current.body.state==='cancelled')throw new Error('ACTIVITY_CANCELLED');
-      const {requestId:_request,expectedVersion:_expected,...patch}=input;const changedGoal=input.goal!==undefined&&input.goal!==current.body.goal;
+      const {requestId:_request,expectedVersion:_expected,...patch}=input;const changedGoal=input.goal!==undefined&&input.goal!==current.body.goal,changedOwner=input.owner!==undefined&&activityScope(input.owner)!==activityScope(current.body.owner);
       if(changedGoal&&(input.anchor===undefined||input.anchor===null))throw new Error('ACTIVITY_SOURCE_REQUIRED');
-      const body=ActivityScheduleBodySchema.parse({...current.body,...patch,version:current.body.version+1,taskGeneration:current.body.taskGeneration+(changedGoal?1:0),updatedAt:new Date(time).toISOString()});this.validate(body);
+      const body=ActivityScheduleBodySchema.parse({...current.body,...patch,version:current.body.version+1,taskGeneration:current.body.taskGeneration+(changedGoal||changedOwner?1:0),updatedAt:new Date(time).toISOString()});this.validate(body);
       const nextDue=input.trigger?initialDue(body.trigger):current.nextDue,status=body.state==='active'&&body.trigger.kind!=='condition'&&nextDue===null?'exhausted':body.state;
-      this.revision(body);this.db.prepare('UPDATE activity_schedules SET version=?,task_generation=?,status=?,next_due=?,not_before=?,failures=0,error=NULL WHERE id=?')
-        .run(body.version,body.taskGeneration,status,nextDue,time,id);
+      this.revision(body);this.db.prepare('UPDATE activity_schedules SET version=?,task_generation=?,status=?,next_due=?,not_before=?,owner_key=?,failures=0,error=NULL WHERE id=?')
+        .run(body.version,body.taskGeneration,status,nextDue,time,activityScope(body.owner),id);
       // Already-running work may settle; queued and paused intents cannot survive a changed plan.
       this.db.prepare("UPDATE activity_occurrences SET state='cancelled',error='SCHEDULE_CHANGED',updated_at=? WHERE schedule_id=? AND (state='waiting' OR state IN ('pending','accepted') AND started_at IS NULL)").run(time,id);
       this.db.prepare("UPDATE activity_outbox SET acknowledged=1 WHERE id IN(SELECT id FROM activity_occurrences WHERE schedule_id=? AND state='cancelled' AND run_id IS NULL)").run(id);
