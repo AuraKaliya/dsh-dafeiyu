@@ -1,5 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
+import {toolParameters} from './tool-schema.js';
 import {SourceDependencySchema,redactContent} from '@dafeiyu/contracts';
 import type {Context} from '@deepseek-ai/cordis';
 import type {AgentOptions} from '@deepseek-ai/dsh-agent';
@@ -159,7 +160,7 @@ export class ConversationCoordinator {
   private replyRecoveryActions(item:PendingMessage):import('./execution-frame.js').NativeAction[] {
     if(!this.pendingReplyFacts(item).length)return [];
     return (['resume','supersede'] as const).map(decision=>{
-      const inputSchema=z.strictObject({inboundId:z.uuid()}),input=z.toJSONSchema(inputSchema),parameters=input as import('./capability-registry.js').BoundAction['parameters'];
+      const inputSchema=z.strictObject({inboundId:z.uuid()}),input=z.toJSONSchema(inputSchema),parameters=toolParameters(input);
       const definition:import('./capability-registry.js').BoundAction={id:'dafeiyu_reply_'+decision,owner:'core',version:'1',pluginVersion:CORE_VERSION,
         description:decision==='resume'?'续发当前会话确定未发送的答复部分。':'由当前回答替代旧答复尚未发送的部分。',effects:'local-write',scope:'any',input,parameters,active:()=>this.accepting,signal:this.controller.signal,
         validateInput:raw=>inputSchema.parse(raw),execute:async()=>{throw new Error('CORE_DISPATCH_REQUIRED');}};
@@ -226,7 +227,7 @@ export class ConversationCoordinator {
         if(run){this.conversationRuns?.fail(run,failure);this.experienceMemory?.settle(run.id,'failed');}
 
         await this.conversationRuns?.project();
-        this.journal.transition(item.id, this.journal.get(item.id).state, 'failed', { ...this.event(item, 'turn.failed', { code: failure, phase:'execution', note: 'Earlier operations may have effects; no automatic replay' }, started?.id??null),
+        this.journal.transition(item.id, this.journal.get(item.id).state, 'failed', { ...this.event(item, 'turn.failed', { code: failure, phase:'execution',...(error instanceof DshRunError&&error.diagnostic?{diagnostic:error.diagnostic}:{}), note: 'Earlier operations may have effects; no automatic replay' }, started?.id??null),
           sources: error instanceof DshRunError ? error.sources : [] });
         await this.notifyConversationFailure(item,failure);
         return;

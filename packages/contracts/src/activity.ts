@@ -14,6 +14,7 @@ export const ActivityTriggerSchema=z.discriminatedUnion('kind',[
 export const ActivityConfigSchema=z.strictObject({
   idleAfterMs:z.number().int().min(0).max(86400000).default(60000),
   tickMs:z.number().int().min(50).max(60000).default(5000),minIntervalMs:z.number().int().min(60000).max(86400000).default(60000),
+  explorationIntervalMs:z.number().int().min(60000).max(7*86400000).default(1800000),restMs:z.number().int().min(60000).max(7*86400000).default(3600000),
   maxPlans:z.number().int().min(1).max(1000).default(100),maxConcurrent:z.literal(1).default(1),
   roundTokens:z.number().int().min(1).max(100000000).default(100000),roundDurationMs:z.number().int().min(1).max(86400000).default(900000),
   backoffBaseMs:z.number().int().min(1000).max(3600000).default(60000),maxBackoffMs:z.number().int().min(1000).max(86400000).default(3600000),

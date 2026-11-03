@@ -16,7 +16,7 @@ export class ActivityRounds {
     const value=z.object({tokens:z.number().int().nonnegative().nullable(),knownTokens:z.number().int().nonnegative(),durationMs:z.number().nonnegative()}).parse({...usage,durationMs});
     this.db.prepare('UPDATE activity_round_items SET settlement=? WHERE occurrence_id=? AND settlement IS NULL').run(JSON.stringify(value),occurrenceId);
     const current=this.current();if(!current||current.id!==row.round_id)return;const totals=this.totals(current.id);
-    if(current.restRequested)this.end('rest',now);else if(totals.unknown)this.end('usage-unknown',now);else if(totals.knownTokens>=current.budget.roundTokens)this.end('token-budget',now);else if(totals.durationMs>=current.budget.roundDurationMs)this.end('time-budget',now);
+    if(current.restRequested)this.end('rest',now);else if(totals.unknown)this.end('usage-unknown',now);else this.end('activity-completed',now);
   }
   totals(id:string){const items=this.db.prepare('SELECT occurrence_id,settlement FROM activity_round_items WHERE round_id=?').all(id);let knownTokens=0,durationMs=0,completed=0,unknown=false;for(const item of items){if(item.settlement===null)continue;const value=z.object({tokens:z.number().nullable(),knownTokens:z.number(),durationMs:z.number()}).parse(JSON.parse(String(item.settlement)));knownTokens+=value.knownTokens;durationMs+=value.durationMs;completed++;unknown ||= value.tokens===null;}return {knownTokens,durationMs,completed,unknown,pending:items.length-completed};}
   end(reason:string,now:number){const current=this.current();if(!current||this.totals(current.id).pending)return;this.db.prepare('UPDATE activity_rounds SET body=? WHERE id=?').run(JSON.stringify({...current,reason,endedAt:now}),current.id);}

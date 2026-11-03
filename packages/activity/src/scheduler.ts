@@ -115,7 +115,9 @@ export class ActivityScheduler {
     const task=port.createTask({requestId:`activity:${plan.body.id}:${plan.body.taskGeneration}`,title:Array.from(plan.body.goal).slice(0,80).join(''),goal:plan.body.goal}),state=port.taskState(task);
     this.store.bindTask(plan.body.id,plan.body.taskGeneration,task.id,state.epoch);binding=this.store.task(plan.body.id);if(!binding)throw new Error('ACTIVITY_TASK_REQUIRED');return binding;
   }
-  rest(runId:string){if(!this.store.idle.owns(runId)&&!this.store.byRun(runId))throw new Error('ACTIVITY_RUN_REQUIRED');this.store.rounds.requestRest();return {restAfterActivity:true};}
+  rest(runId:string){if(!this.store.idle.owns(runId)&&!this.store.byRun(runId))throw new Error('ACTIVITY_RUN_REQUIRED');this.store.rounds.requestRest();
+    const now=this.now(),resumeAfter=now+this.store.config.restMs;if(this.store.idle.owns(runId))this.store.admission.block('idle.rest','agent-requested-rest',resumeAfter,now);
+    return {restAfterActivity:true,resumeAfter:new Date(resumeAfter).toISOString()};}
   private settleRounds(now:number){for(const id of this.store.rounds.pending()){if(id.startsWith('idle:'))continue;const occurrence=this.store.occurrence(id);if(!['completed','failed','cancelled','blocked'].includes(occurrence.state))continue;if(!occurrence.runId){this.store.rounds.settle(id,{tokens:0,knownTokens:0},0,now);continue;}const usages=this.store.occurrenceRuns(id).map(run=>this.ctx.dafeiyu.managementUsage(run)),knownTokens=usages.reduce((sum,usage)=>sum+usage.knownTokens,0);this.store.rounds.settle(id,{tokens:usages.length&&usages.every(usage=>usage.tokens!==null)?knownTokens:null,knownTokens},this.store.occurrenceUsed(id),now);}}
   private pressure(){const value=this.ctx.dafeiyu.activityPressure();const now=this.now(),busy=value.foregroundWaiting+value.foregroundRuns>0;if(busy)this.lastForegroundAt=now;return busy||now-this.lastForegroundAt<this.store.config.idleAfterMs;}
   private reconcile(occurrence:StoredOccurrence,status:RunStatus){
@@ -182,7 +184,7 @@ export class ActivityScheduler {
         if(plan.body.purpose==='maintenance'){const item=plan.body.maintenanceId?this.memory?.inspect(plan.body.maintenanceId):null;
           if(!item||!['ready'].includes(item.state)){this.store.block(id,'MAINTENANCE_NO_LONGER_PENDING',now);continue;}}
         this.ensureTask(plan);this.store.issue(id,now);
-      }this.dispatch(now);if(!this.store.rounds.pending().length&&!this.idle.start(now))this.store.rounds.end('no-pending-activity',now);
+      }this.dispatch(now);if(!this.store.rounds.pending().length&&!await this.idle.start(now))this.store.rounds.end('no-pending-activity',now);
     }).catch(error=>{this.failure=safeCode(error);this.stop();}).finally(()=>{if(this.pending===work)this.pending=undefined;});this.pending=work;return work;
   }
   async whenIdle(){await this.pending;}

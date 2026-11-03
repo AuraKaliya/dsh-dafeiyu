@@ -11,7 +11,7 @@ import {setTimeout as wait} from 'node:timers/promises';
 const visibleFailure=z.object({kind:z.literal('error'),error:z.object({message:z.string(),code:z.string().optional(),status:z.number().int().optional()})});
 const contextFailures:Readonly<Record<string,string>>={'Required context exceeds budget':'REQUIRED_CONTEXT_CAPACITY','Required context unavailable':'REQUIRED_CONTEXT_UNAVAILABLE','Required context stale':'SOURCE_STALE',
   'Required context contributor missing':'REQUIRED_CONTEXT_PROVIDER_MISSING','Context request budget exceeded':'CONTEXT_REQUEST_CAPACITY'};
-export function safeRunFailure(message:string):string{return contextFailures[message]??(['SOURCE_VALIDATION_FAILED','SOURCE_STALE','PERSISTENCE_FAILED','MODEL_INCOMPLETE','DELIVERY_RENDER_TIMEOUT','SESSION_COMPACTION_ACTIVE',
+export function safeRunFailure(message:string):string{if(message.startsWith('unsupported JSON schema:'))return 'TOOL_SCHEMA_UNSUPPORTED';return contextFailures[message]??(['TOOL_SCHEMA_UNSUPPORTED','SOURCE_VALIDATION_FAILED','SOURCE_STALE','PERSISTENCE_FAILED','MODEL_INCOMPLETE','DELIVERY_RENDER_TIMEOUT','SESSION_COMPACTION_ACTIVE',
   'CONTEXT_REQUEST_CAPACITY','MODEL_CONTEXT_CAPACITY','PERSONA_CONTEXT_CAPACITY','REQUIRED_CONTEXT_CAPACITY','REQUIRED_CONTEXT_UNAVAILABLE','REQUIRED_CONTEXT_PROVIDER_MISSING','NATIVE_CONTEXT_SNAPSHOT_MISMATCH','CONTEXT_PREPARE_TIMEOUT',
   'INVALID_MODEL_STREAM','INVALID_MODEL_ARGUMENTS','MODEL_PERSISTENCE_POLICY_UNSUPPORTED','PRIVATE_INPUT_REJECTED'].includes(message)||/^MODEL_[A-Z0-9_]{1,64}$/.test(message)?message:'MODEL_INCOMPLETE');}
 /** Preserve a provider's machine-readable failure without returning its potentially private message. */

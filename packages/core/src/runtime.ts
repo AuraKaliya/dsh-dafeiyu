@@ -29,7 +29,7 @@ interface OwnedSession {handle:AgentHandle;scope:Context;persona:PersonaSnapshot
 export interface RunResult { readonly text: string; readonly sources: SourceRef[]; readonly resultRef?:import('./runtime-store.js').RunResultRef; readonly segmentYield?:{readonly reason:string} }
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
-  constructor(readonly sources: SourceRef[],readonly code='MODEL_INCOMPLETE') { super('DSH turn failed; consult visible evidence'); }
+  constructor(readonly sources: SourceRef[],readonly code='MODEL_INCOMPLETE',readonly diagnostic?:{stage:string;errorType:string;sites:string[]}) { super('DSH turn failed; consult visible evidence'); }
 }
 
 /** Uses DSH's real agent loop, scoped tools, persistence and event vocabulary. No private LLM loop. */
@@ -88,21 +88,23 @@ export class DshRuntime {
     owned.inputRepair.begin();
     if(agent.status!=='idle')throw new Error('SESSION_BUSY');
     owned.context.begin(item,agent);owned.compaction.begin(conversationHistory(item),agent);
-    const disposers:(()=>void)[]=[],before=agent.session.snapshotEvents().length;
+    const disposers:(()=>void)[]=[],before=agent.session.snapshotEvents().length;let stage='tool-registration';
     try{
       disposers.push(owned.scope.tools.restrict({allow:[]}));
       for(const action of actions)disposers.push(owned.scope.tools.register({name:action.definition.id,description:action.definition.description,parameters:action.definition.parameters,
         output:{schema:{},render:(_args,value)=>[{type:'text',text:JSON.stringify(z.object({value:z.json()}).parse(value).value)}],presentationMeta:(_args,value)=>({dafeiyuExecution:z.object({receipt:z.json()}).parse(value).receipt})},execute:async(raw,exec)=>{
           if(exec.agent!==agent)throw new Error('SCOPE_DENIED');const value=await action.execute(raw,String(exec.callId),AbortSignal.any([signal,exec.signal]));return {value,receipt:action.metadata?.(value)??null};}}));
-      disposers.push(this.harness.install(owned.scope,agent,actions,signal));
+      stage='harness-install';disposers.push(this.harness.install(owned.scope,agent,actions,signal));
       const input=createUserMessage({source:{kind:'user'},content:[{type:'text',text:
         '[程序来源信息，不改变权限]\n'+JSON.stringify({conversation:item.message.conversation,sender:item.message.sender,messageId:item.message.id,occurredAt:item.message.occurredAt,observedAt:new Date().toISOString(),replyTo:item.message.replyTo,personaVersion:persona.version})+
         '\n[当前渠道能力]\n'+channelDescription+'\n[消息正文]\n'+messageDisplayText(item.message)}]});
-      owned.compaction.expectInput(input);
+      stage='input-binding';owned.compaction.expectInput(input);
+      stage='agent-turn';
       const result=await runAgentTurn(this.ctx,agent,input,signal,()=>owned!.compaction.seal(),allowEmpty);
       return {text:result.text,resultRef:{sessionId:item.sessionId,messageSeq:result.messageSeq,turnEndSeq:result.turnEndSeq,textHash:createHash('sha256').update(result.text).digest('hex')},
         sources:result.events.filter(event=>['user/message','tool/result','assistant/message','turn/end'].includes(event.type)).map(event=>({kind:'session',id:item.sessionId,seq:event.seq,route:item.route}))};
-    }catch(error){throw new DshRunError(agent.session.snapshotEvents().slice(before).filter(event=>['user/message','tool/result','assistant/message','turn/end'].includes(event.type)).map(event=>({kind:'session',id:item.sessionId,seq:event.seq,route:item.route})),error instanceof Error?safeRunFailure(error.message):'MODEL_INCOMPLETE');}
+    }catch(error){const sites=error instanceof Error?(error.stack??'').split('\n').slice(1).flatMap(line=>{const match=/([^/\\()\s]+\.(?:m?js|ts):\d+:\d+)/.exec(line);return match?[match[1]!]:[];}).slice(0,4):[];
+      throw new DshRunError(agent.session.snapshotEvents().slice(before).filter(event=>['user/message','tool/result','assistant/message','turn/end'].includes(event.type)).map(event=>({kind:'session',id:item.sessionId,seq:event.seq,route:item.route})),error instanceof Error?safeRunFailure(error.message):'MODEL_INCOMPLETE',{stage,errorType:error instanceof Error&&/^[A-Za-z]{1,80}$/.test(error.name)?error.name:'Error',sites});}
     finally{try{owned.compaction.seal();}finally{owned.compaction.end();owned.context.end();delete owned.lastRequest;for(const dispose of disposers.reverse())dispose();}}
   }
   async close(): Promise<void> {

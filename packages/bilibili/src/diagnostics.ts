@@ -161,6 +161,12 @@ export class BiliDiagnostics {
     const row=this.db.prepare("SELECT body FROM bili_http_attempts WHERE json_extract(body,'$.outcome')='failed' AND json_extract(body,'$.kind')=? AND (? IS NULL OR json_extract(body,'$.endpoint')=?) ORDER BY at DESC,rowid DESC LIMIT 1").get(target.kind,target.endpoint,target.endpoint);
     return row?AttemptSchema.parse(JSON.parse(String(row.body))):null;
   }
+  completeBody(raw:BiliAttempt){const value=AttemptSchema.parse(raw);this.atomic(()=>{
+    const row=this.db.prepare('SELECT body FROM bili_http_attempts WHERE id=?').get(value.id);if(!row)return;
+    const before=AttemptSchema.parse(JSON.parse(String(row.body)));if(before.endpoint!=='media'||before.outcome!=='headers-received')return;
+    const completed=AttemptSchema.parse({...before,endedAt:value.endedAt,outcome:value.outcome,errorCode:value.errorCode,kind:value.kind});
+    this.db.prepare('UPDATE bili_http_attempts SET body=? WHERE id=?').run(JSON.stringify(completed),value.id);
+  });}
   record(raw:BiliAttempt){const value=AttemptSchema.parse(raw);this.atomic(()=>{this.db.prepare('INSERT INTO bili_http_attempts VALUES(?,?,?)').run(value.id,value.at,JSON.stringify(value));
     const active=this.conditionAttempt()?.id??'';
     this.db.prepare('DELETE FROM bili_http_attempts WHERE id<>? AND (at<? OR id IN (SELECT id FROM bili_http_attempts WHERE id<>? ORDER BY at DESC,rowid DESC LIMIT -1 OFFSET ?))').run(active,value.at-7*86400000,active,active?4999:5000);});}

@@ -172,7 +172,17 @@ export class RuntimeStore {
   get(id:string):StoredRun {this.open();z.uuid().parse(id);const row=this.sourceRead('SELECT * FROM runs WHERE id=?').get(id);if(!row)throw new Error('RUN_NOT_FOUND');
     return {id,requestKey:string(row.request_key),definition:RunDefinitionSchema.parse(JSON.parse(string(row.definition))),state:RunStateSchema.parse(row.state),version:Number(row.version),
       snapshot:row.snapshot===null?null:RunSnapshotSchema.parse(JSON.parse(string(row.snapshot))),result:row.result===null?null:RunResultRefSchema.parse(JSON.parse(string(row.result))),error:row.error===null?null:string(row.error),createdAt:string(row.created_at),updatedAt:string(row.updated_at)};}
-  usage(runId:string){this.get(runId);const rows=this.db.prepare("SELECT body FROM run_inputs WHERE run_id=? AND input_id LIKE 'model-usage:%'").all(runId).map(row=>z.object({tokens:z.number().nonnegative().nullable(),external:z.boolean().optional(),marker:z.boolean().optional()}).parse(JSON.parse(String(row.body))));const knownTokens=rows.reduce((sum,row)=>sum+(row.tokens??0),0),external=this.operations(runId).some(operation=>operation.plugin==='server-executor'&&operation.action.startsWith('dafeiyu_server_execute_'))&&!rows.some(row=>row.external);return {tokens:rows.length&&rows.every(row=>row.tokens!==null)&&!external?knownTokens:null,knownTokens,calls:rows.filter(row=>!row.marker).length,externalPending:external};}
+  usage(runId:string){
+    this.get(runId);
+    const counter=z.number().int().nonnegative().safe(),breakdown=z.object({inputTokens:counter,outputTokens:counter,cacheReadTokens:counter,cacheWriteTokens:counter,totalTokens:counter});
+    const rows=this.db.prepare("SELECT body FROM run_inputs WHERE run_id=? AND input_id LIKE 'model-usage:%'").all(runId)
+      .map(row=>z.object({tokens:counter.nullable(),external:z.boolean().optional(),marker:z.boolean().optional(),breakdown:breakdown.optional()}).parse(JSON.parse(String(row.body))));
+    const knownTokens=rows.reduce((sum,row)=>sum+(row.tokens??0),0),external=this.operations(runId).some(operation=>operation.plugin==='server-executor'&&operation.action.startsWith('dafeiyu_server_execute_'))&&!rows.some(row=>row.external);
+    const details=rows.flatMap(row=>row.breakdown?[row.breakdown]:[]),sum=(key:keyof z.infer<typeof breakdown>)=>details.reduce((n,row)=>n+row[key],0);
+    return {tokens:rows.length&&rows.every(row=>row.tokens!==null)&&!external?knownTokens:null,knownTokens,calls:rows.filter(row=>!row.marker).length,externalPending:external,
+      unknownCalls:rows.filter(row=>!row.marker&&row.tokens===null).length,breakdownKnownCalls:details.length,legacyCalls:rows.filter(row=>!row.marker&&row.tokens!==null&&!row.breakdown).length,
+      breakdown:{inputTokens:sum('inputTokens'),outputTokens:sum('outputTokens'),cacheReadTokens:sum('cacheReadTokens'),cacheWriteTokens:sum('cacheWriteTokens'),totalTokens:sum('totalTokens')}};
+  }
   list(states?:readonly RunState[]):StoredRun[]{this.open();if(states?.length===0)return [];const filter=states?.map(value=>RunStateSchema.parse(value));
     return this.db.prepare(`SELECT id FROM runs${filter?' WHERE state IN ('+filter.map(()=>'?').join(',')+')':''} ORDER BY rowid`).all(...(filter??[])).map(row=>this.get(string(row.id)));}
   latestConversationTasks(scene:import('@dafeiyu/contracts').Conversation,offset=0,limit=32):StoredRun[]{this.open();

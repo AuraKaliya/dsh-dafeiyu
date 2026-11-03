@@ -1,3 +1,4 @@
+import {MediaDiagnostics,createMediaDiagnosticSchema,MEDIA_DIAGNOSTIC_TABLES} from './diagnostics.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync,mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -9,9 +10,9 @@ import type { Json,MediaAssetRef,MediaAssetRecord,MediaSourceDescription,MediaAc
 import { MediaReplyStore,createMediaReplySchema,MEDIA_REPLY_TABLES } from './reply-store.js';
 
 export const MEDIA_APPLICATION_ID=0x44464d35;
-export const MEDIA_SCHEMA_VERSION=2;
+export const MEDIA_SCHEMA_VERSION=3;
 const MEDIA_BASE_TABLES=['media_metadata','media_sources','media_source_revisions','media_assets','media_asset_revisions','media_blobs','media_requests','media_leases','media_jobs','media_exposures','media_outbox'] as const;
-export const MEDIA_TABLES=[...MEDIA_BASE_TABLES,...MEDIA_REPLY_TABLES] as const;
+export const MEDIA_TABLES=[...MEDIA_BASE_TABLES,...MEDIA_REPLY_TABLES,...MEDIA_DIAGNOSTIC_TABLES] as const;
 const identity=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const scopeKey=(scope:MediaAssetRecord['scope'])=>scope.kind==='task'?scope.scopeKey:scope.route;
 const jsonValue=z.json();
@@ -25,23 +26,7 @@ const exposureSchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),scop
   assets:z.array(MediaAssetRefSchema).min(1).max(8),coverage:MediaCoverageSchema,text:z.string().min(1).max(8000),occurredAt:z.iso.datetime(),detail:z.json()});
 export type MediaExposure=z.infer<typeof exposureSchema>;
 
-export class MediaStore {
-  private readonly db:DatabaseSync;
-  private closed=false;
-  readonly identity:z.infer<typeof identity>;
-  readonly replies:MediaReplyStore;
-  constructor(file:string,who:z.infer<typeof identity>,create=false){
-    this.identity=identity.parse(who);if(!existsSync(file)&&!create)throw new Error('MEDIA_INITIALIZATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});
-    this.db=new DatabaseSync(file);try{this.db.exec('PRAGMA busy_timeout=5000;');const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),app=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
-      const empty=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n)===0;
-      if(!version&&!app&&empty&&create){configureSqlite(this.db);this.atomic(()=>{this.initialize();createMediaReplySchema(this.db);});}
-      else if(version!==MEDIA_SCHEMA_VERSION||app!==MEDIA_APPLICATION_ID)throw new Error('MEDIA_SCHEMA_UNSUPPORTED');
-      const row=this.db.prepare('SELECT body FROM media_metadata WHERE id=1').get();if(!row||canonical(JSON.parse(String(row.body)))!==canonical(this.identity))throw new Error('MEDIA_IDENTITY_MISMATCH');
-      for(const table of MEDIA_BASE_TABLES)this.db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();configureSqlite(this.db);
-      for(const table of MEDIA_TABLES)this.db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();this.replies=new MediaReplyStore(this.db,work=>this.atomic(work),mediaHash,ref=>{this.assetWitness(ref);});
-    }catch(error){this.db.close();throw error;}
-  }
-  private initialize(){this.db.exec(`
+export function createMediaStorageSchema(db:DatabaseSync,diagnostics=true){db.exec(`
     CREATE TABLE media_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
     CREATE TABLE media_sources(id TEXT PRIMARY KEY,provider TEXT NOT NULL,source_key TEXT NOT NULL,version INTEGER NOT NULL,deleted INTEGER NOT NULL DEFAULT 0,UNIQUE(provider,source_key));
     CREATE TABLE media_source_revisions(id TEXT NOT NULL REFERENCES media_sources(id),version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(id,version));
@@ -56,10 +41,29 @@ export class MediaStore {
     CREATE TABLE media_outbox(id TEXT PRIMARY KEY,body TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0);
     PRAGMA application_id=${MEDIA_APPLICATION_ID};PRAGMA user_version=1;
   `);
-    for(const table of ['media_metadata','media_source_revisions','media_asset_revisions','media_requests','media_exposures'])this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable media record');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain media provenance');END;`);
-    this.db.exec("CREATE TRIGGER media_job_input_immutable BEFORE UPDATE OF id,scope_key,run_id,operation_id,body,body_hash ON media_jobs BEGIN SELECT RAISE(ABORT,'Immutable media input');END;");
-    this.db.prepare('INSERT INTO media_metadata VALUES(1,?)').run(JSON.stringify(this.identity));
+    for(const table of ['media_metadata','media_source_revisions','media_asset_revisions','media_requests','media_exposures'])db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable media record');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain media provenance');END;`);
+    db.exec("CREATE TRIGGER media_job_input_immutable BEFORE UPDATE OF id,scope_key,run_id,operation_id,body,body_hash ON media_jobs BEGIN SELECT RAISE(ABORT,'Immutable media input');END;");
+createMediaReplySchema(db);if(diagnostics){createMediaDiagnosticSchema(db);db.exec(`PRAGMA user_version=${MEDIA_SCHEMA_VERSION};`);}
+}
+
+export class MediaStore {
+  private readonly db:DatabaseSync;
+  private closed=false;
+  readonly identity:z.infer<typeof identity>;
+  readonly replies:MediaReplyStore;
+  readonly diagnostics:MediaDiagnostics;
+  constructor(file:string,who:z.infer<typeof identity>,create=false){
+    this.identity=identity.parse(who);if(!existsSync(file)&&!create)throw new Error('MEDIA_INITIALIZATION_REQUIRED');if(create)mkdirSync(dirname(file),{recursive:true});
+    this.db=new DatabaseSync(file);try{this.db.exec('PRAGMA busy_timeout=5000;');const version=Number(this.db.prepare('PRAGMA user_version').get()?.user_version),app=Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
+      const empty=Number(this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()?.n)===0;
+      if(!version&&!app&&empty&&create){configureSqlite(this.db);this.atomic(()=>this.initialize());}
+      else if(version!==MEDIA_SCHEMA_VERSION||app!==MEDIA_APPLICATION_ID)throw new Error('MEDIA_SCHEMA_UNSUPPORTED');
+      const row=this.db.prepare('SELECT body FROM media_metadata WHERE id=1').get();if(!row||canonical(JSON.parse(String(row.body)))!==canonical(this.identity))throw new Error('MEDIA_IDENTITY_MISMATCH');
+      for(const table of MEDIA_BASE_TABLES)this.db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();configureSqlite(this.db);
+      for(const table of MEDIA_TABLES)this.db.prepare(`SELECT * FROM ${table} LIMIT 0`).all();this.diagnostics=new MediaDiagnostics(this.db);this.replies=new MediaReplyStore(this.db,work=>this.atomic(work),mediaHash,ref=>{this.assetWitness(ref);});
+    }catch(error){this.db.close();throw error;}
   }
+  private initialize(){createMediaStorageSchema(this.db);this.db.prepare('INSERT INTO media_metadata VALUES(1,?)').run(JSON.stringify(this.identity));}
   private atomic<T>(fn:()=>T):T{this.db.exec('BEGIN IMMEDIATE');try{const value=fn();this.db.exec('COMMIT');return value;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   private check(access:MediaAccess){access.guard();if(access.execution.view.scope.agentId!==this.identity.agentId)throw new Error('SCOPE_DENIED');return access.execution.view.scope;}
   private request<T>(access:MediaAccess,key:string,input:unknown,parse:(raw:unknown)=>T,fn:()=>T):T {

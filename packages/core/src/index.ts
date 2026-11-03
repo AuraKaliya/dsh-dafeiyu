@@ -1,4 +1,5 @@
 import {RELEASE_VERSION} from '@dafeiyu/contracts';
+import {ExplorationCandidateSchema} from '@dafeiyu/contracts';
 import {digestSource} from './source-records.js';
 import {TaskDispositionSchema} from '@dafeiyu/contracts';
 import {ConversationCoordinator} from './conversation-coordinator.js';
@@ -423,6 +424,37 @@ export class DafeiyuService extends Service {
     guard();return port.select({execution,scene,guard},input,actualView);
   }
   personaContext(request:ContextRequest){const scope=this.scopeForContext(request),id=this.runStore?.findRequest('conversation',scope.traceId)?.runId;const persona=id?this.personas.current(id):undefined;persona?.guard();return persona?.items??[];}
+  private ownerDirectories(item:PendingMessage){
+    const message=item.message,scene=message.conversation;
+    if(scene.kind!=='private'||scene.id!==message.sender.id)return [];
+    return [...this.extensions.values()].flatMap(entry=>{
+      const directory=entry.extension.ownerDirectory;
+      return directory&&entry.active&&entry.extension.lifecycleReady?.()!==false&&item.extensionId===directory.channelExtensionId
+        &&scene.channel===directory.channel&&scene.account===directory.account&&message.sender.id===directory.ownerId?[directory]:[];
+    });
+  }
+  isOwnerExecution(context:ExecutionContext,pluginId:string){return this.executions?.isOwnerExecution(context,pluginId)??false;}
+  async explorationCandidates(producer:string,policyId:string,providers:readonly string[],signal:AbortSignal){
+    const resources=this.executions?.producerResources(producer,policyId)??[],result:import('@dafeiyu/contracts').ExplorationCandidate[]=[];
+    for(const entry of this.extensions.values()){
+      if(!entry.active||entry.extension.lifecycleReady?.()===false||!providers.includes(entry.extension.id)||!entry.extension.explorationCatalog)continue;
+      const current=await entry.extension.explorationCatalog.snapshot(signal);signal.throwIfAborted();
+      for(const raw of current){const candidate=ExplorationCandidateSchema.parse(raw);
+        if(candidate.provider===entry.extension.id&&resources.some(resource=>runtimeHash(resource)===runtimeHash(candidate.resource)))result.push(candidate);
+      }
+    }
+    return result;
+  }
+  private ownerQueryResources(item:PendingMessage):readonly Conversation[]{
+    const scene=item.message.conversation,resources=[scene];
+    for(const directory of this.ownerDirectories(item)){
+      const snapshot=directory.snapshot();
+      for(const raw of snapshot.resources){const resource=ConversationSchema.parse(raw);
+        if(resource.channel===scene.channel&&resource.account===scene.account&&(resource.kind==='group'||resource.kind==='private'&&resource.id===directory.ownerId))resources.push(resource);
+      }
+    }
+    return [...new Map(resources.map(resource=>[conversationKey(this.config.agentId,resource),resource])).values()];
+  }
   configureExecution(raw:ExecutionOptions):void {
     this.assertOpen();if(this.gate.state!=='registered'||this.executions)throw new Error('SERVICE_LIFECYCLE_CONFLICT');
     const options=ExecutionOptionsSchema.parse(raw),store=new RuntimeStore(resolve(this.config.dataDir,'runtime.sqlite'),{agentId:this.config.agentId,profileId:options.profileId},{create:options.createStore});
@@ -437,7 +469,7 @@ export class DafeiyuService extends Service {
       }});
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.conversations.validateRunPersona(run));
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registry,scheduler:this.scheduler,options,personas:this.personas,
-      channelDescription:id=>this.conversations.deliveryChannel(this.journal.get(id))?.capability.description??'',repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
+      isOwnerMessage:item=>this.ownerDirectories(item).length>0,messageResources:item=>this.ownerQueryResources(item),channelDescription:id=>this.conversations.deliveryChannel(this.journal.get(id))?.capability.description??'',repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
       turnTimeoutMs:this.config.turnTimeoutMs,taskTimeoutMs:this.config.taskTimeoutMs,reviewTimeoutMs:this.config.phaseTimeouts.review,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.conversations.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),progress:id=>this.nativeTaskDelivery?.progress(id)??Promise.resolve(null),settled:id=>{if(this.runStore?.get(id).state==='failed')void this.nativeTaskDelivery?.progress(id).catch(()=>{});else void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
     this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:NATIVE_RENDER_ATTEMPTS*(this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification)+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
@@ -621,7 +653,7 @@ export class DafeiyuService extends Service {
     if(extension.memoryObservationProvider&&this.observationEntry())throw new Error('DUPLICATE_PROVIDER');
     if(extension.compactionProvider&&this.compactionBinding())throw new Error('DUPLICATE_PROVIDER');
     const handle=this.registry.register(this.config.agentId,extension);
-    const registered:Registered={extension:Object.freeze({...extension}),controller:new AbortController(),active:true};
+    const registered:Registered={extension:Object.freeze({...extension,...(extension.ownerDirectory?{ownerDirectory:Object.freeze({...extension.ownerDirectory,snapshot:extension.ownerDirectory.snapshot.bind(extension.ownerDirectory)})}:{})}),controller:new AbortController(),active:true};
     let release:()=>void;
     try{release=this.contexts.register(extension.id,extension.version,extension.conversationContexts??[]);this.extensions.set(extension.id,registered);}
     catch(error){handle.dispose();throw error;}

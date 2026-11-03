@@ -2,6 +2,8 @@ import { realpath } from 'node:fs/promises';
 import { z } from 'zod';
 import { BoundedProcess,contained } from './process.js';
 import { MediaRangeBroker } from './range-broker.js';
+import {mediaStage} from './diagnostics.js';
+import type {MediaStage} from './diagnostics.js';
 
 export type DecoderInput={file:string}|{broker:MediaRangeBroker};
 export interface DecodedImage {data:Buffer;mime:'image/png'|'image/jpeg';width:number;height:number;hasAlpha:boolean;requestedMs:number|null;ptsMs:number|null}
@@ -13,8 +15,8 @@ export class MediaDecoder {
   constructor(private readonly process:BoundedProcess,private readonly allowedRoot:string,readonly tools:{ffmpeg:string;ffprobe:string},readonly limits={maxPixels:16000000,maxDimension:1024,maxAudioMs:120000,memoryBytes:512*1024**2,timeoutMs:120000}){}
   private async input(value:DecoderInput){if('broker'in value)return {uri:value.broker.url(),protocols:'http,tcp,pipe'};
     return {uri:await contained(this.allowedRoot,await realpath(value.file)),protocols:'file,pipe'};}
-  private async run(executable:string,args:string[],signal:AbortSignal,max=16*1024**2){return this.process.run({executable,arguments:args,signal,timeoutMs:this.limits.timeoutMs,memoryBytes:this.limits.memoryBytes,maxStdoutBytes:max,maxStderrBytes:65536});}
-  async inspect(input:DecoderInput,signal:AbortSignal){const source=await this.input(input),result=await this.run(this.tools.ffprobe,['-hide_banner','-v','error','-protocol_whitelist',source.protocols,'-format_whitelist',formats,'-enable_drefs','0','-use_absolute_path','0','-show_streams','-show_format','-of','json',source.uri],signal,65536);
+  private async run(executable:string,args:string[],signal:AbortSignal,max=16*1024**2,stage:MediaStage='decode'){return mediaStage(stage,()=>this.process.run({executable,arguments:args,signal,timeoutMs:this.limits.timeoutMs,memoryBytes:this.limits.memoryBytes,maxStdoutBytes:max,maxStderrBytes:65536}));}
+  async inspect(input:DecoderInput,signal:AbortSignal){const source=await this.input(input),result=await this.run(this.tools.ffprobe,['-hide_banner','-v','error','-protocol_whitelist',source.protocols,'-format_whitelist',formats,'-enable_drefs','0','-use_absolute_path','0','-show_streams','-show_format','-of','json',source.uri],signal,65536,'probe');
     let value:z.infer<typeof probeSchema>;try{value=probeSchema.parse(JSON.parse(result.stdout.toString('utf8')));}catch{throw new Error('MEDIA_PROBE_INVALID');}
     const video=value.streams.find(s=>s.codec_type==='video'),audio=value.streams.find(s=>s.codec_type==='audio');
     if(video&&(video.width===undefined||video.height===undefined||video.width<1||video.height<1||video.width*video.height>this.limits.maxPixels))throw new Error('MEDIA_PIXEL_LIMIT');

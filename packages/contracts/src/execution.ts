@@ -65,6 +65,12 @@ export interface Extension {
   readonly contexts?: readonly TaskContextContributor[];
   readonly lifecycleReady?: () => boolean;
   readonly resourceProofs?: ResourceProofProvider;
+  readonly explorationCatalog?:import('./autonomy.js').ExplorationCatalog;
+  /** Trusted channel directory. Only the authenticated owner's private conversation may use it. */
+  readonly ownerDirectory?: {
+    readonly channelExtensionId:string;readonly channel:string;readonly account:string;readonly ownerId:string;
+    snapshot():{readonly resources:readonly z.output<typeof ConversationSchema>[];readonly revision:string};
+  };
   readonly conversationContexts?: readonly import('./context.js').ContextContributor[];
   readonly compactionProvider?: import('./compaction.js').CompactionProvider;
   readonly memoryObservationProvider?: import('./observation.js').MemoryObservationProvider;

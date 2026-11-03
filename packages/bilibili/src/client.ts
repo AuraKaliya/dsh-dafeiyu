@@ -1,4 +1,5 @@
 import { createHash,randomUUID } from 'node:crypto';
+import {MediaTransferDeadline} from './media-stream.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { setTimeout } from 'node:timers/promises';
 import { z } from 'zod';
@@ -207,6 +208,16 @@ export class BiliClient {
     if(endpoint==='danmaku')return this.request(endpoint,url,cookie,signal,checked,response=>boundedBytes(response,this.config.maxResponseBytes,signal,checked),undefined,options);
     return this.json(endpoint,url,cookie,signal,checked,false,options);
   }
-  async external(urlValue:string,kind:'media'|'subtitle',range:{start:number;end:number}|null,caller:AbortSignal,guard:()=>void,options:{allowWhole?:boolean;etag?:string}={}){const url=biliUrl(urlValue,kind),signal=AbortSignal.any([caller,AbortSignal.timeout(this.config.timeoutMs)]);
-    return this.request(kind,url,null,signal,guard,async(response,record)=>{if(response.headers['content-encoding']&&response.headers['content-encoding']!=='identity')throw new Error('BILI_ENCODING_UNSUPPORTED');record.outcome='headers-received';return {response,signal};},{...(range?{Range:`bytes=${range.start}-${range.end}`} : {}),...(options.etag?{'If-Match':options.etag}:{})},options.allowWhole===undefined?{}:{allowWhole:options.allowWhole});}
+  async external(urlValue:string,kind:'media'|'subtitle',range:{start:number;end:number}|null,caller:AbortSignal,guard:()=>void,options:{allowWhole?:boolean;etag?:string}={}){
+    const url=biliUrl(urlValue,kind),deadline=kind==='media'?new MediaTransferDeadline(caller,this.config.timeoutMs,this.config.mediaIdleTimeoutMs,this.config.mediaTransferTimeoutMs):null,
+      signal=deadline?.signal??AbortSignal.any([caller,AbortSignal.timeout(this.config.timeoutMs)]);
+    try{return await this.request(kind,url,null,signal,guard,async(response,record)=>{
+      if(response.headers['content-encoding']&&response.headers['content-encoding']!=='identity')throw new Error('BILI_ENCODING_UNSUPPORTED');record.outcome='headers-received';
+      return {response:deadline?deadline.body(response,transfer=>{
+        record.endedAt=Date.now();record.outcome=transfer.code?'failed':'success';record.errorCode=transfer.code;record.kind=transfer.code?transfer.cancelled?'cancelled':'network':null;
+        this.store.diagnostics.completeBody(record);
+      }):response,signal};
+    },{...(range?{Range:`bytes=${range.start}-${range.end}`} : {}),...(options.etag?{'If-Match':options.etag}:{})},options.allowWhole===undefined?{}:{allowWhole:options.allowWhole});}
+    catch(error){deadline?.close();throw new Error(deadline?.signal.aborted?deadline.failure(error):error instanceof Error?error.message:'BILI_MEDIA_STREAM_FAILED');}
+  }
 }

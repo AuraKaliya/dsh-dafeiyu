@@ -15,3 +15,5 @@ export const inject=['dafeiyu','llm'];
 export function apply(ctx:Context,config:Config){new MediaService(ctx,config);}
 
 export * from './storage-status.js';
+export * from './migration.js';
+export * from './diagnostics.js';

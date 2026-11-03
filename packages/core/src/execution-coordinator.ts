@@ -51,6 +51,8 @@ interface Dependencies {
   taskTimeoutMs?:number|undefined;turnTimeoutMs:number;context:import('@dafeiyu/contracts').ContextBudget;signal:AbortSignal;
   reviewTimeoutMs?:number;
   projectConversation?:()=>Promise<void>;
+  messageResources?:(item:import('@dafeiyu/contracts').PendingMessage)=>readonly Conversation[];
+  isOwnerMessage?:(item:import('@dafeiyu/contracts').PendingMessage)=>boolean;
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
   settled?:(runId:string)=>void;
   progress?:(runId:string)=>Promise<Json>;
@@ -81,16 +83,26 @@ export class ExecutionCoordinator {
   constructor(private readonly d:Dependencies){d.personas.enrich=(access,run)=>{if(run.definition.scope.kind!=='task')return access;
     const scoped={...access,motivation:this.motivation(run),resourceAllowed:(scene:Conversation)=>this.allowedResource(run,scene)};return this.evidenceFor(run,scoped).access(scoped);};}
   private allowedResource(run:StoredRun,scene:Conversation):boolean {
-    if(run.definition.origin.kind==='message')return runtimeHash(scene)===runtimeHash(this.d.journal.get(run.definition.origin.inboundId).message.conversation);
+    if(run.definition.origin.kind==='message')return this.messageResources(run.definition.origin.inboundId).some(resource=>runtimeHash(resource)===runtimeHash(scene));
     if(run.definition.scope.kind!=='task')return false;
     const request=this.d.store.request(run.requestKey),policy=this.policy(request.producer,run.definition.policyId),source=savedSchema.parse(request.payload).messageSource;
-    if(source){this.validateMessageSource(source);return source.resources.some(resource=>runtimeHash(resource)===runtimeHash(scene));}
+    if(source){this.validateMessageSource(source);return source.resources.some(resource=>runtimeHash(resource)===runtimeHash(scene))
+      &&(scene.channel!==source.conversation.channel||scene.account!==source.conversation.account||this.messageResources(source.inboundId).some(resource=>runtimeHash(resource)===runtimeHash(scene)));}
     return policy.resources.some(resource=>runtimeHash(resource)===runtimeHash(scene));
   }
   resources(context:ExecutionContext,pluginId:string):readonly Conversation[]{this.authority(context,pluginId);const run=this.d.store.get(context.runId);
-    if(run.definition.origin.kind==='message')return [this.d.journal.get(run.definition.origin.inboundId).message.conversation];
+    if(run.definition.origin.kind==='message')return this.messageResources(run.definition.origin.inboundId);
     const request=this.d.store.request(run.requestKey),source=savedSchema.parse(request.payload).messageSource;if(source)this.validateMessageSource(source);
-    return (source?.resources??this.policy(request.producer,run.definition.policyId).resources).map(scene=>({...scene}));}
+    return (source?.resources??this.policy(request.producer,run.definition.policyId).resources).filter(scene=>this.allowedResource(run,scene)).map(scene=>({...scene}));}
+  private messageResources(inboundId:string):readonly Conversation[]{const item=this.d.journal.get(inboundId);return this.d.messageResources?.(item)??[item.message.conversation];}
+  isOwnerExecution(context:ExecutionContext,pluginId:string):boolean{
+    this.authority(context,pluginId);const run=this.d.store.get(context.runId);
+    if(run.definition.origin.kind==='message')return this.d.isOwnerMessage?.(this.d.journal.get(run.definition.origin.inboundId))??false;
+    const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
+    if(source?.kind!=='explicit-task'||run.definition.origin.kind==='wake')return false;
+    this.validateMessageSource(source);return this.d.isOwnerMessage?.(this.d.journal.get(source.inboundId))??false;
+  }
+  producerResources(producer:string,policyId:string){return this.policy(producer,policyId).resources;}
   taskContextScope(view:ExecutionView,owner:string,scene:Conversation){
     const lease=this.contextLeases.get(view);if(!lease||lease.owner!==owner||lease.runId!==view.runId)return null;
     const run=this.d.store.get(view.runId);if(run.definition.scope.kind!=='task'||!this.allowedResource(run,scene))return null;
@@ -230,7 +242,7 @@ export class ExecutionCoordinator {
       return {accepted:false,relation,reason:'PROPOSAL_UNVERIFIED',taskId:task.id,note:'确认所引用的方案尚未在本会话送达，未修订或排队。'};
     const goal=task?(revise?this.mergedGoal(task.goal,directive.text,input.intent?.resolvedGoal):task.goal):input.kind==='explicit-task'?directive.text:input.goal!;
     const intent=this.intentSnapshot(relation,item,directive.text,{input,...(parent?{parent}:{}),...(task?{task:{id:task.id,epoch:task.epoch},previousGoal:task.goal}:{}),resolvedGoal:goal});
-    const resources=[...new Map([item.message.conversation,...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:binding.explorationResources??[])].map(scene=>[runtimeHash(scene),scene])).values()];
+    const resources=[...new Map([...(input.kind==='explicit-task'?this.messageResources(item.id):[item.message.conversation]),...(input.kind==='explicit-task'?this.policy(binding.id,binding.policyId).resources:binding.explorationResources??[])].map(scene=>[runtimeHash(scene),scene])).values()];
     const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),
       conversation:item.message.conversation,kind:input.kind,resources,...(voice?{voice}:{}),...(input.kind==='explicit-task'?{intent}:{})});
     this.validateMessageSource(source);
@@ -470,7 +482,7 @@ export class ExecutionCoordinator {
       if(updated.version!==input.expectedVersion+1)throw new Error('CONTROL_SUPERSEDED');
       for(const previous of this.d.store.list(['accepted','queued','running','waiting']))if(previous.definition.taskId===input.taskId)this.control(binding.id,previous,{requestId:runtimeHash([control.id,previous.id,'cancel']),expectedVersion:previous.version,reason:'主人修改或取消任务'},'cancel');
       if(input.action==='revise'){
-        const resources=[...new Map([item.message.conversation,...this.policy(binding.id,binding.policyId).resources].map(scene=>[runtimeHash(scene),scene])).values()];
+        const resources=[...new Map([...this.messageResources(item.id),...this.policy(binding.id,binding.policyId).resources].map(scene=>[runtimeHash(scene),scene])).values()];
         const source=MessageTaskSourceSchema.parse({schemaVersion:1,bindingId:binding.id,authorityVersion:this.messageBindingHash(binding),inboundId:item.id,messageHash:runtimeHash(item.message),conversation:item.message.conversation,kind:'explicit-task',resources,...(voice?{voice}:{})});
         resumed=this.submit(binding.id,ExecutionRequestSchema.parse({requestId:runtimeHash([control.id,'revise']),taskId:input.taskId,expectedVersion:updated.version,policyId:binding.policyId}),undefined,null,null,{kind:'explicit-task',basis:[`message:${item.id}`]},source);
       }

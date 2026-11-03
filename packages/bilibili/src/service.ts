@@ -74,6 +74,10 @@ export class BiliService extends Service {
   constructor(ctx:Context,config:Config,transport?:HttpTransport,private readonly browser?:BiliBrowserPort){super(ctx,'dafeiyuBilibili');this.config=biliServiceConfigSchema.parse(config);if(this.config.settings.browser&&!browser)throw new Error('BILI_BROWSER_BRIDGE_REQUIRED');this.store=new BiliStore(join(this.config.dataDir,'bilibili.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore,this.config.settings.maxPages);this.client=new BiliClient(this.config.settings,this.store,transport,{instanceGeneration:this.instanceGeneration});
     try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'bilibili',version:RELEASE_VERSION,agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['bilibili.read.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
       contexts:[readingContext(this.store,view=>ctx.dafeiyu.taskContextScope(view,'bilibili',BILI_SCENE),()=>this.ready())],
+      explorationCatalog:{snapshot:async signal=>{
+        const raw=await this.client.material('autonomy-discover',300000,()=>this.client.read('discover',{pn:1,ps:20},signal,()=>{if(!this.ready())throw new Error('BILI_UNAVAILABLE');}),signal,()=>{if(!this.ready())throw new Error('BILI_UNAVAILABLE');});
+        return pages.listing(raw,'discover',1,20).data.items.map(item=>({key:'bilibili:'+item.bvid,revision:item.bvid,provider:'bilibili',resource:BILI_SCENE,reference:item.bvid,title:item.title,prior:this.store.priorReading(item.bvid)}));
+      }},
       resourceProofs:{current:proof=>this.ready()&&this.store.valid(proof),epoch:()=>this.ready()?this.store.epoch():'closed',publicView:(proof,view)=>this.publicView(proof,view)}});}catch(e){this.store.close();throw e;}
     try{if(ctx.dafeiyu.capabilityManifest().features.includes('media.assets.v1')){this.media=new BiliMedia(this.store,this.client,()=>this.ready());this.unbindMedia=ctx.dafeiyu.registerMediaProvider(this.media);}}catch(e){this.handle.dispose();this.store.close();throw e;}
     ctx.effect(()=>()=>this.close(),'bilibili.close');}

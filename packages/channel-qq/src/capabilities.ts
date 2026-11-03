@@ -28,7 +28,10 @@ export class QqCapabilities {
   constructor(private readonly ctx: Context, private readonly host: Host) {
     this.handle = ctx.dafeiyu.registerExtension({ protocolVersion:API_VERSION, id: 'qq-capabilities', version: '1', agentId: host.agentId,
       requires: ['memory.capability-observation.v1', 'execution.resource-scope.v1'], provides: ['qq.browse.v1'], lifecycleReady: () => !this.closed,
-      resourceProofs: { current: proof => this.current(proof), epoch: scope => this.epoch(scope) }, actions: this.actions() });
+      resourceProofs: { current: proof => this.current(proof), epoch: scope => this.epoch(scope) },
+      ownerDirectory:{channelExtensionId:'channel-qq',channel:'qq',account:host.botId,ownerId:host.ownerId,snapshot:()=>({
+        revision:this.epoch(),resources:[{channel:'qq',account:host.botId,kind:'private' as const,id:host.ownerId},
+          ...host.groups.effective().map(id=>({channel:'qq',account:host.botId,kind:'group' as const,id}))].filter(scene=>host.allowed(scene))})},actions: this.actions() });
   }
   private owner(context: ExecutionContext): string { this.ctx.dafeiyu.executionAuthority(context, 'qq-capabilities'); return JSON.stringify([context.scope, context.intentVersion]); }
   private assertAvailable(): void { if (this.closed || !this.host.available()) throw new Error('CHANNEL_UNAVAILABLE'); }
@@ -68,10 +71,13 @@ export class QqCapabilities {
   }
   private groups(context: ExecutionContext) {
     this.owner(context); this.assertAvailable(); const sync = this.host.groups.status();
+    const replyTarget=context.origin.kind==='message'?this.ctx.dafeiyu.journal.get(context.origin.inboundId).message.conversation:null;
     const resources = this.ctx.dafeiyu.capabilityResources(context, 'qq-capabilities').filter(scene => this.host.allowed(scene)).map(scene => ({ scene,
       name: scene.kind === 'private' ? '主人私聊' : this.host.groups.info(scene.id)?.name ? redactContent(this.host.groups.info(scene.id)!.name).value : null,
+      joined:scene.kind==='group',readable:true,writable:replyTarget!==null&&digest(replyTarget)===digest(scene),
       membership: sync.enabled ? 'last-confirmed-snapshot' : 'configured', synchronizedAt: sync.lastSuccessAt }));
-    return { resources, sync: { state: sync.state, mode: sync.mode, lastSuccessAt: sync.lastSuccessAt }, coverage: '仅当前核心授权与本账号允许范围的交集；不是全部QQ群。' };
+    return { resources, queryScope:resources.length>1?'owner-unified':'current-conversation',sync: { state: sync.state, mode: sync.mode, lastSuccessAt: sync.lastSuccessAt },
+      coverage: '这是本次实际可查询范围；群成员关系、可读范围、可回复目标分别列出。未列出不能证明账号未加入或从未收到消息；历史完整性须按具体查询回执判断。' };
   }
   private async browse(context: ExecutionContext, raw: unknown) {
     const input = browseSchema.parse(raw), owner = this.owner(context), scene = this.allowed(context, input.target, input.cursor);

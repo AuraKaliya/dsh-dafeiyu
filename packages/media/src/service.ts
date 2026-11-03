@@ -1,5 +1,6 @@
-﻿import {RELEASE_VERSION} from '@dafeiyu/contracts';
+import {RELEASE_VERSION} from '@dafeiyu/contracts';
 import {API_VERSION} from '@dafeiyu/contracts';
+import {mediaStage,mediaFailure,MediaStageError} from './diagnostics.js';
 import {pendingMediaEvents} from './storage-status.js';
 import { Service } from '@deepseek-ai/cordis';
 import type { Context } from '@deepseek-ai/cordis';
@@ -106,12 +107,16 @@ export function validateImageObservations(observations:readonly {image:number}[]
     const guard=()=>{access.guard();if(!this.ready()||this.providers.get(provider.id)!==provider||mediaHash(provider.describe(description.ref.key))!==fingerprint)throw new Error('MEDIA_SOURCE_STALE');};guard();return {...access,guard};}
   private serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.tail.then(()=>{this.gate.assertActive();return work();}).finally(()=>this.flush());this.tail=result.catch(()=>{});return result;}
   private async acquireWithin(context:ExecutionContext,owner:string,input:z.output<typeof MediaAcquireSchema>,signal:AbortSignal){const {provider,description}=this.describe(input.source),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description),cancel=new AbortController();
-    try{const opened=await abortable(provider.open(input.source.key,null,AbortSignal.any([signal,cancel.signal])),signal);return await this.files.ingest(access,input.requestId,source,opened,signal);}finally{cancel.abort();}}
+    try{return await mediaStage('download',async()=>{const opened=await abortable(provider.open(input.source.key,null,AbortSignal.any([signal,cancel.signal])),signal);return await this.files.ingest(access,input.requestId,source,opened,signal);});}finally{cancel.abort();}}
   acquire(context:ExecutionContext,owner:string,input:z.output<typeof MediaAcquireSchema>){return this.serial(()=>this.acquireWithin(context,owner,input,AbortSignal.any([context.signal,this.controller.signal,AbortSignal.timeout(this.config.timeoutMs)])));}
   inspect(context:ExecutionContext,owner:string,ref:MediaAssetRef){const source=this.store.sourceForAsset(ref.id),{provider,description}=this.describe(source.description.ref),access=this.access(context,owner,description,provider);this.store.requireRef(access,ref);return this.store.read(access,ref.id);}
   private async withInput<T>(context:ExecutionContext,owner:string,request:Input,work:(value:Prepared)=>Promise<T>):Promise<T>{
     const ref=request.source??this.store.sourceForAsset(request.asset!.id).description.ref,{provider,description}=this.describe(ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
     const cancel=new AbortController(),signal=AbortSignal.any([context.signal,this.controller.signal,cancel.signal,AbortSignal.timeout(this.config.timeoutMs)]);let broker:MediaRangeBroker|null=null,lease:string|null=null,parent=request.asset??null;
+    const revision=mediaHash({implementation:RELEASE_VERSION,ffmpeg:this.config.ffmpeg,ffprobe:this.config.ffprobe,vision:this.config.vision??null,audio:this.config.audio??null});
+    const resourceKey=mediaHash([description.ref.provider,description.ref.provider==='bilibili'?description.name:description.origin,request.mode,revision]);
+    for(const stage of ['download','probe','decode',...(request.mode==='audio'?['audio']:request.mode==='document'?['document']:['vision'])])this.store.diagnostics.check('capability:'+revision+':'+stage);
+    this.store.diagnostics.check('resource:'+resourceKey);
     try{let input:DecoderInput;
       // Small streams are materialized once. Reopening a signed CDN URL for every probe/frame causes
       // needless range traffic and can exhaust its lease or trigger a resource hold mid-analysis.
@@ -120,7 +125,9 @@ export function validateImageObservations(observations:readonly {image:number}[]
       }else{if(!parent)parent=await this.acquireWithin(context,owner,{requestId:'input:'+mediaHash([request.requestId,source.id]),source:ref},signal);
         this.store.requireRef(access,parent);lease=this.store.lease(access,parent,'process',Date.now()+this.config.timeoutMs+60000);input={file:await this.files.verified(parent)};}
       access.guard();try{return await work({input,access,source,parent,broker,signal});}
-      catch(error){if(broker?.failureCode)throw new Error(broker.failureCode,{cause:error});throw error;}
+      catch(error){if(broker?.failureCode)throw new MediaStageError(mediaFailure(new Error(broker.failureCode),'download'),error);throw error;}
+    }catch(error){const failure=mediaFailure(error,'source'),key=failure.scope==='capability'?'capability:'+revision+':'+failure.stage:'resource:'+resourceKey;
+      const diagnostic=this.store.diagnostics.record(context,error,failure.stage,key);throw new MediaStageError(failure,error,diagnostic.id);
     }finally{cancel.abort();if(broker)await broker.close();if(lease)this.store.releaseLease(lease,'process');}
   }
   private async readImages(context:ExecutionContext,owner:string,input:Input){
@@ -153,7 +160,7 @@ export function validateImageObservations(observations:readonly {image:number}[]
       const lease=this.images.grant(images,access.guard);
       try{
         const route={provider:this.config.vision.provider,model:this.config.vision.model,...(this.config.vision.reasoningEffort?{reasoningEffort:this.config.vision.reasoningEffort}:{})};
-        const result=await this.analysis.run({route,instructions:visionInstructions+'\n'+browserFrameInstructions,input:{...imageAnalysisInput(images),outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:access.guard,parse:value=>visionResult.parse(value)},signal);
+        const result=await mediaStage('vision',()=>this.analysis.run({route,instructions:visionInstructions+'\n'+browserFrameInstructions,input:{...imageAnalysisInput(images),outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:access.guard,parse:value=>visionResult.parse(value)},signal));
         validateImageObservations(result.observations,images.length);
         const actual=lease.exposure(),frames=images.map((i,index)=>({image:index,source:resolved[index]!.description.ref,requestedMs:i.requestedMs,ptsMs:i.ptsMs,width:i.width,height:i.height}));
         const coverage={acquiredBytes:assets.reduce((n,asset)=>n+asset.bytes,0),processed:images.map(i=>({kind:i.ptsMs===null?'image' as const:'frame' as const,unit:i.ptsMs===null?'whole-image' as const:'milliseconds' as const,start:i.ptsMs??0,end:i.ptsMs??1})),exposed:true,gaps:['仅附带图像；未听音轨，不代表完整视频',...result.gaps],completeness:'partial' as const};
@@ -164,43 +171,50 @@ export function validateImageObservations(observations:readonly {image:number}[]
     }catch(error){this.store.abortJob(access,jobId,failureCode(error));throw error;}finally{for(const lease of leases)this.store.releaseLease(lease,'analysis');}
   }
   read(context:ExecutionContext,owner:string,input:Input){if(owner!=='media')return Promise.reject(new Error('MEDIA_READ_ACTION_REQUIRED'));if(input.mode==='images')return this.serial(()=>this.readImages(context,owner,input));return this.serial(()=>this.withInput(context,owner,input,async p=>{
-    if(input.mode==='inspect'){const metadata=await this.decoder.inspect(p.input,p.signal);p.access.guard();return {metadata,understood:false};}
+    if(input.mode==='inspect'){const metadata=await mediaStage('probe',()=>this.decoder.inspect(p.input,p.signal));p.access.guard();return {metadata,understood:false};}
     if(input.mode==='audio')return this.readAudio(context,input,p);
     if(input.mode==='document')return this.readDocument(context,input,p);
     if(input.mode!=='image'&&input.mode!=='frames')throw new Error('MEDIA_MODE_NOT_CONFIGURED');if(!this.config.vision)throw new Error('MEDIA_VISION_NOT_CONFIGURED');
-    const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);
+    const {requestId:_requestId,...options}=input,fingerprint={options,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion,vision:this.config.vision??null,audio:this.config.audio??null},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);
     if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
+    const cached=this.store.cachedRead(p.access,fingerprint);if(cached){this.store.reuseRead(p.access,input.requestId,fingerprint,cached);return {...this.observed(context,p.access,this.store.exposure(p.access,cached)),cacheHit:true};}
     const jobId=randomUUID();this.store.beginJob(p.access,jobId,fingerprint);const leases:string[]=[];
-    try{const metadata=await this.decoder.inspect(p.input,p.signal);if(input.mode==='image'&&metadata.kind!=='image'||input.mode==='frames'&&metadata.kind!=='video')throw new Error('MEDIA_MODE_MISMATCH');
+    try{const metadata=await mediaStage('probe',()=>this.decoder.inspect(p.input,p.signal));if(input.mode==='image'&&metadata.kind!=='image'||input.mode==='frames'&&metadata.kind!=='video')throw new Error('MEDIA_MODE_MISMATCH');
       const points=input.mode==='frames'?input.pointsMs:undefined;if(input.mode==='frames'&&!points?.length)throw new Error('MEDIA_FRAME_POINTS_REQUIRED');
-      const images:DecodedImage[]=[],assets:MediaAssetRef[]=[];
-      for(const point of points??[undefined]){p.signal.throwIfAborted();p.access.guard();
+      const images:DecodedImage[]=[],assets:MediaAssetRef[]=[],failedPoints:{requestedMs:number|null;code:string;diagnosticId:string}[]=[];
+      for(const point of points??[undefined]){p.signal.throwIfAborted();p.access.guard();try{
         const browserJpeg=point===undefined&&p.parent?.mime==='image/jpeg'&&p.source.description.ref.provider==='bilibili'&&p.source.description.ref.key.startsWith('frame:')&&typeof metadata.width==='number'&&typeof metadata.height==='number'&&metadata.width<=1024&&metadata.height<=1024;
-        let decoded:DecodedImage=browserJpeg?{data:await this.files.bytes(p.parent!,p.signal,p.access.guard,this.images.imageLimits.maxImageBytes),mime:'image/jpeg',width:metadata.width!,height:metadata.height!,hasAlpha:false,requestedMs:null,ptsMs:null}:await this.decoder.image(p.input,p.signal,point);
+        let decoded:DecodedImage=browserJpeg?{data:await this.files.bytes(p.parent!,p.signal,p.access.guard,this.images.imageLimits.maxImageBytes),mime:'image/jpeg',width:metadata.width!,height:metadata.height!,hasAlpha:false,requestedMs:null,ptsMs:null}:await mediaStage('decode',()=>this.decoder.image(p.input,p.signal,point));
         if(point===undefined&&p.source.description.sourceFrame)decoded={...decoded,ptsMs:p.source.description.sourceFrame.positionMs};
-        images.push(decoded);if(images.reduce((n,i)=>n+i.data.length,0)>this.images.imageLimits.maxMessageImageBytes)throw new Error('MEDIA_IMAGE_LIMIT');
+        if(images.reduce((n,i)=>n+i.data.length,decoded.data.length)>this.images.imageLimits.maxMessageImageBytes)throw new Error('MEDIA_IMAGE_LIMIT');
         const asset=await this.files.ingest(p.access,'derived:'+mediaHash([fingerprint,point??null]),p.source,{bytes:decoded.data.length,mime:decoded.mime,stream:(async function*(){yield decoded.data;})()},p.signal,{kind:'image',processingHash:mediaHash([decoded.mime==='image/jpeg'?'verified-browser-jpeg-v1':'ffmpeg-normalized-rgba-v1',point??null,decoded.width,decoded.height]),...(p.parent?{parent:p.parent}:{}),
           coverage:{acquiredBytes:decoded.data.length,processed:[{kind:decoded.ptsMs===null?'image':'frame',unit:decoded.ptsMs===null?'whole-image':'milliseconds',start:decoded.ptsMs??0,end:decoded.ptsMs??1}],exposed:false,gaps:point===undefined?['仅首帧／归一化图像，未做音频理解']:['只取得指定采样帧'],completeness:point===undefined?'complete':'partial'}});
-        assets.push(asset);leases.push(this.store.lease(p.access,asset,'analysis',Date.now()+this.config.timeoutMs+60000));}
+        assets.push(asset);images.push(decoded);leases.push(this.store.lease(p.access,asset,'analysis',Date.now()+this.config.timeoutMs+60000));
+        }catch(error){p.signal.throwIfAborted();p.access.guard();const failure=mediaFailure(error,'decode');
+          if(['permission','cancelled'].includes(failure.category)||point===undefined)throw error;
+          const diagnostic=this.store.diagnostics.record(context,error,'decode');failedPoints.push({requestedMs:point??null,code:failure.code,diagnosticId:diagnostic.id});
+        }}
+      if(!images.length)throw new MediaStageError(mediaFailure(new Error(failedPoints[0]?.code??'MEDIA_IMAGE_UNAVAILABLE'),'decode'),null,failedPoints[0]?.diagnosticId);
       const lease=this.images.grant(images,p.access.guard);
       try{const route={provider:this.config.vision.provider,model:this.config.vision.model,...(this.config.vision.reasoningEffort?{reasoningEffort:this.config.vision.reasoningEffort}:{})};
         const browserFrame=p.source.description.ref.provider==='bilibili'&&p.source.description.ref.key.startsWith('frame:');
-        const result=await this.analysis.run({route,instructions:visionInstructions+(browserFrame?'\n'+browserFrameInstructions:''),input:{...imageAnalysisInput(images),outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:p.access.guard,parse:value=>visionResult.parse(value)},p.signal);
+        const result=await mediaStage('vision',()=>this.analysis.run({route,instructions:visionInstructions+(browserFrame?'\n'+browserFrameInstructions:''),input:{...imageAnalysisInput(images),outputContract:outputContract(visionResult)},refs:lease.refs,lease:lease.id,guard:p.access.guard,parse:value=>visionResult.parse(value)},p.signal));
         if(result.observations.length!==images.length||new Set(result.observations.map(o=>o.image)).size!==images.length||result.observations.some(o=>o.image>=images.length))throw new Error('MEDIA_ANALYSIS_INVALID');
         const actual=lease.exposure(),coverage={acquiredBytes:p.broker?.coverage.transferredBytes??p.parent?.bytes??0,processed:images.map(i=>({kind:i.ptsMs===null?'image' as const:'frame' as const,unit:i.ptsMs===null?'whole-image' as const:'milliseconds' as const,start:i.ptsMs??0,end:i.ptsMs??1})),exposed:true,
-          gaps:[...(metadata.kind==='video'?['仅采样画面，未听音轨，不代表看完整视频']:images.every(image=>image.mime==='image/jpeg')?['仅浏览器捕获的原始单帧JPEG，未听音轨，不代表完整视频']:['仅归一化首帧；细节可能缩减']),...result.gaps],completeness:'partial' as const};
-        const text='视觉模型推断（observations仅针对本次图像，未独立核实；frames/sourceFrame为程序记录的采样坐标）：\n'+JSON.stringify({observations:result.observations,frames:images.map(i=>({requestedMs:i.requestedMs,ptsMs:i.ptsMs,width:i.width,height:i.height})),...(p.source.description.sourceFrame?{sourceFrame:p.source.description.sourceFrame}:{}),gaps:coverage.gaps});
+          gaps:[...(metadata.kind==='video'?['仅采样画面，未听音轨，不代表看完整视频']:images.every(image=>image.mime==='image/jpeg')?['仅浏览器捕获的原始单帧JPEG，未听音轨，不代表完整视频']:['仅归一化首帧；细节可能缩减']),...result.gaps,...failedPoints.map(point=>`未读到 ${point.requestedMs}ms：${point.code}（诊断 ${point.diagnosticId}）`)],completeness:'partial' as const};
+        const text='视觉模型推断（observations仅针对本次图像，未独立核实；frames/sourceFrame为程序记录的采样坐标）：\n'+JSON.stringify({observations:result.observations,failedPoints,frames:images.map(i=>({requestedMs:i.requestedMs,ptsMs:i.ptsMs,width:i.width,height:i.height})),...(p.source.description.sourceFrame?{sourceFrame:p.source.description.sourceFrame}:{}),gaps:coverage.gaps});
         const exposure=this.store.recordExposure(p.access,input.requestId,fingerprint,p.source,{assets,coverage,text,occurredAt:new Date().toISOString(),detail:{mode:input.mode,route,actual,rangeReads:p.broker?.coverage.ranges??[],sourceDimensions:{width:metadata.width,height:metadata.height}}});
         const observation=this.observed(context,p.access,exposure);this.store.finishJob(p.access,jobId,{exposureId:exposure.id},null);return observation;
       }finally{lease.close();}
     }catch(error){this.store.abortJob(p.access,jobId,failureCode(error));throw error;}finally{for(const lease of leases)this.store.releaseLease(lease,'analysis');}
   }));}
   private async readAudio(context:ExecutionContext,input:Input,p:Prepared){if(!this.audio)throw new Error('MEDIA_AUDIO_NOT_CONFIGURED');if(!input.interval)throw new Error('MEDIA_AUDIO_INTERVAL_REQUIRED');
-    const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
+    const {requestId:_requestId,...options}=input,fingerprint={options,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion,vision:this.config.vision??null,audio:this.config.audio??null},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
+    const cached=this.store.cachedRead(p.access,fingerprint);if(cached){this.store.reuseRead(p.access,input.requestId,fingerprint,cached);return {...this.observed(context,p.access,this.store.exposure(p.access,cached)),cacheHit:true};}
     const jobId=randomUUID();this.store.beginJob(p.access,jobId,fingerprint);let lease:string|null=null;
     try{const decoded=await this.decoder.audio(p.input,input.interval.startMs,input.interval.endMs,p.signal);
       const asset=await this.files.ingest(p.access,'audio:'+mediaHash(fingerprint),p.source,{bytes:decoded.data.length,mime:decoded.mime,stream:(async function*(){yield decoded.data;})()},p.signal,{kind:'audio',processingHash:mediaHash(['pcm16-mono-16000-v1',input.interval]),...(p.parent?{parent:p.parent}:{})});
-      lease=this.store.lease(p.access,asset,'audio',Date.now()+this.config.timeoutMs+60000);const processed=await this.audio.read(decoded,p.signal,p.access.guard);
+      lease=this.store.lease(p.access,asset,'audio',Date.now()+this.config.timeoutMs+60000);const processed=await mediaStage('audio',()=>this.audio!.read(decoded,p.signal,p.access.guard));
       if(processed.asr.status!=='complete'&&processed.events.status!=='complete')throw new Error('MEDIA_AUDIO_UNPROCESSED');
       const asr=processed.asr.status==='complete'?processed.asr.segments.map(s=>`[${s.startMs}–${s.endMs}ms] ${s.text}`).join('\n'):processed.asr.code;
       const windows=processed.events.status==='complete'?processed.events.windows:[],descriptions:string[]=[];
@@ -214,7 +228,7 @@ export function validateImageObservations(observations:readonly {image:number}[]
   }
   private async prepareReplyAsset(context:ExecutionContext,asset:MediaAssetRef,as:'image'|'record'|'file',key:string,owner:string){return this.withInput(context,owner,{requestId:key,asset,mode:'inspect'},async p=>{
     const record=this.store.read(p.access,asset.id);if(as==='file'||record.processingHash!==null&&(as==='image'&&asset.mime==='image/png'&&asset.kind==='image'||as==='record'&&asset.mime==='audio/wav'&&asset.kind==='audio'))return {asset,source:p.source.description};
-    const metadata=await this.decoder.inspect(p.input,p.signal);let data:Buffer,kind:'image'|'audio',mime:string;
+    const metadata=await mediaStage('probe',()=>this.decoder.inspect(p.input,p.signal));let data:Buffer,kind:'image'|'audio',mime:string;
     if(as==='image'&&p.source.description.ref.provider==='qq-stickers'&&metadata.kind==='image'&&['image/gif','image/png','image/jpeg','image/webp'].includes(asset.mime))return {asset,source:p.source.description};
     if(as==='image'){if(metadata.kind!=='image')throw new Error('MEDIA_IMAGE_ASSET_REQUIRED');const decoded=await this.decoder.image(p.input,p.signal);data=decoded.data;mime=decoded.mime;kind='image';}
     else{if(!metadata.durationMs||metadata.durationMs>120000)throw new Error('MEDIA_AUDIO_INTERVAL_REQUIRED');const decoded=await this.decoder.audio(p.input,0,metadata.durationMs,p.signal);data=decoded.data;mime=decoded.mime;kind='audio';}
@@ -248,7 +262,8 @@ export function validateImageObservations(observations:readonly {image:number}[]
     counts:{received:exposure.assets.length,processed:exposure.assets.length}});this.store.bindObservation(access,exposure.id,observation.source);const cursor=z.object({next:z.object({offset:z.number(),textOffset:z.number()}).nullable()}).safeParse(exposure.detail);
     return {exposureId:exposure.id,text:exposure.text,coverage:exposure.coverage,readProgress:ReadProgressSchema.parse({state:'observed',subject:'source-range',completeness:exposure.coverage.completeness}),assets:exposure.assets,observation,...(cursor.success?{next:cursor.data.next}:{})};}
   private async readDocument(context:ExecutionContext,input:Input,p:Prepared){if(!this.documents)throw new Error('MEDIA_DOCUMENTS_NOT_CONFIGURED');if(!('file'in p.input)||!p.parent)throw new Error('MEDIA_DOCUMENT_WHOLE_BYTES_REQUIRED');
-    const fingerprint={input,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
+    const {requestId:_requestId,...options}=input,fingerprint={options,source:p.source.id,sourceVersion:p.source.version,epoch:p.access.execution.intentVersion,vision:this.config.vision??null,audio:this.config.audio??null},prior=this.store.readReceipt(p.access,input.requestId,fingerprint);if(prior)return this.observed(context,p.access,this.store.exposure(p.access,prior));
+    const cached=this.store.cachedRead(p.access,fingerprint);if(cached){this.store.reuseRead(p.access,input.requestId,fingerprint,cached);return {...this.observed(context,p.access,this.store.exposure(p.access,cached)),cacheHit:true};}
     const jobId=randomUUID();this.store.beginJob(p.access,jobId,fingerprint);
     try{const document=await this.documents.read({file:p.input.file,name:p.source.description.name??'document',offset:input.offset??0,textOffset:input.textOffset??0,limit:input.limit??4000},p.signal,p.access.guard);
       if(!document.units.some(u=>u.text.trim())){this.store.finishJob(p.access,jobId,{kind:document.kind,next:document.next,gaps:document.gaps,observed:false},null);return {document,understood:false};}
@@ -271,7 +286,8 @@ export function validateImageObservations(observations:readonly {image:number}[]
       try{const data=z.json().parse(await execute(i,c)),observation=z.object({observation:z.object({source:z.object({id:z.string(),scopeKey:z.string(),version:z.number(),contentHash:z.string()})})}).safeParse(data);
         return {status:'succeeded',effects:write?'confirmed':'none',completeness:id===MEDIA_ACTIONS[2]?'partial':'complete',data,sources:observation.success?[observation.data.observation.source]:[],receipts:[]};}
       catch(error){const code=failureCode(error);if(write&&!['INVALID_INPUT','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','SOURCE_STALE','MEDIA_SOURCE_STALE','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT','OBSERVATION_NOT_EXPOSED','HISTORY_UNTRACKED','SOURCE_SUPPRESSED','EMPTY_OBSERVATION','PRIVATE_INPUT_REJECTED','MEDIA_SIZE_LIMIT','MEDIA_CACHE_FULL','MEDIA_TTS_NOT_CONFIGURED','MEDIA_DRAFT_FROZEN','MEDIA_IMAGE_ASSET_REQUIRED','MEDIA_AUDIO_INTERVAL_REQUIRED'].includes(code))throw error;
-        return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});
+        const diagnostic=error instanceof MediaStageError&&error.diagnosticId?{id:error.diagnosticId,...error.diagnostic}:this.store.diagnostics.record(c,error,id===MEDIA_ACTIONS[0]?'download':'source');
+        return {status:'failed',effects:'none',completeness:'unknown',data:z.json().parse({diagnostic}),sources:[],receipts:[],errorCode:diagnostic.code};}}});
     return [make(MEDIA_ACTIONS[0],MediaAcquireSchema,false,(i,c)=>this.acquire(c,'media',MediaAcquireSchema.parse(i))),make(MEDIA_ACTIONS[1],MediaAssetRefSchema,false,(i,c)=>this.inspect(c,'media',MediaAssetRefSchema.parse(i))),make(MEDIA_ACTIONS[2],MediaReadSchema,false,(i,c)=>this.read(c,'media',MediaReadSchema.parse(i))),make(MEDIA_ACTIONS[3],selectSchema,true,(i,c)=>this.select(c,i)),
       {...make(MEDIA_ACTIONS[4],MediaReplyDraftInputSchema,true,(i,c)=>this.prepareReply(c,i)),description:'准备当前Run的回复媒体草案，尚未发送。expectedVersion首次0，之后用currentVersion；parts为空取消。图片／语音会归一化，as:file保留原字节；final-voice仅在配置TTS时将核心批准的最终正文合成语音，不传自由文本。目标和正文由核心确定。'},
       {...make(MEDIA_ACTIONS[5],z.strictObject({}),false,(_i,c)=>this.replies.status(c)),description:'查看当前Run的媒体草案版本、选中数量和冻结状态，不读取其它任务。'}];}

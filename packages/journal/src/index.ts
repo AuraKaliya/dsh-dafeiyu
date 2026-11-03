@@ -304,5 +304,6 @@ export function eventFor(agentId: string, item: PendingMessage, type: string, pl
 }
 
 export * from './storage-inspection.js';
+export * from './storage-migration.js';
 
 export {inspectJournalStorage} from './schema.js';

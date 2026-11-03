@@ -1,4 +1,5 @@
 import {IdleWorkStore,createIdleSchema} from './idle.js';
+import {ActivityAdmission,createAdmissionSchema,ACTIVITY_ADMISSION_TABLES} from './admission.js';
 import {ActivityRounds,createRoundSchema} from './rounds.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync,mkdirSync } from 'node:fs';
@@ -11,8 +12,9 @@ import type { ActivityScheduleBody,ActivityDomainEvent,WakeOccurrenceBody,Activi
 import { initialDue,elapsedDue,nextAllowed,validateQuiet,localTime,daySlices } from './time.js';
 
 export const ACTIVITY_APPLICATION_ID=0x44464134;
-export const ACTIVITY_SCHEMA_VERSION=2;
-export const ACTIVITY_TABLES=['activity_metadata','activity_schedules','activity_schedule_revisions','activity_tasks','activity_occurrences','activity_outbox','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage','activity_clock','activity_rounds','activity_round_items','activity_idle_work'] as const;
+export const ACTIVITY_SCHEMA_VERSION=3;
+export const ACTIVITY_LEGACY_TABLES=['activity_metadata','activity_schedules','activity_schedule_revisions','activity_tasks','activity_occurrences','activity_outbox','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage','activity_clock','activity_rounds','activity_round_items','activity_idle_work'] as const;
+export const ACTIVITY_TABLES=[...ACTIVITY_LEGACY_TABLES,...ACTIVITY_ADMISSION_TABLES] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const createSchema=ActivityScheduleBodySchema.omit({id:true,version:true,createdAt:true,updatedAt:true,taskGeneration:true}).extend({requestId:PersonaRequestIdSchema});
 const updateSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().positive(),state:ActivityScheduleBodySchema.shape.state.optional(),
@@ -31,11 +33,37 @@ export const activityScope=(scope:ExecutionScope)=>scope.kind==='task'?scope.sco
 export interface StoredSchedule {body:ActivityScheduleBody;status:'active'|'paused'|'cancelled'|'exhausted'|'blocked';nextDue:number|null;notBefore:number;failures:number;error:string|null}
 export interface StoredOccurrence {body:WakeOccurrenceBody;state:ActivityOccurrenceState;runId:string|null;startedAt:number|null;error:string|null}
 
+export function createActivityStorageSchema(db:DatabaseSync,admission=true){createRoundSchema(db);createIdleSchema(db);if(admission)createAdmissionSchema(db);db.exec(`
+    CREATE TABLE activity_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
+    CREATE TABLE activity_schedules(id TEXT PRIMARY KEY,owner_key TEXT NOT NULL,version INTEGER NOT NULL,task_generation INTEGER NOT NULL,status TEXT NOT NULL,next_due INTEGER,not_before INTEGER NOT NULL DEFAULT 0,event_cursor INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,error TEXT);
+    CREATE INDEX activity_due ON activity_schedules(status,next_due,not_before);
+    CREATE TABLE activity_schedule_revisions(id TEXT NOT NULL REFERENCES activity_schedules(id),version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(id,version));
+    CREATE TABLE activity_tasks(schedule_id TEXT NOT NULL REFERENCES activity_schedules(id),generation INTEGER NOT NULL,task_id TEXT NOT NULL,epoch INTEGER NOT NULL,PRIMARY KEY(schedule_id,generation));
+    CREATE TABLE activity_occurrences(id TEXT PRIMARY KEY,schedule_id TEXT NOT NULL REFERENCES activity_schedules(id),schedule_version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,state TEXT NOT NULL,run_id TEXT UNIQUE,started_at INTEGER,error TEXT,updated_at INTEGER NOT NULL);
+    CREATE INDEX activity_occurrence_plan ON activity_occurrences(schedule_id,state);
+    CREATE TABLE activity_outbox(id TEXT PRIMARY KEY REFERENCES activity_occurrences(id),acknowledged INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE activity_requests(scope_key TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(scope_key,request_id));
+    CREATE TABLE activity_domain_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL);
+    CREATE TABLE activity_condition_watermarks(schedule_id TEXT NOT NULL,event_type TEXT NOT NULL,event_key TEXT NOT NULL,watermark TEXT NOT NULL,PRIMARY KEY(schedule_id,event_type,event_key,watermark));
+    CREATE TABLE activity_run_events(id TEXT PRIMARY KEY,occurrence_id TEXT NOT NULL REFERENCES activity_occurrences(id),body TEXT NOT NULL,body_hash TEXT NOT NULL);
+    CREATE TABLE activity_usage(run_id TEXT NOT NULL,day TEXT NOT NULL,milliseconds INTEGER NOT NULL,PRIMARY KEY(run_id,day));
+    CREATE TABLE activity_clock(id INTEGER PRIMARY KEY CHECK(id=1),last_seen INTEGER NOT NULL);
+    INSERT INTO activity_clock VALUES(1,0);
+    PRAGMA application_id=${ACTIVITY_APPLICATION_ID};PRAGMA user_version=${admission?ACTIVITY_SCHEMA_VERSION:2};
+  `);
+    for(const table of ['activity_metadata','activity_schedule_revisions','activity_tasks','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage']){
+      db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable activity history');END;
+        CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain activity history');END;`);
+    }
+    db.exec("CREATE TRIGGER activity_occurrence_immutable BEFORE UPDATE OF id,schedule_id,schedule_version,body,body_hash ON activity_occurrences BEGIN SELECT RAISE(ABORT,'Immutable wake occurrence');END;");
+}
+
 /** Trusted program persistence. No method accepts model authority directly. */
 export class ActivityStore {
   private readonly db:DatabaseSync;
   readonly rounds:ActivityRounds;
   readonly idle:IdleWorkStore;
+  readonly admission:ActivityAdmission;
   readonly config:z.output<typeof ActivityConfigSchema>;
   readonly identity:z.infer<typeof identitySchema>;
   private closed=false;
@@ -52,35 +80,12 @@ export class ActivityStore {
       configureSqlite(this.db);
     }catch(error){this.db.close();throw error;}
     this.idle=new IdleWorkStore(this.db);
+    this.admission=new ActivityAdmission(this.db);
     this.rounds=new ActivityRounds(this.db,this.config,this.config.minIntervalMs);
   }
   management(){return this.db.prepare('SELECT id FROM activity_schedules ORDER BY rowid DESC LIMIT 100').all().map(row=>this.get(String(row.id)));}
   admitIdle(work:Parameters<IdleWorkStore['save']>[0],now:number){this.transaction(()=>{this.idle.save(work);this.rounds.admit('idle:'+work.id,now);});}
-  private initialize(){createRoundSchema(this.db);createIdleSchema(this.db);this.db.exec(`
-    CREATE TABLE activity_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
-    CREATE TABLE activity_schedules(id TEXT PRIMARY KEY,owner_key TEXT NOT NULL,version INTEGER NOT NULL,task_generation INTEGER NOT NULL,status TEXT NOT NULL,next_due INTEGER,not_before INTEGER NOT NULL DEFAULT 0,event_cursor INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,error TEXT);
-    CREATE INDEX activity_due ON activity_schedules(status,next_due,not_before);
-    CREATE TABLE activity_schedule_revisions(id TEXT NOT NULL REFERENCES activity_schedules(id),version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(id,version));
-    CREATE TABLE activity_tasks(schedule_id TEXT NOT NULL REFERENCES activity_schedules(id),generation INTEGER NOT NULL,task_id TEXT NOT NULL,epoch INTEGER NOT NULL,PRIMARY KEY(schedule_id,generation));
-    CREATE TABLE activity_occurrences(id TEXT PRIMARY KEY,schedule_id TEXT NOT NULL REFERENCES activity_schedules(id),schedule_version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,state TEXT NOT NULL,run_id TEXT UNIQUE,started_at INTEGER,error TEXT,updated_at INTEGER NOT NULL);
-    CREATE INDEX activity_occurrence_plan ON activity_occurrences(schedule_id,state);
-    CREATE TABLE activity_outbox(id TEXT PRIMARY KEY REFERENCES activity_occurrences(id),acknowledged INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE activity_requests(scope_key TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(scope_key,request_id));
-    CREATE TABLE activity_domain_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL);
-    CREATE TABLE activity_condition_watermarks(schedule_id TEXT NOT NULL,event_type TEXT NOT NULL,event_key TEXT NOT NULL,watermark TEXT NOT NULL,PRIMARY KEY(schedule_id,event_type,event_key,watermark));
-    CREATE TABLE activity_run_events(id TEXT PRIMARY KEY,occurrence_id TEXT NOT NULL REFERENCES activity_occurrences(id),body TEXT NOT NULL,body_hash TEXT NOT NULL);
-    CREATE TABLE activity_usage(run_id TEXT NOT NULL,day TEXT NOT NULL,milliseconds INTEGER NOT NULL,PRIMARY KEY(run_id,day));
-    CREATE TABLE activity_clock(id INTEGER PRIMARY KEY CHECK(id=1),last_seen INTEGER NOT NULL);
-    INSERT INTO activity_clock VALUES(1,0);
-    PRAGMA application_id=${ACTIVITY_APPLICATION_ID};PRAGMA user_version=${ACTIVITY_SCHEMA_VERSION};
-  `);
-    for(const table of ['activity_metadata','activity_schedule_revisions','activity_tasks','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage']){
-      this.db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable activity history');END;
-        CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain activity history');END;`);
-    }
-    this.db.exec("CREATE TRIGGER activity_occurrence_immutable BEFORE UPDATE OF id,schedule_id,schedule_version,body,body_hash ON activity_occurrences BEGIN SELECT RAISE(ABORT,'Immutable wake occurrence');END;");
-    this.db.prepare('INSERT INTO activity_metadata VALUES(1,?)').run(JSON.stringify(this.identity));
-  }
+  private initialize(){createActivityStorageSchema(this.db);this.db.prepare('INSERT INTO activity_metadata VALUES(1,?)').run(JSON.stringify(this.identity));}
   private transaction<T>(work:()=>T):T {this.db.exec('BEGIN IMMEDIATE');try{const value=work();this.db.exec('COMMIT');return value;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   private clock(now:number){z.number().int().nonnegative().safe().parse(now);const prior=Number(this.db.prepare('SELECT last_seen FROM activity_clock WHERE id=1').get()?.last_seen),value=Math.max(prior,now);
     this.db.prepare('UPDATE activity_clock SET last_seen=? WHERE id=1').run(value);return value;}

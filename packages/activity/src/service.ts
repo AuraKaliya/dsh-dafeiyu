@@ -67,13 +67,15 @@ export class ActivityService extends Service {
     const anchor=pauseOnly?undefined:this.ctx.dafeiyu.captureActivityAnchor(context,'activity');const {id,...patch}=input;
     return this.store.update(id,access.view.scope,{...patch,...(input.goal!==undefined?{basis:input.basis??[]}:{}),...(input.trigger?{trigger:this.trigger(context,input.trigger)}:{}),...(anchor?{anchor}:{}),configHash:this.configHash},this.now());
   }
-  status(context:ExecutionContext,id?:string){const access=this.access(context,false),plans=id?[this.store.get(id,access.view.scope)]:this.store.list(access.view.scope);
+  status(context:ExecutionContext,id?:string){
+    if(this.ctx.dafeiyu.isOwnerExecution(context,'activity'))return id?this.store.get(id):{health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list()};
+    const access=this.access(context,false),plans=id?[this.store.get(id,access.view.scope)]:this.store.list(access.view.scope);
     return plans.map(plan=>{const source=plan.body.anchor?this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor):{state:'stale',code:'ACTIVITY_SOURCE_REQUIRED'};return {id:plan.body.id,version:plan.body.version,status:plan.status,purpose:plan.body.purpose,goal:source.state==='stale'?null:plan.body.goal,trigger:plan.body.trigger,
       quiet:plan.body.quiet,timeZone:plan.body.timeZone,nextDueAt:plan.nextDue===null?null:new Date(plan.nextDue).toISOString(),notBefore:new Date(plan.notBefore).toISOString(),error:plan.error,
       source};});
   }
   private actions():ActionCapability[]{
-    const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,fn:(input:unknown,c:ExecutionContext)=>unknown):ActionCapability=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',scope:'task',
+    const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,fn:(input:unknown,c:ExecutionContext)=>unknown):ActionCapability=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',scope:id===ACTIVITY_ACTIONS[2]?'any':'task',
       execute:async(input,c)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(fn(input,c)),sources:[],receipts:[]};}
         catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'ACTIVITY_FAILED';
           return {status:'failed',effects:write&&!['INVALID_INPUT','SOURCE_NOT_EXPOSED','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','SCOPE_DENIED','ACTIVITY_CANCELLED','ACTIVITY_INTERVAL_TOO_SHORT','ACTIVITY_SOURCE_REQUIRED','ACTIVITY_REPLAN_REQUIRED','ACTIVITY_QUIET_ALL_DAY','PRIVATE_INPUT_REJECTED'].includes(code)?'unknown':'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});

@@ -12,8 +12,8 @@ import { QQ_ACTIONS,QQ_TASK_ACTIONS,QQ_MEDIA_ACTIONS,QQ_STICKER_ACTIONS,QQ_PROGR
 import { biliActionIds,inspectBiliMigration,migrateBiliStorage } from '@dafeiyu/bilibili';
 import { BiliOwnerStore,BILI_OWNER_TASK_ACTIONS,BILI_PUBLIC_SCENE,biliOwnerScene,createBiliOwnerProductionPorts } from '@dafeiyu/bilibili/channel';
 import { BILI_OWNER_AUTH_HASH } from '@dafeiyu/bilibili/channel/production-config';
-import { ACTIVITY_ACTIONS } from '@dafeiyu/activity';
-import { MEDIA_ACTIONS } from '@dafeiyu/media';
+import { ACTIVITY_ACTIONS,inspectActivityMigration,migrateActivityStorage } from '@dafeiyu/activity';
+import { MEDIA_ACTIONS,inspectMediaMigration,migrateMediaStorage } from '@dafeiyu/media';
 import { readInstallationSettings,checkInstallationFiles } from './settings.js';
 import type { InstallationSettings } from './settings.js';
 import {attachLocalOwnerControl} from './local-owner.js';
@@ -39,7 +39,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
   const stickerActions=settings.qq.stickers.enabled?[...QQ_STICKER_ACTIONS]:[];
   const {service:oneBotService,...qqHostConfig}=settings.qq;
   const actions=[...taskActions,...growthActions,...maintenanceActions,...QQ_ACTIONS,...QQ_PROGRESS_ACTIONS,...stickerActions,...(settings.dshTools?DSH_TOOL_ACTIONS:[]),...(activity?ACTIVITY_ACTIONS:[]),...biliActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[])];
-  const conversation=[...memoryActions,...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...(settings.dshTools?['dsh_tool_list']:[]),...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
+  const conversation=[...memoryActions,...growthActions,...QQ_ACTIONS,...QQ_TASK_ACTIONS,...(activity?['dafeiyu_activity_status']:[]),...(settings.dshTools?['dsh_tool_list']:[]),...stickerActions,...(settings.media?[...QQ_MEDIA_ACTIONS,...enabledMediaActions]:[]),...(bili?.channel?BILI_OWNER_TASK_ACTIONS:[])];
   const plugins:unknown[]=[{id:options.scripted?'model-scripted':'model-deepseek',required:true,config:options.scripted?{}:{credentialStore:settings.model.credentialStore,...(settings.model.auth?{auth:settings.model.auth}:{}),...(settings.model.baseURL?{baseURL:settings.model.baseURL}:{}),...(settings.model.inlineTransport?{inlineTransport:settings.model.inlineTransport}:{})}},
     {id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true,config:{context:{},maintenance:{}}},
     {id:'qq',required:true,config:{...qqHostConfig,joinedGroups:undefined,capabilities:{enabled:true},tasks:{enabled:true,policyId:'qq-task',deliverResults:true,explorationResources:resources},...(settings.media?{media:{enabled:true,...settings.qq.media}}:{}),groupSync:{enabled:true,mode:settings.qq.joinedGroups?'joined':'allowlist'}}}];
@@ -77,8 +77,10 @@ export function migrateInstallation(settingsFile:string):InstallationMigration{
     const stamp=Date.now(),backup=join(settings.dataDir,'backups','bilibili-'+stamp+'.sqlite');
     const result=existsSync(file)?migrateBiliStorage(file,profile,{backup}):{migrated:false,version:0,backup:undefined};
     const engine=migrateRuntimeStorage(runtime,profile,join(settings.dataDir,'backups','runtime-'+stamp+'.sqlite'));
-    const backups=[result.backup,engine.backup].filter((value):value is string=>typeof value==='string');
-    return {code:result.migrated||engine.migrated?'INSTALL_MIGRATED':'INSTALL_CURRENT',version:result.version,backup:result.backup??null,
+    const activity=migrateActivityStorage(join(core,'activity.sqlite'),profile,join(settings.dataDir,'backups','activity-'+stamp+'.sqlite'));
+    const media=migrateMediaStorage(join(core,'media.sqlite'),profile,join(settings.dataDir,'backups','media-'+stamp+'.sqlite'));
+    const backups=[result.backup,engine.backup,activity.backup,media.backup].filter((value):value is string=>typeof value==='string');
+    return {code:result.migrated||engine.migrated||activity.migrated||media.migrated?'INSTALL_MIGRATED':'INSTALL_CURRENT',version:result.version,backup:result.backup??null,
       ...(existsSync(runtime)?{runtimeVersion:engine.version,backups}:{})};
   }finally{lease.release();}
 }
@@ -88,6 +90,10 @@ export function relocateProfileManifest(prepared:ReturnType<typeof loadHostConfi
 export function prepareInstallation(settingsFile:string,options:InstallationOptions={}) {
   const settings=readInstallationSettings(settingsFile),root=settings.dataDir,metaFile=join(root,'installation.json');
   const runtimeStore=join(root,'core','runtime.sqlite');
+  const activityStore=join(root,'core','activity.sqlite');
+  if(existsSync(activityStore)){const profile=z.object({agentId:z.string(),profileId:z.string()}).parse(JSON.parse(readFileSync(join(root,'core','host-profile.json'),'utf8')));if(inspectActivityMigration(activityStore,profile).state==='upgradable')throw new Error('INSTALL_MIGRATION_REQUIRED');}
+  const mediaStore=join(root,'core','media.sqlite');
+  if(existsSync(mediaStore)){const profile=z.object({agentId:z.string(),profileId:z.string()}).parse(JSON.parse(readFileSync(join(root,'core','host-profile.json'),'utf8')));if(inspectMediaMigration(mediaStore,profile).state==='upgradable')throw new Error('INSTALL_MIGRATION_REQUIRED');}
   if(existsSync(runtimeStore)){const profile=z.object({agentId:z.string(),profileId:z.string()}).parse(JSON.parse(readFileSync(join(root,'core','host-profile.json'),'utf8')));
     if(inspectRuntimeMigration(runtimeStore,profile).state==='upgradable')throw new Error('INSTALL_MIGRATION_REQUIRED');}
   const biliStore=join(root,'core','bilibili.sqlite');

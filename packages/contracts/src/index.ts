@@ -27,6 +27,7 @@ export * from './message-task.js';
 export * from './native-expression.js';
 export * from './memory-maintenance.js';
 export * from './activity.js';
+export * from './autonomy.js';
 export * from './feedback.js';
 export * from './media.js';
 export * from './media-delivery.js';

@@ -127,6 +127,10 @@ export class BiliStore {
   recover(){return Number(this.db.prepare("UPDATE bili_requests SET state='interrupted',error='BILI_PROCESS_INTERRUPTED' WHERE state='pending'").run().changes);}
   get counts(){return {pages:Number(this.db.prepare('SELECT count(*) AS n FROM bili_pages').get()?.n),requests:Number(this.db.prepare('SELECT count(*) AS n FROM bili_requests').get()?.n),pending:Number(this.db.prepare("SELECT count(*) AS n FROM bili_requests WHERE state='pending'").get()?.n)};}
   reading(context:Pick<ExecutionContext,'scope'|'intentVersion'>,bvid:string){const owner=biliOwner(context),row=this.db.prepare('SELECT body FROM bili_reading WHERE owner=? AND bvid=?').get(owner,BvidSchema.parse(bvid));return row?BiliReadingRecordSchema.parse(JSON.parse(String(row.body))):null;}
+  /** Only a public resource's read status, never another task's conclusions or authority. */
+  priorReading(bvid:string):'none'|'read'|'blocked'{const rows=this.db.prepare('SELECT body FROM bili_reading WHERE bvid=? ORDER BY updated_at DESC').all(BvidSchema.parse(bvid));
+    const records=rows.map(row=>BiliReadingRecordSchema.parse(JSON.parse(String(row.body))));
+    if(records.some(record=>record.status==='closed'))return 'read';return records.length?'blocked':'none';}
   saveCommentCursor(context:ExecutionContext,raw:unknown){const owner=this.check(context),cursor=BiliCommentCursorSchema.parse(raw),hash=biliHash(cursor);
     const prior=this.db.prepare('SELECT id FROM bili_comment_cursors WHERE owner=? AND hash=?').get(owner,hash);if(prior)return String(prior.id);
     const id=randomUUID();this.db.prepare('INSERT INTO bili_comment_cursors VALUES(?,?,?,?)').run(id,owner,hash,JSON.stringify(cursor));return id;
