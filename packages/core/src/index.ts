@@ -436,6 +436,12 @@ export class DafeiyuService extends Service {
     if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const scene=ConversationSchema.parse(raw);this.executions.authorizeResource(context,pluginId,scene);return scene;
   }
   capabilityResourceCurrent(raw:unknown):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registry.resourceCurrent(proof.data);}
+  capabilityConversationResourceCurrent(scope:TimelineScope,origin:import('@dafeiyu/contracts').RunOrigin,scene:Conversation):boolean{
+    try{if(scope.agentId!==this.config.agentId||origin.kind!=='message')return false;const item=this.journal.get(origin.inboundId);
+      if(item.route!==scope.route||runtimeHash(item.message.conversation)!==runtimeHash(origin.conversation)||this.journal.messageRecalled(scope,item.message.id))return false;
+      return this.ownerQueryResources(item).some(resource=>runtimeHash(resource)===runtimeHash(scene));
+    }catch{return false;}
+  }
   capabilityPublicView(raw:unknown,view:string):boolean {const proof=ResourceProofSchema.safeParse(raw);return proof.success&&this.registry.publicView(proof.data,view);}
   capabilityTargetView(raw:unknown,view:string,target:Conversation,scope:unknown){const proof=ResourceProofSchema.safeParse(raw),destination=ConversationSchema.safeParse(target),execution=ExecutionScopeSchema.safeParse(scope);
     return proof.success&&destination.success&&execution.success&&execution.data.agentId===this.config.agentId?this.registry.targetView(proof.data,view,destination.data,execution.data):null;}

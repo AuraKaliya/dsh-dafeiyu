@@ -13,7 +13,7 @@ export class CapabilityObservationService {
         if(!access||access.view.scope.kind!=='task'||access.view.scope.scopeKey!==scope.route||!access.resourceAllowed?.(body.proof.scene))return false;
         return !body.history.length||!!access.validateHistory?.(body.history);
       }
-      if(conversationKey(scope.agentId,body.proof.scene)!==scope.route)return false;
+      if(conversationKey(scope.agentId,body.proof.scene)!==scope.route&&!ctx.dafeiyu.capabilityConversationResourceCurrent(scope,body.origin,body.proof.scene))return false;
       return body.history.every(dep=>dep.kind==='context'?ctx.dafeiyu.capabilityHistoryCurrent(scope,[dep]):sourcePolicy.validate({...scope,traceId:body.origin.kind==='message'?body.origin.inboundId:body.runId},dep));
     });
     this.unbind=ctx.dafeiyu.bindCapabilityObservations({ready,

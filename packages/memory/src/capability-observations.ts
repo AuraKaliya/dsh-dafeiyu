@@ -50,7 +50,8 @@ export class CapabilityObservations {
   }
   source(scope:TimelineScope,id:string,purpose:MemoryAccessPurpose) {
     const row=this.row(scope,id);if(!row||!this.valid(scope,row.ref))return null;
-    const binding=row.body.scope.kind==='task'?{executionScope:row.body.scope}:{conversation:row.body.proof.scene,ingressPluginId:row.body.producer};
+    // The observation was formed in the authorized reader's scope. Its proof retains the original group.
+    const binding=row.body.scope.kind==='task'?{executionScope:row.body.scope}:{ingressPluginId:row.body.producer};
     if(row.body.scope.kind==='task'&&purpose!=='internal')return null;
     return {ref:row.ref,hash:row.ref.contentHash,version:1,deleted:false,boundary:conservativeBoundary(scope,'conservative-create',binding),body:row.body};
   }
@@ -126,7 +127,7 @@ export class CapabilityObservations {
         memory=this.memory.mutate({agentId:scope.agentId,route:scope.route,traceId:access.view.origin.kind==='message'?access.view.origin.inboundId:access.view.runId,operationId:access.operationId,startedEventId:access.startedEventId!},
           {action:'create',requestId:'capability:'+digest([access.producer,input.requestId]),value:{kind:'experience',claimType:input.mode==='summary'?'inference':'reported_claim',content,
             sources:[{kind:'capability',ref:`dafeiyu:capability:${selected.id}`,version:1,contentHash:selected.contentHash}]}},
-          access.view.scope.kind==='task'?{executionScope:access.view.scope}:{conversation:authority.scene,ingressPluginId:access.producer});
+          access.view.scope.kind==='task'?{executionScope:access.view.scope}:{ingressPluginId:access.producer});
       }
       const receipt={observationId:row.ref.id,mode:input.mode,memory,duplicate:false,exposure:'verified-current-request'};
       this.db.prepare('INSERT INTO capability_selections VALUES(?,?,?,?,?,?)').run(scope.agentId,scope.route,access.producer,input.requestId,fingerprint,JSON.stringify(receipt));
