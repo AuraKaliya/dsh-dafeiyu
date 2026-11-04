@@ -156,3 +156,4 @@ export interface PendingMessage {
 }
 
 export * from './recent-state.js';
+export * from './usage.js';

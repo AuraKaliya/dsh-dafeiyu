@@ -9,9 +9,10 @@ import type { Json } from '@dafeiyu/contracts';
 import { configureSqlite,matchesSchema } from '@dafeiyu/journal';
 import { ownerAlive, ownerNonce } from '@dafeiyu/journal/owner-identity';
 import { NativeDeliveryStore } from './native-delivery-store.js';
+import {UsageLedger} from './usage-ledger.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
-export const RUNTIME_SCHEMA_VERSION = 4;
+export const RUNTIME_SCHEMA_VERSION = 5;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const shareSchema=z.strictObject({id:z.uuid(),runId:z.uuid(),target:ConversationSchema,policyHash:hashSchema,notBefore:z.number().int().nonnegative(),expiresAt:z.iso.datetime(),createdAt:z.iso.datetime()});
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
@@ -58,6 +59,7 @@ export class RuntimeStore {
   private readonly sourceReadStatements=new Map<string,import('node:sqlite').StatementSync>();
   private sourceRead(sql:string){let statement=this.sourceReadStatements.get(sql);if(!statement){statement=this.db.prepare(sql);this.sourceReadStatements.set(sql,statement);}return statement;}
   readonly nativeDeliveries:NativeDeliveryStore;
+  readonly modelUsage:UsageLedger;
   private readonly db:DatabaseSync;
   private readonly nonce=ownerNonce();
   private closed=false;
@@ -84,6 +86,7 @@ export class RuntimeStore {
         if(owner&&ownerAlive(Number(owner.pid),{...(typeof owner.nonce==='string'?{nonce:owner.nonce}:{})}))throw new Error('RUNTIME_ALREADY_OWNED');
         this.db.prepare('INSERT OR REPLACE INTO runtime_ownership VALUES(1,?,?)').run(process.pid,this.nonce);});
       this.nativeDeliveries=new NativeDeliveryStore(this.db,work=>this.transaction(work),(runId,type,data)=>this.event(runId,type,data));
+      this.modelUsage=new UsageLedger(this.db,work=>this.transaction(work));
     }catch(error){this.db.close();throw error;}
   }
   private initialize():void {
@@ -187,11 +190,12 @@ export class RuntimeStore {
     const counter=z.number().int().nonnegative().safe(),breakdown=z.object({inputTokens:counter,outputTokens:counter,cacheReadTokens:counter,cacheWriteTokens:counter,totalTokens:counter});
     const rows=this.db.prepare("SELECT body FROM run_inputs WHERE run_id=? AND input_id LIKE 'model-usage:%'").all(runId)
       .map(row=>z.object({tokens:counter.nullable(),external:z.boolean().optional(),marker:z.boolean().optional(),breakdown:breakdown.optional()}).parse(JSON.parse(String(row.body))));
-    const knownTokens=rows.reduce((sum,row)=>sum+(row.tokens??0),0),external=this.operations(runId).some(operation=>operation.plugin==='server-executor'&&operation.action.startsWith('dafeiyu_server_execute_'))&&!rows.some(row=>row.external);
+    const current=this.modelUsage.summary(runId),recorded=this.modelUsage.rows(runId);
+    const knownTokens=current.knownTokens+rows.reduce((sum,row)=>sum+(row.tokens??0),0),external=this.operations(runId).some(operation=>operation.plugin==='server-executor'&&operation.action.startsWith('dafeiyu_server_execute_'))&&!rows.some(row=>row.external)&&!recorded.some(row=>row.start.external);
     const details=rows.flatMap(row=>row.breakdown?[row.breakdown]:[]),sum=(key:keyof z.infer<typeof breakdown>)=>details.reduce((n,row)=>n+row[key],0);
-    return {tokens:rows.length&&rows.every(row=>row.tokens!==null)&&!external?knownTokens:null,knownTokens,calls:rows.filter(row=>!row.marker).length,externalPending:external,
-      unknownCalls:rows.filter(row=>!row.marker&&row.tokens===null).length,breakdownKnownCalls:details.length,legacyCalls:rows.filter(row=>!row.marker&&row.tokens!==null&&!row.breakdown).length,
-      breakdown:{inputTokens:sum('inputTokens'),outputTokens:sum('outputTokens'),cacheReadTokens:sum('cacheReadTokens'),cacheWriteTokens:sum('cacheWriteTokens'),totalTokens:sum('totalTokens')}};
+    return {tokens:!rows.length&&current.calls&&current.tokens!==null&&!external?knownTokens:null,knownTokens,calls:current.calls+rows.filter(row=>!row.marker).length,externalPending:external,
+      unknownCalls:current.unknownCalls+rows.filter(row=>!row.marker&&row.tokens===null).length,pendingCalls:current.pending,breakdownKnownCalls:details.length+recorded.filter(row=>row.settlement?.receipt.breakdown).length,legacyCalls:rows.filter(row=>!row.marker&&row.tokens!==null&&!row.breakdown).length,coverage:rows.length?'legacy-partial':'recorded-requests',byPhase:current.byPhase,
+      breakdown:{inputTokens:current.breakdown.inputTokens+sum('inputTokens'),outputTokens:current.breakdown.outputTokens+sum('outputTokens'),cacheReadTokens:current.breakdown.cacheReadTokens+sum('cacheReadTokens'),cacheWriteTokens:current.breakdown.cacheWriteTokens+sum('cacheWriteTokens'),totalTokens:current.breakdown.totalTokens+sum('totalTokens')}};
   }
   list(states?:readonly RunState[]):StoredRun[]{this.open();if(states?.length===0)return [];const filter=states?.map(value=>RunStateSchema.parse(value));
     return this.db.prepare(`SELECT id FROM runs${filter?' WHERE state IN ('+filter.map(()=>'?').join(',')+')':''} ORDER BY rowid`).all(...(filter??[])).map(row=>this.get(string(row.id)));}
@@ -290,7 +294,7 @@ export class RuntimeStore {
       const completed=this.transitionInside(id,version,'completed');this.event(id,'conversation.result-ready',projection);return completed;
     });
   }
-  recover():number{return this.transaction(()=>{let count=0;for(const run of this.list(['running','cancelling'])){
+  recover():number{this.modelUsage.recover();return this.transaction(()=>{let count=0;for(const run of this.list(['running','cancelling'])){
     for(const operation of this.operations(run.id))if(operation.state==='started'){this.db.prepare("UPDATE run_operations SET state='unknown' WHERE id=?").run(operation.id);this.event(run.id,'operation.unknown',{operationId:operation.id});}
     this.transitionInside(run.id,run.version,'interrupted','PROCESS_INTERRUPTED');count++;}return count;});}
   outbox(){this.open();return this.db.prepare('SELECT body FROM runtime_outbox WHERE delivered=0 ORDER BY ordinal').all().map(row=>eventSchema.parse(JSON.parse(string(row.body))));}

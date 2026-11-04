@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence';
 import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools';
 import { createHash,randomUUID } from 'node:crypto';
 import { dirname,join } from 'node:path';
+import {fileURLToPath} from 'node:url';
 import { DeferredPluginChanges } from './deferred-plugins.js';
 import { readInstallationSettings } from './settings.js';
 import {readBiliBrowser} from './bili-browser.js';
@@ -59,9 +60,11 @@ export function attachDshBridge(ctx:Context,child:ChildProcess,settingsFile:stri
     const snapshot=registry&&tools.some(tool=>tool.name==='skill')?z.object({skills:z.array(z.object({name:z.string(),description:z.string(),invocation:z.object({modelInvocable:z.boolean()})})),complete:z.boolean()}).parse(await registry.snapshot({scope:h.agent,cwd:dirname(settings.dataDir),signal})):null;
     const skills=snapshot?.skills.filter(item=>item.invocation.modelInvocable&&!excludedSkill(item.name)).map(item=>({name:item.name,description:item.description,load:{name:'skill',arguments:{name:item.name}}}));
     const directories=ctx.get('workingDirectory') as {ensure(agent:AgentHandle['agent'],signal:AbortSignal):Promise<string>}|undefined;
-    const workingDirectory=directories?await directories.ensure(h.agent,signal):dirname(settings.dataDir),environment={workingDirectory,developmentDirectory:join(dirname(settings.dataDir),'development',taskId??'shared'),platform:process.platform};
+    const workingDirectory=directories?await directories.ensure(h.agent,signal):dirname(settings.dataDir),inspection={kind:'local-instance-locators' as const,dataDirectory:settings.dataDir,statusFile:join(settings.dataDir,'core','host-status.json'),filesRead:false as const,
+      sourceFiles:[{purpose:'当前加载包的QQ查询与来源范围',path:fileURLToPath(new URL('../../channel-qq/lib/capabilities.js',import.meta.url))},{purpose:'当前加载包的消息接收与发送',path:fileURLToPath(new URL('../../channel-qq/lib/index.js',import.meta.url))},{purpose:'当前加载包的任务承接与权限',path:fileURLToPath(new URL('../../core/lib/execution-coordinator.js',import.meta.url))}]};
+    const environment={workingDirectory,developmentDirectory:join(dirname(settings.dataDir),'development',taskId??'shared'),platform:process.platform,inspection};
     const catalog=orderedDshCatalog(DshToolCatalogSchema.parse({version:'0'.repeat(64),tools,environment,...(skills?{skills,skillsComplete:snapshot?.complete}:{}),pluginChanges:changes.status()}));
-    return {...catalog,version:createHash('sha256').update(stableJson(z.json().parse({tools:catalog.tools,skills:catalog.skills??null,workingDirectory}))).digest('hex')};
+    return {...catalog,version:createHash('sha256').update(stableJson(z.json().parse({tools:catalog.tools,skills:catalog.skills??null,workingDirectory,inspection}))).digest('hex')};
   };
   const announced=new Set<string>(),lastAttempt=new Map<string,number>();
   const notifyChanges=async()=>{for(const row of changes.notifications()){

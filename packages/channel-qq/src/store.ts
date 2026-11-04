@@ -19,6 +19,8 @@ const remembered = z.object({ id: z.string(), sender: z.string(), text: z.string
 const quoteSchema=z.strictObject({route:z.string(),messageId:z.string().max(80),observedAt:z.iso.datetime(),occurredAt:z.iso.datetime(),expiresAt:z.iso.datetime(),proof:QqCacheProofSchema});
 export class QqStore {
   private readonly db: DatabaseSync;
+  private readonly statements=new Map<string,ReturnType<DatabaseSync['prepare']>>();
+  private statement(sql:string){let statement=this.statements.get(sql);if(!statement){statement=this.db.prepare(sql);this.statements.set(sql,statement);}return statement;}
   readonly cache: QqCache;
   readonly delivery: QqDeliveryLedger;
   readonly media:QqMediaStore;
@@ -53,8 +55,9 @@ export class QqStore {
   }
   find(route: string, id: string) { const row = this.db.prepare('SELECT id,sender,text FROM messages WHERE route=? AND id=?').get(route,id); if (!row) return null; const value = remembered.parse(row); return { ...value, text: redactContent(value.text).value }; }
   receipt(id: string): string | null { const row = this.db.prepare('SELECT platform_id FROM receipts WHERE reply_id=?').get(id); return row ? z.string().parse(row.platform_id) : null; }
-  handled(route: string, id: string): boolean { return !!this.db.prepare('SELECT 1 FROM handled WHERE route=? AND id=?').get(route,id); }
-  acknowledge(route: string, id: string): void { this.db.prepare('INSERT OR IGNORE INTO handled VALUES(?,?)').run(route,id); }
+  handled(route: string, id: string): boolean { return !!this.statement('SELECT 1 FROM handled WHERE route=? AND id=?').get(route,id); }
+  acknowledge(route: string, id: string): void { this.statement('INSERT OR IGNORE INTO handled VALUES(?,?)').run(route,id); }
+  observeBatch(entries:readonly Parameters<QqCache['remember']>[]){this.cache.rememberBatch(entries,(route,id)=>this.acknowledge(route,id));}
   sent(replyId: string, platformId: string): void { this.db.prepare('INSERT INTO receipts VALUES(?,?)').run(replyId, platformId); }
   groupSnapshot(account: string): GroupSnapshot | null {
     const row = this.db.prepare('SELECT at,revision,groups_json FROM qq_group_snapshots WHERE account=?').get(QqAccountIdSchema.parse(account));

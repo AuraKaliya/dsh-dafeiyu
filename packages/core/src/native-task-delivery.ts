@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
+import {withRunUsage} from './usage.js';
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
 import { NativeExpressionPacketSchema,NativeVerificationFeedbackSchema,ContextItemSchema,conversationKey,qqVisibleText,redactJson } from '@dafeiyu/contracts';
 import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply,Conversation } from '@dafeiyu/contracts';
@@ -62,12 +63,12 @@ export class NativeTaskDelivery {
     if(automatic&&!description.autoDeliver)return Promise.resolve(null);if(!automatic&&!this.host.accepting())throw new Error('HOST_NOT_READY');
     const record=this.host.store.nativeDeliveries.create(description.anchor);this.host.flush();
     const pending=this.active.get(runId);if(pending)return pending;if(terminal.has(record.state)||!this.host.accepting())return Promise.resolve(this.host.store.nativeDeliveries.status(runId));
-    const work=this.execute(runId,description.item,automatic).finally(()=>this.active.delete(runId));this.active.set(runId,work);return work;
+    const work=withRunUsage(receipt=>this.host.store.modelUsage.external(runId,receipt),()=>this.execute(runId,description.item,automatic),{runId,phase:'rendering'}).finally(()=>this.active.delete(runId));this.active.set(runId,work);return work;
   }
   activate(){for(const runId of this.host.store.nativeDeliveryCandidates())if(this.host.describe(runId)?.autoDeliver)void this.request(runId,true).catch(()=>{});}
   async whenIdle(){while(this.active.size||this.notices.size)await Promise.allSettled([...this.active.values(),...this.notices.values()]);}
   get pending(){return this.active.size+this.notices.size;}
-  progress(runId:string):Promise<import('@dafeiyu/contracts').Json>{const existing=this.notices.get(runId);if(existing)return existing;const work=this.statusNotice(runId).finally(()=>this.notices.delete(runId));this.notices.set(runId,work);return work;}
+  progress(runId:string):Promise<import('@dafeiyu/contracts').Json>{const existing=this.notices.get(runId);if(existing)return existing;const work=withRunUsage(receipt=>this.host.store.modelUsage.external(runId,receipt),()=>this.statusNotice(runId),{runId,phase:'feedback'}).finally(()=>this.notices.delete(runId));this.notices.set(runId,work);return work;}
   private failureSummary(code:string|null):string{switch(code){case 'MODEL_INCOMPLETE':return '模型本轮没有正常收尾，不能据此认定平台连接失败';case 'MODEL_TRANSPORT':case 'MODEL_HTTP_503':return '模型连接暂时失败，已经重试当前请求；之前执行的工具回执仍保留';case 'SOURCE_VALIDATION_FAILED':case 'SOURCE_STALE':return '执行中引用的资料失效，需要重新核对后再继续';case 'SEGMENT_LIMIT_REACHED':case 'READING_CONTEXT_CAPACITY':return '该历史运行触及旧版阅读限制，不能据此判断当前平台连接';case 'CAPACITY_EXCEEDED':return '待执行任务的队列暂时已满，不能据此判断模型上下文或平台连接';case 'MODEL_CONTEXT_CAPACITY':return '模型实际共享窗口不足，工作已保存，须从有效检查点接续或分块读取';default:return '任务执行中断，已经完成的工作仍保留';}}
   private async statusNotice(runId:string):Promise<import('@dafeiyu/contracts').Json>{
     const source=this.host.feedbackSource(runId);if(!source||this.host.signal.aborted)return {status:'not-sent',code:'STATUS_SOURCE_UNAVAILABLE'};

@@ -141,13 +141,13 @@ export class QqChannel extends Service {
       this.store.mediaDelivery.recover();
       this.transport=new QqSegmentedTransport({ledger:this.store.delivery,failed:(...args)=>this.recordDeliveryDiagnostic(...args),...(this.config.replyDelay.enabled?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal,this.config.replyDelay),betweenMessages:(signal:AbortSignal)=>waitBetweenQqMessages(signal,this.config.replyDelay)}:{}),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,text,signal)=>this.sendSegment(reply,text,signal),
         confirmed:(reply,text,receipt)=>{this.counters.segmentsConfirmed++;if(this.store.delivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
-          if(reply.taskResult)this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,'[任务交付占位：正文须经核心任务来源验证后回查，不能据此推断任务内容。]',{occurredAt:null,unsupported:['task-result-body-withheld']});
-          else this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text);}});
+          if(reply.taskResult)this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,'[任务交付占位：正文须经核心任务来源验证后回查，不能据此推断任务内容。]',{occurredAt:new Date().toISOString(),unsupported:['task-result-body-withheld']});
+          else this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text,{occurredAt:new Date().toISOString(),unsupported:[]});}});
       this.mediaTransport=new QqMediaTransport({ledger:this.store.mediaDelivery,...(this.config.replyDelay.enabled?{beforeSend:(reply:Reply,signal:AbortSignal)=>waitForQqReply(reply.text,signal,this.config.replyDelay),betweenMessages:(signal:AbortSignal)=>waitBetweenQqMessages(signal,this.config.replyDelay)}:{}),textProgress:id=>this.store.delivery.progress(id),check:(reply,signal)=>this.checkDelivery(reply,signal),send:(reply,part,data,signal)=>this.sendMediaPart(reply,part,data,signal),confirmed:(reply,part,receipt)=>{
         if(part.kind==='image'&&this.config.stickers.enabled)this.store.stickers.used(reply.conversation,part.asset,reply.id);
         this.counters.segmentsConfirmed++;if(this.store.mediaDelivery.progress(reply.id)?.state==='sent')this.counters.delivered++;
         const text=reply.taskResult?'[任务媒体交付占位：须经核心来源校验后回查，不能从此推断任务内容。]':part.kind==='text'?part.text:'[已发送受控媒体部件：'+part.kind+'；此占位不包含原媒体内容。]';
-        this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text,{occurredAt:null,unsupported:part.kind==='text'?[]:['delivered-media-withheld']});}});
+        this.store.remember(this.cacheRoute(reply.conversation),receipt,this.config.botId,text,{occurredAt:new Date().toISOString(),unsupported:part.kind==='text'?[]:['delivered-media-withheld']});}});
       this.groups = new GroupDirectory({ account: this.config.botId, allowed: this.config.groupIds, config: this.config.groupSync, store: this.store,
         fetchGroups: signal => this.api.groups(AbortSignal.any([signal, this.controller.signal])),
         rejectIdentity: () => { this.verified=false;this.state = 'rejected'; this.error = 'ACCOUNT_MISMATCH'; this.socket?.terminate(); } });
@@ -249,11 +249,13 @@ export class QqChannel extends Service {
       }, 15000);
     });
     socket.on('pong', () => { this.lastPong = Date.now(); });
+    let pending:string[]=[],queuedBytes=0,scheduled=false;
     socket.on('message', bytes => {
       if (this.stopped || this.socket !== socket) return;
-      this.queue = this.queue.then(() => this.receive(bytes.toString())).catch(() => {
-        this.error = 'INGEST_FAILED'; this.state = 'offline'; socket.terminate();
-      });
+      const text=bytes.toString(),size=Buffer.byteLength(text,'utf8');if(queuedBytes+size>2*1024*1024){this.error='INGRESS_BUFFER_FULL';this.state='offline';socket.terminate();return;}
+      pending.push(text);queuedBytes+=size;if(scheduled)return;scheduled=true;
+      setImmediate(()=>{scheduled=false;const batch=pending;pending=[];const batchBytes=batch.reduce((sum,value)=>sum+Buffer.byteLength(value,'utf8'),0);
+        this.queue=this.queue.then(()=>{if(this.socket===socket)this.receiveBatch(batch);}).catch(()=>{this.error='INGEST_FAILED';this.state='offline';socket.terminate();}).finally(()=>{queuedBytes-=batchBytes;});});
     });
     socket.on('error', () => { this.error = 'EVENT_CONNECTION_FAILED'; });
     socket.on('close', () => {
@@ -266,6 +268,20 @@ export class QqChannel extends Service {
   private retryLater(): void {
     if (this.stopped || this.quiescing || this.retry) return;
     this.retry = setTimeout(() => { this.retry = null; this.counters.reconnects++; void this.connect().catch(() => { this.error = 'CONNECT_FAILED'; }); }, this.config.reconnectMs);
+  }
+  private observationEntry(text:string):Parameters<QqStore['remember']>|null{
+    if(this.stopped||this.quiescing||this.ingressHeld||this.state!=='online')return null;
+    let raw:unknown;try{raw=JSON.parse(text);}catch{return null;}const decoded=messageSchema.safeParse(raw);if(!decoded.success)return null;const message=decoded.data;
+    if(message.self_id!==this.config.botId||message.user_id===this.config.botId||message.message_type!=='group'||!message.group_id||!this.groups.accepts(message.group_id,message.time*1000)||message.message.some(part=>part.type!=='text'))return null;
+    const plain=message.message.map(part=>typeof part.data.text==='string'?part.data.text:'').join('');if(naturallyAddressed(plain,this.config.naturalNames))return null;
+    const conversation:Conversation={channel:'qq',account:this.config.botId,kind:'group',id:message.group_id},route=this.cacheRoute(conversation),occurredAt=new Date(message.time*1000).toISOString();
+    if([...this.tails.values()].some(tail=>tail.route===route&&tail.sender===message.user_id)||this.config.messageBatch.enabled&&this.batches.has({id:message.message_id,occurredAt,conversation,sender:{id:message.user_id,displayName:''},text:plain}))return null;
+    return [route,message.message_id,message.user_id,plain||'[非文字消息]',{occurredAt,unsupported:[],mentionedBot:false,groupGeneration:this.groups.generation(conversation.id)}];
+  }
+  private receiveBatch(messages:readonly string[]):void{
+    let observations:Parameters<QqStore['remember']>[]=[];
+    const flush=()=>{if(!observations.length)return;this.counters.received+=observations.length;this.store.observeBatch(observations);this.counters.ignored+=observations.length;observations=[];};
+    for(const text of messages){const entry=this.observationEntry(text);if(entry){observations.push(entry);if(observations.length>=128)flush();}else{flush();this.receive(text);}}flush();
   }
   private receive(text: string): void {
     if (this.stopped || this.quiescing || this.state !== 'online') return;

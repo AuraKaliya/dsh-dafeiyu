@@ -101,12 +101,13 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     selected.push('bili-reading-integration.test.ts','bili-reading-delivery.test.ts','bili-media-service.test.ts','bili-migration.test.ts','installation-migration.test.ts','installation-bootstrap.test.ts','segment-handoff-store.test.ts','native-reading-runtime.test.ts','bili-browser-search.test.ts','bili-browser-frames.test.ts','tooling/profile-repair.test.ts');
     selected.push('management-lifecycle.test.ts','management-ui.test.ts','onebot-capability.test.ts','bili-cookie-credentials.test.ts','bili-verification.test.ts','bili-diagnostics.test.ts','bili-foundation.test.ts');
     selected.push('activity-sharing.test.ts','group-patrol.test.ts','activity-admission.test.ts','owner-resource-query.test.ts','qq-interrupted-turn.test.ts','bili-media-deadline.test.ts');
+    selected.push('model-usage.test.ts','dsh-handoff.test.ts');
     selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }
   let revision=null;try{const options={cwd:repository,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']};if(resolve(execFileSync('git',['rev-parse','--show-toplevel'],options).trim())===repository)revision=execFileSync('git',['rev-parse','HEAD'],options).trim();}catch{/* A source archive may have no Git metadata. */}
   const contentHash=hash(JSON.stringify(files(destination).map(file=>[portable(relative(destination,file)),hash(readFileSync(file))]).sort((a,b)=>a[0].localeCompare(b[0]))));
-  put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:6,runtime:4,activity:3,media:3,qq:8}},null,2)+'\n');
+  put(destination,'release.json',JSON.stringify({schemaVersion:1,version:plugin.version,revision,contentHash,builtAt:new Date().toISOString(),stores:{bilibili:6,runtime:5,activity:3,media:3,qq:8}},null,2)+'\n');
   const inventory=files(destination).map(file=>({path:portable(relative(destination,file)),bytes:lstatSync(file).size,sha256:hash(readFileSync(file))}));
   return {directory:destination,version:plugin.version,files:inventory.length,bytes:inventory.reduce((sum,file)=>sum+file.bytes,0),inventory};
 }

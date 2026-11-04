@@ -1,4 +1,5 @@
 import type {DatabaseSync} from 'node:sqlite';
+import {addModelUsageSchema} from './usage-ledger.js';
 
 /** Complete current schema. Called only for an empty database. */
 export function createStorageSchemaV2(db:DatabaseSync):void {
@@ -43,4 +44,5 @@ CREATE TRIGGER message_intent_retain BEFORE DELETE ON message_intents BEGIN SELE
 
 export function createStorageSchemaV3(db:DatabaseSync):void {createStorageSchemaV2(db);addIntentReceiptsSchema(db);}
 export function addActivitySharesSchema(db:DatabaseSync):void {db.exec('CREATE TABLE native_share_requests(id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),dedupe_key TEXT NOT NULL UNIQUE,body TEXT NOT NULL);');}
-export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV3(db);addActivitySharesSchema(db);}
+export function createStorageSchemaV4(db:DatabaseSync):void {createStorageSchemaV3(db);addActivitySharesSchema(db);}
+export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV4(db);addModelUsageSchema(db);}

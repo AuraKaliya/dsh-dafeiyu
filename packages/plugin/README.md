@@ -1,4 +1,4 @@
-# 大肥鱼 · dsh-dafeiyu 0.28.0
+# 大肥鱼 · dsh-dafeiyu 0.28.1
 
 基于 DeepSeek Harness 的可成长智能体，整合记忆、QQ、B站、媒体、持续任务和自主活动。管理入口位于 DSH 设置中的“大肥鱼管理中心”。
 

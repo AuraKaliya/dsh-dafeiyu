@@ -162,6 +162,7 @@ export class DafeiyuService extends Service {
   contextAssembly(){return this.config.context.assembly;}
   contextStatus(context:ConversationAccess,offset=0,limit=16):Json{const scope=this.scopeFor(context);return z.json().parse({plan:this.contexts.status(scope.route),responsibilities:(this.executions?.responsibilityFacts(context.conversation,offset,limit)??[]).map(row=>{row.guard();return row.data;}),offset,limit,nextOffset:offset+limit});}
   private closedNativeDelivery:ReturnType<RuntimeStore['nativeDeliveries']['counts']>|null=null;
+  private closedModelUsage:ReturnType<RuntimeStore['modelUsage']['summary']>|null=null;
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
   taskDeliveryBusy(){return !!this.nativeTaskDelivery?.pending;}
@@ -292,7 +293,7 @@ export class DafeiyuService extends Service {
     this.runtime = new DshRuntime(ctx, { provider: this.config.provider, model: this.config.model,
       ...(this.config.reasoningEffort ? { reasoningEffort: ReasoningEffortId(this.config.reasoningEffort) } : {}) }, resolve(this.config.dataDir),this.contexts,
       this.config.agentId,()=>this.compactionBinding(),
-      (frame,data,seqs)=>{const item=this.journal.get(frame.id);this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.harness);
+      (frame,data,seqs)=>{const item=this.journal.get(frame.id);this.journal.append({...this.event(item,data.status==='sources-retired'?'context.sources.retired':data.status==='fragments-retired'?'context.summary.updated':'context.compaction.checked',data),sources:seqs.map(seq=>({kind:'session' as const,id:item.sessionId,seq,route:item.route}))});},this.harness,()=>this.runStore?.modelUsage);
     this.conversations=new ConversationCoordinator({patrol:item=>this.patrolInfo(item),ctx:this.ctx,config:this.config,journal:this.journal,runtime:this.runtime,personas:this.personas,contexts:this.contexts,extensions:this.extensions,signal:this.controller.signal,
       schedulingReady:()=>this.gate.active&&!this.admissionHeld,accepting:()=>this.accepting,failure:()=>this.fatal,fail:code=>{this.fatal=code;},
       runs:()=>this.runStore,executions:()=>this.executions,conversationRuns:()=>this.conversationRuns,scheduler:()=>this.scheduler,media:()=>this.mediaPort,experience:()=>this.experienceMemory,
@@ -748,6 +749,7 @@ export class DafeiyuService extends Service {
   getStatus() {
     return { agentId: this.config.agentId, state: this.fatal ? 'error' : this.controller.signal.aborted ? 'closed' : this.gate.active?(this.admissionHeld?'composing':this.dependenciesReady()?'ready':'degraded'):this.gate.state==='quiescing'?'draining':'composing',
       lifecycle:this.gate.state,error: this.fatal,execution:this.executions?.health??null,nativeDelivery:this.closed?this.closedNativeDelivery:this.runStore?.nativeDeliveries.counts()??null, extensions: [...new Set([...this.extensions.keys(),...this.registry.ids()])], queuedRoutes: this.conversations.queuedRoutes,
+      modelUsage:this.closed?this.closedModelUsage:this.runStore?.modelUsage.summary()??null,
       messages: this.closed ? [] : this.journal.list().map(item => ({ id: item.id, state: item.state, sessionId: item.sessionId })) };
   }
   async whenIdle(): Promise<void> {
@@ -761,7 +763,7 @@ export class DafeiyuService extends Service {
     this.controller.abort();
     this.closing = (async () => {
       try{await this.conversations.whenIdle();await this.executions?.whenIdle();await this.nativeTaskDelivery?.whenIdle();}
-      finally{try { await this.runtime.close(); } finally {this.nativeTaskDelivery?.close();this.closedNativeDelivery=this.runStore?.nativeDeliveries.counts()??null;this.runStore?.close();this.closed = true;this.gate.close(); this.journal.close(); }}
+      finally{try { await this.runtime.close(); } finally {this.nativeTaskDelivery?.close();this.closedNativeDelivery=this.runStore?.nativeDeliveries.counts()??null;this.closedModelUsage=this.runStore?.modelUsage.summary()??null;this.runStore?.close();this.closed = true;this.gate.close(); this.journal.close(); }}
     })();
     return this.closing;
   }

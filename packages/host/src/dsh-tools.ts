@@ -42,8 +42,13 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
     },
   },{
     id:DSH_TOOL_ACTIONS[0],version:'1',effects:'read',scope:'any',
-    description:'分页查看DSH实际工具或技能目录。默认只列名称与用途；query筛选，name查询单项参数/加载入口，按next继续读取。失败或截断不等于工具未安装。目录有版本，环境变化后重新查询。',
-    inputSchema:DshCatalogQuerySchema,outputSchema:z.json(),execute:async(input,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');try{const data=catalogView(await port.catalog(context.signal,context.taskId??undefined),DshCatalogQuerySchema.parse(input));ctx.dafeiyu.executionAuthority(context,'dsh-tools');return {status:'succeeded',effects:'none',completeness:'partial',data:z.json().parse({...z.record(z.string(),z.json()).parse(data),availability:{catalog:'available',dependencies:'not-probed',execution:context.taskId?'check-task-authority':'requires-authorized-task'}}),sources:[],receipts:[]};}
+    description:'只查询DSH实际工具目录，不执行检查。用户只是询问有哪些工具时可直接回答目录；用户要求检查消息、日志、源码或修复时，应先通过当前任务入口受理，再在任务内用文件读取/搜索工具取得实际证据，不能列完目录就结束。query筛选、name查看参数、按next续页；没有专用QQ工具不等于不能检查本地插件。认证主人可见当前实例的检查路径，路径本身不代表已读。',
+    inputSchema:DshCatalogQuerySchema,outputSchema:z.json(),execute:async(input,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');try{
+      const catalog=await port.catalog(context.signal,context.taskId??undefined),owner=ctx.dafeiyu.isOwnerExecution?.(context,'dsh-tools')??false,{environment:_environment,...publicCatalog}=catalog;
+      const data=catalogView(owner?catalog:publicCatalog,DshCatalogQuerySchema.parse(input));ctx.dafeiyu.executionAuthority(context,'dsh-tools');
+      const entry=context.origin.kind==='message'&&context.origin.conversation.channel==='qq'?'qq_task_submit':context.origin.kind==='message'&&context.origin.conversation.channel==='local-owner'?'local_owner_task_submit':null;
+      return {status:'succeeded',effects:'none',completeness:'partial',data:z.json().parse({...z.record(z.string(),z.json()).parse(data),availability:{catalog:'available',dependencies:'not-probed',execution:context.taskId?'check-task-authority':'requires-authorized-task'},
+        handoff:{requiredForActualInspection:context.taskId===null,entry,ownerAuthorized:owner,source:'current-authenticated-message',note:'只列目录不能履行检查请求。受理后在任务内读取当前实例状态/源码，并与实际QQ消息证据对照；没有专用QQ宿主工具时，按文件读取或搜索能力检查，不能据此宣布做不到。'}}),sources:[],receipts:[]};}
       catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:{stage:'catalog',dispatched:false,next:'refresh-or-wait'},sources:[],receipts:[],errorCode:errorCode(error)};}},
   },{
     id:DSH_TOOL_ACTIONS[1],version:'1',effects:'external-write',scope:'task',

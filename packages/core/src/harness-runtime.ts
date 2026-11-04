@@ -77,12 +77,14 @@ export class HarnessRuntime {
     const dispatch=actions.find(action=>action.definition.owner==='dsh-tools'&&action.definition.id==='dsh_tool_call');
     const canInspect=!!dispatch||actions.some(action=>action.definition.owner==='dsh-tools'&&action.definition.id==='dsh_tool_list');
     const aliases=new Map<string,{dispose:()=>void;fingerprint:string}>(),reserved=new Set(scope.tools.schemas(agent).map(tool=>tool.name));
-    let catalog:DshToolCatalog|undefined,available=false,unavailableCode:string|null=null;
+    let catalog:DshToolCatalog|undefined,available=false,unavailableCode:string|null=null,fetchedAt=0,fetchedFrom:Pick<DshToolsPort,'catalog'>|undefined;
     const disposeAliases=()=>{for(const entry of aliases.values())entry.dispose();aliases.clear();};
     const refresh=async()=>{
       signal.throwIfAborted();if(!canInspect)return;
       const provider=this.provider;if(!provider){available=false;unavailableCode='DSH_HARNESS_UNAVAILABLE';disposeAliases();return;}
-      try{catalog=orderedDshCatalog(await provider.catalog(signal,taskId));signal.throwIfAborted();if(provider!==this.provider)throw new Error('DSH_HARNESS_CHANGED');available=true;unavailableCode=null;}
+      // This is a display/alias cache only. Every dispatch still validates the host's current schema and authority.
+      if(catalog&&available&&fetchedFrom===provider&&Date.now()-fetchedAt<60000)return;
+      try{catalog=orderedDshCatalog(await provider.catalog(signal,taskId));signal.throwIfAborted();if(provider!==this.provider)throw new Error('DSH_HARNESS_CHANGED');available=true;unavailableCode=null;fetchedAt=Date.now();fetchedFrom=provider;}
       catch(error){signal.throwIfAborted();available=false;unavailableCode=error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'DSH_CATALOG_UNAVAILABLE';disposeAliases();return;}
       if(stage===BILI_READING_STAGE){disposeAliases();return;}
       const current=catalog,admitted=new Set<string>();
@@ -100,6 +102,7 @@ export class HarnessRuntime {
             if(exec.agent!==agent||!catalog||!available||!dispatch.definition.active())throw new Error('DSH_CAPABILITY_UNAVAILABLE');
             const args=z.json().parse(raw);if(validateJsonSchemaValue(parameters,args).length)throw new Error('DSH_TOOL_ARGUMENTS_INVALID');
             const value=await dispatch.execute({catalogVersion:catalog.version,name:tool.name,argumentsJson:stableJson(args)},String(exec.callId),AbortSignal.any([signal,exec.signal]));
+            if(record(value)&&value.errorCode==='DSH_CATALOG_CHANGED')fetchedAt=0;
             return {value,receipt:dispatch.metadata?.(value)??null};
           }});
         aliases.set(tool.name,{dispose,fingerprint});

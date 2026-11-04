@@ -9,6 +9,18 @@ import {inspectStorage,loadHostConfig,initializeProfile,inspectHost} from '@dafe
 
 async function file() { return join(await mkdtemp(join(tmpdir(), 'dafeiyu-qq-storage-')), 'qq.sqlite'); }
 
+test('passive observation batching keeps durable receipts atomic and preserves FULL synchronization',async()=>{
+  const path=await file(),store=new QqStore(path),db=new DatabaseSync(path),route='batch-room',metadata={occurredAt:new Date().toISOString(),unsupported:[]};
+  try{db.exec("CREATE TRIGGER inject_receipt_failure BEFORE INSERT ON handled WHEN NEW.id='bad' BEGIN SELECT RAISE(ABORT,'injected');END;");
+    assert.throws(()=>store.observeBatch([[route,'first','member','first',metadata],[route,'bad','member','second',metadata]]),/injected/);
+    assert.equal(store.find(route,'first'),null);assert.equal(store.handled(route,'first'),false);
+    db.exec('DROP TRIGGER inject_receipt_failure');store.observeBatch([[route,'first','member','first',metadata],[route,'second','member','second',metadata]]);
+    assert.equal(store.handled(route,'first'),true);assert.equal(store.handled(route,'second'),true);assert.equal(store.find(route,'second')?.text,'second');
+    assert.equal(db.prepare('PRAGMA synchronous').get()?.synchronous,2);
+  }finally{db.close();store.close();}
+  const reopened=new QqStore(path);try{assert.equal(reopened.handled(route,'first'),true);assert.equal(reopened.find(route,'second')?.text,'second');}finally{reopened.close();}
+});
+
 test('received mentions survive cache restart while historical unknown mention state stays unknown',async()=>{
   const path=await file(),route=JSON.stringify(['100001','group','300001']),occurredAt=new Date().toISOString();let store=new QqStore(path);
   store.remember(route,'1','200001','实际提及',{occurredAt,unsupported:[],mentionedBot:true});

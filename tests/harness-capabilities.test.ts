@@ -44,8 +44,8 @@ test('reading-stage install exposes a readable catalog but no dispatch authority
     systemPrompt:{section:()=>()=>{},context:(spec:{text:string|(()=>string)})=>{manifests.push(typeof spec.text==='function'?spec.text():spec.text);return ()=>{};}},
     on:(name:string,handler:(...args:any[])=>any)=>{handlers.set(name,handler);return ()=>{};},
   } as never;
-  const runtime=new HarnessRuntime(()=>({features:[],actions:[]}));
-  runtime.bind({catalog:async()=>({version:'a'.repeat(64),tools:[{name:'host-read',description:'read host state',parameters:{type:'object',properties:{}}}],skills:[],skillsComplete:true})});
+  const runtime=new HarnessRuntime(()=>({features:[],actions:[]}));let reads=0;
+  const unbind=runtime.bind({catalog:async()=>{reads++;return {version:'a'.repeat(64),tools:[{name:'host-read',description:'read host state',parameters:{type:'object',properties:{}}}],skills:[],skillsComplete:true};}});
   const action=(id:string)=>({definition:{id,owner:'dsh-tools',active:()=>true,metadata:()=>null}});
   const dispose=runtime.install(scope,agent as never,[action('dsh_tool_call'),action('dsh_tool_list')] as never,new AbortController().signal,'task-1','bili-reading');
   try{
@@ -57,5 +57,8 @@ test('reading-stage install exposes a readable catalog but no dispatch authority
     assert.equal(host.stage,'bili-reading');
     assert.equal(host.tools[0].name,'host-read');
     assert.deepEqual(registered,[],'Reading stage must not register host dispatch aliases');
+    await assemble({},{},async()=>({sections:[],contexts:[],tools:[]}));assert.equal(reads,1,'stable capability summaries must not rescan the host on every model step');
+    unbind();runtime.bind({catalog:async()=>{reads++;return {version:'b'.repeat(64),tools:[]};}});
+    await assemble({},{},async()=>({sections:[],contexts:[],tools:[]}));assert.equal(reads,2,'replacing the provider bypasses the display cache');
   }finally{dispose();}
 });

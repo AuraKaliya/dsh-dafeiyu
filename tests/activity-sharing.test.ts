@@ -40,6 +40,8 @@ test('an autonomous result uses verified native delivery without inventing an in
     await host.ctx.dafeiyu.whenIdle();assert.equal(producer.status(accepted.run).state,'completed');
     assert.ok(host.ctx.dafeiyu.requestActivityShare(accepted.run.id,'public-video:'+bvid));await host.ctx.dafeiyu.whenIdle();
     assert.equal(delivered.length,1);assert.match(delivered[0]!.text,/没有看画面/);assert.doesNotMatch(delivered[0]!.text,/内部探索/);
+    const usage=host.ctx.dafeiyu.getStatus().modelUsage!;assert.equal(usage.calls,adapter.requests.length,'all actual task, rendering and verification requests must be counted');
+    assert.ok(usage.byPhase.rendering?.calls);assert.ok(usage.byPhase.verification?.calls);assert.equal(usage.unassignedCalls,0);assert.equal(usage.unknownCalls,usage.calls,'fixture omits provider usage; it must not become zero usage');
     host.ctx.dafeiyu.requestActivityShare(accepted.run.id,'public-video:'+bvid);await host.ctx.dafeiyu.whenIdle();assert.equal(delivered.length,1);
     await host.close();host=await ManagedHost.start(config,options);await host.ctx.dafeiyu.whenIdle();assert.equal(delivered.length,1);
     const db=new DatabaseSync(join(root,'data/core/journal.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT COUNT(*) n FROM inbox').get()!.n,0,'no artificial inbound was created');}finally{db.close();}

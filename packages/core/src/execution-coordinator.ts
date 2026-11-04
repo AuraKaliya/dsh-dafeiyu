@@ -128,7 +128,7 @@ export class ExecutionCoordinator {
   messageCapabilities(message:import('@dafeiyu/contracts').InboundMessage){return {kind:'task-capability-catalog',
     bindings:[...this.messageBindings.values()].filter(binding=>binding.active()&&binding.channel===message.conversation.channel&&binding.account===message.conversation.account).map(binding=>{
       const policy=this.policy(binding.id,binding.policyId);return {id:binding.id,ownerTaskAuthorized:message.sender.id===binding.ownerId,actions:this.d.registry.actions().filter(action=>policy.actions.includes(action.id)).map(action=>({name:action.id,registered:true,ready:action.active(),scope:action.scope}))};}),
-    note:'主人对原任务的方法、范围或自主决策责任作补充时，通过任务入口的 amend 传给执行器，不能只在当前聊天里表示同意。查询进度用 status，确认方案用 confirm，不重新创建任务。这是任务阶段的真实能力目录，不是本轮直接调用的工具。普通聊天通过当前任务入口受理主人指示或形成自主探索；当前工具子集缺少某项不能推断插件未加载。ready只说明组件就绪，平台成功须以实际回执为准。'};}
+      note:'主人要求实际检查DSH、日志、插件源码或执行工作时，必须通过当前任务入口承接并实际取证；只列工具目录、解释做法或说没有专用QQ工具不能满足检查请求。用户只问有哪些工具时可以直接查询目录。主人对原任务的方法、范围或自主决策责任作补充时，用 amend 传给执行器，不能只在聊天表示同意。查询进度用 status，确认方案用 confirm，不新建任务。这里列出的是任务阶段能力，当前聊天工具子集缺少某项不能推断插件未加载；受理后结束当前确认，由执行器完成并交付。ready只表示组件就绪。'};}
   private messageDirective(binding:MessageTaskBinding,context:ExecutionContext,message:import('@dafeiyu/contracts').InboundMessage,exposureId?:string){
     const directive=binding.classify(message);if(messageMainText(message).trim()||exposureId===undefined)return {directive,voice:undefined};
     if(message.sender.id!==binding.ownerId)throw new Error('TASK_DIRECTIVE_REQUIRED');if(!binding.voice)throw new Error('VOICE_DIRECTIVES_NOT_CONFIGURED');
@@ -937,7 +937,7 @@ export class ExecutionCoordinator {
           program:z.json().parse({...z.record(z.string(),z.json()).parse(program),handoff}),contexts,evidence,
           audit:data=>{this.d.store.appendExecutionEvent(id,'execution.compaction',data);this.flushEvents();},
           checkpoint:(session,seq,deps,text)=>{checkpoint={session,seq,deps,text};},...this.d.context};
-        const result=await withRunUsage(receipt=>this.d.store.bindInput(frame.view.runId,'model-usage:'+receipt.id,receipt),()=>this.d.runtime.runExecution(frame));admittedGuard();
+        const result=await withRunUsage(receipt=>this.d.store.modelUsage.external(frame.view.runId,receipt),()=>this.d.runtime.runExecution(frame),{runId:frame.view.runId,phase:'task'});admittedGuard();
         const segmentYield=(result as {segmentYield?:{reason:string}}).segmentYield;
         if(segmentYield){this.continueSegment(this.d.store.get(id),segmentYield.reason);return;}
         if(checkpoint)this.captureContinuity(run,access,checkpoint.session,checkpoint.seq,checkpoint.deps,checkpoint.text,omitted);

@@ -43,6 +43,8 @@ test('a new conversation turn can execute while an interrupted reply is still aw
     assert.deepEqual(sent,['第一条已有回执。','新消息已进入执行。']);
     assert.equal(ledger.delivery.progress(firstReply!)?.confirmed,1);
     assert.equal(host.ctx.dafeiyu.journal.list(['delivered']).length,1);
+    const usage=host.ctx.dafeiyu.getStatus().modelUsage!;assert.equal(usage.calls,adapter.requests.length);assert.equal(usage.unassignedCalls,0);
+    assert.equal(usage.byPhase.conversation?.calls,normalTurns);assert.ok(usage.byPhase.recovery?.calls);
   }finally{await host.close();ledger.close();}
 });
 

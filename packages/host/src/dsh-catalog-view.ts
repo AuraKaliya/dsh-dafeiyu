@@ -18,7 +18,8 @@ export function catalogView(raw:DshToolCatalog,input:z.infer<typeof DshCatalogQu
   if(input.catalogVersion&&input.catalogVersion!==catalog.version)throw new Error('DSH_CATALOG_CHANGED');
   const rows=input.kind==='tools'?catalog.tools:catalog.skills??[];
   const common={version:catalog.version,kind:input.kind,total:rows.length,
-    counts:{tools:catalog.tools.length,skills:catalog.skills?.length??0},skillsComplete:catalog.skillsComplete??true};
+    counts:{tools:catalog.tools.length,skills:catalog.skills?.length??0},skillsComplete:catalog.skillsComplete??true,
+    ...(catalog.environment?{environment:redactJson(z.json().parse(catalog.environment)).value}:{})};
   if(input.name){
     const row=rows.find(item=>item.name===input.name);if(!row)throw new Error('DSH_CAPABILITY_NOT_FOUND');
     // Sanitize the complete object before slicing, including credential defaults/examples in host schemas.

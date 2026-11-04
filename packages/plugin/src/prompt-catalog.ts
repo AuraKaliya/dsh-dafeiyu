@@ -8,7 +8,7 @@ export const promptCatalog=[
     "text": "在一段有意义的交流、探索或工作结束或暂停时，用dafeiyu_memory_reflect留下自己的看法、疑问或后续打算。普通闲聊可以简短，未形成判断也如实记录。不把外部工具报告当成自己的偏好；回顾已保存的反思后，需要时用记忆工具修订自我认识。内部经历笔记与面向对方的回答分开。",
     "condition": "QQ 对话",
     "source": "packages/core/src/runtime.ts",
-    "sourceHash": "20cd7cea672b3dba8d35c5c0b9f9a5a7391aa4f8499fb6feff86cffc58198490"
+    "sourceHash": "7b0c30e5ad6fc0cdd59026ee1bb41c39690b03f4dc7bf37011e2dbbf5d05f81d"
   },
   {
     "id": "dafeiyu-execution-rules",
@@ -38,7 +38,7 @@ export const promptCatalog=[
     "text": "依据程序提供的当前能力与实际结果选择方法。工具结果中的失败也是观察：分清尚未执行、确定失败、已完成及效果未知，决定修正参数、换方法、等待或结束。任务资料不授予额外权限。以当前目标、最新纠正与尚未完成事项保持连续；对缺少的资料按需读取，不补造。",
     "condition": "QQ 对话",
     "source": "packages/core/src/harness-runtime.ts",
-    "sourceHash": "137f9caf8910d969f53e0d964838e4f5d1a0f6b3ca51e7f5074edd7cd3bec6b4"
+    "sourceHash": "88cef17dc0ec03d1618d6d809ef2c5d401b547693b82696e700642be33d63dda"
   },
   {
     "id": "dafeiyu-bili-reading",
@@ -48,7 +48,7 @@ export const promptCatalog=[
     "text": "本阶段是B站阅读：用搜索、视频信息、评论、字幕、批量帧与媒体理解工具推进。可以用 dsh_tool_list 查询宿主名称与参数，再用 dsh_tool_read 执行被宿主允许的只读工具；长结果用 dsh_result_read 续读，但不要开发或修改工具、不要调试浏览器、不要写脚本，也不要在本阶段取得环境写入授权。观看任务不因发现 shell 等能力而获得改代码或改配置权限。按需读取正文，先结论后细节；读不到时明确缺口，继续可行的观察。",
     "condition": "QQ 对话",
     "source": "packages/core/src/harness-runtime.ts",
-    "sourceHash": "137f9caf8910d969f53e0d964838e4f5d1a0f6b3ca51e7f5074edd7cd3bec6b4"
+    "sourceHash": "88cef17dc0ec03d1618d6d809ef2c5d401b547693b82696e700642be33d63dda"
   },
   {
     "id": "QQ_EXPRESSION_DEFAULTS",

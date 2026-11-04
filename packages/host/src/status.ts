@@ -1,4 +1,5 @@
 import {ACTIVITY_SCHEMA_VERSION} from '@dafeiyu/activity';
+import {ModelUsageOverviewSchema} from '@dafeiyu/contracts';
 import {MediaFailureSchema,MediaStageSchema} from '@dafeiyu/media';
 import { existsSync,readFileSync,statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ const snapshotSchema=z.strictObject({schemaVersion:z.literal(1),profileId:id,age
     executor:z.strictObject({lifecycle:z.enum(['registered','recovered','active','quiescing','closed']),active:count,counts:z.record(z.string(),count),mode:z.enum(['production','offline'])}).optional(),
     biliOwner:z.strictObject({lifecycle:z.enum(['registered','recovered','active','quiescing','closed']),accountUid:z.string().regex(/^[1-9][0-9]{0,19}$/),ownerUid:z.string().regex(/^[1-9][0-9]{0,19}$/),transport:z.literal('program-injected'),verified:z.boolean(),ingressHeld:z.boolean(),
       polling:z.boolean(),inFlight:count,lastPollAt:z.iso.datetime().nullable(),error:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),bindingFault:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable().optional(),backoffUntil:count,bindingReady:z.boolean(),counts:z.strictObject({inbound:z.record(z.string(),count),deliveries:z.record(z.string(),count)}),leaseEpoch:count.positive()}).optional(),
+    usage:ModelUsageOverviewSchema.nullable().optional(),
     taskDelivery:z.strictObject({total:count,pending:count,sent:count,partial:count,uncertain:count,blocked:count}).nullable().optional(),
     qq:z.strictObject({state:z.enum(['starting','online','offline','rejected','stopped']),groupSync:z.enum(['disabled','unavailable','current','stale']),groupError:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),effectiveGroups:count,lastGroupSync:z.iso.datetime().nullable(),capabilities:z.boolean().optional(),tasks:z.strictObject({enabled:z.boolean(),registered:z.boolean(),deliverResults:z.boolean()}).optional(),delivery:z.strictObject({plans:count,pending:count,unknown:count}).optional()}).nullable().optional()}),
   counts:z.strictObject({activeRuns:count,queuedRuns:count,queuedRoutes:count,pendingMessages:count,outbox:count}),schemas:z.strictObject({journal:z.literal(1),memory:z.literal(MEMORY_SCHEMA_VERSION),runtime:z.number().int().min(1).max(256),activity:z.number().int().min(1).max(256).nullable().optional(),media:z.number().int().min(1).max(256).nullable().optional(),

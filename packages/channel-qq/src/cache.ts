@@ -40,7 +40,15 @@ export class QqCache {
   constructor(private readonly db: DatabaseSync, options: QqCacheOptions = {}) {
     this.now = options.clock ?? Date.now; this.ttl = options.snapshotTtlMs ?? 3600000; this.max = options.maxSnapshots ?? 256;
   }
-  private atomic<T>(work: () => T): T { this.db.exec('BEGIN IMMEDIATE'); try { const value = work(); this.db.exec('COMMIT'); return value; } catch (error) { this.db.exec('ROLLBACK'); throw error; } }
+  private transactionDepth=0;
+  private readonly statements=new Map<string,ReturnType<DatabaseSync['prepare']>>();
+  private statement(sql:string){let statement=this.statements.get(sql);if(!statement){statement=this.db.prepare(sql);this.statements.set(sql,statement);}return statement;}
+  private atomic<T>(work: () => T): T {if(this.transactionDepth)return work();this.db.exec('BEGIN IMMEDIATE');this.transactionDepth++;
+    try { const value = work(); this.db.exec('COMMIT'); return value; } catch (error) { this.db.exec('ROLLBACK'); throw error; }finally{this.transactionDepth--;}}
+  /** Cache-only observations and their local receipts commit together; no external work runs inside this transaction. */
+  rememberBatch(entries:readonly Parameters<QqCache['remember']>[],acknowledge:(route:string,id:string)=>void):void{
+    this.atomic(()=>{for(const entry of entries){this.remember(...entry);acknowledge(entry[0],entry[1]);}});
+  }
   private epoch(route: string): number { return Number(this.db.prepare('SELECT epoch FROM qq_cache_state WHERE route=?').get(route)?.epoch ?? 0); }
   generation(route?:string):number {return route?this.epoch(route):Number(this.db.prepare('SELECT coalesce(sum(epoch),0) AS n FROM qq_cache_state').get()?.n);}
   /** Read-only trigger-bound context; never re-ingest history or create a browse snapshot. */
@@ -76,7 +84,7 @@ export class QqCache {
     return metadata.groupGeneration===undefined||metadata.occurredAt===null?null:{generation:metadata.groupGeneration,occurredAt:metadata.occurredAt};
   }
   recalled(route:string,id:string):boolean{return this.db.prepare('SELECT deleted FROM qq_message_meta WHERE route=? AND id=?').get(route,id)?.deleted===1;}
-  private bump(route: string): void { this.db.prepare('INSERT INTO qq_cache_state VALUES(?,1) ON CONFLICT(route) DO UPDATE SET epoch=epoch+1').run(route); }
+  private bump(route: string): void { this.statement('INSERT INTO qq_cache_state VALUES(?,1) ON CONFLICT(route) DO UPDATE SET epoch=epoch+1').run(route); }
   private meta(route: string, row: CachedRow) {
     const existing = this.db.prepare('SELECT version,hash,body,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, row.id);
     if (existing) return { ...metadataSchema.parse(JSON.parse(String(existing.body))), version: Number(existing.version), hash: String(existing.hash), deleted: existing.deleted === 1 };
@@ -90,17 +98,17 @@ export class QqCache {
     const body = metadataSchema.parse({ occurredAt: metadata?.occurredAt ?? null, unsupported: [...new Set(metadata?.unsupported ?? [])].slice(0, 16).map(kind => redactContent(kind).value.slice(0, 80)), truncated: sanitized.length > text.length, known: metadata !== undefined,...(metadata?.mentionedBot===undefined?{}:{mentionedBot:metadata.mentionedBot}),...(metadata?.media?{media:metadata.media}:{}),...(metadata?.groupGeneration===undefined?{}:{groupGeneration:metadata.groupGeneration}),...(metadata?.history?{history:true}:{}),...(metadata?.forwardIds?.length?{forwardIds:metadata.forwardIds}:{}) });
     const hash = digest({ sender, text, ...body });
     return this.atomic(() => {
-      const old = this.db.prepare('SELECT version,hash,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
+      const old = this.statement('SELECT version,hash,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
       if (old?.deleted === 1) return false;
-      const cached = this.db.prepare('SELECT seq,id,sender,text FROM messages WHERE route=? AND id=?').get(route, id);
+      const cached = this.statement('SELECT seq,id,sender,text FROM messages WHERE route=? AND id=?').get(route, id);
       if (!old && cached) this.meta(route, rowSchema.parse(cached));
-      const previous = this.db.prepare('SELECT version,hash FROM qq_message_meta WHERE route=? AND id=?').get(route, id);
+      const previous = old;
       if (previous?.hash === hash) return true;
       const version = Number(previous?.version ?? 0) + 1;
-      this.db.prepare('INSERT INTO messages(route,id,sender,text) VALUES(?,?,?,?) ON CONFLICT(route,id) DO UPDATE SET sender=excluded.sender,text=excluded.text').run(route, id, sender, text);
-      this.db.prepare('INSERT INTO qq_message_meta VALUES(?,?,?,?,0,?) ON CONFLICT(route,id) DO UPDATE SET version=excluded.version,hash=excluded.hash,body=excluded.body').run(route, id, version, hash, JSON.stringify(body));
+      this.statement('INSERT INTO messages(route,id,sender,text) VALUES(?,?,?,?) ON CONFLICT(route,id) DO UPDATE SET sender=excluded.sender,text=excluded.text').run(route, id, sender, text);
+      this.statement('INSERT INTO qq_message_meta VALUES(?,?,?,?,0,?) ON CONFLICT(route,id) DO UPDATE SET version=excluded.version,hash=excluded.hash,body=excluded.body').run(route, id, version, hash, JSON.stringify(body));
       if (previous) this.bump(route);
-      const removed = this.db.prepare('DELETE FROM messages WHERE route=? AND seq NOT IN(SELECT seq FROM messages WHERE route=? ORDER BY seq DESC LIMIT 200)').run(route, route);
+      const removed = this.statement('DELETE FROM messages WHERE route=? AND seq NOT IN(SELECT seq FROM messages WHERE route=? ORDER BY seq DESC LIMIT 200)').run(route, route);
       if (removed.changes) this.bump(route);
       return true;
     });

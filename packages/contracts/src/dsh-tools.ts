@@ -6,7 +6,8 @@ import type { Json } from './index.js';
 
 export const DSH_TOOL_ACTIONS=['dsh_tool_list','dsh_tool_call','dsh_result_read','dsh_tool_read'] as const;
 export const DshToolSchema=z.strictObject({name:z.string().min(1).max(160),description:z.string().max(32000),parameters:z.record(z.string(),z.json())});
-export const DshToolCatalogSchema=z.strictObject({version:z.string().length(64),tools:z.array(DshToolSchema).max(256),environment:z.strictObject({workingDirectory:z.string(),developmentDirectory:z.string(),platform:z.string()}).optional(),skills:z.array(z.strictObject({name:z.string(),description:z.string(),load:z.json()})).max(256).optional(),skillsComplete:z.boolean().optional(),pluginChanges:z.array(z.strictObject({id:z.uuid(),state:z.string(),updatedAt:z.iso.datetime()})).max(10).optional()});
+export const DshToolCatalogSchema=z.strictObject({version:z.string().length(64),tools:z.array(DshToolSchema).max(256),environment:z.strictObject({workingDirectory:z.string(),developmentDirectory:z.string(),platform:z.string(),
+  inspection:z.strictObject({kind:z.literal('local-instance-locators'),dataDirectory:z.string().max(2000),statusFile:z.string().max(2000),sourceFiles:z.array(z.strictObject({purpose:z.string().max(160),path:z.string().max(2000)})).max(8),filesRead:z.literal(false)}).optional()}).optional(),skills:z.array(z.strictObject({name:z.string(),description:z.string(),load:z.json()})).max(256).optional(),skillsComplete:z.boolean().optional(),pluginChanges:z.array(z.strictObject({id:z.uuid(),state:z.string(),updatedAt:z.iso.datetime()})).max(10).optional()});
 export type DshToolCatalog=z.infer<typeof DshToolCatalogSchema>;
 /** Canonical program data. Array order remains semantic except named capability inventories. */
 export function stableJson(value:Json):string {

@@ -386,6 +386,7 @@ function RuntimePanel({ snapshot, host = null, busy = false, notice = "", onCont
   const availability = controlAvailability(state);
   const rows = capabilityRows(state, host);
   const error51 = state?.error ?? null;
+  const usage = host?.services?.usage, phaseNames = { conversation: "\u5BF9\u8BDD", task: "\u4EFB\u52A1", media: "\u5A92\u4F53\u7406\u89E3", review: "\u590D\u6838", rendering: "\u7ED3\u679C\u8868\u8FBE", verification: "\u8868\u8FBE\u6838\u9A8C", recovery: "\u6062\u590D", compaction: "\u4E0A\u4E0B\u6587\u6574\u7406", feedback: "\u8FDB\u5EA6\u53CD\u9988", external: "\u5916\u90E8\u6267\u884C", other: "\u5176\u5B83" };
   return h6(
     "section",
     { className: "df-section df-runtime", "data-runtime-state": state?.state ?? "unknown" },
@@ -425,6 +426,14 @@ function RuntimePanel({ snapshot, host = null, busy = false, notice = "", onCont
       { className: "df-detail", "data-runtime-history": state.history.length },
       h6("summary", null, "\u5386\u53F2\u9519\u8BEF\u8BB0\u5F55\uFF08" + state.history.length + "\uFF09"),
       h6("ul", null, ...state.history.slice(-5).reverse().map((entry, index) => h6("li", { key: entry.at + ":" + index }, formatTime(entry.at) + " \xB7 " + phaseLabel(entry.phase) + " \xB7 " + entry.code + (errorHint(entry.code) ? "\uFF08" + errorHint(entry.code) + "\uFF09" : ""))))
+    ),
+    usage && h6(
+      "section",
+      { "data-model-usage": true },
+      h6("h3", null, "\u6A21\u578B\u7528\u91CF"),
+      h6("p", { className: "df-muted" }, "\u8BB0\u5F55\u672C\u5B9E\u4F8B\u4ECE " + formatTime(usage.since) + " \u8D77\u89C2\u6D4B\u7684\u8BF7\u6C42\u3002\u65E7\u7248\u672C\u6F0F\u8BB0\u7684\u5386\u53F2\u6CA1\u6709\u8865\u9020\uFF1B\u672A\u77E5\u7528\u91CF\u4E0D\u7B97\u96F6\u3002"),
+      h6("dl", { className: "df-runtime-facts" }, h6(Fact, { label: "\u8BF7\u6C42\u6B21\u6570" }, String(usage.calls)), h6(Fact, { label: "\u8FDB\u884C\u4E2D" }, String(usage.pending)), h6(Fact, { label: "\u7528\u91CF\u672A\u77E5" }, String(usage.unknownCalls)), h6(Fact, { label: "\u5F85\u5F52\u5C5E\u8BF7\u6C42" }, String(usage.unassignedCalls)), h6(Fact, { label: "\u5DF2\u77E5 token" }, String(usage.knownTokens)), h6(Fact, { label: "\u975E\u7F13\u5B58\u8F93\u5165" }, String(usage.breakdown.inputTokens)), h6(Fact, { label: "\u7F13\u5B58\u8BFB\u53D6" }, String(usage.breakdown.cacheReadTokens)), h6(Fact, { label: "\u7F13\u5B58\u5199\u5165" }, String(usage.breakdown.cacheWriteTokens)), h6(Fact, { label: "\u8F93\u51FA" }, String(usage.breakdown.outputTokens))),
+      h6("ul", null, ...Object.entries(usage.byPhase).map(([phase, value]) => h6("li", { key: phase }, (phaseNames[phase] ?? phase) + "\uFF1A" + value.calls + " \u6B21\uFF0C\u5DF2\u77E5 " + value.knownTokens + " token\uFF0C\u672A\u77E5 " + value.unknownCalls + " \u6B21")))
     ),
     h6("h3", null, "\u7EC4\u4EF6\u72B6\u6001"),
     rows.length === 0 ? h6("p", { className: "df-muted" }, "\u5B9E\u4F8B\u5C1A\u672A\u62A5\u544A\u7EC4\u4EF6\u72B6\u6001\u3002") : h6("ul", { className: "df-runtime-capabilities" }, ...rows.map((row) => h6("li", { key: row.id, "data-capability": row.id, "data-state": row.state }, h6("strong", null, row.title), h6("span", null, row.state), row.detail && h6("span", { className: "df-muted" }, row.detail)))),

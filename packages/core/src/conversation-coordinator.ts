@@ -24,6 +24,7 @@ import type {FoundationSnapshot} from './foundation.js';
 import type {CoreRuntimeConfig} from './index.js';
 import {CORE_VERSION} from './version.js';
 import {DeliveryCountsSchema} from './delivery-counts.js';
+import {withUsageContext} from './usage.js';
 
 interface ConversationHost {
   patrol?(item:PendingMessage):{planId:string;version:number;current:boolean}|null;
@@ -107,7 +108,8 @@ export class ConversationCoordinator {
     this.journal.append(this.event(item,'recovery.notice.started',{noticeId:id,code:failure,phase:'recovery'}));
     let text=`【系统状态】刚才的处理未完成（${failure}），进度和已有操作记录已保存；没有自动重做已执行的操作。`,fallback=true,next='wait';
     try{const persona=this.targetPersona(item,id,signal,guard),renderSignal=AbortSignal.any([signal,AbortSignal.timeout(20000)]);
-      const decision=await renderConversationRecovery(this.ctx,this.recoveryModel(),this.config.dataDir,id,persona.text,persona.items,{question:item.message.mainText??item.message.text,failureCode:failure,operations,originalTurn:'failed',automaticReplay:false},renderSignal,()=>{guard();persona.guard();});
+      const failedRun=this.runStore?.findRequest('conversation',item.id)?.runId;
+      const decision=await withUsageContext({...(failedRun?{runId:failedRun}:{}),phase:'recovery'},()=>renderConversationRecovery(this.ctx,this.recoveryModel(),this.config.dataDir,id,persona.text,persona.items,{question:item.message.mainText??item.message.text,failureCode:failure,operations,originalTurn:'failed',automaticReplay:false},renderSignal,()=>{guard();persona.guard();}));
       text=decision.message;next=decision.next;fallback=false;
     }catch{if(signal.aborted)return;}
     try{guard();}catch{return;}this.journal.append(this.event(item,'recovery.notice.prepared',{noticeId:id,next,fallback}));
@@ -212,11 +214,11 @@ export class ConversationCoordinator {
         const access = this.messageProcessingSignal(id);
         const signal = AbortSignal.any([this.controller.signal, source.controller.signal, ...(access ? [access] : []), AbortSignal.timeout(this.config.turnTimeoutMs)]);
         signal.throwIfAborted();
-        await this.decideRepliesBeforeTurn(item,signal);
         if(!this.conversationRuns||!this.executions||!this.experienceMemory)throw new Error('DEPENDENCY_UNAVAILABLE');
         run=this.conversationRuns.begin(item,persona,this.analysisModelRoute(),[...this.extensions.values()].map(entry=>({id:entry.extension.id,version:entry.extension.version})),this.executions.conversationSnapshot(source.extension.id),
           record=>this.personas.prepare(record,persona,this.analysisModelRoute(),[],signal,()=>{signal.throwIfAborted();if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');}).manifest);
         this.experienceMemory.begin({id:run.id,scope:run.definition.scope,origin:run.definition.origin,goal:item.message.mainText??item.message.text,at:run.createdAt});
+        await withUsageContext({runId:run.id,phase:'recovery'},()=>this.decideRepliesBeforeTurn(item,signal));
         started = this.journal.transition(item.id, 'accepted', 'processing', this.event(item, 'turn.started',run?{runId:run.id}:{}, accepted?.id ?? null));
         this.journal.append(this.event(item, 'persona.loaded', { version: persona.version }, started.id));
         const nativeActions=this.executions.conversationActions(run,source.extension.id,signal,()=>{if(!source.active)throw new Error('DEPENDENCY_UNAVAILABLE');});
