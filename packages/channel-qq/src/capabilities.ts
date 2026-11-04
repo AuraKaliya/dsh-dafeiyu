@@ -29,7 +29,11 @@ export class QqCapabilities {
   constructor(private readonly ctx: Context, private readonly host: Host) {
     this.handle = ctx.dafeiyu.registerExtension({ protocolVersion:API_VERSION, id: 'qq-capabilities', version: '1', agentId: host.agentId,
       requires: ['memory.capability-observation.v1', 'execution.resource-scope.v1'], provides: ['qq.browse.v1'], lifecycleReady: () => !this.closed,
-      resourceProofs: { current: proof => this.current(proof), epoch: scope => this.epoch(scope) },
+      resourceProofs: { current: proof => this.current(proof), epoch: scope => this.epoch(scope),targetView:(proof,view,target,scope)=>{
+        // Memory verifies the exact observed view and the task's resource grant first. This only grants its configured owner destination.
+        if(scope.kind!=='task'||scope.agentId!==host.agentId||target.channel!=='qq'||target.account!==host.botId||target.kind!=='private'||target.id!==host.ownerId||!this.current(proof))return null;
+        return {kind:'reported',stamp:digest([proof,view,target,scope])};
+      } },
       ownerDirectory:{channelExtensionId:'channel-qq',channel:'qq',account:host.botId,ownerId:host.ownerId,snapshot:()=>({
         revision:this.epoch(),available:host.available(),resources:[{channel:'qq',account:host.botId,kind:'private' as const,id:host.ownerId},
         ...host.groups.effective().map(id=>({channel:'qq',account:host.botId,kind:'group' as const,id}))].filter(scene=>host.allowed(scene))}),

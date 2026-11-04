@@ -38,6 +38,12 @@ const snapshot=(overrides:Partial<ManagementRuntimeSnapshot>={}):ManagementRunti
   state:'stopped',phase:'idle',operationId:null,operation:null,generation:0,pid:null,code:null,codeAt:null,retryAttempt:0,retry:{attempt:0,nextAt:null},
   checkedAt:null,startedAt:null,readyAt:null,instance:'absent',error:null,history:[],capabilities:[],activity:null,...overrides});
 const temp=()=>mkdtempSync(join(testTempDir(),'ui-'));
+test('model usage panel separates work type, processing stage and unknown usage',()=>{
+  const totals={calls:2,pending:0,unknownCalls:1,knownTokens:14,tokens:null,breakdown:{inputTokens:2,cacheReadTokens:3,cacheWriteTokens:4,outputTokens:5,totalTokens:14}};
+  const usage={...totals,since:new Date().toISOString(),unassignedCalls:0,byPhase:{verification:totals},byWorkType:{'owner-task':totals},unknownReasons:{PROVIDER_USAGE_UNAVAILABLE:1}};
+  const html=renderToStaticMarkup(React.createElement(RuntimePanel,{snapshot:snapshot(),host:{services:{usage}},onControl:()=>{},onRefresh:()=>{}}));
+  assert.match(html,/主人任务/);assert.match(html,/表达核验/);assert.match(html,/提供方未返回用量/);assert.match(html,/非缓存输入/);assert.match(html,/缓存读取/);assert.doesNotMatch(html,/PROVIDER_USAGE_UNAVAILABLE/);
+});
 const settingsFile=(root:string)=>{
   writeFileSync(join(root,'token.txt'),'token-value');
   const file=join(root,'settings.json');

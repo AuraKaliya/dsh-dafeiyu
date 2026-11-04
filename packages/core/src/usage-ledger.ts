@@ -1,12 +1,12 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {ModelUsagePhaseSchema,ModelUsageBreakdownSchema,ModelUsageOverviewSchema} from '@dafeiyu/contracts';
+import {ModelUsagePhaseSchema,ModelUsageWorkTypeSchema,ModelUsageBreakdownSchema,ModelUsageOverviewSchema} from '@dafeiyu/contracts';
 import type {ModelUsagePhase,ModelUsageOverview} from '@dafeiyu/contracts';
 import type {UsageStart,UsageSettlement,UsageReceipt,UsageRecorder} from './usage.js';
 
 const counter=z.number().int().nonnegative().safe(),identifier=z.string().min(1).max(240);
-const startSchema=z.strictObject({id:identifier,runId:z.uuid().nullable(),phase:ModelUsagePhaseSchema,startedAt:z.iso.datetime(),provider:identifier,model:identifier,sessionId:identifier.nullable(),external:z.boolean().optional(),marker:z.boolean().optional()});
+const startSchema=z.strictObject({id:identifier,runId:z.uuid().nullable(),phase:ModelUsagePhaseSchema,workType:ModelUsageWorkTypeSchema.default('unassigned'),startedAt:z.iso.datetime(),provider:identifier,model:identifier,sessionId:identifier.nullable(),external:z.boolean().optional(),marker:z.boolean().optional()});
 const receiptSchema=z.object({id:identifier,tokens:counter.nullable(),durationMs:counter,breakdown:ModelUsageBreakdownSchema.optional()});
 const settlementSchema=z.strictObject({state:z.enum(['completed','failed','cancelled','interrupted']),finishedAt:z.iso.datetime(),reason:z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).nullable(),receipt:receiptSchema});
 type Row={start:z.infer<typeof startSchema>;settlement:z.infer<typeof settlementSchema>|null};
@@ -28,7 +28,10 @@ export class UsageLedger implements UsageRecorder {
     if(input.sessionId){const row=this.db.prepare("SELECT id FROM runs WHERE json_extract(snapshot,'$.sessionId')=? ORDER BY rowid DESC LIMIT 1").get(input.sessionId);if(row)return String(row.id);}
     return null;
   }
-  begin(input:UsageStart){this.insert(startSchema.parse({id:input.id,runId:this.resolveRun(input),phase:input.phase??'other',startedAt:input.startedAt,provider:input.provider,model:input.model,sessionId:input.sessionId??null}));}
+  private workType(runId:string|null):z.infer<typeof ModelUsageWorkTypeSchema>{if(!runId)return 'unassigned';
+    const row=this.db.prepare("SELECT json_extract(r.definition,'$.scope.kind') scope,json_extract(r.definition,'$.policyId') policy,json_extract(r.definition,'$.origin.producerId') producer,json_extract(q.body,'$.messageSource.kind') motivation FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE r.id=?").get(runId);
+    if(!row)return 'unassigned';if(row.scope==='conversation')return 'conversation';if(String(row.policy).includes('maintenance'))return 'maintenance';if(row.producer==='activity'||row.motivation==='self-exploration')return 'exploration';return 'owner-task';}
+  begin(input:UsageStart){const runId=this.resolveRun(input);this.insert(startSchema.parse({id:input.id,runId,phase:input.phase??'other',workType:input.workType??this.workType(runId),startedAt:input.startedAt,provider:input.provider,model:input.model,sessionId:input.sessionId??null}));}
   private insert(value:z.infer<typeof startSchema>){this.atomic(()=>{const body=JSON.stringify(value),old=this.db.prepare('SELECT body FROM model_requests WHERE id=?').get(value.id);
     if(old){if(old.body!==body)throw new Error('USAGE_REQUEST_CONFLICT');return;}
     this.db.prepare('INSERT INTO model_requests VALUES(?,?,?,NULL)').run(value.id,value.runId,body);this.overview=undefined;});}
@@ -41,7 +44,7 @@ export class UsageLedger implements UsageRecorder {
     const id='external:'+createHash('sha256').update(runId+':'+receipt.id).digest('hex'),old=this.db.prepare('SELECT body,settlement FROM model_requests WHERE id=?').get(id);
     const normalized=receiptSchema.parse({...receipt,id});if(old?.settlement){const saved=settlementSchema.parse(JSON.parse(String(old.settlement)));if(JSON.stringify(saved.receipt)!==JSON.stringify(normalized))throw new Error('USAGE_SETTLEMENT_CONFLICT');return;}
     const at=old?startSchema.parse(JSON.parse(String(old.body))).startedAt:new Date().toISOString();
-    this.insert({id,runId,phase:'external',startedAt:at,provider:receipt.provider??'external',model:receipt.model??'external',sessionId:receipt.sessionId??null,external:true,...(receipt.marker?{marker:true}:{})});
+    this.insert({id,runId,phase:'external',workType:this.workType(runId),startedAt:at,provider:receipt.provider??'external',model:receipt.model??'external',sessionId:receipt.sessionId??null,external:true,...(receipt.marker?{marker:true}:{})});
     this.finish(id,{state:'completed',finishedAt:at,reason:receipt.tokens===null?'EXTERNAL_USAGE_UNAVAILABLE':null,receipt:{id:normalized.id,tokens:normalized.tokens,durationMs:normalized.durationMs,...(normalized.breakdown?{breakdown:normalized.breakdown}:{})}});
   }
   recover(){let count=0;for(const row of this.db.prepare('SELECT id,body FROM model_requests WHERE settlement IS NULL').all()){const start=startSchema.parse(JSON.parse(String(row.body)));
@@ -52,7 +55,9 @@ export class UsageLedger implements UsageRecorder {
     return {calls:counted.length,pending,unknownCalls,knownTokens,tokens:pending||unknownCalls?null:knownTokens,breakdown:{inputTokens:sum('inputTokens'),cacheReadTokens:sum('cacheReadTokens'),cacheWriteTokens:sum('cacheWriteTokens'),outputTokens:sum('outputTokens'),totalTokens:sum('totalTokens')}};}
   summary(runId?:string):ModelUsageOverview {if(runId===undefined&&this.overview)return structuredClone(this.overview);const rows=this.rows(runId),times=rows.map(row=>row.start.startedAt).sort(),byPhase:Partial<Record<ModelUsagePhase,ReturnType<UsageLedger['totals']>>>={};
     for(const phase of ModelUsagePhaseSchema.options){const matching=rows.filter(row=>row.start.phase===phase);if(matching.length)byPhase[phase]=this.totals(matching);}
-    const result=ModelUsageOverviewSchema.parse({...this.totals(rows),scope:'observed-local-requests',since:times[0]??null,lastAt:times.at(-1)??null,unassignedCalls:rows.filter(row=>!row.start.runId&&!row.start.marker).length,byPhase,legacyHistory:'not-reconstructed'});
+    const byWorkType:Partial<Record<z.infer<typeof ModelUsageWorkTypeSchema>,ReturnType<UsageLedger['totals']>>>={};for(const type of ModelUsageWorkTypeSchema.options){const matching=rows.filter(row=>row.start.workType===type);if(matching.length)byWorkType[type]=this.totals(matching);}
+    const unknownReasons:Record<string,number>={};for(const row of rows)if(!row.start.marker&&row.settlement?.receipt.tokens===null){const reason=row.settlement.reason??'USAGE_REASON_UNAVAILABLE';unknownReasons[reason]=(unknownReasons[reason]??0)+1;}
+    const result=ModelUsageOverviewSchema.parse({...this.totals(rows),scope:'observed-local-requests',since:times[0]??null,lastAt:times.at(-1)??null,unassignedCalls:rows.filter(row=>!row.start.runId&&!row.start.marker).length,byPhase,byWorkType,unknownReasons,legacyHistory:'not-reconstructed'});
     if(runId===undefined)this.overview=structuredClone(result);return result;
   }
 }

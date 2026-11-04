@@ -3,10 +3,10 @@ import {randomUUID} from 'node:crypto';
 import type {Context} from '@deepseek-ai/cordis';
 import type {TokenUsage} from '@deepseek-ai/dsh-llm';
 import {workContexts} from '@dafeiyu/contracts';
-import type {ModelUsagePhase} from '@dafeiyu/contracts';
+import type {ModelUsagePhase,ModelUsageWorkType} from '@dafeiyu/contracts';
 export interface UsageBreakdown {inputTokens:number;outputTokens:number;cacheReadTokens:number;cacheWriteTokens:number;totalTokens:number}
 export interface UsageReceipt {id:string;tokens:number|null;durationMs:number;external?:true;marker?:true;provider?:string;model?:string;sessionId?:string;breakdown?:UsageBreakdown}
-export interface UsageAttribution {runId?:string;workItemId?:string;phase?:ModelUsagePhase}
+export interface UsageAttribution {runId?:string;workItemId?:string;phase?:ModelUsagePhase;workType?:ModelUsageWorkType}
 export interface UsageStart extends UsageAttribution {id:string;startedAt:string;provider:string;model:string;sessionId?:string}
 export interface UsageSettlement {state:'completed'|'failed'|'cancelled'|'interrupted';finishedAt:string;reason:string|null;receipt:UsageReceipt}
 export interface UsageRecorder {begin(input:UsageStart):void;finish(id:string,result:UsageSettlement):void}

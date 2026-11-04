@@ -30,7 +30,7 @@ test('post-task usage can settle without reopening execution records and duplica
 test('a process interruption leaves a counted unknown request after restart',async()=>{
   const f=await fixture(),id=randomUUID();f.store.modelUsage.begin({id,runId:f.run.id,phase:'task',startedAt:new Date().toISOString(),provider:'fixture',model:'test'});f.store.close();
   const reopened=new RuntimeStore(f.file,identity);try{reopened.recover();const usage=reopened.usage(f.run.id);assert.equal(usage.calls,1);assert.equal(usage.pendingCalls,0);assert.equal(usage.unknownCalls,1);assert.equal(usage.tokens,null);
-    assert.equal(reopened.modelUsage.rows(f.run.id)[0]?.settlement?.reason,'PROCESS_INTERRUPTED');reopened.recover();assert.equal(reopened.modelUsage.summary().calls,1);
+    assert.equal(reopened.modelUsage.rows(f.run.id)[0]?.settlement?.reason,'PROCESS_INTERRUPTED');reopened.recover();assert.equal(reopened.modelUsage.summary().calls,1);assert.equal(reopened.modelUsage.summary().unknownReasons.PROCESS_INTERRUPTED,1);
   }finally{reopened.close();}
 });
 

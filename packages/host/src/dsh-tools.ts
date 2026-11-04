@@ -48,7 +48,7 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
       const data=catalogView(owner?catalog:publicCatalog,DshCatalogQuerySchema.parse(input));ctx.dafeiyu.executionAuthority(context,'dsh-tools');
       const entry=context.origin.kind==='message'&&context.origin.conversation.channel==='qq'?'qq_task_submit':context.origin.kind==='message'&&context.origin.conversation.channel==='local-owner'?'local_owner_task_submit':null;
       return {status:'succeeded',effects:'none',completeness:'partial',data:z.json().parse({...z.record(z.string(),z.json()).parse(data),availability:{catalog:'available',dependencies:'not-probed',execution:context.taskId?'check-task-authority':'requires-authorized-task'},
-        handoff:{requiredForActualInspection:context.taskId===null,entry,ownerAuthorized:owner,source:'current-authenticated-message',note:'只列目录不能履行检查请求。受理后在任务内读取当前实例状态/源码，并与实际QQ消息证据对照；没有专用QQ宿主工具时，按文件读取或搜索能力检查，不能据此宣布做不到。'}}),sources:[],receipts:[]};}
+        handoff:{requiredForActualInspection:context.taskId===null,entry,ownerAuthorized:owner,source:'current-authenticated-message',note:'只列目录不能履行检查请求。受理后用本任务已经取得的QQ原文、@字段和发送回执作为消息证据；用DSH文件读取/搜索核对当前实例状态与相关源码即可，不必重复转储数据库。脚本输出乱码不能推翻已有的有效QQ证据。没有专用QQ宿主工具不等于无法检查。'}}),sources:[],receipts:[]};}
       catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:{stage:'catalog',dispatched:false,next:'refresh-or-wait'},sources:[],receipts:[],errorCode:errorCode(error)};}},
   },{
     id:DSH_TOOL_ACTIONS[1],version:'1',effects:'external-write',scope:'task',
