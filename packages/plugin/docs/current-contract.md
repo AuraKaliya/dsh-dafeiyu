@@ -1,6 +1,6 @@
 # 当前接口与记忆驱动架构
 
-本文件依据本轮源代码整理。自有模块统一为 0.28.1（API_VERSION = 7），扩展协议由 contracts 的 API_VERSION 唯一定义。
+本文件依据本轮源代码整理。自有模块统一为 0.28.2（API_VERSION = 7），扩展协议由 contracts 的 API_VERSION 唯一定义。
 
 ## 单一当前接口
 
@@ -60,3 +60,5 @@ Journal、Runtime、Memory、QQ、B站、媒体、Activity、执行器分别提�
 ## 管理中心与活动轮次
 
 DSH 设置页通过管理协议组合模块自己的界面与操作。管理调用只接受 DSH 已认证的主人连接；不会由模型请求中的角色字段授予管理权限。配置与状态分离，模块按职责提供 UI 描述和管理端口。当前管理行为及验证范围见 [管理中心](management-center.md)。
+
+恢复管理：activity 的 recovery.probe 接受 requestId、expectedGeneration，返回持久探测回执；media 的 recovery.arm 另需 key，返回一次短期读取许可。活动库与媒体库为 v4。许可、实际验证和业务接续是不同状态；只有当前代次的成功能解除对应暂停。恢复探测按 maintenance/recovery 计量，独立探测没有业务 Run，不伪造绑定。

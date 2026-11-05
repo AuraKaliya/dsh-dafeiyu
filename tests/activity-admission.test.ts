@@ -32,7 +32,7 @@ test('activity v2 migration backs up and preserves every existing table, and ref
   }finally{old.close();}
   assert.equal(inspectActivityMigration(file,identity).state,'upgradable');
   assert.throws(()=>migrateActivityStorage(file,{...identity,agentId:'other'},backup),/ACTIVITY_IDENTITY_MISMATCH/);
-  const result=migrateActivityStorage(file,identity,backup);assert.equal(result.version,3);assert.equal(result.verified.length,15);
+  const result=migrateActivityStorage(file,identity,backup);assert.equal(result.version,4);assert.equal(result.verified.length,15);
   assert.equal(inspectActivityMigration(backup,identity).version,2);assert.equal(inspectActivityMigration(file,identity).state,'current');
   assert.equal(migrateActivityStorage(file,identity,join(root,'unused-backup.sqlite')).migrated,false);
   const current=new ActivityStore(file,identity);try{assert.equal(current.rounds.list().length,1);assert.deepEqual(current.admission.list(),[]);}finally{current.close();}

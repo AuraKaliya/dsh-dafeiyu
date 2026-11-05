@@ -1,4 +1,5 @@
 import {RELEASE_VERSION} from '@dafeiyu/contracts';
+import {RecoveryProbeRequestSchema} from '@dafeiyu/contracts';
 import {API_VERSION} from '@dafeiyu/contracts';
 import {pendingActivityEvents} from './storage-status.js';
 import { Service } from '@deepseek-ai/cordis';
@@ -28,7 +29,7 @@ declare module '@deepseek-ai/cordis' {interface Context {dafeiyuActivity:Activit
 export const ACTIVITY_ACTIONS=['dafeiyu_activity_plan','dafeiyu_activity_update','dafeiyu_activity_status','dafeiyu_activity_rest'] as const;
 
 export class ActivityService extends Service {
-  management(action:string,raw:unknown){if(action==='plan.update'){const input=z.strictObject({id:z.uuid(),requestId:z.uuid(),expectedVersion:z.number().int().positive(),state:z.enum(['active','paused','cancelled'])}).parse(raw),plan=this.store.get(input.id);return this.store.update(input.id,plan.body.owner,{requestId:input.requestId,expectedVersion:input.expectedVersion,state:input.state},this.now());}if(action==='configure-budget')return this.store.rounds.configure(raw);if(action!=='status')throw new Error('MANAGEMENT_ACTION_INVALID');return {health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list(),admission:this.store.admission.gates(),explorations:this.store.admission.list().slice(0,20)};}
+  management(action:string,raw:unknown){if(action==='recovery.probe')return this.scheduler.probeRecovery(RecoveryProbeRequestSchema.parse(raw));if(action==='plan.update'){const input=z.strictObject({id:z.uuid(),requestId:z.uuid(),expectedVersion:z.number().int().positive(),state:z.enum(['active','paused','cancelled'])}).parse(raw),plan=this.store.get(input.id);return this.store.update(input.id,plan.body.owner,{requestId:input.requestId,expectedVersion:input.expectedVersion,state:input.state},this.now());}if(action==='configure-budget')return this.store.rounds.configure(raw);if(action!=='status')throw new Error('MANAGEMENT_ACTION_INVALID');return {health:this.health,settings:this.config.settings,plans:this.store.management(),rounds:this.store.rounds.list(),admission:this.store.admission.gates(),explorations:this.store.admission.list().slice(0,20),recovery:this.scheduler.recoveryStatus()};}
   pendingEvents(){return pendingActivityEvents(this.config.dataDir); }
   readonly store:ActivityStore;
   readonly config:z.output<typeof configSchema>;

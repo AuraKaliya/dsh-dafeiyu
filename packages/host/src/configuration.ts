@@ -84,7 +84,8 @@ export function loadHostConfig(input:string):PreparedHostConfig{
       try{validateQuiet(activityConfig.quiet);}catch{throw new Error('HOST_ACTIVITY_QUIET_INVALID');}
 
       const exploration=config.authorityPolicies.find(p=>p.id===activityConfig.explorationPolicy&&p.producers.includes('activity'));
-      if(!exploration?.allowLocalWrite||ACTIVITY_ACTIONS.some(id=>!exploration.actions.includes(id)))throw new Error('HOST_ACTIVITY_POLICY_REQUIRED');
+      const activityActions=activityConfig.plans?ACTIVITY_ACTIONS:[ACTIVITY_ACTIONS[3]];
+      if(!exploration?.allowLocalWrite||activityActions.some(id=>!exploration.actions.includes(id)))throw new Error('HOST_ACTIVITY_POLICY_REQUIRED');
       if(activityConfig.maintenance){if(!memory.config.maintenance)throw new Error('HOST_ACTIVITY_MAINTENANCE_REQUIRED');
         const maintenance=config.authorityPolicies.find(p=>p.id===activityConfig.maintenancePolicy&&p.producers.includes('activity'));
         if(!maintenance?.allowLocalWrite||!maintenance.actions.includes('dafeiyu_memory_consolidate'))throw new Error('HOST_ACTIVITY_MAINTENANCE_POLICY_REQUIRED');}

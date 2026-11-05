@@ -12,6 +12,7 @@ import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
 import { randomUUID } from 'node:crypto';
 import { ScopedImages } from './images.js';
 import {abortable} from './files.js';
+import {turnFailureCode} from '@dafeiyu/core';
 
 export interface MediaModelRoute {provider:string;model:string;reasoningEffort?:string}
 class MediaTransport extends LlmAdapter {
@@ -26,7 +27,7 @@ class MediaTransport extends LlmAdapter {
         if(chunk.type==='text-delta'){bytes+=Buffer.byteLength(chunk.text);if(bytes>32000)throw new Error('MEDIA_ANALYSIS_OUTPUT_LIMIT');}
         else if(chunk.block.type!=='text'||Buffer.byteLength(chunk.block.text)>32000)throw new Error('MEDIA_ANALYSIS_INVALID');yield {...chunk,index};}
       else if(chunk.type==='usage')yield chunk;
-      else if(chunk.type==='finish')yield {type:'finish',reason:chunk.reason.kind==='error'||chunk.reason.kind==='aborted'?{kind:chunk.reason.kind,failure:{message:'Media analysis did not complete',code:'MEDIA_ANALYSIS_FAILED'}}:chunk.reason};
+      else if(chunk.type==='finish')yield {type:'finish',reason:chunk.reason.kind==='error'||chunk.reason.kind==='aborted'?{kind:chunk.reason.kind,failure:{message:'Media analysis did not complete',code:chunk.reason.kind==='error'?turnFailureCode({kind:'error',error:chunk.reason.failure}):'MEDIA_CANCELLED'}}:chunk.reason};
     }}finally{const closing=iterator.return?.();if(signal.aborted)void closing?.catch(()=>{});else await closing;}
   }
 }
@@ -46,7 +47,7 @@ export class MediaAnalysis {
       const agent=handle.agent,abort=()=>agent.cancel({kind:'hook',reason:'Media analysis cancelled'});signal.addEventListener('abort',abort,{once:true});
       try{signal.throwIfAborted();job.guard();agent.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:JSON.stringify(job.input)},...(job.refs??[]).map(attachment=>({type:'image' as const,attachment}))]}));await agent.whenIdle();
         signal.throwIfAborted();job.guard();if(!await ctx.sessions.flush(agent.session))throw new Error('MEDIA_CHECKPOINT_UNAVAILABLE');
-        const events=agent.session.snapshotEvents(),end=events.findLast(e=>e.type==='turn/end');if(!end||end.type!=='turn/end'||end.data.reason.kind!=='completed')throw new Error('MEDIA_ANALYSIS_FAILED');
+        const events=agent.session.snapshotEvents(),end=events.findLast(e=>e.type==='turn/end');if(!end||end.type!=='turn/end'||end.data.reason.kind!=='completed')throw new Error(end?.type==='turn/end'?turnFailureCode(end.data.reason):'MEDIA_ANALYSIS_FAILED');
         const message=events.findLast(e=>e.type==='assistant/message'&&!e.data.interrupted&&e.data.turn===end.data.turn);if(!message||message.type!=='assistant/message')throw new Error('MEDIA_ANALYSIS_FAILED');
         let text=message.data.message.content.filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();if(Buffer.byteLength(text)>32000)throw new Error('MEDIA_ANALYSIS_OUTPUT_LIMIT');
         const fence=/^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text);if(fence)text=fence[1]!;try{return job.parse(JSON.parse(text));}catch{throw new Error('MEDIA_ANALYSIS_INVALID');}

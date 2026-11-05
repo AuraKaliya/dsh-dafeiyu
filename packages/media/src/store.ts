@@ -1,4 +1,5 @@
 import {MediaDiagnostics,createMediaDiagnosticSchema,MEDIA_DIAGNOSTIC_TABLES} from './diagnostics.js';
+import {createMediaRecoverySchema,MEDIA_RECOVERY_TABLES} from './recovery.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync,mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -10,9 +11,9 @@ import type { Json,MediaAssetRef,MediaAssetRecord,MediaSourceDescription,MediaAc
 import { MediaReplyStore,createMediaReplySchema,MEDIA_REPLY_TABLES } from './reply-store.js';
 
 export const MEDIA_APPLICATION_ID=0x44464d35;
-export const MEDIA_SCHEMA_VERSION=3;
+export const MEDIA_SCHEMA_VERSION=4;
 const MEDIA_BASE_TABLES=['media_metadata','media_sources','media_source_revisions','media_assets','media_asset_revisions','media_blobs','media_requests','media_leases','media_jobs','media_exposures','media_outbox'] as const;
-export const MEDIA_TABLES=[...MEDIA_BASE_TABLES,...MEDIA_REPLY_TABLES,...MEDIA_DIAGNOSTIC_TABLES] as const;
+export const MEDIA_TABLES=[...MEDIA_BASE_TABLES,...MEDIA_REPLY_TABLES,...MEDIA_DIAGNOSTIC_TABLES,...MEDIA_RECOVERY_TABLES] as const;
 const identity=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const scopeKey=(scope:MediaAssetRecord['scope'])=>scope.kind==='task'?scope.scopeKey:scope.route;
 const jsonValue=z.json();
@@ -26,7 +27,7 @@ const exposureSchema=z.strictObject({schemaVersion:z.literal(1),id:z.uuid(),scop
   assets:z.array(MediaAssetRefSchema).min(1).max(8),coverage:MediaCoverageSchema,text:z.string().min(1).max(8000),occurredAt:z.iso.datetime(),detail:z.json()});
 export type MediaExposure=z.infer<typeof exposureSchema>;
 
-export function createMediaStorageSchema(db:DatabaseSync,diagnostics=true){db.exec(`
+export function createMediaStorageSchema(db:DatabaseSync,diagnostics=true,recovery=diagnostics){db.exec(`
     CREATE TABLE media_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
     CREATE TABLE media_sources(id TEXT PRIMARY KEY,provider TEXT NOT NULL,source_key TEXT NOT NULL,version INTEGER NOT NULL,deleted INTEGER NOT NULL DEFAULT 0,UNIQUE(provider,source_key));
     CREATE TABLE media_source_revisions(id TEXT NOT NULL REFERENCES media_sources(id),version INTEGER NOT NULL,body TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(id,version));
@@ -43,7 +44,7 @@ export function createMediaStorageSchema(db:DatabaseSync,diagnostics=true){db.ex
   `);
     for(const table of ['media_metadata','media_source_revisions','media_asset_revisions','media_requests','media_exposures'])db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable media record');END;CREATE TRIGGER ${table}_retain BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'Retain media provenance');END;`);
     db.exec("CREATE TRIGGER media_job_input_immutable BEFORE UPDATE OF id,scope_key,run_id,operation_id,body,body_hash ON media_jobs BEGIN SELECT RAISE(ABORT,'Immutable media input');END;");
-createMediaReplySchema(db);if(diagnostics){createMediaDiagnosticSchema(db);db.exec(`PRAGMA user_version=${MEDIA_SCHEMA_VERSION};`);}
+createMediaReplySchema(db);if(diagnostics){createMediaDiagnosticSchema(db);if(recovery)createMediaRecoverySchema(db);db.exec(`PRAGMA user_version=${recovery?MEDIA_SCHEMA_VERSION:3};`);}
 }
 
 export class MediaStore {

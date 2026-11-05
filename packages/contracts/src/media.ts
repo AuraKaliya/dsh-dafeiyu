@@ -55,6 +55,8 @@ export interface MediaSourceProvider {
   open(key:string,range:{start:number;end:number}|null,signal:AbortSignal):Promise<MediaByteStream>;
 }
 export interface MediaPort {
+  recoveryDependencies?(runId:string):readonly import('./recovery.js').DependencyRecovery[];
+  recoveryState?(key:string,generation:number):import('./recovery.js').DependencyRecovery;
   readingProgress?(scope:import('./execution.js').ExecutionScope,scene:import('./conversation.js').Conversation):readonly {exposureId:string;pageId:string;mode:string;at:string;source:import('./persona.js').PersonaSourceRef;coverage:MediaCoverage}[];
   ready():boolean;
   registerProvider(provider:MediaSourceProvider):()=>void;

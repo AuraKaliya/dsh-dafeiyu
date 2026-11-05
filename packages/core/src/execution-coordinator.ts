@@ -174,8 +174,15 @@ export class ExecutionCoordinator {
     return [...rows.values()].sort((a,b)=>a.updatedAt<b.updatedAt?1:-1);
   }
   requestActivityShare(runId:string,dedupeKey:string){const run=this.d.store.get(runId),policy=this.d.activitySharing?.();
-    if(!policy||run.state!=='completed'||!run.result||run.definition.origin.kind!=='native'||run.definition.origin.producerId!=='activity'||this.d.store.request(run.requestKey).producer!=='activity')return null;
+    if(!policy||run.state!=='completed'||!run.result||!this.idleActivityOrigin(run))return null;
     return this.d.store.queueActivityShare(runId,runtimeHash([policy.target,dedupeKey]),policy.target,policy.policyHash,policy.cooldownMs);
+  }
+  private idleActivityOrigin(run:StoredRun){const seen=new Set<string>();let current=run;
+    for(;;){if(seen.has(current.id)||this.d.store.request(current.requestKey).producer!=='activity'||current.definition.taskId!==run.definition.taskId||current.definition.intentVersion!==run.definition.intentVersion)return false;
+      seen.add(current.id);const origin=current.definition.origin;
+      if(origin.kind!=='continuation')return origin.kind==='native'&&origin.producerId==='activity';
+      current=this.d.store.get(origin.parentRunId);
+    }
   }
   private messageTaskTarget(binding:MessageTaskBinding,scene:Conversation,taskId?:string):{run:StoredRun|null;ambiguous:boolean;candidates:string[]}{
     if(taskId)return {run:this.findMessageTask(binding,scene,taskId),ambiguous:false,candidates:[taskId]};

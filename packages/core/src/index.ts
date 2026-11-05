@@ -12,7 +12,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { PhaseTimeoutsSchema } from '@dafeiyu/contracts';
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
+import { ReasoningEffortId,createUserMessage } from '@deepseek-ai/dsh-llm';
+import {SessionId} from '@deepseek-ai/dsh-session';
+import {withUsageContext} from './usage.js';
+import {turnFailureCode} from './agent-session.js';
 import { API_VERSION, MessageSchema, ObservationSchema, conversationKey } from '@dafeiyu/contracts';
 import type { ConversationAccess, OperationScope, Json, PendingMessage, PersonaSnapshot, Receipt, Reply } from '@dafeiyu/contracts';
 import { Journal, eventFor } from '@dafeiyu/journal';
@@ -171,7 +174,7 @@ export class DafeiyuService extends Service {
   private mediaPort:MediaPort|undefined;
   private readonly mediaReplyAccesses=new WeakSet<MediaReplyAccess>();
   bindNativeExpression(port:NativeExpressionPort){if(this.nativeExpressionPort)throw new Error('DUPLICATE_PROVIDER');const bound=Object.freeze({...(port.signal?{signal:port.signal}:{}),ready:port.ready.bind(port),prepare:port.prepare.bind(port),open:port.open.bind(port),withdraw:port.withdraw.bind(port),verify:port.verify.bind(port)});this.nativeExpressionPort=bound;return ()=>{if(this.nativeExpressionPort===bound)this.nativeExpressionPort=undefined;};}
-  bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),...(port.readingProgress?{readingProgress:port.readingProgress.bind(port)}:{}),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port),...(port.voice?{voice:port.voice.bind(port)}:{}),...(port.voiceCurrent?{voiceCurrent:port.voiceCurrent.bind(port)}:{}),
+  bindMedia(port:MediaPort){if(this.mediaPort)throw new Error('DUPLICATE_PROVIDER');const bound:MediaPort=Object.freeze({ready:port.ready.bind(port),...(port.readingProgress?{readingProgress:port.readingProgress.bind(port)}:{}),...(port.recoveryDependencies?{recoveryDependencies:port.recoveryDependencies.bind(port)}:{}),...(port.recoveryState?{recoveryState:port.recoveryState.bind(port)}:{}),registerProvider:port.registerProvider.bind(port),acquire:port.acquire.bind(port),inspect:port.inspect.bind(port),read:port.read.bind(port),...(port.voice?{voice:port.voice.bind(port)}:{}),...(port.voiceCurrent?{voiceCurrent:port.voiceCurrent.bind(port)}:{}),
     ...(port.imageOriginal?{imageOriginal:port.imageOriginal.bind(port)}:{}),...(port.prepareReply?{prepareReply:port.prepareReply.bind(port)}:{}),...(port.replyDraft?{replyDraft:port.replyDraft.bind(port)}:{}),...(port.finalizeReply?{finalizeReply:port.finalizeReply.bind(port)}:{}),...(port.readReplyPart?{readReplyPart:port.readReplyPart.bind(port)}:{}),...(port.validateReply?{validateReply:port.validateReply.bind(port)}:{}),...(port.settleReply?{settleReply:port.settleReply.bind(port)}:{}),...(port.releaseReply?{releaseReply:port.releaseReply.bind(port)}:{}),...(port.nativeMaterial?{nativeMaterial:port.nativeMaterial.bind(port)}:{}),...(port.observedMaterial?{observedMaterial:port.observedMaterial.bind(port)}:{})});
     this.mediaPort=bound;return ()=>{if(this.mediaPort===bound)this.mediaPort=undefined;};}
   messageMediaReadingProgress(context:ExecutionContext,owner:string,scene:Conversation){this.authorizeCapabilityResource(context,owner,scene);return this.mediaPort?.readingProgress?.(context.scope,scene)??[];}
@@ -694,6 +697,23 @@ export class DafeiyuService extends Service {
     return Object.freeze({provider:this.config.provider,model:this.config.model,
       ...(this.config.reasoningEffort ? {reasoningEffort:this.config.reasoningEffort} : {})});
   }
+  mediaRecoveryDependencies(runId:string){return this.mediaPort?.recoveryDependencies?.(runId)??[];}
+  mediaRecoveryState(key:string,generation:number){return this.mediaPort?.recoveryState?.(key,generation)??null;}
+  /** A fixed, source-free health request; it cannot execute tools or write to a channel. */
+  async probeModelRecovery(requestId:string,signal:AbortSignal){
+    this.assertAccepting();
+    return withUsageContext({workItemId:requestId,workType:'maintenance',phase:'recovery'},async()=>{
+      let code='MODEL_INCOMPLETE';
+      try{const info=await this.ctx.llm.resolveModelInfo(this.config.provider,this.config.model,signal);
+        const off=info.reasoning?.efforts.some(e=>e.id==='off');
+        for await(const chunk of this.ctx.llm.stream({provider:this.config.provider,model:this.config.model,sessionId:SessionId('dafeiyu-recovery-probe-'+requestId),
+        ...(off?{reasoningEffort:ReasoningEffortId('off')}:{}),maxTokens:32,signal,messages:[createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Health check. Reply OK.'}]})]})){
+        if(chunk.type==='finish')return {okay:!['error','aborted','max-tokens'].includes(chunk.reason.kind),code:chunk.reason.kind==='error'?turnFailureCode({kind:'error',error:chunk.reason.failure}):code};
+      }}catch(error){const value=z.object({failure:z.object({code:z.string(),status:z.number().optional()})}).safeParse(error);
+        if(value.success)code=turnFailureCode({kind:'error',error:{message:'',...value.data.failure}});else if(signal.aborted)code='MODEL_PROBE_CANCELLED';}
+      return {okay:false,code};
+    });
+  }
   private recoveryModel(){return {provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})};}
   registerExtension(extension:Extension):ExtensionHandle {
     this.assertOpen();
@@ -777,3 +797,4 @@ export function apply(ctx: Context, config: Config): void {
 
 export * from './storage-status.js';
 export * from './runtime-migration.js';
+export {turnFailureCode} from './agent-session.js';

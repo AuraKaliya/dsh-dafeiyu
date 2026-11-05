@@ -67,7 +67,7 @@ export function installationProfile(settings:InstallationSettings,meta:Installat
 }
 
 export interface InstallationMigration{code:'INSTALL_MIGRATED'|'INSTALL_CURRENT'|'INSTALL_NO_STORE';version:number;backup:string|null;runtimeVersion?:number;backups?:readonly string[]}
-/** Explicit Bili -> v6 and Runtime v1/v2 -> v3 migrations for installed storage. Never runs implicitly. */
+/** Explicit storage upgrades verify and back up each supported prior schema; startup never migrates implicitly. */
 export function migrateInstallation(settingsFile:string):InstallationMigration{
   const settings=readInstallationSettings(settingsFile),core=join(settings.dataDir,'core'),file=join(core,'bilibili.sqlite'),runtime=join(core,'runtime.sqlite');
   if(!existsSync(file)&&!existsSync(runtime))return {code:'INSTALL_NO_STORE',version:0,backup:null};

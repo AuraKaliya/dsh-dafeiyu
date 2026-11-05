@@ -5,6 +5,8 @@ import {z} from 'zod';
 import type {ExecutionLifecycle} from '@dafeiyu/contracts';
 import type {ActivityStore} from './store.js';
 import {quietAt} from './time.js';
+import {MODEL_GATE,recoverableModelFailure,accountModelFailure} from './model-recovery.js';
+import {MAX_RECOVERY_ATTEMPTS} from './recovery-store.js';
 const idleSchema=z.strictObject({id:z.uuid(),request:z.strictObject({requestId:z.uuid(),title:z.string(),goal:z.string(),policyId:z.string().min(1)}),runs:z.array(z.uuid()),activeSince:z.number().nullable(),elapsedMs:z.number().nonnegative(),paused:z.boolean(),settled:z.boolean(),
   candidate:z.strictObject({key:z.string(),revision:z.string(),claim:z.uuid()}).optional(),shareRecorded:z.boolean().optional()});
 export function createIdleSchema(db:DatabaseSync){db.exec('CREATE TABLE activity_idle_work(id TEXT PRIMARY KEY,body TEXT NOT NULL);');}
@@ -22,7 +24,13 @@ export class IdleActivity {
   constructor(private readonly ctx:Context,private readonly store:ActivityStore){this.port=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'self-exploration',basis:['owner-enabled-idle-activity']}});}
   receive(event:ExecutionLifecycle){if(event.type==='run.continued'){const work=this.store.idle.pending();if(work?.runs.includes(event.runId)&&work.activeSince!==null){work.elapsedMs+=Math.max(0,Date.parse(event.at)-work.activeSince);work.activeSince=null;this.store.idle.save(work);}return;}if(event.type!=='run.running'||event.origin.kind!=='continuation')return;const work=this.store.idle.pending();if(!work||!work.runs.includes(event.origin.parentRunId)||work.runs.includes(event.runId))return;work.runs.push(event.runId);work.activeSince=Date.parse(event.at);work.paused=false;this.store.idle.save(work);}
   control(now:number,foreground:boolean){if(now-this.lastRecovery>=60000){this.lastRecovery=now;this.recoverCandidates(now);}const work=this.store.idle.pending();if(!work)return false;
-    const runId=work.runs.at(-1);if(!this.store.config.exploration&&!runId){this.finish(work,now,true,'ACTIVITY_DISABLED');return false;}if(!runId){if(foreground)return true;const accepted=this.port.submitTask(work.request);work.runs.push(accepted.run.id);work.activeSince=now;this.store.idle.save(work);if(work.candidate)this.store.admission.bind(work.candidate.key,work.candidate.claim,accepted.run.id,now);return true;}
+    const runId=work.runs.at(-1);if(!this.store.config.exploration&&!runId){this.finish(work,now,true,'ACTIVITY_DISABLED');return false;}if(!runId){if(foreground)return true;
+      const recovery=this.store.recovery.byWork(work.id);let accepted;
+      try{accepted=recovery?.resume?this.port.resume(this.port.openTask(recovery.resume.taskId),recovery.resume):this.port.submitTask(work.request);}
+      catch(error){const code=error instanceof Error?error.message:'ACTIVITY_RECOVERY_FAILED';
+        if(code==='CAPACITY_EXCEEDED')return true;
+        if(!recovery)throw error;this.store.recovery.hold(recovery.id,/^[A-Z0-9_]+$/.test(code)?code:'ACTIVITY_RECOVERY_FAILED',now);this.finish(work,now,true,'ACTIVITY_RECOVERY_REJECTED');return false;}
+      work.runs.push(accepted.run.id);work.activeSince=now;this.store.idle.save(work);if(work.candidate)this.store.admission.bind(work.candidate.key,work.candidate.claim,accepted.run.id,now);return true;}
     const ref=this.port.restoreRun(runId),status=this.port.status(ref);
     if(status.state==='running'&&foreground){this.port.yield(ref,{requestId:'idle-yield:'+runId,expectedVersion:status.version,reason:'前台交互让出，空闲后自动继续'});return true;}
     if(status.state==='waiting'&&status.error===null&&!work.paused){if(work.activeSince!==null){work.elapsedMs+=Math.max(0,now-work.activeSince);work.activeSince=null;this.store.idle.save(work);}return true;}
@@ -38,11 +46,23 @@ export class IdleActivity {
     this.store.admission.block('idle.interval','completed-activity-interval',now+this.store.config.explorationIntervalMs,now);
     if(work.candidate)this.store.admission.settle(work.candidate.key,work.candidate.claim,stop?'blocked':'complete',{runIds:work.runs,code,readingCompleteness:'not-inferred-from-run-state'},null,now);
     if(!stop&&work.candidate&&this.store.config.ownerSharing.enabled){const runId=work.runs.at(-1);if(runId&&this.ctx.dafeiyu.requestActivityShare(runId,work.candidate.key+':'+work.candidate.revision)){work.shareRecorded=true;this.store.idle.save(work);}}
-    if(code&&/^MODEL_HTTP_(401|402|403)$/.test(code))this.store.admission.block('idle.model',code,null,now);
-    else if(code&&/^MODEL_(HTTP_(429|50[234])|TRANSPORT|STREAM_CLOSED|INCOMPLETE)$/.test(code)){
-      const previous=this.store.admission.gate('idle.model'),delay=Math.min(this.store.config.maxBackoffMs,this.store.config.backoffBaseMs*2**Math.min(previous?.generation??0,10));
-      this.store.admission.block('idle.model',code,now+delay,now);
+    if(stop&&recoverableModelFailure(code)){
+      const previous=this.store.admission.gate(MODEL_GATE),delay=Math.min(this.store.config.maxBackoffMs,this.store.config.backoffBaseMs*2**Math.min(previous?.generation??0,10));
+      const gate=this.store.admission.block(MODEL_GATE,code!,accountModelFailure(code!)?null:now+delay,now);this.queueRecovery(work,gate.generation,code!,now);
+    }else if(stop&&code==='TASK_WAITING'){
+      const runId=work.runs.at(-1),dependency=runId?this.ctx.dafeiyu.mediaRecoveryDependencies(runId)[0]:null;
+      if(dependency)this.queueRecovery(work,dependency.generation,dependency.code,now,dependency.key);
     }
+    const recovery=this.store.recovery.byWork(work.id);if(recovery&&recovery.state==='claimed')this.store.recovery.save({...recovery,state:'settled',code,updatedAt:now});
+  }
+  private queueRecovery(work:z.infer<typeof idleSchema>,generation:number,code:string,now:number,dependencyKey=MODEL_GATE){
+    if(!work.candidate||this.store.recovery.get(work.id))return;
+    const parentRunId=work.runs.at(-1);if(!parentRunId)return;
+    const status=this.port.status(this.port.restoreRun(parentRunId)),previous=this.store.recovery.byWork(work.id),attempt=previous?.attempt??0;
+    const uncertain=status.operations?.some(op=>op.effects==='unknown'||op.state==='unknown'||op.status==='unknown');
+    const held=uncertain?'OPERATION_UNCERTAIN':!status.taskId||!status.checkpoints.at(-1)?'ACTIVITY_CHECKPOINT_MISSING':attempt>=MAX_RECOVERY_ATTEMPTS?'ACTIVITY_RECOVERY_LIMIT':null;
+    this.store.recovery.save({id:work.id,key:work.candidate.key,revision:work.candidate.revision,claim:work.candidate.claim,parentRunId,generation,dependencyKey,attempt,
+      state:held?'held':'blocked',code:held??code,updatedAt:now,workId:null,resume:null});
   }
   private recoverCandidates(now:number){const works=this.store.idle.candidates(),claims=new Set(works.flatMap(work=>work.candidate?[work.candidate.claim]:[]));
     for(const entry of this.store.admission.list())if(entry.state==='claimed'&&!entry.runId&&!claims.has(entry.claim))this.store.admission.releaseUnstarted(entry.key,entry.claim,now);
@@ -51,11 +71,37 @@ export class IdleActivity {
       const status=this.port.status(this.port.restoreRun(runId));
       if(!current.runId&&current.state==='claimed')this.store.admission.bind(candidate.key,candidate.claim,runId,now);
       if(work.settled&&current.state==='claimed')this.store.admission.settle(candidate.key,candidate.claim,status.state==='completed'?'complete':'blocked',{runIds:work.runs,code:status.error,readingCompleteness:'not-inferred-from-run-state'},null,now);
+      if(work.settled&&current.state==='blocked'&&status.state==='failed'&&recoverableModelFailure(status.error)){
+        const gate=this.store.admission.gate(MODEL_GATE);if(gate)this.queueRecovery(work,gate.reason==='restored'?Math.max(1,gate.generation-1):gate.generation,status.error!,now);
+      }
+      if(work.settled&&current.state==='blocked'&&status.state==='waiting'&&status.error==='TASK_WAITING'){
+        const dependency=this.ctx.dafeiyu.mediaRecoveryDependencies(runId)[0];if(dependency)this.queueRecovery(work,dependency.generation,dependency.code,now,dependency.key);
+      }
       if(work.settled&&status.state==='completed'&&!work.shareRecorded&&this.store.config.ownerSharing.enabled&&this.ctx.dafeiyu.requestActivityShare(runId,candidate.key+':'+candidate.revision)){work.shareRecorded=true;this.store.idle.save(work);}
     }
   }
-  async start(now:number){if(this.store.idle.pending()||!this.store.config.exploration||!this.store.rounds.canStart(now)||quietAt(now,this.store.config.timeZone,this.store.config.quiet)
-      ||['idle.interval','idle.rest','idle.model','idle.discovery'].some(key=>!this.store.admission.allowed(key,now)))return false;
+  private resumeRecovered(now:number){
+    const gate=this.store.admission.gate(MODEL_GATE);
+    for(const recovery of this.store.recovery.list()){
+      if(recovery.state!=='blocked')continue;
+      const model=recovery.dependencyKey===MODEL_GATE;
+      if(model?(!gate||gate.reason!=='restored'||gate.generation<=recovery.generation):!['retry-ready','recovered'].includes(this.ctx.dafeiyu.mediaRecoveryState(recovery.dependencyKey,recovery.generation)?.state??'blocked'))continue;
+      const candidate=this.store.admission.read(recovery.key),prior=this.store.idle.candidates().find(work=>work.id===recovery.id);
+      if(!prior||candidate?.claim!==recovery.claim||candidate.revision!==recovery.revision||candidate.state!=='blocked'){this.store.recovery.hold(recovery.id,'ACTIVITY_RECOVERY_STALE',now);continue;}
+      const status=this.port.status(this.port.restoreRun(recovery.parentRunId)),checkpointId=status.checkpoints.at(-1);
+      if(!status.taskId||!checkpointId||(model?status.state!=='failed'||!recoverableModelFailure(status.error):status.state!=='waiting'||status.error!=='TASK_WAITING')){this.store.recovery.hold(recovery.id,'ACTIVITY_RECOVERY_NOT_FAILED',now);continue;}
+      if(status.operations.some(op=>op.effects==='unknown'||op.state==='unknown'||op.status==='unknown')){this.store.recovery.hold(recovery.id,'OPERATION_UNCERTAIN',now);continue;}
+      const task=this.port.openTask(status.taskId),state=this.port.taskState(task);
+      if(state.status!=='active'){this.store.recovery.hold(recovery.id,'TASK_NOT_ACTIVE',now);continue;}
+      const id=randomUUID(),claim=randomUUID(),work=idleSchema.parse({...prior,id,request:{...prior.request,requestId:id},runs:[],activeSince:null,elapsedMs:0,paused:false,settled:false,shareRecorded:false,candidate:{key:recovery.key,revision:recovery.revision,claim}});
+      this.store.admitRecovery(work,{...recovery,claim,workId:id,state:'claimed',attempt:recovery.attempt+1,updatedAt:now,resume:{requestId:id,taskId:task.id,expectedVersion:state.version,policyId:prior.request.policyId,parentRunId:recovery.parentRunId,checkpointId}},now);
+      return true;
+    }return false;
+  }
+  async start(now:number){const model=this.store.admission.gate(MODEL_GATE);if(this.store.idle.pending()||!this.store.config.exploration||!this.store.rounds.canStart(now)||quietAt(now,this.store.config.timeZone,this.store.config.quiet)
+      ||model&&model.reason!=='restored'||!this.store.admission.allowed('idle.rest',now))return false;
+    if(this.resumeRecovered(now))return true;
+    if(['idle.interval','idle.discovery'].some(key=>!this.store.admission.allowed(key,now)))return false;
     this.store.admission.block('idle.discovery','catalog-refresh',now+this.store.config.explorationIntervalMs,now);
     let candidates:Awaited<ReturnType<Context['dafeiyu']['explorationCandidates']>>;
     try{candidates=await this.ctx.dafeiyu.explorationCandidates('activity',this.store.config.explorationPolicy,this.store.config.allowedCapabilities,AbortSignal.timeout(30000));}

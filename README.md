@@ -1,8 +1,8 @@
 # 大肥鱼 · dsh-dafeiyu
 
-**0.28.1** · Windows · Node.js 24.13+（24.x）· DSH SDK 0.2.1-rc.2
+**0.28.2** · Windows · Node.js 24.13+（24.x）· DSH SDK 0.2.1-rc.2
 
-当前 0.28.1 已通过本轮约定的本地验收，见[验收记录](docs/results/integrated-local-acceptance-20261104.md)。依赖恢复后的旧探索续办缺口按用户选择保留，不能据此声称原整合方案全部完成；服务器尚未部署。
+当前 0.28.2 补齐模型和媒体依赖恢复后的旧探索续办，正在进行本地验收，见[本轮状态](docs/checks/integrated-development-status-20261105.md)。服务器尚未部署。
 
 运行在 DeepSeek Harness 上的可成长智能体，整合 QQ、B站、媒体、持续任务、长期记忆和自主活动。程序管理身份、来源、权限、预算与交付；模型选择方法、理解材料并表达结果。
 

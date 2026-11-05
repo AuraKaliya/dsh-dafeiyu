@@ -5,6 +5,7 @@ export const managementDefinition={
   "tab": "capabilities",
   "description": "为能力模块提供解码、视觉观察、语音识别、声音事件、文档读取和语音合成。",
   "sections": [
+    {"id":"recovery","title":"读取故障与恢复","description":"按实际故障范围验证一次，再沿原任务补读缺口。","fields":[],"panel":"media-recovery"},
     {
       "id": "files",
       "title": "文件处理限制",

@@ -1,4 +1,6 @@
 import {IdleActivity} from './idle.js';
+import {ActivityModelRecovery} from './model-recovery.js';
+import type {RecoveryProbeRequest} from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { ContextItemSchema } from '@dafeiyu/contracts';
@@ -11,6 +13,7 @@ type RunStatus=ReturnType<Producer['status']>;
 
 export class ActivityScheduler {
   private readonly idle:IdleActivity;
+  private readonly recovery:ActivityModelRecovery;
   private readonly explore:ReturnType<Context['dafeiyu']['executionProducer']>;
   private readonly maintain:ReturnType<Context['dafeiyu']['executionProducer']>;
   private readonly unbindWake:()=>void;
@@ -26,7 +29,7 @@ export class ActivityScheduler {
   private lastForegroundAt:number;
   private readonly runClocks=new Map<string,number>();
   constructor(private readonly ctx:Context,private readonly store:ActivityStore,private readonly configHash:string,private readonly ready:()=>boolean,private readonly now:()=>number,private readonly monotonic:()=>number=()=>performance.now()){
-    this.lastForegroundAt=this.now();this.idle=new IdleActivity(ctx,store);
+    this.lastForegroundAt=this.now();this.idle=new IdleActivity(ctx,store);this.recovery=new ActivityModelRecovery(ctx,store,now);
     this.explore=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'self-exploration',basis:['scheduled-autonomous-exploration']}});
     this.maintain=ctx.dafeiyu.executionProducer('activity',{motivation:{kind:'maintenance',basis:['durable-memory-maintenance-request']}});
     this.unbindWake=ctx.dafeiyu.bindWakeAuthority({producerId:'activity',validate:(origin,task)=>this.authorized(origin,task),sourceAnchor:origin=>this.store.snapshot(origin.scheduleId,origin.scheduleVersion).anchor,
@@ -188,6 +191,7 @@ export class ActivityScheduler {
       if(!this.started||this.closed||!this.ready()||!this.ctx.dafeiyu.accepting)return;
       const now=this.now();
       this.importMemory(now);this.controlActive(now);const idleBusy=this.idle.control(now,this.pressure());this.settleRounds(now);if(this.pressure()||idleBusy)return;
+      if(this.store.config.exploration&&!quietAt(now,this.store.config.timeZone,this.store.config.quiet))this.recovery.schedule(now);
       this.dispatch(now);
       for(const id of this.store.due(now)){const plan=this.store.get(id);const source=this.source(plan);if(source.state==='pending')continue;
         if(source.state==='stale'){this.store.block(id,source.code??'SOURCE_STALE',now);this.retireOwnedTask(plan);continue;}
@@ -199,7 +203,9 @@ export class ActivityScheduler {
     }).catch(error=>{this.failure=safeCode(error);this.stop();}).finally(()=>{if(this.pending===work)this.pending=undefined;});this.pending=work;return work;
   }
   async whenIdle(){await this.pending;}
+  recoveryStatus(){return this.recovery.status();}
+  probeRecovery(input:RecoveryProbeRequest){if(this.closed||!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');return this.recovery.startProbe(input);}
   get health(){return {running:this.started,error:this.failure};}
-  async close(){if(this.closed)return;this.closed=true;this.stop();await this.whenIdle();this.unbindWake();this.unbindEvents();this.disconnectMemory?.();}
+  async close(){if(this.closed)return;this.closed=true;this.stop();await this.whenIdle();await this.recovery.close();this.unbindWake();this.unbindEvents();this.disconnectMemory?.();}
 }
 function safeCode(error:unknown){return error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'ACTIVITY_FAILED';}

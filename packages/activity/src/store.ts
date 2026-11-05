@@ -1,6 +1,7 @@
 import {IdleWorkStore,createIdleSchema} from './idle.js';
 import {ActivityAdmission,createAdmissionSchema,ACTIVITY_ADMISSION_TABLES} from './admission.js';
 import {ActivityRounds,createRoundSchema} from './rounds.js';
+import {ActivityRecoveryStore,createRecoverySchema,ACTIVITY_RECOVERY_TABLES} from './recovery-store.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync,mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -12,9 +13,9 @@ import type { ActivityScheduleBody,ActivityDomainEvent,WakeOccurrenceBody,Activi
 import { initialDue,elapsedDue,nextAllowed,validateQuiet,localTime,daySlices } from './time.js';
 
 export const ACTIVITY_APPLICATION_ID=0x44464134;
-export const ACTIVITY_SCHEMA_VERSION=3;
+export const ACTIVITY_SCHEMA_VERSION=4;
 export const ACTIVITY_LEGACY_TABLES=['activity_metadata','activity_schedules','activity_schedule_revisions','activity_tasks','activity_occurrences','activity_outbox','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage','activity_clock','activity_rounds','activity_round_items','activity_idle_work'] as const;
-export const ACTIVITY_TABLES=[...ACTIVITY_LEGACY_TABLES,...ACTIVITY_ADMISSION_TABLES] as const;
+export const ACTIVITY_TABLES=[...ACTIVITY_LEGACY_TABLES,...ACTIVITY_ADMISSION_TABLES,...ACTIVITY_RECOVERY_TABLES] as const;
 const identitySchema=z.strictObject({agentId:z.string().min(1).max(100),profileId:z.string().min(1).max(100)});
 const createSchema=ActivityScheduleBodySchema.omit({id:true,version:true,createdAt:true,updatedAt:true,taskGeneration:true}).extend({requestId:PersonaRequestIdSchema});
 const updateSchema=z.strictObject({requestId:PersonaRequestIdSchema,expectedVersion:z.number().int().positive(),state:ActivityScheduleBodySchema.shape.state.optional(),
@@ -33,7 +34,7 @@ export const activityScope=(scope:ExecutionScope)=>scope.kind==='task'?scope.sco
 export interface StoredSchedule {body:ActivityScheduleBody;status:'active'|'paused'|'cancelled'|'exhausted'|'blocked';nextDue:number|null;notBefore:number;failures:number;error:string|null}
 export interface StoredOccurrence {body:WakeOccurrenceBody;state:ActivityOccurrenceState;runId:string|null;startedAt:number|null;error:string|null}
 
-export function createActivityStorageSchema(db:DatabaseSync,admission=true){createRoundSchema(db);createIdleSchema(db);if(admission)createAdmissionSchema(db);db.exec(`
+export function createActivityStorageSchema(db:DatabaseSync,admission=true,recovery=admission){createRoundSchema(db);createIdleSchema(db);if(admission)createAdmissionSchema(db);if(recovery)createRecoverySchema(db);db.exec(`
     CREATE TABLE activity_metadata(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
     CREATE TABLE activity_schedules(id TEXT PRIMARY KEY,owner_key TEXT NOT NULL,version INTEGER NOT NULL,task_generation INTEGER NOT NULL,status TEXT NOT NULL,next_due INTEGER,not_before INTEGER NOT NULL DEFAULT 0,event_cursor INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,error TEXT);
     CREATE INDEX activity_due ON activity_schedules(status,next_due,not_before);
@@ -49,7 +50,7 @@ export function createActivityStorageSchema(db:DatabaseSync,admission=true){crea
     CREATE TABLE activity_usage(run_id TEXT NOT NULL,day TEXT NOT NULL,milliseconds INTEGER NOT NULL,PRIMARY KEY(run_id,day));
     CREATE TABLE activity_clock(id INTEGER PRIMARY KEY CHECK(id=1),last_seen INTEGER NOT NULL);
     INSERT INTO activity_clock VALUES(1,0);
-    PRAGMA application_id=${ACTIVITY_APPLICATION_ID};PRAGMA user_version=${admission?ACTIVITY_SCHEMA_VERSION:2};
+    PRAGMA application_id=${ACTIVITY_APPLICATION_ID};PRAGMA user_version=${recovery?ACTIVITY_SCHEMA_VERSION:admission?3:2};
   `);
     for(const table of ['activity_metadata','activity_schedule_revisions','activity_tasks','activity_requests','activity_domain_events','activity_condition_watermarks','activity_run_events','activity_usage']){
       db.exec(`CREATE TRIGGER ${table}_immutable BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'Immutable activity history');END;
@@ -64,6 +65,7 @@ export class ActivityStore {
   readonly rounds:ActivityRounds;
   readonly idle:IdleWorkStore;
   readonly admission:ActivityAdmission;
+  readonly recovery:ActivityRecoveryStore;
   readonly config:z.output<typeof ActivityConfigSchema>;
   readonly identity:z.infer<typeof identitySchema>;
   private closed=false;
@@ -81,6 +83,7 @@ export class ActivityStore {
     }catch(error){this.db.close();throw error;}
     this.idle=new IdleWorkStore(this.db);
     this.admission=new ActivityAdmission(this.db);
+    this.recovery=new ActivityRecoveryStore(this.db);
     this.rounds=new ActivityRounds(this.db,this.config,this.config.minIntervalMs);
   }
   management(){return this.db.prepare('SELECT id FROM activity_schedules ORDER BY rowid DESC LIMIT 100').all().map(row=>this.get(String(row.id)));}
@@ -96,6 +99,12 @@ export class ActivityStore {
     const {next}=elapsedDue(plan.body,plan.nextDue,time,Math.max(this.config.minIntervalMs,this.config.tickMs*2));this.db.prepare('UPDATE activity_schedules SET next_due=?,status=? WHERE id=? AND version=?').run(next,next===null?'exhausted':'active',planId,version);
   });}
   admitIdle(work:Parameters<IdleWorkStore['save']>[0],now:number){this.transaction(()=>{this.idle.save(work);this.rounds.admit('idle:'+work.id,now);});}
+  admitRecovery(work:Parameters<IdleWorkStore['save']>[0],recovery:Parameters<ActivityRecoveryStore['save']>[0],now:number){this.transaction(()=>{
+    const current=this.recovery.get(recovery.id),candidate=work.candidate&&this.admission.read(work.candidate.key);
+    if(this.idle.pending()||current?.state!=='blocked'||!candidate||candidate.claim!==current.claim||candidate.state!=='blocked')throw new Error('ACTIVITY_RECOVERY_STALE');
+    this.admission.reclaim(candidate.key,current.claim,recovery.claim,now);
+    this.recovery.save(recovery);this.idle.save(work);this.rounds.admit('idle:'+work.id,now);
+  });}
   private initialize(){createActivityStorageSchema(this.db);this.db.prepare('INSERT INTO activity_metadata VALUES(1,?)').run(JSON.stringify(this.identity));}
   private transaction<T>(work:()=>T):T {this.db.exec('BEGIN IMMEDIATE');try{const value=work();this.db.exec('COMMIT');return value;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   private clock(now:number){z.number().int().nonnegative().safe().parse(now);const prior=Number(this.db.prepare('SELECT last_seen FROM activity_clock WHERE id=1').get()?.last_seen),value=Math.max(prior,now);
