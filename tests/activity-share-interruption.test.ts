@@ -27,7 +27,7 @@ test('autonomous text shares yield before dispatch and between segments, then re
   const config=loadHostConfig(file),coordination=join(root,'coordination.sqlite');initializeProfile(config,coordination);
   const options:Parameters<typeof ManagedHost.start>[1]={coordination,adapter,signal:t.signal,installChannels:ctx=>{
     ctx.dafeiyu.bindActivitySharing(()=>({enabled:true,cooldownMs:60000}));ctx.dafeiyu.bindActivityPressure('foreground-fixture',()=>foreground?1:0);
-    const transport=new QqSegmentedTransport({ledger:qqStore.delivery,confirmed:()=>{},beforeSend:async()=>{if(beforeOnce){beforeOnce=false;throw new Error('DELIVERY_INTERRUPTED_BY_MESSAGE');}},betweenMessages:async()=>{if(betweenOnce){betweenOnce=false;throw new Error('DELIVERY_INTERRUPTED_BY_MESSAGE');}},check:async reply=>{
+    const transport=new QqSegmentedTransport({ledger:qqStore.delivery,confirmed:()=>{},beforeSend:async()=>{assert.ok(ctx.dafeiyu.activityPressure().foregroundRuns>0,'the actual interactive delivery lease must block a second autonomous render');if(beforeOnce){beforeOnce=false;throw new Error('DELIVERY_INTERRUPTED_BY_MESSAGE');}},betweenMessages:async()=>{if(betweenOnce){betweenOnce=false;throw new Error('DELIVERY_INTERRUPTED_BY_MESSAGE');}},check:async reply=>{
       assert.equal(reply.taskResult?.kind,'activity-result','the persisted transport snapshot must retain the autonomous result authority');
       ctx.dafeiyu.verifyActivityShareReply(reply);
     },send:async(reply,text)=>{delivered.push({...reply,text});return String(123456+delivered.length);}});

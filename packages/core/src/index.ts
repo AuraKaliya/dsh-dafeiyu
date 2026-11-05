@@ -553,7 +553,7 @@ export class DafeiyuService extends Service {
   createMaintenanceAnchor(runId:string,taskId:string,epoch:number){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.maintenanceAnchor(runId,taskId,epoch);}
   private readonly activityPressureReaders=new Map<string,()=>number>();
   bindActivityPressure(id:string,read:()=>number){if(this.activityPressureReaders.has(id))throw new Error('DUPLICATE_PROVIDER');this.activityPressureReaders.set(id,read);return ()=>{this.activityPressureReaders.delete(id);};}
-  activityPressure(){return {...(this.scheduler?.status??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:(this.executions?.foregroundPending??0)+this.journal.list(['accepted','processing','reply-ready','sending']).length+[...this.activityPressureReaders.values()].reduce((sum,read)=>sum+Math.max(0,read()),0)};}
+  activityPressure(){const scheduler=this.scheduler?.status;return {...(scheduler??{active:0,waiting:0,foregroundWaiting:0}),foregroundRuns:(scheduler?.interactiveActive??0)+(this.executions?.foregroundPending??0)+this.journal.list(['accepted','processing','reply-ready','sending']).length+[...this.activityPressureReaders.values()].reduce((sum,read)=>sum+Math.max(0,read()),0)};}
   feedbackLedger(){return this.feedback;}
   bindFeedbackReceipts(port:FeedbackReceiptPort){if(this.feedbackReceipts)throw new Error('DUPLICATE_PROVIDER');this.feedbackReceipts=port;return ()=>{if(this.feedbackReceipts===port)this.feedbackReceipts=undefined;};}
   private feedbackSourceCurrent(record:import('./feedback-ledger.js').FeedbackRecord):boolean {
