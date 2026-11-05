@@ -31,6 +31,8 @@ export class NativeDeliveryStore {
   verifyCredential(runId:string){const row=this.get(runId);if(!row?.body||!row.material||!row.credential||row.credential!==nativeDeliveryHash({id:row.id,anchor:row.anchor,material:row.material,body:row.body}))throw new Error('DELIVERY_CREDENTIAL_INVALID');return row.body;}
   sending(runId:string){return this.atomic(()=>this.advance(runId,'ready','sending'));}
   notSentBeforeDispatch(runId:string,code:string){return this.atomic(()=>this.advance(runId,'ready','not-sent',code));}
+  deferActivity(runId:string){return this.atomic(()=>{const row=this.get(runId);if(!row||row.anchor.kind!=='activity-result'||!['ready','sending'].includes(row.state))throw new Error('DELIVERY_STATE_CONFLICT');
+    return this.advance(runId,row.state,'ready','DELIVERY_INTERRUPTED_BY_MESSAGE');});}
   sendAttempted(runId:string):boolean{return !!this.db.prepare("SELECT 1 FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')='native.delivery.sending' LIMIT 1").get(z.uuid().parse(runId));}
   finish(runId:string,state:'sent'|'not-sent'|'partial'|'uncertain',receipt:string|null,code:string|null){return this.atomic(()=>{if(this.get(runId)?.state!=='sending')throw new Error('DELIVERY_STATE_CONFLICT');if(state==='sent'&&!receipt)throw new Error('DELIVERY_RECEIPT_REQUIRED');this.db.prepare('UPDATE native_deliveries SET receipt=? WHERE run_id=?').run(receipt,runId);return this.advance(runId,'sending',state,code);});}
   reject(runId:string,code:string){return this.atomic(()=>{const row=this.get(runId);if(!row||!['accepted','rendering','verifying','ready'].includes(row.state))throw new Error('DELIVERY_STATE_CONFLICT');return this.advance(runId,row.state,'rejected',code);});}

@@ -55,7 +55,18 @@ export class RuntimeStore {
     });
   }
   activityShare(runId:string){const row=this.db.prepare('SELECT body FROM native_share_requests WHERE run_id=?').get(runId);return row?shareSchema.parse(JSON.parse(String(row.body))):null;}
-  dueActivityShares(now=Date.now()){return this.db.prepare('SELECT run_id FROM native_share_requests WHERE json_extract(body,\'$.notBefore\')<=? AND NOT EXISTS(SELECT 1 FROM native_deliveries d WHERE d.run_id=native_share_requests.run_id) ORDER BY rowid').all(now).map(row=>String(row.run_id));}
+  prepareActivityShare(runId:string,policyHash:string,cooldownMs:number,now=Date.now()){
+    return this.transaction(()=>{const share=this.activityShare(runId);if(!share||share.policyHash!==policyHash||share.notBefore>now)return false;
+      if(this.nativeDeliveries.get(runId))return true;
+      const last=this.db.prepare("SELECT MAX(json_extract(o.body,'$.at')) at FROM runtime_outbox o JOIN native_share_requests s ON s.run_id=json_extract(o.body,'$.runId') WHERE json_extract(o.body,'$.type')='native.delivery.sent'").get();
+      if(typeof last?.at==='string'&&Date.parse(last.at)+cooldownMs>now)return false;
+      // No delivery anchor exists yet. Start its validity window only when foreground work has yielded.
+      const ready={...share,expiresAt:new Date(now+900000).toISOString()};
+      this.db.prepare('UPDATE native_share_requests SET body=? WHERE run_id=?').run(JSON.stringify(ready),runId);
+      return true;
+    });
+  }
+  dueActivityShares(now=Date.now()){return this.db.prepare("SELECT s.run_id FROM native_share_requests s LEFT JOIN native_deliveries d ON d.run_id=s.run_id WHERE json_extract(s.body,'$.notBefore')<=? AND (d.id IS NULL OR d.state IN ('accepted','ready')) ORDER BY s.rowid").all(now).map(row=>String(row.run_id));}
   private readonly sourceReadStatements=new Map<string,import('node:sqlite').StatementSync>();
   private sourceRead(sql:string){let statement=this.sourceReadStatements.get(sql);if(!statement){statement=this.db.prepare(sql);this.sourceReadStatements.set(sql,statement);}return statement;}
   readonly nativeDeliveries:NativeDeliveryStore;

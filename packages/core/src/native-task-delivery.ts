@@ -20,6 +20,7 @@ interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:s
   persona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
   model():AgentOptions;channel(item:PendingMessage):DeliveryChannel|null;accepting():boolean;flush():void;
   activityChannel?(target:Conversation):DeliveryChannel|null;
+  admitActivityShare?(runId:string):boolean;
   activityPersona?(runId:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
   enqueue<T>(route:string,work:()=>Promise<T>):Promise<T>;acquire():Promise<()=>void>;
   notice(input:{item:PendingMessage;text:string;deliveryId:string;status:'sent'|'not-sent'|'unknown';kind:'progress'|'result'|'failure';receiptId?:string;code?:string}):void;
@@ -59,7 +60,8 @@ export class NativeTaskDelivery {
     }catch{/* Invalid or unavailable sources cannot fall back to the old body. */}}
     return items;
   }
-  request(runId:string,automatic=false){const description=this.host.describe(runId);if(!description){if(automatic)return Promise.resolve(null);throw new Error('RESULT_UNAVAILABLE');}
+  request(runId:string,automatic=false){if(this.host.store.activityShare(runId)&&this.host.admitActivityShare?.(runId)===false)return Promise.resolve(null);
+    const description=this.host.describe(runId);if(!description){if(automatic)return Promise.resolve(null);throw new Error('RESULT_UNAVAILABLE');}
     if(automatic&&!description.autoDeliver)return Promise.resolve(null);if(!automatic&&!this.host.accepting())throw new Error('HOST_NOT_READY');
     const record=this.host.store.nativeDeliveries.create(description.anchor);this.host.flush();
     const pending=this.active.get(runId);if(pending)return pending;if(terminal.has(record.state)||!this.host.accepting())return Promise.resolve(this.host.store.nativeDeliveries.status(runId));
@@ -157,10 +159,14 @@ export class NativeTaskDelivery {
           if(!invoked&&outcome.status!=='not-sent'){if(this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;throw new Error('DELIVERY_DISPATCH_NOT_NOTIFIED');}return outcome;
         }finally{if(timer)clearTimeout(timer);}
       });}
-      if(!invoked&&result.status==='not-sent'&&this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.notSentBeforeDispatch(runId,result.code);
+      const progress=!item&&!packet.media?channel.capability.deliveryProgress?.(reply.id):null;
+      const deferred=!item&&!packet.media&&(result.status==='not-sent'&&!invoked&&result.code==='DELIVERY_INTERRUPTED_BY_MESSAGE'
+        ||result.status==='unknown'&&result.code==='PARTIAL_DELIVERY'&&progress?.canResume===true&&progress.unknown===0&&progress.sending===0&&progress.pending>0);
+      if(deferred)this.host.store.nativeDeliveries.deferActivity(runId);
+      else if(!invoked&&result.status==='not-sent'&&this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.notSentBeforeDispatch(runId,result.code);
       else this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
       if(item)this.host.notice({item,text:body,deliveryId:`native-delivery:${record.id}`,status:result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':'unknown',kind:'result',...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code})});
-      else this.host.store.appendExecutionEvent(runId,'activity.share.settled',{deliveryId:record.id,status:result.status});
+      else this.host.store.appendExecutionEvent(runId,deferred?'activity.share.deferred':'activity.share.settled',{deliveryId:record.id,status:result.status});
     }catch(error){this.host.store.appendExecutionEvent(runId,'native.delivery.diagnostic',{stage,code:code(error),name:error instanceof Error?error.name:'Unknown',
       ...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(String).join('.')}))}:{})});
       const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));

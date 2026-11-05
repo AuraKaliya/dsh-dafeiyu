@@ -37,3 +37,19 @@ test('pre-dispatch rejection retains the approved text without inventing a send 
     store.nativeDeliveries.notSentBeforeDispatch(run.id,'DELIVERY_BUDGET_EXHAUSTED');assert.equal(store.nativeDeliveries.get(run.id)?.state,'not-sent');assert.equal(store.nativeDeliveries.sendAttempted(run.id),false);assert.equal(store.nativeDeliveries.get(run.id)?.receipt,null);
   }finally{store.close();}
 });
+
+test('queued autonomous shares start their validity window at admission and cooldown follows actual sent receipts',async()=>{
+  const store=new RuntimeStore(await file(),identity,{create:true}),now=Date.now(),target={channel:'qq',account:'12345678',kind:'private' as const,id:'11223344'};
+  try{const first=setup(store),share=store.queueActivityShare(first.run.id,'first',target,digest,60000,now-3600000);
+    assert.ok(Date.parse(share.expiresAt)<now);assert.equal(store.prepareActivityShare(first.run.id,'b'.repeat(64),60000,now),false);
+    assert.equal(store.prepareActivityShare(first.run.id,digest,60000,now),true);const ready=store.activityShare(first.run.id)!;assert.equal(Date.parse(ready.expiresAt),now+900000);
+    const anchor:TaskResultAnchor={kind:'activity-result',schemaVersion:1,taskId:first.anchor.taskId,runId:first.run.id,shareId:ready.id,target,intentVersion:1,authorityVersion:digest,expiresAt:ready.expiresAt};
+    store.nativeDeliveries.create(anchor);store.nativeDeliveries.start(first.run.id,{packetId:randomUUID(),sourceStamp:digest,foundationHash:digest,personaHash:digest,modelHash:digest});store.nativeDeliveries.rendered(first.run.id,first.ref);store.nativeDeliveries.approve(first.run.id,body);
+    store.nativeDeliveries.sending(first.run.id);store.nativeDeliveries.finish(first.run.id,'sent','platform-1',null);
+    const second=setup(store);store.queueActivityShare(second.run.id,'second',target,digest,60000,now-3000000);
+    assert.equal(store.prepareActivityShare(second.run.id,digest,60000,now),false,'long foreground work must not cause a burst of queued shares');
+    assert.equal(store.prepareActivityShare(second.run.id,digest,60000,now+61000),true);
+    assert.equal(store.activityShare(first.run.id)?.expiresAt,ready.expiresAt,'an already created anchor stays immutable');
+    assert.throws(()=>store.nativeDeliveries.deferActivity(first.run.id),/DELIVERY_STATE_CONFLICT/,'a confirmed delivery is never reopened');
+  }finally{store.close();}
+});
