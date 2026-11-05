@@ -95,6 +95,20 @@ export class BiliClient {
       pause:{scope:route,kind:pause.kind,endpoint:pause.endpoint,failures:this.store.diagnostics.pauses.reduce((max,pauseState)=>Math.max(max,pauseState.failures),0),held,waitUntil:pause.until===null?null:new Date(pause.until).toISOString(),automaticProbe:false},
       note:'登录有效与接口可用分别判断：登录校验成功不会解除视频、评论等接口的风控；匿名HTTP暂停不影响已验证账号读取；媒体与字幕资源单独记录。'};
   }
+  readAvailability(action:string){
+    const endpoints:Record<string,string>={bili_video:'video',bili_search:'search',bili_discover:'discover',bili_comments:'comments',bili_subtitles:'player',bili_danmaku:'danmaku',bili_media:'play',bili_frames:'video'};
+    if(action==='bili_browser_read'){
+      const held=['video','comments','search','discover','player'].filter(endpoint=>!this.store.diagnostics.route({scope:'browser',endpoint}).available);
+      return {available:!!this.config.browser&&held.length<5,reason:held.length?'浏览器暂停范围：'+held.join('、')+'。不得用该入口重试这些范围；其它范围仍需当前账号与来源验证。':null};
+    }
+    const endpoint=endpoints[action];if(!endpoint)return {available:true,reason:null};
+    const {account,http,shared}=this.httpRoute(endpoint),login=this.config.session?this.store.diagnostics.route({scope:'verified-http',uid:this.config.session.expectedUid,endpoint:'nav'}):null;
+    const httpReady=http.available&&shared.available&&(!login||login.available)&&(!account.configured||account.credentialState==='ready'&&!['expired','mismatch'].includes(account.engine));
+    const browserEndpoint=action==='bili_subtitles'?'player':endpoint;
+    const browserReady=!!this.config.browser&&this.store.diagnostics.route({scope:'browser',endpoint:browserEndpoint}).available;
+    const available=action==='bili_frames'?browserReady:action==='bili_media'||action==='bili_danmaku'?httpReady:httpReady||browserReady&&this.fallbackAllowed();
+    return {available,reason:available?null:'对应读取通道暂停或未配置。使用bili_status核对恢复条件；缓存读取仍可用，不代表插件缺失。'};
+  }
   /** Login/verification challenges on a verified or shared scope must not silently switch channels. */
   fallbackAllowed(){const {account,route}=this.httpRoute();
     if(account.configured&&(account.credentialState!=='ready'||['expired','mismatch'].includes(account.engine)))return false;

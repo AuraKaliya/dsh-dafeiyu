@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ActionOutcomeSchema, ExtensionMetadataSchema, dependencyOrder,redactJson,ResourceTargetViewSchema } from '@dafeiyu/contracts';
+import { ActionOutcomeSchema,ActionReadinessSchema, ExtensionMetadataSchema, dependencyOrder,redactJson,ResourceTargetViewSchema } from '@dafeiyu/contracts';
 import type { Conversation,ExecutionScope,ResourceTargetView } from '@dafeiyu/contracts';
 import type { ActionCapability, Extension, ExtensionHandle, ExecutionContext, ActionOutcome, Json, TaskContextContributor, ResourceProof, ResourceProofProvider, TimelineScope } from '@dafeiyu/contracts';
 import { toolParameters } from './tool-schema.js';
@@ -9,6 +9,7 @@ export interface BoundAction {
   readonly input: Record<string, unknown>; readonly effects: ActionCapability['effects']; readonly scope:'conversation'|'task'|'any';
   readonly parameters:ReturnType<typeof toolParameters>;
   readonly active: () => boolean;
+  readonly readiness?:ActionCapability['readiness'];
   readonly signal:AbortSignal;
   validateInput(raw:unknown):Json;
   execute(raw: unknown, context: ExecutionContext): Promise<ActionOutcome>;
@@ -76,7 +77,7 @@ export class CapabilityRegistry {
       entry.resourceProofs=Object.freeze({current:extension.resourceProofs.current.bind(extension.resourceProofs),epoch:extension.resourceProofs.epoch.bind(extension.resourceProofs),...(extension.resourceProofs.publicView?{publicView:extension.resourceProofs.publicView.bind(extension.resourceProofs)}:{}),...(extension.resourceProofs.targetView?{targetView:extension.resourceProofs.targetView.bind(extension.resourceProofs)}:{})});}
     const bound: BoundAction[] = [];
     for (const action of extension.actions ?? []) {
-      if(Object.keys(action).some(key=>!['id','version','description','inputSchema','outputSchema','effects','scope','execute'].includes(key)))throw new Error('INVALID_ACTION_CONTRACT');
+      if(Object.keys(action).some(key=>!['id','version','description','inputSchema','outputSchema','effects','scope','execute','readiness'].includes(key))||action.readiness!==undefined&&typeof action.readiness!=='function')throw new Error('INVALID_ACTION_CONTRACT');
       const meta = actionMetaSchema.parse({ id: action.id, version: action.version, description: action.description, effects: action.effects, scope: action.scope ?? 'any' });
       if (names.has(meta.id)) throw new Error('DUPLICATE_ACTION'); names.add(meta.id);
       if (!(action.inputSchema instanceof z.ZodType) || !(action.outputSchema instanceof z.ZodType) || typeof action.execute !== 'function') throw new Error('INVALID_ACTION_CONTRACT');
@@ -85,9 +86,9 @@ export class CapabilityRegistry {
       assertStrictSchema(input);
       freezeTree(input);
       const parameters=toolParameters(input);freezeTree(parameters);
-      const parseInput = action.inputSchema.parse.bind(action.inputSchema), parseOutput = action.outputSchema.parse.bind(action.outputSchema), execute = action.execute.bind(action);
+      const parseInput = action.inputSchema.parse.bind(action.inputSchema), parseOutput = action.outputSchema.parse.bind(action.outputSchema), execute = action.execute.bind(action),readiness=action.readiness?.bind(action);
       const validateInput=(raw:unknown):Json=>{let parsed:Json;try{parsed=z.json().parse(parseInput(raw));}catch{throw new Error('INVALID_INPUT');}if(Buffer.byteLength(JSON.stringify(parsed),'utf8')>128000)throw new Error('ACTION_INPUT_TOO_LARGE');return parsed;};
-      bound.push(Object.freeze({ ...meta, owner: metadata.id,pluginVersion:metadata.version, input: Object.freeze(input),parameters, signal:entry.controller.signal,active: () => entry.active&&entry.ready(),validateInput,
+      bound.push(Object.freeze({ ...meta, owner: metadata.id,pluginVersion:metadata.version, input: Object.freeze(input),parameters, signal:entry.controller.signal,active: () => entry.active&&entry.ready(),...(readiness?{readiness:()=>ActionReadinessSchema.parse(readiness())}:{}),validateInput,
         execute: async (raw: unknown, context: ExecutionContext):Promise<ActionOutcome> => {
           if (!entry.active || !entry.ready()) throw new Error('CAPABILITY_UNAVAILABLE');
           context.signal.throwIfAborted();

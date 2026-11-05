@@ -46,10 +46,13 @@ export const ActionOutcomeSchema = z.strictObject({
   errorCode: z.string().regex(/^[A-Z0-9_]{1,100}$/).optional(),
 });
 export type ActionOutcome = z.infer<typeof ActionOutcomeSchema>;
+export const ActionReadinessSchema=z.strictObject({available:z.boolean(),reason:z.string().max(1000).nullable()});
 export interface ActionCapability {
   readonly id: string; readonly version: string; readonly description: string;
   readonly inputSchema: z.ZodType; readonly outputSchema: z.ZodType;
   readonly effects: 'read' | 'local-write' | 'external-write'; readonly scope?: 'conversation'|'task'|'any';
+  /** Temporary presentation state. It cannot revoke or grant source authority. */
+  readonly readiness?:()=>z.infer<typeof ActionReadinessSchema>;
   execute(input: Json, context: ExecutionContext): Promise<ActionOutcome>;
 }
 export interface TaskContextContributor {

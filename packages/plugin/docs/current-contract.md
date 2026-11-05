@@ -62,3 +62,5 @@ Journal、Runtime、Memory、QQ、B站、媒体、Activity、执行器分别提�
 DSH 设置页通过管理协议组合模块自己的界面与操作。管理调用只接受 DSH 已认证的主人连接；不会由模型请求中的角色字段授予管理权限。配置与状态分离，模块按职责提供 UI 描述和管理端口。当前管理行为及验证范围见 [管理中心](management-center.md)。
 
 恢复管理：activity 的 recovery.probe 接受 requestId、expectedGeneration，返回持久探测回执；media 的 recovery.arm 另需 key，返回一次短期读取许可。活动库与媒体库为 v4。许可、实际验证和业务接续是不同状态；只有当前代次的成功能解除对应暂停。恢复探测按 maintenance/recovery 计量，独立探测没有业务 Run，不伪造绑定。
+
+动作可提供程序侧 `readiness()`，返回临时可用性与原因。任务每步装配模型请求时据此收窄当前工具；它与生命周期及来源授权分别判断，不让暂停反向作废已读证据。DSH 的 in-history 模型路由会保留历史声明用于解释旧调用，并用正式的工具移除/增加记录表示当前集合；不能把历史声明仍在请求中误判为暂停没有生效。
