@@ -12,6 +12,20 @@ import { testTempDir } from './test-temp.js';
 const identity={agentId:'fish',profileId:'test'};
 async function fixture(){const root=await mkdtemp(join(testTempDir(),'bili-diagnostics-')),file=join(root,'bilibili.sqlite');return {file,store:new BiliStore(file,identity,true)};}
 const response=(status:number,body:string,headers:Record<string,string>={}):HttpResponse=>({status,headers:{'content-type':'application/json',...headers},body:(async function*(){yield Buffer.from(body);})(),close(){}});
+
+test('a connection reset retries the same read once after recorded cooldown, without retrying account rejection',async()=>{
+  const f=await fixture();let calls=0;const c=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100}),f.store,async()=>{if(++calls===1)throw new Error('BILI_HTTP_ECONNRESET');return response(200,'{"code":0,"data":{"read":true}}');});
+  try{assert.deepEqual(await c.read('video',{bvid:'BV1xx411c7mD'},new AbortController().signal,()=>{}),{read:true});assert.equal(calls,2);const attempts=f.store.diagnostics.recent();assert.equal(attempts.length,2);assert.equal(attempts[1]?.errorCode,'BILI_HTTP_ECONNRESET');assert.equal(attempts[0]?.outcome,'success');assert.ok(attempts[0]!.at>=attempts[1]!.retryAt!);}finally{c.dispose();f.store.close();}
+  const denied=await fixture();let rejected=0;const d=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100}),denied.store,async()=>{rejected++;return response(200,'{"code":-101}');});
+  try{await assert.rejects(d.read('video',{bvid:'BV1xx411c7mD'},new AbortController().signal,()=>{}),/BILI_LOGIN_REQUIRED/);assert.equal(rejected,1);}finally{d.dispose();denied.store.close();}
+});
+
+test('connection recovery is bounded and cancellation during cooldown does not dispatch again',async()=>{
+  const f=await fixture();let calls=0;const c=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100}),f.store,async()=>{calls++;throw new Error('BILI_HTTP_ECONNRESET');});
+  try{await assert.rejects(c.read('video',{bvid:'BV1xx411c7mD'},new AbortController().signal,()=>{}),/BILI_HTTP_ECONNRESET/);assert.equal(calls,2);}finally{c.dispose();f.store.close();}
+  const cancelled=await fixture(),controller=new AbortController();let attempted=0;const d=new BiliClient(BiliConfigSchema.parse({minIntervalMs:100}),cancelled.store,async()=>{attempted++;setTimeout(()=>controller.abort(),20);throw new Error('BILI_HTTP_ECONNRESET');});
+  try{await assert.rejects(d.read('video',{bvid:'BV1xx411c7mD'},controller.signal,()=>{}),/BILI_CANCELLED/);assert.equal(attempted,1);}finally{d.dispose();cancelled.store.close();}
+});
 test('HTTP status, platform code and blocked attempts survive restart without secrets',async()=>{
   const f=await fixture();let store=f.store;try{let calls=0;const c=new BiliClient(BiliConfigSchema.parse({}),store,async()=>{calls++;return response(200,JSON.stringify({code:-352,message:'SESSDATA=secret-value',data:{private:'never-persist'}}));});
     await assert.rejects(c.read('video',{bvid:'BV1xx411c7mD'},new AbortController().signal,()=>{}),/BACKOFF/);

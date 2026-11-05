@@ -191,12 +191,21 @@ export class BiliClient {
       throw new Error(code);
     }finally{record.endedAt=Date.now();this.store.diagnostics.release(record.id);this.store.diagnostics.record(record);}
   }
-  private async json(endpoint:Endpoint,url:URL,cookie:string|null,signal:AbortSignal,guard:()=>void,anonymousNav=false,options:{permit?:string}={}){return this.request(endpoint,url,cookie,signal,guard,async(response,record,reject)=>{
+  private async json(endpoint:Endpoint,url:URL,cookie:string|null,signal:AbortSignal,guard:()=>void,anonymousNav=false,options:{permit?:string}={}){const attempt=()=>this.request(endpoint,url,cookie,signal,guard,async(response,record,reject)=>{
     const raw=boundedJson(await boundedBytes(response,this.config.maxResponseBytes,signal,guard)),envelope=z.object({code:z.number().int().safe(),data:z.unknown().optional()}).parse(raw);record.platformCode=envelope.code;
     if([-352,-412,-509,-799].includes(envelope.code))reject('risk','BILI_BACKOFF',true);
     if(envelope.code!==0&&!(anonymousNav&&envelope.code===-101))reject(envelope.code===-101?'login':'response',envelope.code===-101?'BILI_LOGIN_REQUIRED':envelope.code===-404||envelope.code===62002?'BILI_NOT_FOUND':'BILI_PLATFORM_ERROR',envelope.code===-101);
     if(endpoint==='nav'&&cookie){try{verifiedLoginUid(envelope.data,this.config.session!.expectedUid);}catch(error){reject('login',error instanceof Error?error.message:'BILI_LOGIN_REQUIRED',true);}}
-    return envelope.data;},undefined,options);}
+    return envelope.data;},undefined,options);
+    try{return await attempt();}catch(error){
+      // Retry a failed GET connection once inside this operation. Login/risk errors and one-use management probes never retry here.
+      if(options.permit||signal.aborted||!(error instanceof Error)||!/^BILI_HTTP_(ECONNRESET|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED)$/.test(error.message))throw error;
+      const route=this.store.diagnostics.route({...this.scopeFor(endpoint,cookie?'configured-session':'anonymous','http'),endpoint}),wait=Math.max(route.until??0,this.store.clock.blockedUntil)-Date.now();
+      if(route.held||wait>3000)throw error;
+      if(wait>0)try{await setTimeout(wait+25,undefined,{signal});}catch{throw new Error('BILI_CANCELLED');}
+      guard();signal.throwIfAborted();return attempt();
+    }
+  }
   private wbiKeys(nav:unknown){const keys=WBI.safeParse(nav);if(!keys.success)throw new Error('BILI_WBI_UNAVAILABLE');return {img:keys.data.wbi_img.img_url,sub:keys.data.wbi_img.sub_url};}
   async read(endpoint:Endpoint,input:unknown,caller:AbortSignal,guard:()=>void,options:{permit?:string}={}){
     if(!Object.hasOwn(endpoints,endpoint))throw new Error('BILI_ENDPOINT_DENIED');
