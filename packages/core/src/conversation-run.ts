@@ -52,8 +52,11 @@ export class ConversationRuns {
         const silent=patrol&&(()=>{if(!projection.reply.text.trim())return true;try{const value:unknown=JSON.parse(projection.reply.text);return !!value&&typeof value==='object'&&'qq_messages'in value&&Array.isArray(value.qq_messages)&&value.qq_messages.length===0;}catch{return false;}})();
         if(silent){this.journal.transition(item.id,'processing','handled',eventFor(this.agentId,item,'patrol.observed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id,decision:'silent'}));this.store.acknowledgeEvent(event.id);continue;}
         const operations=this.store.operations(run.id),delegated=!!this.taskHandoff(run.id),media=operations.some(op=>['qq_sticker_use','dafeiyu_media_reply'].includes(op.action)&&op.outcome?.status==='succeeded'&&z.object({selected:z.number().positive()}).safeParse(op.outcome.data).success);
-        const delegatedEmpty=!projection.reply.text.trim()&&delegated&&!media,delivery=delegatedEmpty?{...projection.reply,text:'任务已受理，正在后台执行；完成后把结果发给你。'}:projection.reply;
-        this.journal.transition(item.id,'processing','reply-ready',{...eventFor(this.agentId,item,'turn.completed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id,...(delegatedEmpty?{replyFallback:'accepted-task'}:{})}),
+        // With all tools removed, some providers emit their native call syntax as ordinary text.
+        // Keep the persisted model result intact; only project a factual acceptance notice to the channel.
+        const controlText=/<[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*(?:calls|invoke|parameter)\b/u.test(projection.reply.text);
+        const delegatedFallback=delegated&&(controlText||!projection.reply.text.trim()&&!media),delivery=delegatedFallback?{...projection.reply,text:'任务已受理，正在后台执行；完成后把结果发给你。'}:projection.reply;
+        this.journal.transition(item.id,'processing','reply-ready',{...eventFor(this.agentId,item,'turn.completed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id,...(delegatedFallback?{replyFallback:controlText?'accepted-task-control-text':'accepted-task'}:{})}),
           sources:projection.sources.map(source=>({kind:source.kind,id:source.id,...(source.seq===undefined?{}:{seq:source.seq}),route:source.route}))},delivery);
       }else if(!['reply-ready','sending','delivered','handled','uncertain'].includes(item.state))throw new Error('RESULT_PROJECTION_CONFLICT');
     }else{

@@ -9,9 +9,10 @@ import { taskScopeKey } from '@dafeiyu/contracts';
 import { MediaStore } from '../packages/media/lib/store.js';
 import { testTempDir } from './test-temp.js';
 
-async function fixture(){const root=await mkdtemp(join(testTempDir(),'media-store-')),file=join(root,'media.sqlite'),who={agentId:'fictional-fish',profileId:'media-fixture'},store=new MediaStore(file,who,true),taskId=randomUUID();
+async function fixture(bilibili=false){const root=await mkdtemp(join(testTempDir(),'media-store-')),file=join(root,'media.sqlite'),who={agentId:'fictional-fish',profileId:'media-fixture'},store=new MediaStore(file,who,true),taskId=randomUUID();
   const scope={kind:'task' as const,agentId:who.agentId,taskId,scopeKey:taskScopeKey(who.agentId,taskId)};
   const description:MediaSourceDescription={ref:{provider:'fixture-media',key:'input'},origin:{provider:'fixture-media',scene:{channel:'fixture',account:'local',kind:'local',id:'asset'},key:'input',version:1,hash:'a'.repeat(64),roots:['fictional-source'],detail:{fixture:true}},kind:'document',name:'fictional.txt',mimeHint:'text/plain',bytesHint:null,durationMsHint:null,rangeReadable:false,publicContent:false};
+  if(bilibili){description.ref.provider='bilibili';description.origin.provider='bilibili';}
   let valid=true;const guard=()=>{if(!valid)throw new Error('SOURCE_STALE');};
   const access:MediaAccess={origin:description.origin,guard,execution:{view:{runId:randomUUID(),taskId,scope,origin:{kind:'native',producerId:'fixture',requestId:'task'},signal:new AbortController().signal},producer:'fixture',operationId:randomUUID(),startedEventId:randomUUID(),intentVersion:1,motivation:{kind:'explicit-task',basis:[]},inputs:[],admittedSources:[],guard,historyDependencies:[],validateHistory:()=>valid}};
   const bytes=Buffer.from('fictional document'),publish={sha256:createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length,mime:'text/plain',kind:'document' as const,
@@ -19,6 +20,20 @@ async function fixture(){const root=await mkdtemp(join(testTempDir(),'media-stor
   const source=store.rememberSource(access,description);const ready=(key='asset')=>{const {id}=store.reserve(access,key,source);return store.publish(access,id,publish,()=>true);};
   return {root,file,who,store,access,description,source,publish,ready,invalidate:()=>{valid=false;},close:()=>store.close()};
 }
+
+test('reused reading progress rechecks provider authority, local deletion and external changes without sharing mutable records',async()=>{
+  const f=await fixture(true);try{const ref=f.ready(),scope=f.access.execution.view.scope,scene=f.description.origin.scene;
+    const exposure=f.store.recordExposure(f.access,'read',{},f.source,{assets:[ref],coverage:{...f.publish.coverage,exposed:true},text:'fixture observation',occurredAt:new Date().toISOString(),detail:{mode:'images'}});
+    assert.equal(scope.kind,'task');if(scope.kind!=='task')throw new Error('TASK_REQUIRED');
+    f.store.bindObservation({...f.access,execution:{...f.access.execution,producer:'media'}},exposure.id,{kind:'execution-source',id:randomUUID(),agentId:f.who.agentId,scopeKey:scope.scopeKey,version:1,contentHash:'b'.repeat(64)});
+    let allowed=true;const read=()=>f.store.readingProgress(scope,scene,()=>allowed);
+    const first=read();assert.equal(first.length,1);first[0]!.coverage.gaps.push('caller mutation');assert.deepEqual(read()[0]!.coverage.gaps,[]);
+    allowed=false;assert.deepEqual(read(),[]);allowed=true;assert.equal(read().length,1);
+    const external=new DatabaseSync(f.file);try{external.prepare('UPDATE media_sources SET deleted=1 WHERE id=?').run(f.source.id);assert.deepEqual(read(),[]);
+      external.prepare('UPDATE media_sources SET deleted=0 WHERE id=?').run(f.source.id);assert.equal(read().length,1);}finally{external.close();}
+    f.store.changeSource(f.access,f.source.id,1,true);assert.deepEqual(read(),[]);
+  }finally{f.close();}
+});
 
 test('media metadata starts unread and publishes only verified complete bytes with a stable receipt',async()=>{
   const f=await fixture();try{const reserved=f.store.reserve(f.access,'asset',f.source);assert.deepEqual(f.store.reserve(f.access,'asset',f.source),reserved);assert.equal(f.store.read(f.access,reserved.id).state,'staging');

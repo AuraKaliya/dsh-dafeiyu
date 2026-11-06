@@ -44,7 +44,8 @@ export function readingContext(store:BiliStore,grant:(view:ExecutionView)=>Scope
   },validateHistorical:(view,item)=>{
     try{if(!ready())return false;const scope=scopes.get(view.runId);if(!scope)return false;(scope.historyGuard??scope.guard)();
       if(item.id!=='bilibili-reading:'+biliOwner(scope)||item.version!==biliHash(item.text))return false;
-      const prior=JSON.parse(item.text) as {mediaReadings?:unknown[]},current=mediaFor(scope).map(row=>biliHash(row));if(prior.mediaReadings?.some(row=>!current.includes(biliHash(row))))return false;
+      const prior=JSON.parse(item.text) as {mediaReadings?:unknown[]};
+      if(prior.mediaReadings?.length){const current=new Set(mediaFor(scope).map(row=>biliHash(row)));if(prior.mediaReadings.some(row=>!current.has(biliHash(row))))return false;}
       return item.sources.filter(source=>source.ref.startsWith('page:')).every(source=>biliHash(store.page(biliOwner(scope),source.ref.slice(5)))===source.hash)&&item.sources.filter(source=>source.ref.startsWith('reading:')).every(source=>{
         const record=store.readingVersion(scope,source.ref.slice(8),Number(source.version));return record!==null&&biliHash(record)===source.hash;
       });

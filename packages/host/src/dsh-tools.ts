@@ -52,7 +52,7 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
       catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:{stage:'catalog',dispatched:false,next:'refresh-or-wait'},sources:[],receipts:[],errorCode:errorCode(error)};}},
   },{
     id:DSH_TOOL_ACTIONS[1],version:'1',effects:'external-write',scope:'task',
-    description:'按当前能力声明直接执行操作。真实任务来源和DSH策略由程序检查；返回执行事实、结果引用及可继续读取的视图。',
+    description:'按当前能力声明执行操作；检查文件和源码优先用读取、搜索工具。真实任务来源和DSH策略由程序检查。成功回执只表示工具已返回，命令还需核对exitCode、timedOut和stderr；非零退出不能证明检查成功，不原样重复失败脚本。用dsh_result_read续读已有结果。',
     inputSchema:DshToolCallSchema,outputSchema:z.json(),execute:async(raw,context)=>{
       const authority=ctx.dafeiyu.authorizeExternalTask(context,'dsh-tools');authority.guard();
       const call=DshToolCallSchema.parse(raw);let result:Json;try{result=await port.execute(call,authority,context.signal);}catch(e){if(e instanceof Error&&['DSH_CATALOG_CHANGED','DSH_TOOL_ARGUMENTS_INVALID','DSH_AUTHORITY_INVALID','PRIVATE_INPUT_REJECTED','DSH_PLUGIN_CHANGE_PENDING','DSH_SKILL_NOT_AVAILABLE'].includes(e.message))return {status:'failed',effects:'none',completeness:'unknown',data:{stage:'admission',dispatched:false,next:e.message==='DSH_CATALOG_CHANGED'?'refresh-capabilities':e.message==='DSH_TOOL_ARGUMENTS_INVALID'?'correct-arguments':'choose-alternative-or-wait'},sources:[],receipts:[],errorCode:e.message};

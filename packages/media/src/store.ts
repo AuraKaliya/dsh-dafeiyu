@@ -49,6 +49,8 @@ createMediaReplySchema(db);if(diagnostics){createMediaDiagnosticSchema(db);if(re
 
 export class MediaStore {
   private readonly db:DatabaseSync;
+  private progressEpoch='';
+  private readonly progressFacts=new Map<string,Array<{description:MediaSourceDescription;value:{exposureId:string;pageId:string;mode:'image'|'images'|'frames'|'audio';at:string;source:ReturnType<MediaStore['observation']>;coverage:MediaCoverage}}>>();
   private closed=false;
   readonly identity:z.infer<typeof identity>;
   readonly replies:MediaReplyStore;
@@ -187,12 +189,17 @@ export class MediaStore {
     const row=this.db.prepare("SELECT request_id,receipt FROM media_requests WHERE scope_key=? AND producer='media' AND request_id LIKE 'observation:%' AND json_extract(receipt,'$.id')=?").get(ref.scopeKey,ref.id);
     if(!row||mediaHash(PersonaSourceRefSchema.parse(JSON.parse(String(row.receipt))))!==mediaHash(ref))return null;return this.exposureWitness(String(row.request_id).slice('observation:'.length));}
   readingProgress(scope:MediaAssetRecord['scope'],scene:ResourceProof['scene'],current:(source:MediaSourceDescription)=>boolean){
-    return this.db.prepare('SELECT id FROM media_exposures WHERE scope_key=? ORDER BY rowid DESC').all(scopeKey(scope)).flatMap(row=>{try{
+    const epoch=this.epoch();if(epoch!==this.progressEpoch){this.progressFacts.clear();this.progressEpoch=epoch;}
+    const key=JSON.stringify([scope,scene]);let facts=this.progressFacts.get(key);
+    if(!facts){facts=this.db.prepare('SELECT id FROM media_exposures WHERE scope_key=? ORDER BY rowid DESC').all(scopeKey(scope)).flatMap(row=>{try{
       const body=this.exposureWitness(String(row.id)),description=this.exposureOrigin(body.id);
-      if(body.scope.agentId!==scope.agentId||description.origin.provider!=='bilibili'||mediaHash(description.origin.scene)!==mediaHash(scene)||!current(description))return [];
+      if(body.scope.agentId!==scope.agentId||description.origin.provider!=='bilibili'||mediaHash(description.origin.scene)!==mediaHash(scene))return [];
       const mode=z.object({mode:z.enum(['image','images','frames','audio'])}).safeParse(body.detail);if(!mode.success)return [];
-      const source=this.observation(body.id);return [{exposureId:body.id,pageId:description.origin.key,mode:mode.data.mode,at:body.occurredAt,source,coverage:body.coverage}];
+      const source=this.observation(body.id);return [{description,value:{exposureId:body.id,pageId:description.origin.key,mode:mode.data.mode,at:body.occurredAt,source,coverage:body.coverage}}];
     }catch{return [];}});
+      // Cache immutable local media facts only. Every call still checks the live external source authority.
+      if(Buffer.byteLength(JSON.stringify(facts))<=262144){if(this.progressFacts.size>=32)this.progressFacts.delete(this.progressFacts.keys().next().value!);this.progressFacts.set(key,facts);}}
+    return facts.flatMap(fact=>{try{return current(structuredClone(fact.description))?[structuredClone(fact.value)]:[];}catch{return [];}});
   }
   epoch(){return mediaHash([this.db.prepare('PRAGMA data_version').get(),this.db.prepare('SELECT total_changes() AS changes').get()]);}
   private contentCurrent(ref:MediaAssetRef,seen=new Set<string>()):boolean {if(seen.has(ref.id)||seen.size>=32)return false;seen.add(ref.id);const asset=this.asset(ref.id),source=this.source(asset.sourceId);
