@@ -31,7 +31,8 @@ export function catalogView(raw:DshToolCatalog,input:z.infer<typeof DshCatalogQu
       next:end<chars.length?{kind:input.kind,name:input.name,offset:end,maxChars:input.maxChars,catalogVersion:catalog.version}:null,
       note:'按 next 读取剩余 JSON 文字，不重新执行工具。redacted=true 时敏感字段已遮蔽，不能当作实际凭据。'};
   }
-  const query=input.query?.toLocaleLowerCase(),selected=query?rows.filter(row=>(row.name+' '+row.description).toLocaleLowerCase().includes(query)):rows;
+  const terms=input.query?.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean)??[];
+  const selected=terms.length?rows.filter(row=>{const text=(row.name+' '+row.description).toLocaleLowerCase();return terms.every(term=>text.includes(term));}):rows;
   if(input.offset>selected.length)throw new Error('DSH_CATALOG_OFFSET_INVALID');
   const end=Math.min(selected.length,input.offset+input.limit);
   return redactJson(z.json().parse({...common,matched:selected.length,offset:input.offset,

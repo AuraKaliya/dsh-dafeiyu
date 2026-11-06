@@ -1,4 +1,4 @@
-import {API_VERSION} from '@dafeiyu/contracts';
+import {API_VERSION,QQ_EXPRESSION_DEFAULTS,QQ_SEQUENCE_INSTRUCTIONS} from '@dafeiyu/contracts';
 import type {Context} from '@deepseek-ai/cordis';
 import type {} from '@dafeiyu/core';
 import type {} from '@dafeiyu/qq';
@@ -16,7 +16,7 @@ export function attachLocalOwnerControl(ctx:Context,settings:InstallationSetting
   const handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'local-owner-tasks',version:'1',agentId,requires:['execution.message-task.v1'],provides:['channel.local-owner.v1'],lifecycleReady:()=>!closed,
     actions:[{id:'local_owner_task_submit',version:'1',description:'受理本地主人明确下达的当前任务。每条指示只需受理一次；重复调用返回同一个任务，不查询进度。受理后结束本轮确认回复，实际工作及核验后的QQ结果由独立任务自动交付。来源是本机委托，不是QQ来信。',inputSchema:MessageInstructionSubmitSchema,outputSchema:z.json(),effects:'local-write',
       execute:async(input,context)=>({status:'succeeded',effects:'confirmed',completeness:'complete',data:ctx.dafeiyu.submitMessageTask(context,'local-owner-tasks',{...MessageInstructionSubmitSchema.parse(input),kind:'explicit-task'}),sources:[],receipts:[]})}],
-    channels:[{channel:'local-owner',account:settings.qq.botId,deliveryValidation:'per-segment',description:'本机管理员代表主人提交的新指示；并非收到一条QQ消息。用local_owner_task_submit受理。回复与结果将实际发送到配置中的主人QQ，任务执行与结果核验沿用正常流程。',
+    channels:[{channel:'local-owner',account:settings.qq.botId,deliveryValidation:'per-segment',description:'本机管理员代表主人提交的新指示；并非收到一条QQ消息。用local_owner_task_submit受理。回复与结果将实际发送到配置中的主人QQ，任务执行与结果核验沿用正常流程。\n'+QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS,
       deliver:(reply,signal,authority)=>ctx.dafeiyuQQ.deliverLocalOwner(reply,signal,authority),deliverTaskResult:(reply,_anchor,signal,authority,writeWindow)=>ctx.dafeiyuQQ.deliverLocalOwner(reply,signal,authority,writeWindow)}]});
   const unbind=ctx.dafeiyu.bindMessageTasks({id:'local-owner-tasks',pluginId:'local-owner-tasks',channelExtensionId:'local-owner-tasks',channel:'local-owner',account:settings.qq.botId,ownerId:settings.qq.ownerId,policyId:'local-owner-task',version:'1',autoDeliver:true,
     active:()=>!closed,classify:message=>({kind:'submit',text:message.mainText??message.text})});

@@ -26,3 +26,11 @@ test('single-tool details reconstruct across pages after whole-object sanitizati
   const page=catalogView(sensitive,DshCatalogQuerySchema.parse({name:'auth_tool'}));
   assert.doesNotMatch(JSON.stringify(page),/fictional-secret-never-emit/);
 });
+
+test('catalog search matches whitespace-separated words across tool names and descriptions',()=>{
+  const sample={version:'a'.repeat(64),tools:[{name:'read',description:'Read a file from the filesystem',parameters:{type:'object'}},{name:'write',description:'Write a file',parameters:{type:'object'}}]};
+  const page=record(catalogView(sample,DshCatalogQuerySchema.parse({query:'  FILE\tread  '})));
+  assert.equal(page.matched,1);assert.deepEqual(z.array(z.object({name:z.string()})).parse(page.items).map(row=>row.name),['read']);
+  assert.equal(record(catalogView(sample,DshCatalogQuerySchema.parse({query:'   '}))).matched,2);
+  assert.equal(record(catalogView(sample,DshCatalogQuerySchema.parse({query:'missing read'}))).matched,0);
+});

@@ -102,7 +102,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     selected.push('management-lifecycle.test.ts','management-ui.test.ts','onebot-capability.test.ts','bili-cookie-credentials.test.ts','bili-verification.test.ts','bili-diagnostics.test.ts','bili-foundation.test.ts');
     selected.push('activity-sharing.test.ts','group-patrol.test.ts','activity-admission.test.ts','owner-resource-query.test.ts','qq-interrupted-turn.test.ts','bili-media-deadline.test.ts');
     selected.push('model-usage.test.ts','dsh-handoff.test.ts','owner-task-delivery.test.ts');
-    selected.push('conversation-handoff.test.ts','journal-trace-events.test.ts','dsh-result-store.test.ts','media-store.test.ts');
+    selected.push('conversation-handoff.test.ts','journal-trace-events.test.ts','dsh-result-store.test.ts','media-store.test.ts','dsh-catalog-view.test.ts');
     selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }
