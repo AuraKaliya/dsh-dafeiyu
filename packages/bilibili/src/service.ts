@@ -11,7 +11,7 @@ import {BiliCommentCursorSchema,BiliSearchQuerySchema} from '@dafeiyu/contracts'
 import { ReadProgressSchema } from '@dafeiyu/contracts';
 import { ServiceGate,CapabilitySelectionSchema,PersonaRequestIdSchema,ExecutionScopeSchema,RunOriginSchema,redactContent,BiliSearchResultSchema,BiliCommentPageSchema,BiliFrameBatchResultSchema } from '@dafeiyu/contracts';
 import type { ExecutionContext,ActionCapability,ResourceProof,PersonaAccess } from '@dafeiyu/contracts';
-import type {BiliBrowserPort} from '@dafeiyu/contracts';
+import type {BiliBrowserPort,BiliBrowserRequest} from '@dafeiyu/contracts';
 import { BiliConfigSchema,BILI_SCENE,BvidSchema,NumberIdSchema,code } from './config.js';
 import { readingFacts } from './reading-facts.js';
 import { readingContext } from './reading-context.js';
@@ -30,11 +30,12 @@ export const BILI_ACTIONS=['bili_status','bili_discover','bili_search','bili_vid
 export const biliActionIds=(browser:boolean):string[]=>[...BILI_ACTIONS.filter(action=>browser||action!=='bili_frames'),...(browser?['bili_browser_read']:[])];
 /** Owner-only management actions; they are never model tools. */
 export const BILI_MANAGEMENT_ACTIONS=['status','verify.start','verify.read','verify.status','verify.cancel'] as const;
-const verifyReadSchema=z.strictObject({endpoint:z.enum(['discover','video','search','comments']),bvid:BvidSchema.optional(),aid:NumberIdSchema.optional(),keyword:z.string().trim().min(1).max(100).optional(),
+const verifyReadSchema=z.strictObject({endpoint:z.enum(['discover','video','search','comments']),transport:z.enum(['http','browser']).default('http'),bvid:BvidSchema.optional(),aid:NumberIdSchema.optional(),keyword:z.string().trim().min(1).max(100).optional(),
   page:z.number().int().min(1).max(50).default(1),limit:z.number().int().min(1).max(10).default(5),order:z.enum(['totalrank','pubdate','click']).default('totalrank'),sort:z.enum(['time','hot']).default('hot')})
   .superRefine((value,ctx)=>{
     if(value.endpoint==='video'&&value.bvid===undefined)ctx.addIssue({code:'custom',path:['bvid'],message:'Video verification requires bvid'});
-    if(value.endpoint==='comments'&&value.aid===undefined)ctx.addIssue({code:'custom',path:['aid'],message:'Comment verification requires aid'});
+    if(value.endpoint==='comments'&&value.transport==='http'&&value.aid===undefined)ctx.addIssue({code:'custom',path:['aid'],message:'HTTP comment verification requires aid'});
+    if(value.endpoint==='comments'&&value.transport==='browser'&&value.bvid===undefined)ctx.addIssue({code:'custom',path:['bvid'],message:'Browser comment verification requires bvid'});
     if(value.endpoint==='search'&&value.keyword===undefined)ctx.addIssue({code:'custom',path:['keyword'],message:'Search verification requires keyword'});
   });
 type VerifyTarget=z.infer<typeof verifyReadSchema>;
@@ -70,6 +71,7 @@ export class BiliService extends Service {
   private media:BiliMedia|undefined;private unbindMedia:(()=>void)|undefined;
   private finalBackoff:number|null=null;private finalHeld=false;
   private verification:{id:string;kind:'login'|'read';startedAt:number;controller:AbortController;promise:Promise<void>}|undefined;
+  private readonly verificationJobs=new Set<Promise<void>>();
   private readonly instanceGeneration=Date.now();
   constructor(ctx:Context,config:Config,transport?:HttpTransport,private readonly browser?:BiliBrowserPort){super(ctx,'dafeiyuBilibili');this.config=biliServiceConfigSchema.parse(config);if(this.config.settings.browser&&!browser)throw new Error('BILI_BROWSER_BRIDGE_REQUIRED');this.store=new BiliStore(join(this.config.dataDir,'bilibili.sqlite'),{agentId:this.config.agentId,profileId:this.config.profileId},this.config.createStore,this.config.settings.maxPages);this.client=new BiliClient(this.config.settings,this.store,transport,{instanceGeneration:this.instanceGeneration});
     try{this.handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'bilibili',version:RELEASE_VERSION,agentId:this.config.agentId,requires:['execution.task.v1','memory.capability-observation.v1'],provides:['bilibili.read.v1'],lifecycleReady:()=>this.ready(),actions:this.actions(),
@@ -180,7 +182,7 @@ export class BiliService extends Service {
     if(!this.ready())throw new Error('BILI_UNAVAILABLE');
     const active=this.verification;
     if(active)return {accepted:true,reused:true,operationId:active.id,state:'pending',kind:active.kind};
-    const account=this.client.accountStatus(),now=new Date().toISOString(),id=randomUUID();
+    const account=target?.transport==='browser'?{uid:this.config.settings.browser?.expectedUid??null,credentialGeneration:0}:this.client.accountStatus(),now=new Date().toISOString(),id=randomUUID();
     const record:BiliVerification={id,at:now,updatedAt:now,state:'pending',kind,uid:account.uid,credentialGeneration:account.credentialGeneration,instanceGeneration:this.instanceGeneration,
       endpoint:kind==='login'?'nav':target?.endpoint??null,target:target?z.json().parse(target):null,result:null,errorCode:null};
     this.store.beginVerification(record);
@@ -189,7 +191,8 @@ export class BiliService extends Service {
     this.verification=entry;
     entry.promise=this.runVerification(record,target,controller.signal).catch(error=>{
       const current=this.store.verification(id);if(current?.state==='pending')this.store.updateVerification(id,{...current,state:'failed',errorCode:code(error),updatedAt:new Date().toISOString()});
-    }).finally(()=>{if(this.verification?.id===id)this.verification=undefined;});
+    }).finally(()=>{this.verificationJobs.delete(entry.promise);if(this.verification?.id===id)this.verification=undefined;});
+    this.verificationJobs.add(entry.promise);
     return {accepted:true,reused:false,operationId:id,state:'pending',kind};
   }
   private cancelVerification(id?:string){
@@ -226,6 +229,19 @@ export class BiliService extends Service {
     const update=(patch:Partial<BiliVerification>)=>{const current=this.store.verification(id);if(!current||current.state!=='pending')return;
       this.store.updateVerification(id,{...current,...patch,updatedAt:new Date().toISOString()});};
     const finish=(state:'completed'|'failed'|'interrupted',errorCode:string|null,result:unknown,uid:string|null=record.uid)=>update({state,errorCode,uid,result:z.json().parse(result)});
+    if(target?.transport==='browser'){
+      if(!this.browser||!this.config.settings.browser){finish('failed','BILI_BROWSER_NOT_CONFIGURED',{stage:'local',read:{ok:false,transport:'browser'}});return;}
+      let permit:string|undefined;
+      const guard=()=>{signal.throwIfAborted();if(this.verification?.id!==id||this.store.verification(id)?.state!=='pending')throw new Error('BILI_VERIFICATION_CANCELLED');};
+      try{permit=this.client.browserVerificationPermit(target.endpoint);
+        // Correlation IDs belong to this management operation; the attempt ledger records no business Task/Run.
+        const correlation={taskId:id,runId:id,operationId:id},request:BiliBrowserRequest=target.endpoint==='video'?{...correlation,section:'frames',bvid:target.bvid!,pointsMs:[0]}
+          :target.endpoint==='comments'?{...correlation,section:'comments',bvid:target.bvid!}:target.endpoint==='search'?{...correlation,section:'search',keyword:target.keyword!,page:target.page,order:target.order}:{...correlation,section:'discover',feed:'popular'};
+        const value=await this.client.probeBrowser(this.browser,request,{signal,permit,guard});guard();
+        finish('completed',null,{stage:'browser-read',read:{ok:true,transport:'browser',endpoint:target.endpoint,bvid:value.bvid??null,frames:value.frames?.length??0,items:value.items?.length??null,observedAt:value.observedAt,scopeRestored:this.store.diagnostics.route({scope:'browser',uid:value.accountUid,endpoint:target.endpoint}).available,note:'只证明本次账号与读取样本有效；不验证HTTP登录，不代表其它接口、完整视频或音轨可用。'}},value.accountUid);
+      }catch(error){finish(signal.aborted?'interrupted':'failed',code(error),{stage:'browser-read',read:{ok:false,transport:'browser',code:code(error)}});}
+      finally{if(permit)this.store.diagnostics.dropPermit(permit);}return;
+    }
     // Local credential checks happen before any network request.
     const credential=this.client.accountStatus();
     if(credential.credentialState==='not-configured'){finish('failed','BILI_SESSION_NOT_CONFIGURED',{stage:'local',ok:false,recommendation:'在配置文件中填写 bilibili.session.file 与 expectedUid；Cookie 不在管理界面或聊天中提交。'});return;}
@@ -252,7 +268,7 @@ export class BiliService extends Service {
     }finally{if(permit)this.store.diagnostics.dropPermit(permit);}
   }
   flush(){if(this.gate.state==='closed')return;this.store.drain((raw,id)=>{const row=z.object({scope:ExecutionScopeSchema,origin:RunOriginSchema,runId:z.uuid(),operationId:z.uuid(),type:z.string(),at:z.string(),data:z.record(z.string(),z.json())}).parse(raw);if(row.scope.kind!=='task')throw new Error('BILI_AUDIT_SCOPE_INVALID');this.ctx.dafeiyu.journal.appendExecutionOnce({agentId:row.scope.agentId,route:row.scope.scopeKey,taskId:row.scope.taskId,runId:row.runId,traceId:row.runId,operationId:row.operationId,causedBy:null,type:row.type,plugin:'bilibili',pluginVersion:RELEASE_VERSION,occurredAt:row.at,sources:[],data:{...row.data,origin:row.origin}},id);});}
-  recover(){this.store.recover();this.store.interruptVerifications();this.store.diagnostics.clearRuntimeLeases();this.verification?.controller.abort();this.verification=undefined;this.flush();this.gate.recovered();}activate(){this.gate.activate();}async whenIdle(){await Promise.allSettled([this.tail,this.verification?.promise]);}cancelRunning(){this.controller.abort();this.cancelVerification();}
+  recover(){this.store.recover();this.store.interruptVerifications();this.store.diagnostics.clearRuntimeLeases();this.verification?.controller.abort();this.verification=undefined;this.flush();this.gate.recovered();}activate(){this.gate.activate();}async whenIdle(){await Promise.allSettled([this.tail,...this.verificationJobs]);}cancelRunning(){this.controller.abort();this.cancelVerification();}
   get health(){const route=this.finalHealth?null:this.biliRoute();return {lifecycle:this.gate.state,media:!!this.media,counts:this.finalHealth??this.store.counts,backoffUntil:route===null?this.finalBackoff:route.backoffUntil,diagnosticRequired:route===null?this.finalHeld:route.diagnosticRequired,...(this.finalHealth?{}:{diagnostic:this.client.status()})};}
-  close(){if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();const verification=this.verification?.promise;this.cancelVerification();this.closing=(async()=>{await Promise.allSettled([this.tail,verification]);const route=this.biliRoute();this.flush();this.finalHealth=this.store.counts;this.finalBackoff=route.backoffUntil;this.finalHeld=route.diagnosticRequired;this.client.dispose();this.unbindMedia?.();this.handle.dispose();this.store.close();this.gate.close();})();return this.closing;}
+  close(){if(this.closing)return this.closing;this.gate.quiesce();this.controller.abort();this.cancelVerification();this.closing=(async()=>{await Promise.allSettled([this.tail,...this.verificationJobs]);const route=this.biliRoute();this.flush();this.finalHealth=this.store.counts;this.finalBackoff=route.backoffUntil;this.finalHeld=route.diagnosticRequired;this.client.dispose();this.unbindMedia?.();this.handle.dispose();this.store.close();this.gate.close();})();return this.closing;}
 }

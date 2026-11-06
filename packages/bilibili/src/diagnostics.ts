@@ -49,6 +49,7 @@ const matches=(pause:BiliPause,query:PauseQuery):boolean=>{
   const endpoint=query.endpoint??null;
   return pause.endpoint===null||endpoint===null||pause.endpoint===endpoint;
 };
+const recoverablePause=(pause:BiliPause,scope:BiliScope,endpoint:string|null|undefined)=>pause.scope===scope&&pause.endpoint===endpoint&&(scope==='verified-http'?pause.kind==='login'&&endpoint==='nav':scope==='browser'&&(pause.kind==='login'||pause.kind==='verification'));
 /** Scoped pauses, bounded probe permits and truthful recovery evidence. */
 export class BiliDiagnostics {
   constructor(private readonly db:DatabaseSync){}
@@ -75,7 +76,7 @@ export class BiliDiagnostics {
     const state=this.state,permitCovered=this.permitCovers(state,query,now);
     for(const pause of state.pauses){
       if(!matches(pause,query))continue;
-      if(pause.scope==='verified-http'&&pause.kind==='login'&&pause.endpoint==='nav'&&permitCovered){
+      if(recoverablePause(pause,query.scope,query.endpoint)&&permitCovered){
         if(pause.until>now)throw new Error('BILI_BACKOFF');
         continue;
       }
@@ -92,10 +93,19 @@ export class BiliDiagnostics {
     if(blocking.some(pause=>pause.scope!=='verified-http'||pause.kind!=='login'||pause.endpoint!=='nav'))throw new Error('BILI_PROBE_NOT_PERMITTED');
     const permit={id:randomUUID(),scope:input.scope,uid:input.uid,endpoint:input.endpoint,credentialGeneration:input.credentialGeneration,instanceGeneration:input.instanceGeneration,
       expiresAt:now+(input.ttlMs??60_000),used:false};
-    this.atomic(()=>{const s=this.state;this.set({...s,permit,probe:null});});
+    this.atomic(()=>{const s=this.state;if(s.probe?.permitId&&s.probe.until>now)throw new Error('BILI_PROBE_BUSY');this.set({...s,permit,probe:null});});
     return {id:permit.id,expiresAt:permit.expiresAt};
   }
   get permit(){return this.state.permit;}
+  /** Owner verification of one browser endpoint; this never clears a hold before an actual successful read. */
+  authorizeBrowserProbe(input:{uid:string;endpoint:string;instanceGeneration:number;now?:number;ttlMs?:number}){
+    const uid=z.string().regex(/^[1-9]\d{0,19}$/).parse(input.uid),endpoint=z.enum(['video','comments','search','discover']).parse(input.endpoint),now=input.now??Date.now();
+    const blocking=this.state.pauses.filter(pause=>matches(pause,{scope:'browser',uid,endpoint})&&(pause.held||pause.until>now));
+    if(Number(this.db.prepare('SELECT blocked_until FROM bili_clock WHERE id=1').get()?.blocked_until)>now||blocking.some(pause=>pause.until>now))throw new Error('BILI_BACKOFF');
+    if(blocking.some(pause=>!recoverablePause(pause,'browser',endpoint)))throw new Error('BILI_PROBE_NOT_PERMITTED');
+    const permit={id:randomUUID(),scope:'browser' as const,uid,endpoint,credentialGeneration:0,instanceGeneration:input.instanceGeneration,expiresAt:now+(input.ttlMs??60000),used:false};
+    this.atomic(()=>{const s=this.state;if(s.probe?.permitId&&s.probe.until>now)throw new Error('BILI_PROBE_BUSY');this.set({...s,permit,probe:null});});return {id:permit.id,expiresAt:permit.expiresAt};
+  }
   dropPermit(id:string):void{this.atomic(()=>{const s=this.state;if(s.permit?.id===id)this.set({...s,permit:null});});}
   acquireProbe(id:string,now:number,timeout:number,permitId?:string,query?:PauseQuery,binding?:{credentialGeneration:number;instanceGeneration:number}):void{
     this.atomic(()=>{
@@ -109,7 +119,8 @@ export class BiliDiagnostics {
         permit={...candidate,used:true};
       }
       if(relevant.some(pause=>pause.held)&&!permit)throw new Error('BILI_DIAGNOSTIC_REQUIRED');
-      if(permit&&relevant.some(pause=>pause.held&&(pause.scope!=='verified-http'||pause.kind!=='login'||pause.endpoint!=='nav')))throw new Error('BILI_PROBE_NOT_PERMITTED');
+      if(permit&&relevant.some(pause=>pause.held&&!recoverablePause(pause,permit.scope,permit.endpoint)))throw new Error('BILI_PROBE_NOT_PERMITTED');
+      if(s.probe?.permitId&&s.probe.until>now&&s.probe.id!==id)throw new Error('BILI_PROBE_BUSY');
       const paused=relevant.filter(pause=>pause.failures>0);
       if(paused.length&&s.probe&&s.probe.until>now&&s.probe.id!==id)throw new Error('BILI_PROBE_BUSY');
       const maxUntil=relevant.reduce((max,pause)=>Math.max(max,pause.until),0);
@@ -122,14 +133,14 @@ export class BiliDiagnostics {
   /** A restarted process must not inherit a probe lease or management permit from the previous one. */
   clearRuntimeLeases():void{this.atomic(()=>{const s=this.state;if(s.probe!==null||s.permit!==null)this.set({...s,probe:null,permit:null});this.refreshClock(s.pauses);});}
   /** A successful attempt clears only its own endpoint pause; a shared or anonymous hold is kept separately. */
-  success(id:string,endpoint:string,query?:PauseQuery):void{
+  success(id:string,endpoint:string,query?:PauseQuery,startedAt?:number):void{
     this.atomic(()=>{
       const s=this.state,probe=s.probe;
       if(!probe||probe.id!==id||(probe.endpoint!==null&&probe.endpoint!==endpoint))return;
       const scope=query?.scope??probe.scope;
       const pauses=s.pauses.filter(pause=>{
-        if(pause.endpoint!==endpoint)return true;
-        return !(pause.scope===scope&&pause.uid===(query?.uid??probe.uid));
+        if(pause.endpoint!==endpoint||startedAt!==undefined&&pause.updatedAt>=startedAt)return true;
+        return !(pause.scope===scope&&(pause.uid===(query?.uid??probe.uid)||scope==='browser'&&pause.uid===null&&probe.permitId!==null));
       });
       this.set({...s,pauses,probe:null});
       this.refreshClock(s.pauses);

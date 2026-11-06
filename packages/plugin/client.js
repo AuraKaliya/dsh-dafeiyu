@@ -130,12 +130,12 @@ var credentialLabels = { "not-configured": "\u672A\u914D\u7F6E\u51ED\u636E\u6587
 var stateLabels = { pending: "\u8FDB\u884C\u4E2D", completed: "\u5DF2\u5B8C\u6210", failed: "\u5931\u8D25", interrupted: "\u5DF2\u4E2D\u65AD" };
 var scopeLabels = { "anonymous-http": "\u533F\u540D HTTP", "verified-http": "\u5DF2\u767B\u5F55 HTTP", browser: "\u6D4F\u89C8\u5668", resource: "\u5A92\u4F53/\u5B57\u5E55\u8D44\u6E90", shared: "\u5171\u4EAB\u6216\u6765\u6E90\u4E0D\u660E" };
 var routeLabels = { available: "\u53EF\u7528", cooldown: "\u7B49\u5F85\u51B7\u5374", "diagnostic-required": "\u9700\u8981\u8BCA\u65AD" };
-var codeLabels = { BILI_SESSION_NOT_CONFIGURED: "\u5C1A\u672A\u914D\u7F6E\u672C\u5730\u51ED\u636E\u6587\u4EF6", BILI_SESSION_INVALID: "\u51ED\u636E\u6587\u4EF6\u683C\u5F0F\u6216 UID \u6821\u9A8C\u5931\u8D25", BILI_ACCOUNT_MISMATCH: "\u670D\u52A1\u7AEF\u767B\u5F55 UID \u4E0E\u914D\u7F6E\u4E0D\u7B26", BILI_LOGIN_REQUIRED: "\u767B\u5F55\u6001\u5DF2\u5931\u6548\uFF0C\u9700\u8981\u66F4\u65B0\u672C\u5730\u51ED\u636E\u6587\u4EF6", BILI_BACKOFF: "\u4ECD\u5728\u51B7\u5374\u7B49\u5F85", BILI_DIAGNOSTIC_REQUIRED: "\u5171\u4EAB\u6216\u6765\u6E90\u4E0D\u660E\u7684\u6682\u505C\u963B\u6B62\u4E86\u81EA\u52A8\u63A2\u6D4B", BILI_SESSION_CHANGED: "\u51ED\u636E\u5728\u9A8C\u8BC1\u8FC7\u7A0B\u4E2D\u53D8\u5316\uFF0C\u65E7\u7ED3\u679C\u672A\u91C7\u7528", BILI_VERIFICATION_CANCELLED: "\u9A8C\u8BC1\u5DF2\u53D6\u6D88", BILI_VERIFICATION_INTERRUPTED: "\u5B9E\u4F8B\u91CD\u542F\u4E2D\u65AD\u4E86\u4E0A\u6B21\u9A8C\u8BC1" };
+var codeLabels = { BILI_BROWSER_STATE_UNAVAILABLE: "\u9875\u9762\u72B6\u6001\u68C0\u67E5\u672A\u5B8C\u6210\uFF0C\u5C1A\u672A\u786E\u8BA4\u9A8C\u8BC1\u6311\u6218", BILI_BROWSER_IDENTITY_UNAVAILABLE: "\u7F51\u9875\u8D26\u53F7\u6682\u65F6\u65E0\u6CD5\u6838\u5BF9\uFF0C\u4E0D\u4EE3\u8868\u5DF2\u7ECF\u9000\u51FA\u767B\u5F55", BILI_BROWSER_CHALLENGE: "\u9875\u9762\u68C0\u6D4B\u5230\u9A8C\u8BC1\u63A7\u4EF6\u6216\u660E\u786E\u9A8C\u8BC1\u63D0\u793A", BILI_BROWSER_ACCOUNT_MISMATCH: "\u5F53\u524D\u7F51\u9875\u8D26\u53F7\u4E0E\u914D\u7F6E\u4E0D\u7B26", BILI_BROWSER_NOT_CONFIGURED: "\u672A\u914D\u7F6E\u6216\u672A\u8FDE\u63A5 DSH \u6D4F\u89C8\u5668", BILI_BROWSER_FRAME_UNAVAILABLE: "\u5C1A\u672A\u53D6\u5F97\u5B9E\u9645\u753B\u9762", BILI_PROBE_BUSY: "\u5DF2\u6709\u9A8C\u8BC1\u5C1A\u672A\u7ED3\u675F", BILI_SESSION_NOT_CONFIGURED: "\u5C1A\u672A\u914D\u7F6E\u672C\u5730\u51ED\u636E\u6587\u4EF6", BILI_SESSION_INVALID: "\u51ED\u636E\u6587\u4EF6\u683C\u5F0F\u6216 UID \u6821\u9A8C\u5931\u8D25", BILI_ACCOUNT_MISMATCH: "\u670D\u52A1\u7AEF\u767B\u5F55 UID \u4E0E\u914D\u7F6E\u4E0D\u7B26", BILI_LOGIN_REQUIRED: "\u767B\u5F55\u6001\u5DF2\u5931\u6548\uFF0C\u9700\u8981\u66F4\u65B0\u672C\u5730\u51ED\u636E\u6587\u4EF6", BILI_BACKOFF: "\u4ECD\u5728\u51B7\u5374\u7B49\u5F85", BILI_DIAGNOSTIC_REQUIRED: "\u6B64\u8BFB\u53D6\u8303\u56F4\u5DF2\u6682\u505C\uFF0C\u9700\u8981\u76F8\u5E94\u9A8C\u8BC1", BILI_SESSION_CHANGED: "\u51ED\u636E\u5728\u9A8C\u8BC1\u8FC7\u7A0B\u4E2D\u53D8\u5316\uFF0C\u65E7\u7ED3\u679C\u672A\u91C7\u7528", BILI_VERIFICATION_CANCELLED: "\u9A8C\u8BC1\u5DF2\u53D6\u6D88", BILI_VERIFICATION_INTERRUPTED: "\u5B9E\u4F8B\u91CD\u542F\u4E2D\u65AD\u4E86\u4E0A\u6B21\u9A8C\u8BC1" };
 var hint = (code) => code ? codeLabels[code] ?? code : "";
 function BilibiliStatusPanel({ call, ui }) {
   const Button2 = ui.Button, Detail2 = ui.Detail;
   const [status, setStatus] = import_react5.default.useState(null), [notice, setNotice] = import_react5.default.useState(""), [busy, setBusy] = import_react5.default.useState(false);
-  const [target, setTarget] = import_react5.default.useState({ endpoint: "video", bvid: "", aid: "", keyword: "", page: 1, limit: 5 });
+  const [target, setTarget] = import_react5.default.useState({ endpoint: "video", transport: "http", bvid: "", aid: "", keyword: "", page: 1, limit: 5 });
   const sequence = import_react5.default.useRef(0);
   const read = async () => {
     const token = ++sequence.current;
@@ -195,8 +195,8 @@ function BilibiliStatusPanel({ call, ui }) {
   };
   const testRead = () => {
     const endpoint = target.endpoint;
-    const input = endpoint === "video" ? { endpoint, bvid: target.bvid.trim() } : endpoint === "comments" ? { endpoint, aid: target.aid.trim(), page: Number(target.page), limit: Number(target.limit) } : endpoint === "search" ? { endpoint, keyword: target.keyword.trim(), page: Number(target.page), limit: Number(target.limit) } : { endpoint, page: Number(target.page), limit: Number(target.limit) };
-    return run("verify.read", input);
+    const input = endpoint === "video" ? { endpoint, bvid: target.bvid.trim() } : endpoint === "comments" ? target.transport === "browser" ? { endpoint, bvid: target.bvid.trim() } : { endpoint, aid: target.aid.trim(), page: Number(target.page), limit: Number(target.limit) } : endpoint === "search" ? { endpoint, keyword: target.keyword.trim(), page: Number(target.page), limit: Number(target.limit) } : { endpoint, page: Number(target.page), limit: Number(target.limit) };
+    return run("verify.read", { ...input, transport: target.transport ?? "http" });
   };
   const account = status?.account, http = status?.http, operations = status?.operations ?? [];
   return h5(
@@ -205,7 +205,7 @@ function BilibiliStatusPanel({ call, ui }) {
     h5(
       "div",
       { className: "df-actions" },
-      h5(Button2, { disabled: busy, onClick: () => run("verify.start", {}), primary: true }, "\u9A8C\u8BC1\u767B\u5F55"),
+      h5(Button2, { disabled: busy, onClick: () => run("verify.start", {}), primary: true }, "\u9A8C\u8BC1 HTTP \u767B\u5F55"),
       h5(Button2, { disabled: busy, onClick: testRead }, "\u6D4B\u8BD5\u8BFB\u53D6"),
       h5(Button2, { disabled: busy || !status?.active, onClick: () => run("verify.cancel", {}) }, "\u53D6\u6D88\u9A8C\u8BC1"),
       h5(Button2, { disabled: busy, onClick: () => {
@@ -220,7 +220,7 @@ function BilibiliStatusPanel({ call, ui }) {
       { className: "df-runtime-facts" },
       h5("div", null, h5("dt", null, "\u672C\u5730\u51ED\u636E"), h5("dd", null, credentialLabels[account.credentialState] ?? account.credentialState)),
       h5("div", null, h5("dt", null, "\u914D\u7F6E\u8D26\u53F7"), h5("dd", null, account.expectedUid ?? "\u2014")),
-      h5("div", null, h5("dt", null, "\u767B\u5F55\u72B6\u6001"), h5("dd", { "data-bili-engine": account.engine }, engineLabels[account.engine] ?? account.engine)),
+      h5("div", null, h5("dt", null, "HTTP \u767B\u5F55\u72B6\u6001"), h5("dd", { "data-bili-engine": account.engine }, engineLabels[account.engine] ?? account.engine)),
       h5("div", null, h5("dt", null, "\u5DF2\u9A8C\u8BC1 UID"), h5("dd", null, account.verifiedUid ?? "\u2014")),
       h5("div", null, h5("dt", null, "\u9A8C\u8BC1\u65F6\u95F4"), h5("dd", null, account.verifiedAt ? new Date(account.verifiedAt).toLocaleString("zh-CN", { hour12: false }) : "\u2014")),
       h5("div", null, h5("dt", null, "\u6709\u6548\u81F3"), h5("dd", null, account.expiresAt ? new Date(account.expiresAt).toLocaleTimeString("zh-CN", { hour12: false }) : "\u2014"))
@@ -240,18 +240,19 @@ function BilibiliStatusPanel({ call, ui }) {
     h5(
       "div",
       { className: "df-field-group" },
+      h5("label", null, "\u8BFB\u53D6\u65B9\u5F0F", h5("select", { value: target.transport ?? "http", onChange: (event) => setTarget((current) => ({ ...current, transport: event.target.value })) }, h5("option", { value: "http" }, "\u672C\u5730\u51ED\u636E\uFF08HTTP\uFF09"), h5("option", { value: "browser", disabled: !status?.browser?.configured }, "\u5DF2\u767B\u5F55\u7684 DSH \u6D4F\u89C8\u5668"))),
       h5("label", null, "\u7C7B\u578B", h5("select", { value: target.endpoint, onChange: (event) => setTarget((current) => ({ ...current, endpoint: event.target.value })) }, h5("option", { value: "video" }, "\u89C6\u9891\u4FE1\u606F"), h5("option", { value: "search" }, "\u641C\u7D22"), h5("option", { value: "comments" }, "\u8BC4\u8BBA"), h5("option", { value: "discover" }, "\u70ED\u95E8\u5217\u8868"))),
-      target.endpoint === "video" && h5("label", null, "bv\u53F7", h5("input", { value: target.bvid, placeholder: "BV1xx411c7mD", onChange: (event) => setTarget((current) => ({ ...current, bvid: event.target.value })) })),
+      (target.endpoint === "video" || target.endpoint === "comments" && target.transport === "browser") && h5("label", null, "bv\u53F7", h5("input", { value: target.bvid, placeholder: "BV1xx411c7mD", onChange: (event) => setTarget((current) => ({ ...current, bvid: event.target.value })) })),
       target.endpoint === "search" && h5("label", null, "\u5173\u952E\u8BCD", h5("input", { value: target.keyword, onChange: (event) => setTarget((current) => ({ ...current, keyword: event.target.value })) })),
-      target.endpoint === "comments" && h5("label", null, "aid", h5("input", { value: target.aid, onChange: (event) => setTarget((current) => ({ ...current, aid: event.target.value })) }))
+      target.endpoint === "comments" && target.transport !== "browser" && h5("label", null, "aid", h5("input", { value: target.aid, onChange: (event) => setTarget((current) => ({ ...current, aid: event.target.value })) }))
     ),
-    h5("p", { className: "df-note" }, "\u6D4B\u8BD5\u8BFB\u53D6\u5148\u505A\u4E00\u6B21\u767B\u5F55\u9A8C\u8BC1\uFF0C\u518D\u505A\u4E00\u6B21\u6307\u5B9A\u63A5\u53E3\u8BFB\u53D6\uFF1B\u4E24\u6B65\u7ED3\u679C\u5206\u522B\u8BB0\u5F55\uFF0C\u4E0D\u8FFD\u52A0\u63A2\u6D4B\u8BF7\u6C42\u3002"),
+    h5("p", { className: "df-note" }, target.transport === "browser" ? "\u6D4F\u89C8\u5668\u6D4B\u8BD5\u6838\u5BF9\u5F53\u524D\u7F51\u9875\u8D26\u53F7\u548C\u6307\u5B9A\u5185\u5BB9\uFF1B\u89C6\u9891\u4F1A\u53D6\u4E00\u5E27\uFF0C\u672A\u505A\u753B\u9762\u7406\u89E3\u6216\u97F3\u8F68\u8BFB\u53D6\u3002\u53EA\u6709\u771F\u5B9E\u8BFB\u53D6\u6210\u529F\u624D\u89E3\u9664\u5BF9\u5E94\u8303\u56F4\u7684\u6682\u505C\uFF0CHTTP\u72B6\u6001\u4E0D\u53D7\u5F71\u54CD\u3002" : "HTTP\u6D4B\u8BD5\u5148\u9A8C\u8BC1\u767B\u5F55\uFF0C\u518D\u8BFB\u53D6\u4E00\u6B21\u6307\u5B9A\u63A5\u53E3\uFF1B\u4E24\u6B65\u7ED3\u679C\u5206\u522B\u8BB0\u5F55\uFF0C\u4E0D\u4EE3\u8868\u5176\u5B83\u63A5\u53E3\u5747\u53EF\u7528\u3002"),
     h5("h3", null, "\u6700\u8FD1\u7684\u9A8C\u8BC1\u8BB0\u5F55"),
     operations.length === 0 ? h5("p", { className: "df-muted" }, "\u8FD8\u6CA1\u6709\u9A8C\u8BC1\u8BB0\u5F55\u3002") : h5("ul", { className: "df-runtime-capabilities" }, ...operations.slice(0, 8).map((operation) => h5(
       "li",
       { key: operation.id, "data-verification": operation.state },
-      h5("strong", null, (operation.kind === "login" ? "\u767B\u5F55\u9A8C\u8BC1" : "\u8BFB\u53D6\u9A8C\u8BC1") + " \xB7 " + (stateLabels[operation.state] ?? operation.state)),
-      h5("span", { className: "df-muted" }, new Date(operation.at).toLocaleString("zh-CN", { hour12: false }) + (operation.endpoint ? " \xB7 " + operation.endpoint : "") + (operation.errorCode ? " \xB7 " + (hint(operation.errorCode) || operation.errorCode) : "")),
+      h5("strong", null, (operation.kind === "login" ? "HTTP\u767B\u5F55\u9A8C\u8BC1" : operation.target?.transport === "browser" ? "\u6D4F\u89C8\u5668\u8BFB\u53D6\u9A8C\u8BC1" : "HTTP\u8BFB\u53D6\u9A8C\u8BC1") + " \xB7 " + (stateLabels[operation.state] ?? operation.state)),
+      h5("span", { className: "df-muted" }, new Date(operation.at).toLocaleString("zh-CN", { hour12: false }) + (operation.endpoint ? " \xB7 " + operation.endpoint : "") + (operation.uid ? " \xB7 UID " + operation.uid : "") + (operation.errorCode ? " \xB7 " + (hint(operation.errorCode) || operation.errorCode) : "")),
       operation.result && h5(Detail2, { title: "\u9A8C\u8BC1\u7ED3\u679C", value: operation.result })
     )))
   );

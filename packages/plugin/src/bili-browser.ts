@@ -54,11 +54,11 @@ export async function readBiliBrowser(request:BiliBrowserRequest,expectedUid:str
     if(state.ids.some(id=>id!==expectedUid))throw new Error('BILI_BROWSER_ACCOUNT_MISMATCH');
     return state.ids.length?true:null;
   },'BILI_BROWSER_IDENTITY_UNAVAILABLE');
-  const checkReportedChallenge=async()=>{if(!opened.challenge?.blocked&&!reused)return;try{await waitReady(async()=>{
+  const checkReportedChallenge=async()=>{if(!opened.challenge?.blocked&&!reused)return;await waitReady(async()=>{
     const evidence=z.object({normalVideo:z.boolean(),widget:z.boolean(),outsideVerificationText:z.boolean(),contentVerificationText:z.boolean()}).parse(evaluated(await call('dsh_browser_execute',{script:contentChallengeCheck},readySignal)));
     if(evidence.widget||evidence.outsideVerificationText)throw new Error('BILI_BROWSER_CHALLENGE');
     return reused||evidence.normalVideo&&evidence.contentVerificationText?true:null;
-  },'BILI_BROWSER_CHALLENGE');}catch{signal.throwIfAborted();throw new Error('BILI_BROWSER_CHALLENGE');}};
+  },'BILI_BROWSER_STATE_UNAVAILABLE');};
   await checkReportedChallenge();
   await verify();
   if(input.section==='comments')await waitReady(async()=>{await call('dsh_browser_scroll',{deltaY:850},readySignal);return true;},'BILI_BROWSER_CONTENT_UNAVAILABLE');

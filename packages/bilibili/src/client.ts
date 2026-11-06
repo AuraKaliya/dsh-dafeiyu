@@ -74,7 +74,7 @@ export class BiliClient {
   accountStamp(){const read=this.credentials.read();return createHash('sha256').update(read.state==='ready'?read.snapshot.fingerprint:read.state).digest('hex');}
   /** Route scope for one attempt; a verified account never matches an anonymous pause. */
   private scopeFor(endpoint:string,auth:'anonymous'|'configured-session',transport:'http'|'dsh-browser'):{scope:BiliScope;uid:string|null}{
-    if(transport==='dsh-browser')return {scope:'browser',uid:null};
+    if(transport==='dsh-browser')return {scope:'browser',uid:this.config.browser?.expectedUid??null};
     if(endpoint==='media'||endpoint==='subtitle')return {scope:'resource',uid:null};
     if(auth==='configured-session'){const uid=this.config.session?.expectedUid??null;return uid?{scope:'verified-http',uid}:{scope:'shared',uid:null};}
     return {scope:'anonymous-http',uid:null};
@@ -86,7 +86,7 @@ export class BiliClient {
   }
   status(){
     const now=Date.now(),{account,route,http,shared}=this.httpRoute();
-    const browser=this.store.diagnostics.route({scope:'browser'},now),resource=this.store.diagnostics.route({scope:'resource'},now);
+    const browser=this.store.diagnostics.route({scope:'browser',uid:this.config.browser?.expectedUid??null},now),resource=this.store.diagnostics.route({scope:'resource'},now);
     const describe=(state:RouteState)=>({state:state.held?'diagnostic-required':state.reason==='cooldown'?'cooldown':'available',kind:state.kind,endpoint:state.endpoint,waitUntil:state.until===null?null:new Date(state.until).toISOString()});
     const pause=shared.available?http:shared,held=http.held||shared.held;
     return {account,http:{identity:account.credentialState==='not-configured'?'anonymous':'configured-session',route,...describe(http)},
@@ -98,14 +98,14 @@ export class BiliClient {
   readAvailability(action:string){
     const endpoints:Record<string,string>={bili_video:'video',bili_search:'search',bili_discover:'discover',bili_comments:'comments',bili_subtitles:'player',bili_danmaku:'danmaku',bili_media:'play',bili_frames:'video'};
     if(action==='bili_browser_read'){
-      const held=['video','comments','search','discover','player'].filter(endpoint=>!this.store.diagnostics.route({scope:'browser',endpoint}).available);
+      const held=['video','comments','search','discover','player'].filter(endpoint=>!this.store.diagnostics.route({scope:'browser',uid:this.config.browser?.expectedUid??null,endpoint}).available);
       return {available:!!this.config.browser&&held.length<5,reason:held.length?'浏览器暂停范围：'+held.join('、')+'。不得用该入口重试这些范围；其它范围仍需当前账号与来源验证。':null};
     }
     const endpoint=endpoints[action];if(!endpoint)return {available:true,reason:null};
     const {account,http,shared}=this.httpRoute(endpoint),login=this.config.session?this.store.diagnostics.route({scope:'verified-http',uid:this.config.session.expectedUid,endpoint:'nav'}):null;
     const httpReady=http.available&&shared.available&&(!login||login.available)&&(!account.configured||account.credentialState==='ready'&&!['expired','mismatch'].includes(account.engine));
     const browserEndpoint=action==='bili_subtitles'?'player':endpoint;
-    const browserReady=!!this.config.browser&&this.store.diagnostics.route({scope:'browser',endpoint:browserEndpoint}).available;
+    const browserReady=!!this.config.browser&&this.store.diagnostics.route({scope:'browser',uid:this.config.browser.expectedUid,endpoint:browserEndpoint}).available;
     const available=action==='bili_frames'?browserReady:action==='bili_media'||action==='bili_danmaku'?httpReady:httpReady||browserReady&&this.fallbackAllowed();
     return {available,reason:available?null:'对应读取通道暂停或未配置。使用bili_status核对恢复条件；缓存读取仍可用，不代表插件缺失。'};
   }
@@ -113,11 +113,11 @@ export class BiliClient {
   fallbackAllowed(){const {account,route}=this.httpRoute();
     if(account.configured&&(account.credentialState!=='ready'||['expired','mismatch'].includes(account.engine)))return false;
     return !this.store.diagnostics.pauses.some(pause=>(pause.scope==='shared'||pause.scope===route)&&(['login','permission','verification'].includes(pause.kind)||route==='verified-http'&&pause.kind==='risk'));}
-  async browserRead(port:BiliBrowserPort,request:BiliBrowserRequest,signal:AbortSignal,guard:()=>void){
+  async browserRead(port:BiliBrowserPort,request:BiliBrowserRequest,signal:AbortSignal,guard:()=>void,options:{permit?:string;maintenance?:boolean}={}){
     if(!this.config.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');
-    const auth='configured-session' as const,record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint:request.section==='discover'?'discover':request.section==='comments'?'comments':'video',transport:'dsh-browser',auth,origin:'task',taskId:request.taskId,runId:request.runId,operationId:request.operationId,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
+    const auth='configured-session' as const,record:BiliAttempt={id:randomUUID(),at:Date.now(),sentAt:null,endedAt:Date.now(),endpoint:request.section==='discover'?'discover':request.section==='comments'?'comments':request.section==='search'?'search':'video',transport:'dsh-browser',auth,origin:options.maintenance?'maintenance':'task',taskId:options.maintenance?null:request.taskId,runId:options.maintenance?null:request.runId,operationId:request.operationId,networkSent:false,httpStatus:null,platformCode:null,contentType:null,retryAfter:null,retryAt:null,waitSource:null,outcome:'failed',errorCode:null,kind:null};
     const routing={auth,transport:'dsh-browser' as const,endpoint:record.endpoint};
-    try{await this.slot(record.id,signal,guard,routing);record.sentAt=Date.now();record.networkSent=null;const value=BiliBrowserResultSchema.parse(await port.read(request,signal));guard();signal.throwIfAborted();
+    try{await this.slot(record.id,signal,guard,routing,options.permit);record.sentAt=Date.now();record.networkSent=null;const value=BiliBrowserResultSchema.parse(await port.read(request,signal));guard();signal.throwIfAborted();
       if(!browserBindingMatches(request,value,this.config.browser.expectedUid))throw new Error('BILI_BROWSER_BINDING_MISMATCH');
       if(request.section==='frame'&&(!value.frame||request.positionMs===undefined||Math.abs(value.frame.positionMs-request.positionMs)>500||value.frame.positionMs>=value.frame.durationMs))throw new Error('BILI_BROWSER_BINDING_MISMATCH');
       if(request.section==='frames'){
@@ -126,12 +126,15 @@ export class BiliClient {
           if(point===undefined||!points.includes(point)||seen.has(point)||Math.abs(point-frame.positionMs)>500||frame.positionMs>=frame.durationMs)throw new Error('BILI_BROWSER_BINDING_MISMATCH');seen.add(point);}
         for(const failure of value.frameErrors??[]){if(!points.includes(failure.positionMs)||seen.has(failure.positionMs))throw new Error('BILI_BROWSER_BINDING_MISMATCH');seen.add(failure.positionMs);}
       }
-      record.outcome='success';this.store.diagnostics.success(record.id,record.endpoint,{scope:'browser',uid:null});return value;
+      if(options.maintenance&&request.section==='frames'&&!value.frames?.length)throw new Error('BILI_BROWSER_FRAME_UNAVAILABLE');
+      record.outcome='success';this.store.diagnostics.success(record.id,record.endpoint,{scope:'browser',uid:this.config.browser.expectedUid},record.sentAt);return value;
     }catch(error){record.errorCode=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:'BILI_BROWSER_READ_FAILED';record.kind=record.networkSent!==false?'response':'local';
-      if(record.errorCode==='BILI_BROWSER_CHALLENGE'||['BILI_BROWSER_ACCOUNT_MISMATCH','BILI_BROWSER_BINDING_MISMATCH'].includes(record.errorCode)){record.kind=record.errorCode==='BILI_BROWSER_CHALLENGE'?'verification':'login';const retry=this.store.diagnostics.failure(record.endpoint,record.kind,Date.now(),this.config.retry,null,'browser',null);record.retryAt=retry.at;record.waitSource=retry.source;}
+      if(record.errorCode==='BILI_BROWSER_CHALLENGE'||['BILI_BROWSER_ACCOUNT_MISMATCH','BILI_BROWSER_BINDING_MISMATCH'].includes(record.errorCode)){record.kind=record.errorCode==='BILI_BROWSER_CHALLENGE'?'verification':'login';const retry=this.store.diagnostics.failure(record.endpoint,record.kind,Date.now(),this.config.retry,null,'browser',this.config.browser.expectedUid);record.retryAt=retry.at;record.waitSource=retry.source;}
       if(record.networkSent===false){record.outcome='blocked';record.retryAt=this.store.clock.blockedUntil||null;record.waitSource='existing-state';}throw error;}
     finally{record.endedAt=Date.now();this.store.diagnostics.release(record.id);this.store.diagnostics.record(record);}
   }
+  browserVerificationPermit(endpoint:string){if(!this.config.browser)throw new Error('BILI_BROWSER_NOT_CONFIGURED');return this.store.diagnostics.authorizeBrowserProbe({uid:this.config.browser.expectedUid,endpoint,instanceGeneration:this.instanceGeneration}).id;}
+  probeBrowser(port:BiliBrowserPort,request:BiliBrowserRequest,options:{signal:AbortSignal;permit:string;guard:()=>void}){return this.browserRead(port,request,AbortSignal.any([options.signal,AbortSignal.timeout(this.config.timeoutMs)]),options.guard,{permit:options.permit,maintenance:true});}
   private async fetchNav(credential:CredentialSnapshot|null,signal:AbortSignal,permit?:string,guard?:()=>void):Promise<unknown>{
     const check=()=>{signal.throwIfAborted();guard?.();if(credential)this.credentials.assertCurrent(credential);};
     const url=biliUrl('https://api.bilibili.com'+endpoints.nav.path,'api');
@@ -158,9 +161,8 @@ export class BiliClient {
   dispose(){this.credentials.dispose();}
   private async slot(id:string,signal:AbortSignal,guard:()=>void,routing:{auth:'anonymous'|'configured-session';transport:'http'|'dsh-browser';endpoint:string},permit?:string){guard();signal.throwIfAborted();
     const query={...this.scopeFor(routing.endpoint,routing.auth,routing.transport),endpoint:routing.endpoint};
-    if(routing.transport==='http'){this.store.diagnostics.acquireProbe(id,Date.now(),this.config.timeoutMs,permit,query,
-      {credentialGeneration:this.accountStatus().credentialGeneration,instanceGeneration:this.instanceGeneration});this.store.diagnostics.assertAvailable(query);}
-    else this.store.diagnostics.assertAvailable({scope:'browser',uid:null});
+    this.store.diagnostics.acquireProbe(id,Date.now(),this.config.timeoutMs,permit,query,
+      {credentialGeneration:routing.transport==='dsh-browser'?0:this.accountStatus().credentialGeneration,instanceGeneration:this.instanceGeneration});this.store.diagnostics.assertAvailable(query);
     const wait=this.store.reserveRequest(Date.now(),this.config.minIntervalMs,this.config.timeoutMs);if(wait)await setTimeout(wait,undefined,{signal});guard();signal.throwIfAborted();}
   private async request<T>(endpoint:BiliAttempt['endpoint'],url:URL,cookie:string|null,signal:AbortSignal,guard:()=>void,consume:(response:HttpResponse,record:BiliAttempt,reject:(kind:BiliFailureKind,code:string,backoff?:boolean)=>never)=>Promise<T>,extra:Readonly<Record<string,string>>={},options:{allowWhole?:boolean;permit?:string}={}):Promise<T>{
     const context=this.context.getStore(),auth=cookie?'configured-session'as const:'anonymous'as const;
@@ -181,7 +183,7 @@ export class BiliClient {
       if(response.status===412||response.status===429)reject(response.status===429?'rate-limit':'risk','BILI_BACKOFF',true);
       if(response.status===401||response.status===403)reject(response.status===401?'login':'permission','BILI_ACCESS_DENIED',true);
       const expected=extra.Range?206:200;if(response.status!==expected&&!(extra.Range&&options.allowWhole&&response.status===200))reject(response.status>=500?'network':'response',response.status>=300&&response.status<400?'BILI_REDIRECT_DENIED':'BILI_HTTP_FAILED',response.status>=500);
-      const result=await consume(response,record,reject);if(record.outcome!=='headers-received')record.outcome='success';this.store.diagnostics.success(record.id,endpoint,query);return result;
+      const result=await consume(response,record,reject);if(record.outcome!=='headers-received')record.outcome='success';this.store.diagnostics.success(record.id,endpoint,query,record.sentAt??undefined);return result;
     }catch(error){response?.close();const code=error instanceof Error&&/^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)?error.message:signal.aborted?'BILI_CANCELLED':record.networkSent===null?'BILI_HTTP_FAILED':'BILI_REQUEST_FAILED';record.errorCode??=code;
       record.kind??=record.networkSent===false?'local':signal.aborted?'cancelled':record.httpStatus===null?'network':'response';
       if(record.kind==='network'&&record.retryAt===null&&!signal.aborted){const retry=this.store.diagnostics.failure(endpoint,'network',Date.now(),{...this.config.retry,rateDelaysMs:[2000,5000,10000]},null,query.scope,query.uid);record.retryAt=retry.at;record.waitSource=retry.source;}

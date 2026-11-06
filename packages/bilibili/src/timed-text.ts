@@ -20,9 +20,10 @@ class Wire {
   skip(wire:number){if(wire===0){this.varint();return;}if(wire===2){this.block();return;}const size=wire===1?8:wire===5?4:0;if(!size||this.offset+size>this.bytes.length)throw new Error('BILI_PROTO_INVALID');this.offset+=size;}
 }
 export function danmakuText(bytes:Uint8Array,startMs:number,endMs:number,offset:number,limit:number){const root=new Wire(bytes),items:{id:string;atMs:number;mode:number;text:string}[]=[];let count=0,fields=0;
-  while(root.offset<bytes.length){if(++fields>100000)throw new Error('BILI_PROTO_LIMIT');const outer=root.field();if(outer.id!==1||outer.wire!==2){root.skip(outer.wire);continue;}if(++count>20000)throw new Error('BILI_PROTO_LIMIT');const row=new Wire(root.block());let id:string|null=null,at:number|null=null,text:string|null=null,mode=1,n=0;
+  // Proto3 omits an implicit scalar when its value is zero; progress=0 is a valid video timestamp.
+  while(root.offset<bytes.length){if(++fields>100000)throw new Error('BILI_PROTO_LIMIT');const outer=root.field();if(outer.id!==1||outer.wire!==2){root.skip(outer.wire);continue;}if(++count>20000)throw new Error('BILI_PROTO_LIMIT');const row=new Wire(root.block());let id:string|null=null,at=0,text:string|null=null,mode=1,n=0;
     while(row.offset<row.bytes.length){if(++n>64)throw new Error('BILI_PROTO_LIMIT');const f=row.field();if(f.id===1&&f.wire===0)id=row.varint().toString();else if(f.id===2&&f.wire===0){const value=row.varint();if(value>2147483647n)throw new Error('BILI_PROTO_INVALID');at=Number(value);}else if(f.id===3&&f.wire===0){const value=row.varint();if(value>100n)throw new Error('BILI_PROTO_INVALID');mode=Number(value);}
       else if((f.id===7||f.id===12)&&f.wire===2){const value=new TextDecoder('utf-8',{fatal:true}).decode(row.block());if(f.id===12){if(!/^\d{1,30}$/.test(value))throw new Error('BILI_PROTO_INVALID');id=value;}else text=plain(value,300);}else row.skip(f.wire);}
-    if(id===null||at===null||text===null)throw new Error('BILI_PROTO_INVALID');if(at>=startMs&&at<endMs)items.push({id,atMs:at,mode,text});
+    if(id===null||text===null)throw new Error('BILI_PROTO_INVALID');if(at>=startMs&&at<endMs)items.push({id,atMs:at,mode,text});
   }
   return {items:items.slice(offset,offset+limit),received:count,matching:items.length,nextOffset:offset+limit<items.length?offset+limit:null,range:{startMs,endMs},coverage:['平台六分钟弹幕段内按时间筛选；不是全部历史弹幕','每条文字最多300字符，分页保持同一区间']};}

@@ -16,6 +16,15 @@ const varint=(v:number)=>{const parts:number[]=[];do{const b=v&127;v=Math.floor(
 const bytes=(id:number,data:Buffer)=>Buffer.concat([varint(id*8+2),varint(data.length),data]);
 export const danmakuFixture=()=>Buffer.concat([1000,2000,12000].map((at,i)=>bytes(1,Buffer.concat([Buffer.from([8]),varint(i+1),Buffer.from([16]),varint(at),bytes(7,Buffer.from('虚构弹幕'+i)),bytes(12,Buffer.from(String(100+i)))]))));
 
+test('omitted protobuf zero timestamps preserve the segment, exact IDs and pagination',()=>{
+  const implicit=bytes(1,Buffer.concat([bytes(7,Buffer.from('零时间点')),bytes(12,Buffer.from('9007199254740993123'))]));
+  const explicit=bytes(1,Buffer.concat([Buffer.from([8,2,16,0]),bytes(7,Buffer.from('显式零时间点'))]));
+  const segment=Buffer.concat([implicit,explicit,danmakuFixture()]),first=danmakuText(segment,0,5000,0,1);
+  assert.equal(first.received,5);assert.equal(first.matching,4);assert.equal(first.items[0]!.atMs,0);assert.equal(first.items[0]!.id,'9007199254740993123');assert.equal(first.nextOffset,1);
+  assert.equal(danmakuText(segment,0,5000,1,1).items[0]!.atMs,0);assert.equal(danmakuText(segment,1,5000,0,10).items.length,2);
+  assert.throws(()=>danmakuText(bytes(1,bytes(7,Buffer.from('没有稳定身份'))),0,1000,0,5),/INVALID/);
+});
+
 test('subtitle and protobuf parsers preserve timestamps, pagination and explicit text-only coverage',()=>{
   const data={body:[{from:0,to:2,content:'字幕甲'},{from:2,to:4,content:'字幕乙'},{from:8,to:10,content:'字幕丙'}]},first=subtitleText(data,0,5000,0,1),second=subtitleText(data,0,5000,first.nextOffset!,1);assert.equal(first.nextOffset,1);assert.equal(second.entries[0]!.text,'字幕乙');assert.equal(second.nextOffset,null);
   assert.throws(()=>subtitleText({body:[{from:4,to:2,content:'错误'}]},0,5000,0,5),/RANGE/);
