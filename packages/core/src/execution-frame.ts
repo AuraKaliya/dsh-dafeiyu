@@ -12,6 +12,7 @@ export interface NativeAction {
   execute(input:unknown,callId:string,signal:AbortSignal):Promise<Json>;
   metadata?(value:Json):ExecutionToolReceipt|undefined;
 }
+export interface ConversationTaskHandoff {taskId:string;runId:string;state:string;motivation:'explicit-task'|'self-exploration'}
 export interface TaskExecutionFrame {
   readonly handoff?:import('@dafeiyu/contracts').ContextHandoff;
   /** Program-declared execution stage; never inferred from the available actions. */
@@ -38,5 +39,6 @@ export interface TaskExecutionFrame {
 export interface ConversationExecutionFrame {
   mode:'conversation';item:PendingMessage;persona:PersonaSnapshot;actions:readonly NativeAction[];
   signal:AbortSignal;channelDescription:string;allowEmpty?:()=>boolean;
+  taskHandoff?:()=>ConversationTaskHandoff|null;
 }
 export type ExecutionFrame=TaskExecutionFrame|ConversationExecutionFrame;

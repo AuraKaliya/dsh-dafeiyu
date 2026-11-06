@@ -26,17 +26,21 @@ export class DshResultStore {
     }catch{/* Non-JSON tool text remains explicitly paged text. */}}
     for(const key of input.path){if(value===null||typeof value!=='object'||!Object.hasOwn(value,key))throw new Error('DSH_RESULT_PATH_INVALID');value=z.json().parse(Reflect.get(value,key));}
     const next=(offset:number,path=input.path)=>({resultId:input.resultId,path,offset,limit:input.limit});
-    const describe=(v:Json,path:string[]):Json=>{
-      if(Buffer.byteLength(JSON.stringify(v))<=1600)return {value:v};
+    const describe=(v:Json,path:string[],inlineBytes:number):Json=>{
+      if(Buffer.byteLength(JSON.stringify(v))<=inlineBytes)return {value:v};
       return {kind:typeof v==='string'?'text':Array.isArray(v)?'array':'object',size:typeof v==='string'?Array.from(v).length:Array.isArray(v)?v.length:Object.keys(v??{}).length,
         ...(typeof v==='string'?{preview:Array.from(v).slice(0,160).join('')}:!Array.isArray(v)&&v!==null&&typeof v==='object'?{keys:Object.keys(v).slice(0,24)}:{}),read:next(0,path)};
     };
     let view:Json;
     if(typeof value==='string'){const chars=Array.from(value),end=Math.min(chars.length,input.offset+input.limit);view={kind:'text',text:chars.slice(input.offset,end).join(''),coverage:{start:input.offset,end,total:chars.length,complete:input.offset===0&&end===chars.length},next:end<chars.length?next(end):null};}
     else if(value!==null&&typeof value==='object'){
-      const entries=Object.entries(value),items:Json[]=[];let index=input.offset,bytes=0;
-      for(;index<entries.length;index++){const [key,child]=entries[index]!,entry:Json={key,...z.record(z.string(),z.json()).parse(describe(child,[...input.path,key]))},size=Buffer.byteLength(JSON.stringify(entry));if(items.length&&bytes+size>input.limit*3)break;items.push(entry);bytes+=size;if(items.length>=32){index++;break;}}
-      view={kind:Array.isArray(value)?'array':'object',entries:items,coverage:{start:input.offset,end:index,total:entries.length,complete:input.offset===0&&index===entries.length},next:index<entries.length?next(index):null};
+      const entries=Object.entries(value),items:Json[]=[],unread:Json[]=[];let index=input.offset,bytes=0;
+      const budget=Math.max(1600,input.limit*3);
+      for(;index<entries.length;index++){const [key,child]=entries[index]!,description=z.record(z.string(),z.json()).parse(describe(child,[...input.path,key],Math.max(1600,Math.min(12000,budget-bytes-100)))),entry:Json={key,...description},size=Buffer.byteLength(JSON.stringify(entry));
+        if(items.length&&bytes+size>budget)break;items.push(entry);bytes+=size;if(description.read)unread.push(description.read);if(items.length>=32){index++;break;}}
+      const listedComplete=input.offset===0&&index===entries.length;
+      view={kind:Array.isArray(value)?'array':'object',entries:items,coverage:{start:input.offset,end:index,total:entries.length,listedComplete,complete:listedComplete&&unread.length===0},
+        ...(unread.length?{unread,note:'已列出字段不等于读完正文；这些子节点尚未展开。沿unread中的读取入口继续，不重新执行原工具。'}:{}),next:index<entries.length?next(index):null};
     }else view={kind:'value',value,coverage:{complete:true},next:null};
     return z.json().parse({resultId:input.resultId,path:input.path,encoding,execution:{isError:envelope.success?envelope.data.isError??false:false,effect:envelope.success?envelope.data.effect??'unknown':'unknown',receiptId:input.resultId},...(envelope.success&&envelope.data.processing?{processing:envelope.data.processing}:{}),...(envelope.success&&envelope.data.handoff?{handoff:envelope.data.handoff}:{}),view});
   }

@@ -31,6 +31,9 @@ function state(value: unknown): MessageState {
 /** Single-process durable workflow ledger. DSH remains the owner of full session history. */
 export class Journal {
   private readonly db: DatabaseSync;
+  private eventRevision=0;
+  private readonly traceLookups=new Map<string,{revision:number;dataVersion:number;value:EventRecord|null}>();
+  private readonly messageBodies=new Map<string,{payload:string;message:InboundMessage}>();
   private recallThrough=0;
   private recallDataVersion=-1;
   private readonly recalls=new Map<string,{epoch:number;ids:Set<string>}>();
@@ -78,7 +81,7 @@ export class Journal {
   private transaction<T>(run: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = run(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); this.resetRecalls(); throw error; }
+    catch (error) { this.db.exec('ROLLBACK'); this.resetRecalls();this.eventRevision++;this.traceLookups.clear(); throw error; }
   }
   /** Persists acceptance and its audit event in the same transaction; conflicting duplicates fail. */
   accept(agentId: string, extensionId: string, version: string, message: InboundMessage): Receipt {
@@ -115,6 +118,7 @@ export class Journal {
       if(!isDeepStrictEqual(body,input))throw new Error('Event idempotency conflict');return {...record,seq:Number(old.seq)};}
     const record=ExecutionEventSchema.parse({...input,id,schemaVersion:2,recordedAt:new Date().toISOString(),visibility:{kind:'task',agentId:input.agentId,taskId:input.taskId}});
     const result=this.db.prepare('INSERT INTO events(id,route,trace_id,operation_id,body) VALUES(?,?,?,?,?)').run(id,input.route,input.traceId,input.operationId,JSON.stringify(record));
+    this.eventRevision++;
     return {...record,seq:Number(result.lastInsertRowid)};
   }
   /** Trusted native API. A model-facing caller must obtain its task scope from the core. */
@@ -143,6 +147,7 @@ export class Journal {
       visibility: { kind: 'conversation' as const, route: input.route } };
     const result = this.db.prepare('INSERT INTO events(id,route,trace_id,operation_id,body) VALUES(?,?,?,?,?)')
       .run(record.id, record.route, record.traceId, record.operationId, JSON.stringify(record));
+    this.eventRevision++;
     return { ...record, seq: Number(result.lastInsertRowid) };
   }
   /** State and causal event move together. CAS prevents stale completion overwriting a newer state. */
@@ -155,9 +160,13 @@ export class Journal {
     });
   }
   get(id: string): PendingMessage {
-    const row = this.db.prepare('SELECT i.*,c.session_id FROM inbox i JOIN conversations c ON c.route=i.route WHERE i.id=?').get(id);
+    const row = this.recallStatement('SELECT i.*,c.session_id FROM inbox i JOIN conversations c ON c.route=i.route WHERE i.id=?').get(id);
     if (!row) throw new Error('Message not found');
-    const message = MessageSchema.parse(JSON.parse(text(row.payload)));
+    // Always read the live row. Reuse only an exactly unchanged payload, never state, reply, identity or permissions.
+    const payload=text(row.payload),cached=this.messageBodies.get(id);
+    const parsedMessage=cached?.payload===payload?cached.message:MessageSchema.parse(JSON.parse(payload));
+    if(cached?.payload!==payload){this.messageBodies.delete(id);if(Buffer.byteLength(payload)<=65536){if(this.messageBodies.size>=128)this.messageBodies.delete(this.messageBodies.keys().next().value!);this.messageBodies.set(id,{payload,message:parsedMessage});}}
+    const message=structuredClone(parsedMessage);
     let reply: Reply | null = null;
     if (row.reply !== null) {
       const parsed: unknown = JSON.parse(text(row.reply));
@@ -177,6 +186,17 @@ export class Journal {
   events(route: string): EventRecord[] {
     return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='conversation' ORDER BY seq").all(route)
       .map(row => ({ ...JSON.parse(text(row.body)), seq: Number(row.seq) }) as EventRecord);
+  }
+  /** Program lookup using the existing trace index. Cached event facts never cache live permission decisions. */
+  eventForTrace(route:string,traceId:string,type:string,order:'first'|'last'='last'):EventRecord|null{
+    const dataVersion=Number(this.recallStatement('PRAGMA data_version').get()?.data_version),key=JSON.stringify([route,traceId,type,order]),cached=this.traceLookups.get(key);
+    if(cached&&cached.revision===this.eventRevision&&cached.dataVersion===dataVersion)return cached.value?structuredClone(cached.value):null;
+    const row=this.recallStatement("SELECT seq,body FROM events INDEXED BY events_trace WHERE trace_id=? AND route=? AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.visibility.route')=route AND json_extract(body,'$.type')=? ORDER BY seq "+(order==='first'?'ASC':'DESC')+' LIMIT 1').get(traceId,route,type);
+    const value=row?this.eventRow(row):null;if(this.traceLookups.size>=512)this.traceLookups.delete(this.traceLookups.keys().next().value!);
+    this.traceLookups.set(key,{revision:this.eventRevision,dataVersion,value});return value?structuredClone(value):null;
+  }
+  eventsForTrace(route:string,traceId:string):EventRecord[]{
+    return this.recallStatement("SELECT seq,body FROM events INDEXED BY events_trace WHERE trace_id=? AND route=? AND json_extract(body,'$.visibility.kind')='conversation' AND json_extract(body,'$.visibility.route')=route ORDER BY seq").all(traceId,route).map(row=>this.eventRow(row));
   }
   /** Bounded type-filtered conversation view for per-request context contributors. */
   recentEvents(route:string,type:string,limit=6):EventRecord[] {

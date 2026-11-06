@@ -20,13 +20,13 @@ import type { CompactionBinding,CompactionAudit } from './compaction-runtime.js'
 import { openAgentSession,runAgentTurn,readPersistedResult,safeRunFailure } from './agent-session.js';
 import { ModelInputRepair } from './model-input-repair.js';
 import { NativeRuntime } from './native-runtime.js';
-import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame } from './execution-frame.js';
+import type { TaskExecutionFrame,NativeAction,ExecutionFrame,ConversationExecutionFrame,ConversationTaskHandoff } from './execution-frame.js';
 import { setImmediate as yieldEventLoop } from 'node:timers/promises';
 import { conversationHistory } from './history-frame.js';
 import { reviewTask } from './task-review.js';
 import {HarnessRuntime} from './harness-runtime.js';
 
-interface OwnedSession {handle:AgentHandle;scope:Context;persona:PersonaSnapshot;context:ContextRuntime;compaction:CompactionRuntime;inputRepair:ModelInputRepair;lastRequest?:GenerateOptions}
+interface OwnedSession {handle:AgentHandle;scope:Context;persona:PersonaSnapshot;context:ContextRuntime;compaction:CompactionRuntime;inputRepair:ModelInputRepair;lastRequest?:GenerateOptions;taskHandoff?:()=>ConversationTaskHandoff|null}
 export interface RunResult { readonly text: string; readonly sources: SourceRef[]; readonly resultRef?:import('./runtime-store.js').RunResultRef; readonly segmentYield?:{readonly reason:string} }
 /** Safe evidence identifiers from a failed turn; no raw provider exception or reasoning text. */
 export class DshRunError extends Error {
@@ -54,10 +54,10 @@ export class DshRuntime {
     });
   }
   registerHarnessSection(name:string){return this.harness.allowSection(name);}
-  run(item:PendingMessage,persona:PersonaSnapshot,actions:readonly NativeAction[],signal:AbortSignal,channelDescription='当前接入提供文字消息。',allowEmpty:()=>boolean=()=>false):Promise<RunResult>{
+  run(item:PendingMessage,persona:PersonaSnapshot,actions:readonly NativeAction[],signal:AbortSignal,channelDescription='当前接入提供文字消息。',allowEmpty:()=>boolean=()=>false,taskHandoff?:()=>ConversationTaskHandoff|null):Promise<RunResult>{
     const work:WorkCallContext={workItemId:item.id,runId:item.id,scopeKey:item.route,class:'interactive',targetVersion:0,stage:'conversation'};
     const unbind=workContexts.bindSession(item.sessionId,work);
-    return this.runConversation(item,persona,actions,signal,channelDescription,allowEmpty).finally(unbind);
+    return this.runConversation(item,persona,actions,signal,channelDescription,allowEmpty,taskHandoff).finally(unbind);
   }
   runFrame(frame:TaskExecutionFrame):ReturnType<NativeRuntime['run']>;
   runFrame(frame:ConversationExecutionFrame):Promise<RunResult>;
@@ -66,10 +66,10 @@ export class DshRuntime {
       ? frame.work ?? {workItemId:frame.view.runId,runId:frame.view.runId,scopeKey:String(frame.view.scope.kind==='task'?frame.view.scope.scopeKey:frame.view.scope.route),class:'owner-task',targetVersion:0,stage:'execution'}
       : {workItemId:frame.item.id,runId:frame.item.id,scopeKey:frame.item.route,class:'interactive',targetVersion:0,stage:'conversation'};
     const unbind=workContexts.bindSession(frame.mode==='task'?frame.sessionId:frame.item.sessionId,work);
-    const run=frame.mode==='task'?this.native.run(frame):this.runConversation(frame.item,frame.persona,frame.actions,frame.signal,frame.channelDescription,frame.allowEmpty??(()=>false));
+    const run=frame.mode==='task'?this.native.run(frame):this.runConversation(frame.item,frame.persona,frame.actions,frame.signal,frame.channelDescription,frame.allowEmpty??(()=>false),frame.taskHandoff);
     return Promise.resolve(run).finally(unbind) as ReturnType<NativeRuntime['run']>|Promise<RunResult>;
   }
-  private async runConversation(item:PendingMessage,persona:PersonaSnapshot,actions:readonly NativeAction[],signal:AbortSignal,channelDescription:string,allowEmpty:()=>boolean):Promise<RunResult>{
+  private async runConversation(item:PendingMessage,persona:PersonaSnapshot,actions:readonly NativeAction[],signal:AbortSignal,channelDescription:string,allowEmpty:()=>boolean,taskHandoff?:()=>ConversationTaskHandoff|null):Promise<RunResult>{
     signal.throwIfAborted();
     if(this.compactionBinding()&&!this.ctx.get('tokenMeter'))await(this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter)));
     let owned=this.handles.get(item.sessionId);
@@ -80,12 +80,16 @@ export class DshRuntime {
         scope=current;context=new ContextRuntime(current,this.coordinator);
         compaction=new CompactionRuntime(current,this.agentId,this.compactionBinding,this.compactionAudit,context);
         current.systemPrompt.section({name:'dafeiyu-persona',order:0,interpolate:false,text:()=>identity.persona.text});
+        current.systemPrompt.section({name:'dafeiyu-task-handoff',order:21,interpolate:false,text:()=>{
+          const handoff=this.handles.get(item.sessionId)?.taskHandoff?.();return handoff?JSON.stringify({kind:'accepted-task-handoff',...handoff,
+            instruction:'当前消息的任务已由程序确认受理，后续工作由执行器完成并单独交付。本回合进入简短确认阶段，不再执行、轮询或重复交办；现在以当前人格自然确认并结束本回合。受理不代表任务已完成或结果已送达。'}):'';}});
+        current.on('system-prompt/assemble',async(_assembly,_context,next)=>{const assembled=await next();return this.handles.get(item.sessionId)?.taskHandoff?.()?{...assembled,tools:[]}:assembled;});
         current.systemPrompt.section({name:'dafeiyu-memory-habit',order:10,interpolate:false,text:'在一段有意义的交流、探索或工作结束或暂停时，用dafeiyu_memory_reflect留下自己的看法、疑问或后续打算。普通闲聊可以简短，未形成判断也如实记录。不把外部工具报告当成自己的偏好；回顾已保存的反思后，需要时用记忆工具修订自我认识。内部经历笔记与面向对方的回答分开。'});current.tools.presentAs('native');
       });
       if(!scope||!context||!compaction){await handle.dispose();throw new Error('DSH_SCOPE_MISSING');}
       owned={handle,scope,context,compaction,inputRepair:new ModelInputRepair(scope),get persona(){return identity.persona;},set persona(value){identity.persona=value;}};this.handles.set(item.sessionId,owned);
     }
-    owned.persona=persona;const {agent}=owned.handle;
+    owned.persona=persona;if(taskHandoff)owned.taskHandoff=taskHandoff;else delete owned.taskHandoff;const {agent}=owned.handle;
     owned.inputRepair.begin();
     if(agent.status!=='idle')throw new Error('SESSION_BUSY');
     owned.context.begin(item,agent);owned.compaction.begin(conversationHistory(item),agent);
@@ -106,7 +110,7 @@ export class DshRuntime {
         sources:result.events.filter(event=>['user/message','tool/result','assistant/message','turn/end'].includes(event.type)).map(event=>({kind:'session',id:item.sessionId,seq:event.seq,route:item.route}))};
     }catch(error){const sites=error instanceof Error?(error.stack??'').split('\n').slice(1).flatMap(line=>{const match=/([^/\\()\s]+\.(?:m?js|ts):\d+:\d+)/.exec(line);return match?[match[1]!]:[];}).slice(0,4):[];
       throw new DshRunError(agent.session.snapshotEvents().slice(before).filter(event=>['user/message','tool/result','assistant/message','turn/end'].includes(event.type)).map(event=>({kind:'session',id:item.sessionId,seq:event.seq,route:item.route})),error instanceof Error?safeRunFailure(error.message):'MODEL_INCOMPLETE',{stage,errorType:error instanceof Error&&/^[A-Za-z]{1,80}$/.test(error.name)?error.name:'Error',sites});}
-    finally{try{owned.compaction.seal();}finally{owned.compaction.end();owned.context.end();delete owned.lastRequest;for(const dispose of disposers.reverse())dispose();}}
+    finally{try{owned.compaction.seal();}finally{owned.compaction.end();owned.context.end();delete owned.lastRequest;delete owned.taskHandoff;for(const dispose of disposers.reverse())dispose();}}
   }
   async close(): Promise<void> {
     const handles = [...this.handles.values()];

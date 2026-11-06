@@ -18,7 +18,7 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
     if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
-    if(!request.tools?.some(tool=>tool.name==='fixture_task_submit')){if(request.tools?.some(tool=>tool.name==='dafeiyu_memory_pending')&&!nativeReads.has(session)){nativeReads.add(session);return toolResponse('dafeiyu_memory_pending',{});}return textResponse('已依据当前对话答复。');}
+    if(session.startsWith('dafeiyu-task-')||session.startsWith('dafeiyu-delivery-')){if(request.tools?.some(tool=>tool.name==='dafeiyu_memory_pending')&&!nativeReads.has(session)){nativeReads.add(session);return toolResponse('dafeiyu_memory_pending',{});}return textResponse('已依据当前对话答复。');}
     toolRequests++;
     if(toolRequests>12)throw new Error('SCRIPTED_TOOL_LOOP');
     const textOf=(message:any)=>Array.isArray(message.content)?message.content.filter((block:any)=>block.type==='text').map((block:any)=>block.text).join('\n'):String(message.content??'');

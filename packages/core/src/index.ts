@@ -95,7 +95,7 @@ export class DafeiyuService extends Service {
   private readonly patrolAdmissions=new WeakMap<object,{planId:string;version:number}>();
   private patrolValidator:((planId:string,version:number,target:Conversation,reply:boolean)=>boolean)|undefined;
   bindPatrolValidator(check:(planId:string,version:number,target:Conversation,reply:boolean)=>boolean){if(this.patrolValidator)throw new Error('DUPLICATE_PROVIDER');this.patrolValidator=check;return ()=>{if(this.patrolValidator===check)this.patrolValidator=undefined;};}
-  patrolInfo(item:PendingMessage){const event=this.journal.events(item.route).find(event=>event.traceId===item.id&&event.type==='patrol.selected');if(!event)return null;
+  patrolInfo(item:PendingMessage){const event=this.journal.eventForTrace(item.route,item.id,'patrol.selected','first');if(!event)return null;
     const data=z.object({planId:z.uuid(),version:z.number().int().positive()}).parse(event.data);return {...data,current:this.patrolValidator?.(data.planId,data.version,item.message.conversation,true)===true};}
   patrolResources(anchor:import('@dafeiyu/contracts').ActivityAnchor){return this.executions?.patrolResources(anchor)??[];}
   patrolReplyPermitted(context:ExecutionContext){return this.executions?.patrolReplyPermitted(context)??false;}
@@ -197,7 +197,7 @@ export class DafeiyuService extends Service {
     if(reply.taskResult)throw new Error('DELIVERY_BINDING_CONFLICT');
     const item=this.journal.get(run.definition.origin.inboundId),source=this.extensions.get(item.extensionId);
     if(!run.result||reply.id!==item.id+':reply'||reply.sourceMessageId!==item.message.id||runtimeHash(reply.conversation)!==runtimeHash(item.message.conversation)||createHash('sha256').update(reply.text).digest('hex')!==run.result.textHash)throw new Error('DELIVERY_BINDING_CONFLICT');
-    const completed=this.journal.events(item.route).findLast(event=>event.traceId===item.id&&event.type==='turn.completed');let captured:Awaited<ReturnType<typeof prepareCapturedReplySources>>|undefined,final:Awaited<ReturnType<typeof prepareReplySources>>|undefined,allocated:MediaReplyAccess|undefined;
+    const completed=this.journal.eventForTrace(item.route,item.id,'turn.completed');let captured:Awaited<ReturnType<typeof prepareCapturedReplySources>>|undefined,final:Awaited<ReturnType<typeof prepareReplySources>>|undefined,allocated:MediaReplyAccess|undefined;
     try{captured=await prepareCapturedReplySources(this.config.agentId,item,facts.body.dependencies,this.contexts,()=>this.compactionBinding(),signal);
       final=await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal);
       const expiresAt=new Date(Date.parse(run.updatedAt)+900000).toISOString(),target=Object.freeze({...item.message.conversation}),text=reply.text;
@@ -330,7 +330,7 @@ export class DafeiyuService extends Service {
     // Never replay work that may already have caused effects before a process died.
     for (const item of this.journal.list(['processing', 'sending'])) {
       this.journal.transition(item.id, item.state, 'uncertain', this.event(item, 'recovery.uncertain', { previousState: item.state }));
-      const events = this.journal.events(item.route).filter(event => event.traceId === item.id);
+      const events = this.journal.eventsForTrace(item.route,item.id);
       for (const operation of events.filter(event => event.type === 'operation.started')) {
         if (!events.some(event => event.operationId === operation.operationId && event.type !== 'operation.started')) {
           this.journal.append(eventFor(this.config.agentId, item, 'operation.unknown', operation.plugin,
@@ -516,7 +516,7 @@ export class DafeiyuService extends Service {
         this.journal.append({agentId:this.config.agentId,route:decision.route,traceId:randomUUID(),operationId:randomUUID(),causedBy:null,
           type:'attention.decided',plugin:'@dafeiyu/core',pluginVersion:CORE_VERSION,occurredAt:decision.at,sources:[],data:z.record(z.string(),z.json()).parse(decision)});
       }});
-    this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.conversations.validateRunPersona(run));
+    this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.conversations.validateRunPersona(run),id=>this.executions?.conversationTaskHandoff(id)??null);
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registry,scheduler:this.scheduler,options,personas:this.personas,
       activitySharing:()=>this.activitySharingState(),
       isOwnerMessage:item=>this.ownerDirectories(item).length>0,messageResources:item=>this.ownerQueryResources(item),channelDescription:id=>this.conversations.deliveryChannel(this.journal.get(id))?.capability.description??'',repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),

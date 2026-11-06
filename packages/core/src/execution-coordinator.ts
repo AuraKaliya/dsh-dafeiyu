@@ -125,6 +125,21 @@ export class ExecutionCoordinator {
     if(binding.explorationResources?.some(scene=>!policy.resources.some(allowed=>runtimeHash(allowed)===runtimeHash(scene))))throw new Error('EXPLORATION_RESOURCE_DENIED');
     const captured=Object.freeze({...binding,classify:binding.classify.bind(binding),active:binding.active.bind(binding),...(binding.voice?{voice:Object.freeze({version:binding.voice.version,resolve:binding.voice.resolve.bind(binding.voice),current:binding.voice.current.bind(binding.voice)})}:{})});this.messageBindings.set(binding.id,captured);return ()=>{if(this.messageBindings.get(binding.id)===captured)this.messageBindings.delete(binding.id);};}
   private messageBindingHash(binding:MessageTaskBinding){const {classify:_classify,active:_active,autoDeliver:_auto,voice:_voice,...identity}=binding;return runtimeHash({identity,policy:this.policy(binding.id,binding.policyId)});}
+  /** Only a committed operation and its actual message-bound child Run can close the foreground handoff phase. */
+  conversationTaskHandoff(runId:string):import('./execution-frame.js').ConversationTaskHandoff|null{
+    const parent=this.d.store.get(runId);if(parent.definition.origin.kind!=='message'||parent.definition.scope.kind!=='conversation')return null;
+    const inboundId=parent.definition.origin.inboundId;
+    for(const operation of this.d.store.operations(runId).reverse()){
+      if(operation.state!=='finished'||operation.outcome?.status!=='succeeded'||operation.outcome.effects!=='confirmed')continue;
+      const receipt=z.object({taskId:z.uuid(),runId:z.uuid(),accepted:z.boolean().optional()}).safeParse(operation.outcome.data);
+      if(!receipt.success||receipt.data.accepted===false||receipt.data.runId===runId)continue;
+      try{const child=this.d.store.get(receipt.data.runId),request=this.d.store.request(child.requestKey),saved=savedSchema.parse(request.payload),source=saved.messageSource;
+        if(child.definition.taskId!==receipt.data.taskId||!source||request.producer!==source.bindingId)continue;
+        if(source.inboundId!==inboundId&&source.control?.inboundId!==inboundId&&!source.intent?.amendments.some(amendment=>amendment.inboundId===inboundId))continue;
+        return {taskId:receipt.data.taskId,runId:child.id,state:child.state,motivation:source.kind};
+      }catch{/* Other write receipts can contain locators; they are not task acceptance evidence. */}
+    }return null;
+  }
   messageCapabilities(message:import('@dafeiyu/contracts').InboundMessage){return {kind:'task-capability-catalog',
     bindings:[...this.messageBindings.values()].filter(binding=>binding.active()&&binding.channel===message.conversation.channel&&binding.account===message.conversation.account).map(binding=>{
       const policy=this.policy(binding.id,binding.policyId);return {id:binding.id,ownerTaskAuthorized:message.sender.id===binding.ownerId,actions:this.d.registry.actions().filter(action=>policy.actions.includes(action.id)).map(action=>({name:action.id,registered:true,ready:action.active(),scope:action.scope}))};}),
@@ -1030,6 +1045,9 @@ export class ExecutionCoordinator {
       if(operation.state==='finished'&&operation.outcome)return result(operation.id,callId,operation.outcome);if(operation.state==='unknown')throw new Error('OPERATION_UNCERTAIN');
       if(operation.reused)throw new Error('OPERATION_IN_PROGRESS');
       this.d.store.bindInput(run.id,`operation-inputs:${operation.id}`,this.evidence.get(run.id)?.exposed()??[]);
+      const handoff=run.definition.scope.kind==='conversation'?this.conversationTaskHandoff(run.id):null;
+      if(handoff){const outcome={status:'failed',effects:'none',completeness:'complete',data:{...handoff,dispatched:false,note:'任务已交接，当前回合只需简短确认；执行器会独立完成并交付。不要继续轮询或重复交办。'},sources:[],receipts:[],errorCode:'TASK_HANDOFF_ACCEPTED'};
+        this.d.store.finishOperation(operation.id,outcome);this.flushEvents();return result(operation.id,callId,outcome);}
       const params=z.record(z.string(),z.json()).safeParse(input);
       const {requestId:_requestId,...stableInput}=params.success?params.data:{input:z.json().parse(input)};
       const workKey=runtimeHash({action:action.id,version:action.version,input:stableInput,intentVersion:run.definition.intentVersion});
@@ -1061,7 +1079,7 @@ export class ExecutionCoordinator {
   }
   conversationActions(run:StoredRun,producer:string,signal:AbortSignal,guard:()=>void):NativeAction[]{
     const policy=this.conversationPolicy(producer);
-    const patrol=run.definition.origin.kind==='message'&&this.d.journal.events(run.definition.scope.kind==='conversation'?run.definition.scope.route:'').some(event=>event.traceId===(run.definition.origin.kind==='message'?run.definition.origin.inboundId:'')&&event.type==='patrol.selected');
+    const patrol=run.definition.origin.kind==='message'&&!!this.d.journal.eventForTrace(run.definition.scope.kind==='conversation'?run.definition.scope.route:'',run.definition.origin.inboundId,'patrol.selected','first');
     return this.d.registry.actions().filter(action=>basicCapability(action)||action.scope!=='task'&&policy?.actions.includes(action.id)&&action.effects!=='external-write'&&(action.effects!=='local-write'||policy.allowLocalWrite))
       .filter(action=>!patrol||['qq_groups','qq_browse','qq_forward_read','qq_reply_quote','dafeiyu_media_read','dafeiyu_media_inspect','dafeiyu_media_acquire','dafeiyu_memory_reflect'].includes(action.id))
       .map(action=>{const base=()=>{signal.throwIfAborted();guard();if(!action.active()||this.d.store.get(run.id).state!=='running')throw new Error('SCOPE_DENIED');};return this.bindAction(run,action,signal,()=>{base();this.d.personas.current(run.id)?.guard();},base);});

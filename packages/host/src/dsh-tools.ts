@@ -66,7 +66,7 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
     },
   },{
     id:DSH_TOOL_ACTIONS[2],version:'1',effects:'read',scope:'task',
-    description:'继续读取本Task的已有结果，不重新执行原工具。path与offset来自结果中的read/next入口；返回完整JSON值、明确的文字区间或子节点入口。',
+    description:'继续读取本Task的已有结果，不重新执行原工具。path与offset来自read/next/unread入口；路径、字段名和数组大小不是正文。coverage.complete=false时必须读取与问题有关的子节点后才能说已检查内容；大文件按页读，不必重新执行读取命令。',
     inputSchema:DshResultReadSchema,outputSchema:z.json(),execute:async(raw,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');const input=DshResultReadSchema.parse(raw),target=scene(context);
       try{return observe(context,target,results.read(context.taskId!,target,input),input.resultId,'none');}catch(e){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:errorCode(e)};}}
   }];

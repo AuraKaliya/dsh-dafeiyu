@@ -20,7 +20,7 @@ test('an owner task delivers the actual group text and mention evidence through 
   const adapter=new FixtureAdapter(request=>{
     if(String(request.sessionId).startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){const text=request.messages.flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).join(' ');assert.match(text,/GROUP_TEXT_MUST_REACH_OWNER/);assert.match(text,/mentionedBot/);sawGroupEvidence=true;return textResponse('{"qq_messages":[{"type":"text","text":"已核对群消息 GROUP_TEXT_MUST_REACH_OWNER，确实提到了我。"}]}');}
-    if(request.tools?.some(tool=>tool.name==='fixture_task_submit')){if(submitted)return textResponse('已经承接检查。');submitted=true;return toolResponse('fixture_task_submit',{requestId:'inspect-groups',title:'检查群消息'});}
+    if(!String(request.sessionId).startsWith('dafeiyu-task-')){if(submitted)return textResponse('已经承接检查。');submitted=true;return toolResponse('fixture_task_submit',{requestId:'inspect-groups',title:'检查群消息'});}
     if(taskStep++===0)return toolResponse('qq_groups',{});
     if(taskStep===2)return toolResponse('qq_browse',{requestId:'read-group',target:group,limit:20});return textResponse('群原文和提及记录已取得。');
   });
