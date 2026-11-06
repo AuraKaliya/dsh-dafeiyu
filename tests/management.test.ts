@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {ManagementRequestSchema,API_VERSION} from '@dafeiyu/contracts';
+import {ManagementRequestSchema,API_VERSION,OBSERVATION_EVIDENCE_RULES} from '@dafeiyu/contracts';
 import {ManagementSettings} from '../packages/plugin/lib/management-settings.js';
 import {managementModules} from '../packages/plugin/lib/management-catalog.js';
 import {promptCatalog} from '../packages/plugin/lib/prompt-catalog.js';
 import {QqReplyDelaySchema,qqReplyDelayMs} from '@dafeiyu/qq';
 import {usageTokens,withRunUsage,reportExternalUsage} from '../packages/core/lib/usage.js';
 import {testTempDir} from './test-temp.js';
+import {DELIVERY_VERIFICATION_INSTRUCTIONS} from '../packages/memory/lib/expression-runtime.js';
 
 test('management has one strict protocol and source-owned single-purpose groups',()=>{
   assert.ok(ManagementRequestSchema.safeParse({apiVersion:API_VERSION,kind:'describe'}).success);
@@ -19,6 +20,8 @@ test('management has one strict protocol and source-owned single-purpose groups'
   assert.equal(new Set(paths).size,paths.length);assert.ok(managementModules.some(module=>module.id==='bilibili'));
   assert.ok(paths.includes('contextCapacity.maxTokens'),'The unified million-token capacity must be editable in the management UI');
   assert.ok(promptCatalog.some(prompt=>prompt.id==='dafeiyu-execution-rules'&&prompt.text.includes('上下文快照')));
+  assert.equal(promptCatalog.find(prompt=>prompt.id==='dafeiyu-observation-limits')?.text,OBSERVATION_EVIDENCE_RULES);
+  assert.equal(promptCatalog.find(prompt=>prompt.id==='DELIVERY_VERIFICATION_INSTRUCTIONS')?.text,DELIVERY_VERIFICATION_INSTRUCTIONS);
 });
 test('configuration edits use field ownership, revisions and the sole installation file',()=>{
   const root=join(testTempDir(),randomUUID());mkdirSync(root);const file=join(root,'settings.json'),config=JSON.parse(readFileSync('packages/plugin/examples/dafeiyu.config.json','utf8'));config.model={model:'fixture',credentialStore:'fixture-credentials.json'};config.qq={...config.qq,botId:'123456',ownerId:'654321',tokenFile:'fixture-token.txt'};writeFileSync(file,JSON.stringify(config));

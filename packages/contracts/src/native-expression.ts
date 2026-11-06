@@ -6,6 +6,7 @@ import { PersonaSourceRefSchema } from './persona.js';
 import type { PersonaAccess } from './persona.js';
 import { NativeMediaMaterialSchema } from './media.js';
 import type { NativeMediaMaterial } from './media.js';
+export const OBSERVATION_EVIDENCE_RULES='涉及事实或任务汇报时，数字、单位、时间及时区应与证据一致；不能可靠换算时保留原数值和单位。空缓存、零条查询结果、缺少日志只证明本次可读范围没有观察到，不能单凭它断言消息未发生、没到入口、平台未投递，或排除插件过滤等原因。代码中的一般处理条件不能替代事发时每个条件的实际取值。未验证的原因不能被“要么A、要么B”式的封闭列举排除；末尾笼统的范围声明也不能纠正正文中的确定性归因。模型写出的检查脚本、注释和反思不是被检查系统的独立事实。采样画面或局部音频应明确观察范围，不能声称完整看完或听完全片。';
 const resultAnchor=z.strictObject({schemaVersion:z.literal(1),taskId:z.uuid(),runId:z.uuid(),target:ConversationSchema,
   intentVersion:z.number().int().positive(),authorityVersion:z.string().length(64),expiresAt:z.iso.datetime(),outcome:z.literal('waiting').optional()});
 export const TaskResultAnchorSchema=z.discriminatedUnion('kind',[resultAnchor.extend({kind:z.literal('task-result'),inboundId:z.uuid()}),resultAnchor.extend({kind:z.literal('activity-result'),shareId:z.uuid()})]);

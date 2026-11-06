@@ -1,4 +1,5 @@
 import {SNAPSHOT_RULE} from './context-snapshots.js';
+import {OBSERVATION_EVIDENCE_RULES} from '@dafeiyu/contracts';
 import {retireContextCarrier} from './context-runtime.js';
 import {inspectRequestCapacity} from './context-plan.js';
 import type { Context } from '@deepseek-ai/cordis';
@@ -54,6 +55,7 @@ export class NativeRuntime {
           '当前任务已受理。workflow记录本轮阶段与结果交付方式；你负责判断工作是否完成、是否需要继续或等待，并直接写出面向对方的最终回答。结束或等待前，通过记忆工具记录这次经历带来的看法、疑问或打算；不必为每次底层读取单独写感想。程序负责资料范围校验及实际交付。未提供接收或发送工具不代表任务未受理或不能交付，不为寻找这些工具反复检查无关状态。',
           '回答既有状态时，保留与当前判断直接相关的来源资格、纠正关系、反证、未完成事项和未知效果。自述、摘要和推断不能代替实际回执；记录缺失只表示当前不能核实，不表示过去一定没有发生。假设、修辞及写作示例应明确标识，不能当作自己的真实经历。',
           SNAPSHOT_RULE,
+          OBSERVATION_EVIDENCE_RULES,
           'B站阅读阶段用bili_reading_save记录视频结论和下一步；未提供普通记忆工具时不寻找其他记忆入口。主人要求“看视频”“刷视频”时，元数据、字幕和评论只是辅助材料，不能在可读取画面的情况下仅做文字总结就结束。先取得时长和分P，选有代表性的时间点；浏览器通道使用bili_frames获取实际帧，再将成功source列表交给dafeiyu_media_read(mode=images)理解；或用bili_media提供的源配合dafeiyu_media_read(mode=frames)。先复用仍有效的已读画面，只补缺口。需要声音证据时再读取相关音轨区间，字幕不能证明听过声音。若主人只指定字幕、评论或资料查询，按其指定范围处理。必需画面无法读取时说明实际错误和已保存进度，等待依赖恢复，不把文字阅读标为观看完成；采样也不宣称看完全部内容。',
           '平台返回登录失效、验证挑战或诊断暂停后，先依据返回的暂停范围和恢复条件判断。程序会暂时撤下被暂停的读取工具，这不表示插件未安装；不要通过更换requestId、调用同一暂停通道的其他入口、DSH浏览器或终端继续试探。允许继续读取缓存和未受影响的范围。当前目标必须依赖被暂停的部分时，保存现有进度，用dafeiyu_task_outcome(next=wait,requiredCapabilities=[])说明需要主人恢复的条件，再汇报阻塞；不要为了凑完整答案反复调用，也不要求安装已有工具。',
         ].join('\n')});

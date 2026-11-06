@@ -2,7 +2,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import ts from 'typescript';
 import {build} from 'esbuild';
-const files=['packages/core/src/context-snapshots.ts','packages/core/src/runtime.ts','packages/core/src/native-runtime.ts','packages/core/src/context-runtime.ts','packages/core/src/harness-runtime.ts','packages/contracts/src/qq-expression.ts','packages/media/src/service.ts'];
+const files=['packages/contracts/src/native-expression.ts','packages/core/src/context-snapshots.ts','packages/core/src/runtime.ts','packages/core/src/native-runtime.ts','packages/core/src/context-runtime.ts','packages/core/src/harness-runtime.ts','packages/contracts/src/qq-expression.ts','packages/memory/src/expression-runtime.ts','packages/media/src/service.ts'];
 export function generatePromptCatalog(){const constants=new Map(),sources=[];
   const evaluate=node=>{if(!node)return undefined;if(ts.isStringLiteral(node)||ts.isNoSubstitutionTemplateLiteral(node))return node.text;if(ts.isIdentifier(node))return constants.get(node.text);if(ts.isArrayLiteralExpression(node)){const parts=node.elements.map(evaluate);return parts.every(p=>typeof p==='string')?parts:undefined;}if(ts.isBinaryExpression(node)&&node.operatorToken.kind===ts.SyntaxKind.PlusToken){const a=evaluate(node.left),b=evaluate(node.right);return typeof a==='string'&&typeof b==='string'?a+b:undefined;}if(ts.isCallExpression(node)&&ts.isPropertyAccessExpression(node.expression)&&node.expression.name.text==='join'){const parts=evaluate(node.expression.expression),separator=evaluate(node.arguments[0]);return Array.isArray(parts)&&typeof separator==='string'?parts.join(separator):undefined;}return undefined;};
   for(const file of files){const source=readFileSync(file,'utf8'),tree=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true),sourceHash=createHash('sha256').update(source).digest('hex');
@@ -11,6 +11,7 @@ export function generatePromptCatalog(){const constants=new Map(),sources=[];
       ts.forEachChild(node,visit);};visit(tree);
     if(file.endsWith('qq-expression.ts'))for(const name of ['QQ_EXPRESSION_DEFAULTS','QQ_SEQUENCE_INSTRUCTIONS']){const text=constants.get(name);if(typeof text==='string')sources.push({id:name,module:'qq',title:name==='QQ_EXPRESSION_DEFAULTS'?'QQ 表达规则':'QQ 消息序列规则',position:'context',text,condition:'QQ 渠道能力说明',source:file,sourceHash});}
     if(file.endsWith('media/src/service.ts'))for(const name of ['visionInstructions','browserFrameInstructions']){const text=constants.get(name);if(typeof text==='string')sources.push({id:name,module:'media',title:name==='visionInstructions'?'独立视觉分析系统提示词':'视频单帧观察规则',position:'system',text,condition:'独立视觉请求；不拼入主会话系统提示词',source:file,sourceHash});}
+    if(file.endsWith('memory/src/expression-runtime.ts')){const text=constants.get('DELIVERY_VERIFICATION_INSTRUCTIONS');if(typeof text==='string')sources.push({id:'DELIVERY_VERIFICATION_INSTRUCTIONS',module:'memory',title:'最终报告事实核验',position:'system',text,condition:'独立核验请求；优先使用模型支持的低档推理',source:file,sourceHash});}
   }
   if(sources.length<5)throw new Error('PROMPT_CATALOG_INCOMPLETE');writeFileSync('packages/plugin/src/prompt-catalog.ts',`// Generated from current source literals by scripts/generate-management.mjs.\nexport const promptCatalog=${JSON.stringify(sources,null,2)} as const;\n`);
 }

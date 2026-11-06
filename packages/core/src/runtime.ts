@@ -11,7 +11,7 @@ import type {} from '@deepseek-ai/dsh-tools';
 import type { ActionCapability, Json, PendingMessage, PersonaSnapshot, SourceRef, WorkCallContext } from '@dafeiyu/contracts';
 import { ContextRuntime } from './context-runtime.js';
 import type { ContextCoordinator } from './context.js';
-import {messageDisplayText,workContexts} from '@dafeiyu/contracts';
+import {messageDisplayText,workContexts,OBSERVATION_EVIDENCE_RULES} from '@dafeiyu/contracts';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
@@ -80,6 +80,7 @@ export class DshRuntime {
         scope=current;context=new ContextRuntime(current,this.coordinator);
         compaction=new CompactionRuntime(current,this.agentId,this.compactionBinding,this.compactionAudit,context);
         current.systemPrompt.section({name:'dafeiyu-persona',order:0,interpolate:false,text:()=>identity.persona.text});
+        current.systemPrompt.section({name:'dafeiyu-observation-limits',order:11,interpolate:false,text:OBSERVATION_EVIDENCE_RULES});
         current.systemPrompt.section({name:'dafeiyu-task-handoff',order:21,interpolate:false,text:()=>{
           const handoff=this.handles.get(item.sessionId)?.taskHandoff?.();return handoff?JSON.stringify({kind:'accepted-task-handoff',...handoff,
             instruction:'当前消息的任务已由程序确认受理，后续工作由执行器完成并单独交付。本回合进入简短确认阶段，不再执行、轮询或重复交办；现在以当前人格自然确认并结束本回合。受理不代表任务已完成或结果已送达。'}):'';}});
