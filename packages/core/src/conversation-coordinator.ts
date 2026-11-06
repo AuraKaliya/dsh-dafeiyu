@@ -256,7 +256,7 @@ export class ConversationCoordinator {
     let result,invoked=false,mediaSettlementPending=false;let release=()=>{};let mediaAccess:MediaReplyAccess|undefined,mediaManifestId:string|undefined,activeMedia:MediaPort|undefined;
     try {
       const signal=AbortSignal.any([this.controller.signal,source.controller.signal,AbortSignal.timeout(this.config.deliveryTimeoutMs)]);
-      const evidence=channel.deliveryValidation==='per-segment'?await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal):{guard:()=>{},release:()=>{}};release=evidence.release;
+      const evidence=this.conversationRuns?.acceptanceNotice(item)??(channel.deliveryValidation==='per-segment'?await prepareReplySources(this.ctx,this.config.agentId,item,completed?.sources??[],this.contexts,()=>this.compactionBinding(),signal):{guard:()=>{},release:()=>{}});release=evidence.release;
       const authority=()=>{if(!source.active||this.fatal||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');
         if(runId&&this.runStore)this.validateRunPersona(this.runStore.get(runId));
         evidence.guard();};

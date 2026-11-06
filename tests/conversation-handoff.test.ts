@@ -6,13 +6,21 @@ import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
 import {API_VERSION,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
-import type {ExtensionHandle} from '@dafeiyu/contracts';
+import type {ExtensionHandle,Reply} from '@dafeiyu/contracts';
 import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
+import type {Context} from '@deepseek-ai/cordis';
+import {ConversationRuns} from '../packages/core/lib/conversation-run.js';
 
 test('a persisted handoff closes foreground tools, rejects stale polls, releases result delivery and resets for the next message',{timeout:30000},async t=>{
   const root=await mkdtemp(join(testTempDir(),'conversation-handoff-'));process.env.DSH_HOME=join(root,'data/core/dsh-home');
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');let channel:ExtensionHandle|undefined,mode='delegate',step=0,polls=0,reads=0;const order:string[]=[],acknowledgements:string[]=[];
+  const checkNoticeGuard=(reply:Reply,ctx:Context)=>{const runs:unknown=Reflect.get(ctx.dafeiyu,'conversationRuns');assert.ok(runs instanceof ConversationRuns);
+    const item=ctx.dafeiyu.journal.get(reply.id.slice(0,-6));
+    assert.equal(runs.acceptanceNotice({...item,reply:{...reply,text:reply.text+' Unapproved content.'}}),null);
+    assert.throws(()=>runs.acceptanceNotice({...item,reply:{...reply,conversation:{...reply.conversation,id:'another-target'}}}),/SOURCE_STALE/);
+    const lease=runs.acceptanceNotice(item);assert.ok(lease);lease.guard();lease.release();assert.throws(lease.guard,/SOURCE_STALE/);
+  };
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
     if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
@@ -37,7 +45,7 @@ test('a persisted handoff closes foreground tools, rejects stale polls, releases
   await writeFile(file,JSON.stringify({schemaVersion:1,profileId:'handoff',agent:{id:'fish'},paths:{core:'./data/core',memory:'./data/memory',sessions:'./data/sessions',query:'./data/query.sqlite'},modelRoutes:{chat:{provider:'local-test',model:'scripted'}},persona:{fixedFile:'./persona.md',kind:'test'},plugins:[{id:'model-scripted',required:true},{id:'timeline',required:true,config:{execution:true}},{id:'memory-growth',required:true}],authorityPolicies:[{id:'conversation',producers:['fixture-channel'],actions:['fixture_submit','fixture_poll','fixture_forged','fixture_read'],allowLocalWrite:true},{id:'task',producers:['fixture-tasks'],actions:[],allowLocalWrite:false}]}));
   const config=loadHostConfig(file),coordination=join(root,'coordination.sqlite');initializeProfile(config,coordination);
   const host=await ManagedHost.start(config,{coordination,adapter,signal:t.signal,installChannels:ctx=>{
-    channel=ctx.dafeiyu.registerExtension({id:'fixture-channel',version:'1',protocolVersion:API_VERSION,agentId:'fish',channels:[{channel:'fixture',account:'local',deliver:async(reply,_signal,guard)=>{guard?.();order.push('ack');acknowledgements.push(reply.text);return {status:'sent',receiptId:randomUUID()};},deliverTaskResult:async(_reply,_anchor,_signal,guard,begin)=>{guard();const done=begin();try{order.push('result');return {status:'sent',receiptId:randomUUID()};}finally{done();}}}]});
+    channel=ctx.dafeiyu.registerExtension({id:'fixture-channel',version:'1',protocolVersion:API_VERSION,agentId:'fish',channels:[{channel:'fixture',account:'local',deliveryValidation:'per-segment',deliver:async(reply,_signal,guard)=>{assert.ok(guard);guard();if(!acknowledgements.length)checkNoticeGuard(reply,ctx);order.push('ack');acknowledgements.push(reply.text);return {status:'sent',receiptId:randomUUID()};},deliverTaskResult:async(_reply,_anchor,_signal,guard,begin)=>{guard();const done=begin();try{order.push('result');return {status:'sent',receiptId:randomUUID()};}finally{done();}}}]});
     const outcome=(data:unknown,effects:'none'|'confirmed'='none')=>({status:'succeeded' as const,effects,completeness:'complete' as const,data:z.json().parse(data),sources:[],receipts:[]});
     ctx.dafeiyu.registerExtension({id:'fixture-tasks',version:'1',protocolVersion:API_VERSION,agentId:'fish',actions:[
       {id:'fixture_submit',version:'1',description:'受理整个当前任务',inputSchema:MessageInstructionSubmitSchema,outputSchema:z.json(),effects:'local-write',scope:'conversation',execute:async(input,c)=>outcome(ctx.dafeiyu.submitMessageTask(c,'fixture-tasks',{...MessageInstructionSubmitSchema.parse(input),kind:'explicit-task'}),'confirmed')},

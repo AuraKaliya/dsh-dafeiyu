@@ -15,6 +15,7 @@ import type { FoundationSnapshot } from './foundation.js';
 const projectionSchema=z.strictObject({inboundId:z.uuid(),startedEventId:z.uuid(),reply:z.strictObject({id:z.string(),conversation:ConversationSchema,sourceMessageId:z.string(),text:z.string()}),
   sources:z.array(z.strictObject({kind:z.enum(['message','session','event']),id:z.string(),seq:z.number().int().nonnegative().optional(),route:z.string().min(1)}))});
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
+const ACCEPTED_TASK_NOTICE='任务已受理，正在后台执行；完成后把结果发给你。';
 /** The journal owns delivery. The Run owns only the durable model execution and its projection. */
 export class ConversationRuns {
   private projection:Promise<void>=Promise.resolve();
@@ -32,6 +33,17 @@ export class ConversationRuns {
     this.store.completeWithProjection(run.id,this.store.get(run.id).version,result.resultRef,z.record(z.string(),z.json()).parse(projection));
   }
   fail(run:StoredRun,code='MODEL_INCOMPLETE'):void{const current=this.store.get(run.id);if(['queued','running','cancelling'].includes(current.state))this.store.transition(run.id,current.version,'failed',code);}
+  /** A fixed program notice is proven by task acceptance, not by the discarded model wording. */
+  acceptanceNotice(item:PendingMessage):{guard():void;release():void}|null{
+    const event=this.journal.eventForTrace(item.route,item.id,'turn.completed'),runId=event?.data.runId;
+    if(!item.reply||item.reply.text!==ACCEPTED_TASK_NOTICE||typeof runId!=='string'||!['accepted-task','accepted-task-control-text'].includes(String(event?.data.replyFallback)))return null;
+    if(item.reply.id!==item.id+':reply'||item.reply.sourceMessageId!==item.message.id||runtimeHash(item.reply.conversation)!==runtimeHash(item.message.conversation))throw new Error('SOURCE_STALE');
+    const replyHash=runtimeHash(item.reply);let active=true;
+    const guard=()=>{const run=this.store.get(runId),current=this.journal.get(item.id),completed=this.journal.eventForTrace(item.route,item.id,'turn.completed');
+      if(!active||!run.result||run.state!=='completed'||run.definition.origin.kind!=='message'||run.definition.origin.inboundId!==item.id||run.definition.scope.kind!=='conversation'||run.definition.scope.route!==item.route
+        ||completed?.id!==event!.id||!['reply-ready','sending'].includes(current.state)||runtimeHash(current.reply)!==replyHash||current.message.id!==item.message.id||runtimeHash(current.message.conversation)!==runtimeHash(item.message.conversation)||!this.taskHandoff(runId))throw new Error('SOURCE_STALE');};
+    guard();return {guard,release:()=>{active=false;}};
+  }
   project():Promise<void>{
     const work=this.projection.then(()=>this.projectNow());
     this.projection=work.catch(()=>{});
@@ -55,7 +67,7 @@ export class ConversationRuns {
         // With all tools removed, some providers emit their native call syntax as ordinary text.
         // Keep the persisted model result intact; only project a factual acceptance notice to the channel.
         const controlText=/<[｜|]{1,2}\s*DSML\s*[｜|]{1,2}\s*(?:calls|invoke|parameter)\b/u.test(projection.reply.text);
-        const delegatedFallback=delegated&&(controlText||!projection.reply.text.trim()&&!media),delivery=delegatedFallback?{...projection.reply,text:'任务已受理，正在后台执行；完成后把结果发给你。'}:projection.reply;
+        const delegatedFallback=delegated&&(controlText||!projection.reply.text.trim()&&!media),delivery=delegatedFallback?{...projection.reply,text:ACCEPTED_TASK_NOTICE}:projection.reply;
         this.journal.transition(item.id,'processing','reply-ready',{...eventFor(this.agentId,item,'turn.completed','core',CORE_VERSION,item.id,projection.startedEventId,{runId:run.id,...(delegatedFallback?{replyFallback:controlText?'accepted-task-control-text':'accepted-task'}:{})}),
           sources:projection.sources.map(source=>({kind:source.kind,id:source.id,...(source.seq===undefined?{}:{seq:source.seq}),route:source.route}))},delivery);
       }else if(!['reply-ready','sending','delivered','handled','uncertain'].includes(item.state))throw new Error('RESULT_PROJECTION_CONFLICT');
