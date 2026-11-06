@@ -35,6 +35,7 @@ export type BiliVerification=z.infer<typeof BiliVerificationSchema>;
 const requestState=z.enum(['pending','completed','failed','interrupted']);
 export class BiliStore {
   private readonly db:DatabaseSync;
+  private readonly pageFacts=new Map<string,{body:string;hash:string;page:BiliPage;proofHash:string}>();
   readonly diagnostics:BiliDiagnostics;
   private readonly checking=new Set<string>();
   readonly identity:z.infer<typeof identitySchema>;
@@ -93,7 +94,16 @@ export class BiliStore {
     this.db.prepare('INSERT INTO bili_pages VALUES(?,?,?,?,NULL)').run(page.id,owner,JSON.stringify(page),biliHash(page));related?.(page);
     if(this.db.prepare("UPDATE bili_requests SET state='completed',page_id=? WHERE owner=? AND request_id=? AND state='pending'").run(page.id,owner,requestId).changes!==1)throw new Error('BILI_REQUEST_STATE_CONFLICT');this.audit(context,'bilibili.request.completed',{requestId,pageId:page.id,kind:page.kind});return page;});}
   fail(context:ExecutionContext,requestId:string,error:string){z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).parse(error);const owner=biliOwner(context);this.atomic(()=>{if(this.db.prepare("UPDATE bili_requests SET state='failed',error=? WHERE owner=? AND request_id=? AND state='pending'").run(error,owner,requestId).changes)this.audit(context,'bilibili.request.failed',{requestId,error});});}
-  page(owner:string,id:string):BiliPage{const row=this.db.prepare('SELECT body,hash FROM bili_pages WHERE id=? AND owner=?').get(z.uuid().parse(id),owner);if(!row)throw new Error('BILI_PAGE_UNAVAILABLE');const page=BiliPageSchema.parse(JSON.parse(String(row.body)));if(page.owner!==owner||biliHash(page)!==row.hash)throw new Error('BILI_STATE_CORRUPT');if(!this.sourceKnown(page.sourceKey,page.sourceVersion)||page.parents?.some(p=>!this.valid(p)))throw new Error('SOURCE_STALE');return page;}
+  private checkedPage(owner:string,id:string){const row=this.db.prepare('SELECT body,hash FROM bili_pages WHERE id=? AND owner=?').get(z.uuid().parse(id),owner);if(!row)throw new Error('BILI_PAGE_UNAVAILABLE');
+    const body=String(row.body),hash=String(row.hash),key=JSON.stringify([owner,id]);let fact=this.pageFacts.get(key);
+    if(!fact||fact.body!==body||fact.hash!==hash){const page=BiliPageSchema.parse(JSON.parse(body));if(page.id!==id||page.owner!==owner||biliHash(page)!==hash)throw new Error('BILI_STATE_CORRUPT');
+      fact={body,hash,page,proofHash:biliHash(this.proof(page))};this.pageFacts.delete(key);
+      if(Buffer.byteLength(body)<=262144){if(this.pageFacts.size>=32)this.pageFacts.delete(this.pageFacts.keys().next().value!);this.pageFacts.set(key,fact);}}
+    // The complete stored bytes/hash are compared on every read; source availability and all parent proofs stay live.
+    if(!this.sourceKnown(fact.page.sourceKey,fact.page.sourceVersion)||fact.page.parents?.some(parent=>!this.valid(parent)))throw new Error('SOURCE_STALE');return fact;
+  }
+  page(owner:string,id:string):BiliPage{return structuredClone(this.checkedPage(owner,id).page);}
+  pageMatches(owner:string,id:string,hash:string){return this.checkedPage(owner,id).hash===hash;}
   pages(owner:string){return this.db.prepare('SELECT id FROM bili_pages WHERE owner=? ORDER BY rowid DESC LIMIT 64').all(owner).flatMap(r=>{try{return [this.page(owner,String(r.id))];}catch{return [];}});}
   /** Selected/observed videos survive long subtitle or comment pagination that pushes the video page out of the recent-page window. */
   observedVideoPages(owner:string){return this.db.prepare("SELECT id FROM bili_pages WHERE owner=? AND observation IS NOT NULL AND json_extract(body,'$.kind')='video' ORDER BY rowid DESC LIMIT 2").all(owner).flatMap(r=>{try{return [this.page(owner,String(r.id))];}catch{return [];}});}
@@ -110,8 +120,8 @@ export class BiliStore {
   unavailable(key:string){this.db.prepare('UPDATE bili_sources SET available=0 WHERE key=?').run(key);}
   proof(page:BiliPage):ResourceProof{const frame=page.kind==='browser'&&page.sourceKey.startsWith('browser-frame:')?z.object({bvid:BvidSchema,section:z.literal('frame')}).safeParse(page.data):null;
     return {provider:'bilibili',scene:BILI_SCENE,key:page.id,version:page.sourceVersion,hash:biliHash(page),roots:[frame?.success?'bilibili:video:'+frame.data.bvid:'bilibili:'+page.sourceKey],detail:{owner:page.owner}};}
-  valid(raw:ResourceProof):boolean{if(this.checking.has(raw.key)||this.checking.size>=64)return false;this.checking.add(raw.key);try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail),page=this.page(detail.owner,proof.key);return biliHash(proof)===biliHash(this.proof(page));}catch{return false;}finally{this.checking.delete(raw.key);}}
-  current(raw:ResourceProof):boolean{if(this.checking.has(raw.key)||this.checking.size>=64)return false;this.checking.add(raw.key);try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail),page=this.page(detail.owner,proof.key);if(!this.sourceCurrent(page.sourceKey,page.sourceVersion))return false;return biliHash(proof)===biliHash(this.proof(page));}catch{return false;}finally{this.checking.delete(raw.key);}}
+  valid(raw:ResourceProof):boolean{if(this.checking.has(raw.key)||this.checking.size>=64)return false;this.checking.add(raw.key);try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail);return biliHash(proof)===this.checkedPage(detail.owner,proof.key).proofHash;}catch{return false;}finally{this.checking.delete(raw.key);}}
+  current(raw:ResourceProof):boolean{if(this.checking.has(raw.key)||this.checking.size>=64)return false;this.checking.add(raw.key);try{const proof=ResourceProofSchema.parse(raw),detail=z.object({owner:z.string()}).parse(proof.detail),fact=this.checkedPage(detail.owner,proof.key);if(!this.sourceCurrent(fact.page.sourceKey,fact.page.sourceVersion))return false;return biliHash(proof)===fact.proofHash;}catch{return false;}finally{this.checking.delete(raw.key);}}
   bindObservation(page:BiliPage,source:PersonaSourceRef){const value=JSON.stringify(PersonaSourceRefSchema.parse(source)),old=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);if(!old)throw new Error('BILI_PAGE_UNAVAILABLE');if(old.observation&&old.observation!==value)throw new Error('BILI_OBSERVATION_CONFLICT');this.db.prepare('UPDATE bili_pages SET observation=? WHERE id=?').run(value,page.id);}
   observation(page:BiliPage){const row=this.db.prepare('SELECT observation FROM bili_pages WHERE id=?').get(page.id);return row?.observation?PersonaSourceRefSchema.parse(JSON.parse(String(row.observation))):null;}
   registerMedia(key:string,description:MediaSourceDescription,locator:unknown,expiresAt:number){const body=MediaSourceDescriptionSchema.parse(description),location=JSON.stringify(z.json().parse(locator));

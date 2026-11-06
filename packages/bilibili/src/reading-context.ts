@@ -46,7 +46,7 @@ export function readingContext(store:BiliStore,grant:(view:ExecutionView)=>Scope
       if(item.id!=='bilibili-reading:'+biliOwner(scope)||item.version!==biliHash(item.text))return false;
       const prior=JSON.parse(item.text) as {mediaReadings?:unknown[]};
       if(prior.mediaReadings?.length){const current=new Set(mediaFor(scope).map(row=>biliHash(row)));if(prior.mediaReadings.some(row=>!current.has(biliHash(row))))return false;}
-      return item.sources.filter(source=>source.ref.startsWith('page:')).every(source=>biliHash(store.page(biliOwner(scope),source.ref.slice(5)))===source.hash)&&item.sources.filter(source=>source.ref.startsWith('reading:')).every(source=>{
+      return item.sources.filter(source=>source.ref.startsWith('page:')).every(source=>store.pageMatches(biliOwner(scope),source.ref.slice(5),source.hash))&&item.sources.filter(source=>source.ref.startsWith('reading:')).every(source=>{
         const record=store.readingVersion(scope,source.ref.slice(8),Number(source.version));return record!==null&&biliHash(record)===source.hash;
       });
     }catch{return false;}

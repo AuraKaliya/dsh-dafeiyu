@@ -11,11 +11,25 @@ import { BiliConfigSchema } from '../packages/bilibili/lib/config.js';
 import type { HttpResponse,HttpTransport } from '../packages/bilibili/lib/http.js';
 import { biliUrl,boundedJson,publicAddress } from '../packages/bilibili/lib/http.js';
 import { testTempDir } from './test-temp.js';
+import {DatabaseSync} from 'node:sqlite';
 
 async function fixture(){const root=await mkdtemp(join(testTempDir(),'bili-')),file=join(root,'bilibili.sqlite'),identity={agentId:'fish',profileId:'test'},taskId=randomUUID(),context:ExecutionContext={agentId:'fish',taskId,scope:{kind:'task',agentId:'fish',taskId,scopeKey:taskScopeKey('fish',taskId)},runId:randomUUID(),operationId:randomUUID(),origin:{kind:'native',producerId:'fixture',requestId:'start'},intentVersion:1,grant:{} as ExecutionGrant,signal:new AbortController().signal};
   return {root,file,identity,context,store:new BiliStore(file,identity,true)};}
 const response=(data:unknown,status=200):HttpResponse=>{const bytes=Buffer.from(JSON.stringify(data));return {status,headers:{'content-length':String(bytes.length)},body:(async function*(){yield bytes;})(),close(){}};};
 const page={kind:'discover' as const,sourceKey:'popular:1',data:{titles:['虚构天文']},coverage:['本页'],fields:[{id:'title:0',text:'虚构天文'}]};
+
+test('reused Bili page facts preserve owner, parent, revocation and external integrity checks',async()=>{const f=await fixture();try{
+  f.store.begin(f.context,'parent',{});const parent=f.store.complete(f.context,'parent',page),proof=f.store.proof(parent);
+  f.store.begin(f.context,'child',{});const child=f.store.complete(f.context,'child',{...page,sourceKey:'child',parents:[proof]}),childProof=f.store.proof(child);
+  assert.equal(f.store.valid(childProof),true);assert.equal(f.store.pageMatches(child.owner,child.id,childProof.hash),true);
+  f.store.page(child.owner,child.id).coverage.push('caller mutation');assert.deepEqual(f.store.page(child.owner,child.id).coverage,['本页']);
+  assert.throws(()=>f.store.page('other-owner',child.id),/UNAVAILABLE/);
+  const other=new DatabaseSync(f.file);try{other.prepare('UPDATE bili_sources SET available=0 WHERE key=?').run(parent.sourceKey);assert.equal(f.store.valid(childProof),false);
+    other.prepare('UPDATE bili_sources SET available=1 WHERE key=?').run(parent.sourceKey);assert.equal(f.store.valid(childProof),true);
+    other.exec('DROP TRIGGER bili_page_immutable');other.prepare('UPDATE bili_pages SET body=? WHERE id=?').run(JSON.stringify({...child,coverage:['tampered']}),child.id);assert.equal(f.store.valid(childProof),false);
+  }finally{other.close();}
+  f.store.unavailable(parent.sourceKey);assert.equal(f.store.valid(proof),false);
+}finally{f.store.close();}});
 
 test('a CDN permission hold preserves its resource scope and does not impose its cooldown on API reads',async t=>{
   const f=await fixture();try{let now=Date.now();t.mock.method(Date,'now',()=>now);
