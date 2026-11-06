@@ -9,6 +9,7 @@ import {QqStore,GroupDirectory,GroupSyncConfigSchema} from '@dafeiyu/qq';
 import {QqCapabilities,qqResourceRoute} from '../packages/channel-qq/lib/capabilities.js';
 import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
+import {LlmError} from '@deepseek-ai/dsh-llm';
 
 test('an owner task delivers the actual group text and mention evidence through the native result verifier',{timeout:30000},async t=>{
   const root=await mkdtemp(join(testTempDir(),'owner-task-delivery-'));process.env.DSH_HOME=join(root,'data/core/dsh-home');
@@ -16,9 +17,9 @@ test('an owner task delivers the actual group text and mention evidence through 
   const owner:Conversation={channel:'qq',account:'100001',kind:'private',id:'200001'},group:Conversation={...owner,kind:'group',id:'300001'};
   const qq=new QqStore(join(root,'qq.sqlite')),groups=new GroupDirectory({account:owner.account,allowed:[group.id],store:qq,config:GroupSyncConfigSchema.parse({enabled:true}),fetchGroups:async()=>[{id:group.id,name:'fixture group',msgMask:1}],rejectIdentity:()=>{}});await groups.start();
   qq.remember(qqResourceRoute(group),'group-message',owner.id,'GROUP_TEXT_MUST_REACH_OWNER',{occurredAt:new Date().toISOString(),unsupported:[],mentionedBot:true,groupGeneration:groups.generation(group.id)});
-  let channel:ExtensionHandle|undefined,capabilities:QqCapabilities|undefined,submitted=false,taskStep=0,sawGroupEvidence=false;const delivered:Reply[]=[];
+  let channel:ExtensionHandle|undefined,capabilities:QqCapabilities|undefined,submitted=false,taskStep=0,sawGroupEvidence=false,verificationCalls=0;const delivered:Reply[]=[];
   const adapter=new FixtureAdapter(request=>{
-    if(String(request.sessionId).startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
+    if(String(request.sessionId).startsWith('memory-expression-verify-')){if(verificationCalls++===0)throw new LlmError('fixture transient verifier outage','TRANSPORT');return textResponse('{"faithful":true,"issues":[]}');}
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){const text=request.messages.flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).join(' ');assert.match(text,/GROUP_TEXT_MUST_REACH_OWNER/);assert.match(text,/mentionedBot/);sawGroupEvidence=true;return textResponse('{"qq_messages":[{"type":"text","text":"已核对群消息 GROUP_TEXT_MUST_REACH_OWNER，确实提到了我。"}]}');}
     if(!String(request.sessionId).startsWith('dafeiyu-task-')){if(submitted)return textResponse('已经承接检查。');submitted=true;return toolResponse('fixture_task_submit',{requestId:'inspect-groups',title:'检查群消息'});}
     if(taskStep++===0)return toolResponse('qq_groups',{});
@@ -33,5 +34,6 @@ test('an owner task delivers the actual group text and mention evidence through 
     ctx.dafeiyu.bindMessageTasks({id:'fixture-tasks',pluginId:'fixture-tasks',channelExtensionId:'channel-qq',channel:'qq',account:owner.account,ownerId:owner.id,policyId:'owner-task',version:'1',autoDeliver:true,active:()=>true,classify:message=>({kind:'submit',text:message.text})});
   }});
   try{channel!.ingest({id:'owner-request',occurredAt:new Date().toISOString(),conversation:owner,sender:{id:owner.id,displayName:'主人'},text:'请检查我在群里发的消息和@标记。',mainText:'请检查我在群里发的消息和@标记。'});await host.ctx.dafeiyu.whenIdle();assert.equal(delivered.length,1);assert.match(delivered[0]!.text,/GROUP_TEXT_MUST_REACH_OWNER/);assert.equal(delivered[0]!.conversation.kind,'private');assert.equal(delivered[0]!.conversation.id,owner.id);assert.equal(sawGroupEvidence,true);
+    assert.equal(verificationCalls,2);assert.equal(taskStep,3,'the completed inspection is not rerun when verification retries');
   }finally{capabilities?.close();await host.close();groups.pause();await groups.whenIdle();qq.close();}
 });

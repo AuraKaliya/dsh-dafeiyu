@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import type { RunResultRef } from './runtime-store.js';
 import {z} from 'zod';
 import {setTimeout as wait} from 'node:timers/promises';
+import {transientModelFailure,modelRetryDelay} from '@dafeiyu/contracts';
 const visibleFailure=z.object({kind:z.literal('error'),error:z.object({message:z.string(),code:z.string().optional(),status:z.number().int().optional()})});
 const contextFailures:Readonly<Record<string,string>>={'Required context exceeds budget':'REQUIRED_CONTEXT_CAPACITY','Required context unavailable':'REQUIRED_CONTEXT_UNAVAILABLE','Required context stale':'SOURCE_STALE',
   'Required context contributor missing':'REQUIRED_CONTEXT_PROVIDER_MISSING','Context request budget exceeded':'CONTEXT_REQUEST_CAPACITY'};
@@ -33,10 +34,8 @@ export async function openAgentSession(ctx:Context,id:string,model:AgentOptions,
     let attemptKey='',retries=0;
     scope.on('agent/request-error',async(payload,next)=>{
       const key=payload.turn+':'+payload.step;if(key!==attemptKey){attemptKey=key;retries=0;}
-      const transient=['TRANSPORT','CONNECTION_ERROR','NETWORK_ERROR','TIMEOUT','MESSAGES_IDLE'].includes(payload.failure.code)
-        ||[429,502,503,504].includes(payload.failure.status??0);
-      if(!transient||retries>=2)return next();
-      await wait(750*2**retries++,undefined,{signal:payload.signal});
+      if(!transientModelFailure(payload.failure)||retries>=2)return next();
+      await wait(modelRetryDelay(payload.failure,retries++),undefined,{signal:payload.signal});
       return {kind:'retry' as const};
     });
     scope.on('agent/request',async({agent,signal},next)=>{

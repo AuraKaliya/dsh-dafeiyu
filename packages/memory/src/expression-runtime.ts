@@ -1,10 +1,11 @@
 import type { Context } from '@deepseek-ai/cordis';
-import { createSystemMessage,createUserMessage,ReasoningEffortId } from '@deepseek-ai/dsh-llm';
-import type {GenerateOptions} from '@deepseek-ai/dsh-llm';
+import { createSystemMessage,createUserMessage,ReasoningEffortId,LlmError } from '@deepseek-ai/dsh-llm';
+import type {GenerateOptions,LlmFailure} from '@deepseek-ai/dsh-llm';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { redactContent } from '@dafeiyu/contracts';
+import { redactContent,transientModelFailure,modelRetryDelay } from '@dafeiyu/contracts';
+import {setTimeout as wait} from 'node:timers/promises';
 
 export interface ExpressionModelInput {question:string;evidence:{id:string;text:string}[]}
 const answerSchema=z.strictObject({answer:z.string().trim().min(1).max(4000),citations:z.array(z.string()).max(16),insufficient:z.boolean()});
@@ -16,16 +17,24 @@ export async function verifyPersonaDelivery(ctx:Context,input:ExpressionModelInp
   guard();const timer=AbortSignal.timeout(bounds.timeoutMs??ctx.dafeiyu.phaseTimeouts().verification),deadline=AbortSignal.any([signal,timer]);
   try{const info=await ctx.llm.resolveModelInfo(model.provider,model.model,deadline);
   const effort=['off','low'].find(id=>info.reasoning?.efforts.some(value=>value.id===id))??model.reasoningEffort;
-  // A cutoff is not a fidelity decision. Retry only a truncated verifier, with unchanged evidence and one shared deadline.
-  for(const maxTokens of [8192,16384]){let output='',size=0,finish='missing';deadline.throwIfAborted();
+  const messages=[createSystemMessage(DELIVERY_VERIFICATION_INSTRUCTIONS),createUserMessage({source:{kind:'user'},content:[{type:'text',text:body}]})];
+  // Verification has no external writes. Retain the exact candidate/evidence and one shared deadline across bounded transport retries.
+  let retries=0;
+  for(const maxTokens of [8192,16384]){let output='',size=0,finish='missing';
+  for(;;){output='';size=0;finish='missing';let failure:LlmFailure|undefined;deadline.throwIfAborted();guard();if(JSON.stringify(model)!==JSON.stringify(ctx.dafeiyu.analysisModelRoute()))throw new Error('DELIVERY_VERIFICATION_MODEL_CHANGED');
   const request:GenerateOptions={provider:model.provider,model:model.model,...(effort?{reasoningEffort:ReasoningEffortId(effort)}:{}),
-    sessionId:SessionId(`memory-expression-verify-delivery-${randomUUID()}`),signal:deadline,maxTokens,temperature:0,messages:[createSystemMessage(DELIVERY_VERIFICATION_INSTRUCTIONS),createUserMessage({source:{kind:'user'},content:[{type:'text',text:body}]})]};
+    sessionId:SessionId(`memory-expression-verify-delivery-${randomUUID()}`),signal:deadline,maxTokens,temperature:0,messages};
   await ctx.dafeiyu.inspectContextRequest(request,bounds.maxInputBytes,0,info);guard();
-  for await(const chunk of ctx.llm.stream(request)){
+  try{for await(const chunk of ctx.llm.stream(request)){
     deadline.throwIfAborted();if(chunk.type==='block-start'&&chunk.blockType==='tool-call'||chunk.type==='tool-call-delta'||chunk.type==='block-end'&&chunk.block.type==='tool-call')throw new Error('delivery_tools_forbidden');
     if(chunk.type==='text-delta')size+=chunk.text.length;if(size>12000)throw new Error('delivery_output_capacity');
     if(chunk.type==='block-end'&&chunk.block.type==='text')output+=chunk.block.text;if(output.length>12000)throw new Error('delivery_output_capacity');
-    if(chunk.type==='finish')finish=chunk.reason.kind;
+    if(chunk.type==='finish'){finish=chunk.reason.kind;if(chunk.reason.kind==='error')failure=chunk.reason.failure;}
+  }}catch(error){if(error instanceof LlmError)failure=error.failure;else throw error;}
+  if(!failure)break;
+  deadline.throwIfAborted();guard();if(JSON.stringify(model)!==JSON.stringify(ctx.dafeiyu.analysisModelRoute()))throw new Error('DELIVERY_VERIFICATION_MODEL_CHANGED');
+  if(transientModelFailure(failure)&&retries<2){await wait(modelRetryDelay(failure,retries++),undefined,{signal:deadline});continue;}
+  throw new Error('DELIVERY_VERIFICATION_MODEL_ERROR',{cause:{code:failure.code,...(failure.status===undefined?{}:{status:failure.status}),attempts:retries+1}});
   }
   deadline.throwIfAborted();guard();if(JSON.stringify(model)!==JSON.stringify(ctx.dafeiyu.analysisModelRoute()))throw new Error('DELIVERY_VERIFICATION_MODEL_CHANGED');
   if(finish==='max-tokens'){if(maxTokens===8192)continue;throw new Error('DELIVERY_VERIFICATION_MAX_TOKENS');}

@@ -167,7 +167,8 @@ export class NativeTaskDelivery {
       else this.host.store.nativeDeliveries.finish(runId,result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':result.code==='PARTIAL_DELIVERY'?'partial':'uncertain',result.status==='sent'?result.receiptId:null,result.status==='sent'?null:result.code);
       if(item)this.host.notice({item,text:body,deliveryId:`native-delivery:${record.id}`,status:result.status==='sent'?'sent':result.status==='not-sent'?'not-sent':'unknown',kind:'result',...(result.status==='sent'?{receiptId:result.receiptId}:{code:result.code})});
       else this.host.store.appendExecutionEvent(runId,deferred?'activity.share.deferred':'activity.share.settled',{deliveryId:record.id,status:result.status});
-    }catch(error){this.host.store.appendExecutionEvent(runId,'native.delivery.diagnostic',{stage,code:code(error),name:error instanceof Error?error.name:'Unknown',
+    }catch(error){const modelFailure=z.object({code:z.string().regex(/^[A-Z0-9_]{1,100}$/),status:z.number().int().min(400).max(599).optional(),attempts:z.number().int().min(1).max(3)}).safeParse(error instanceof Error?error.cause:null);
+      this.host.store.appendExecutionEvent(runId,'native.delivery.diagnostic',{stage,code:code(error),name:error instanceof Error?error.name:'Unknown',...(modelFailure.success?{modelFailure:z.json().parse(modelFailure.data)}:{}),
       ...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(String).join('.')}))}:{})});
       const record=this.host.store.nativeDeliveries.get(runId);if(record?.state==='sending')this.host.store.nativeDeliveries.finish(runId,invoked?'uncertain':'not-sent',null,code(error));
       else if(record&&!terminal.has(record.state)){if(signal.aborted)this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
