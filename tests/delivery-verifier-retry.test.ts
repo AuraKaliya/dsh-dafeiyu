@@ -8,7 +8,7 @@ import {textResponse} from './sdk-fixture.js';
 
 const input={question:'Report the recorded fact',evidence:[{id:'one',text:'The file contains the fixture marker.'}]};
 const context=(stream:(request:GenerateOptions)=>AsyncIterable<StreamChunk>)=>({
-  llm:{stream,resolveModelInfo:async()=>({})},dafeiyu:{analysisModelRoute:()=>({provider:'fixture',model:'verifier'}),phaseTimeouts:()=>({verification:10000}),inspectContextRequest:async()=>{}},
+  llm:{stream,resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'},{id:'low'}]}})},dafeiyu:{analysisModelRoute:()=>({provider:'fixture',model:'verifier'}),phaseTimeouts:()=>({verification:10000}),inspectContextRequest:async()=>{}},
 }) as unknown as Context;
 
 test('a transient verifier retry discards partial output and keeps the same evidence and candidate',async()=>{
@@ -17,7 +17,7 @@ test('a transient verifier retry discards partial output and keeps the same evid
     yield* textResponse('{"faithful":true,"issues":[]}');
   });
   await verifyPersonaDelivery(ctx,input,'The file contains the fixture marker.',new AbortController().signal,()=>{});
-  assert.equal(requests.length,2);assert.deepEqual(requests[0]!.messages,requests[1]!.messages);assert.notEqual(requests[0]!.sessionId,requests[1]!.sessionId);
+  assert.equal(requests.length,2);assert.equal(requests[0]!.reasoningEffort,'low');assert.deepEqual(requests[0]!.messages,requests[1]!.messages);assert.notEqual(requests[0]!.sessionId,requests[1]!.sessionId);
   assert.equal(modelRetryDelay({code:'RATE_LIMIT',status:429,providerRetryAfterMs:5000},0),5000);
 });
 
