@@ -7,7 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
 import {API_VERSION,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
 import type {ExtensionHandle,Reply} from '@dafeiyu/contracts';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 import type {Context} from '@deepseek-ai/cordis';
 import {ConversationRuns} from '../packages/core/lib/conversation-run.js';
@@ -23,7 +23,7 @@ test('a persisted handoff closes foreground tools, rejects stale polls, releases
   };
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
-    if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
+    if(session.startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(session.startsWith('dafeiyu-delivery-'))return textResponse('后台结果已准备好。');
     if(session.startsWith('dafeiyu-task-'))return textResponse('执行器独立完成了任务。');
     const active=new Set(request.tools?.map(tool=>tool.name)??[]);

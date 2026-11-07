@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {z} from 'zod';
 import {API_VERSION,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
 import type {Conversation,ExtensionHandle,Reply,InboundMessage} from '@dafeiyu/contracts';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
 test('an owner instruction becomes a durable patrol, authentic group replies stay isolated and unchanged messages do not wake a model',{timeout:30000},async t=>{
@@ -15,7 +15,7 @@ test('an owner instruction becomes a durable patrol, authentic group replies sta
   const actual:InboundMessage={id:'authentic-group-message',occurredAt:new Date().toISOString(),conversation:a,sender:{id:'200002',displayName:'真实测试成员'},text:'大家觉得古画修复中保留原貌重要吗？',mainText:'大家觉得古画修复中保留原貌重要吗？'};
   let channel:ExtensionHandle|undefined,submitted=false,planned=false,patrolCalls=0,updating=false,planId='';
   const adapter=new FixtureAdapter(request=>{
-    if(String(request.sessionId).startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
+    if(String(request.sessionId).startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){const evidence=request.messages.flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).join('\n');assert.ok(evidence.includes(updating?'120000':'60000'),'the final rendering must receive the recorded interval');return textResponse(updating?'群巡视已调整为每两分钟。':'群巡视计划已建立。');}
     if(request.tools?.some(tool=>tool.name==='fixture_task_submit')){if(submitted)return textResponse('已经承接巡视安排。');submitted=true;return toolResponse('fixture_task_submit',{requestId:'watch-owner-request',title:'定期看群'});}
     if(request.tools?.some(tool=>tool.name==='dafeiyu_activity_plan')){if(planned)return textResponse('已保存持久群巡视计划。');planned=true;return updating?toolResponse('dafeiyu_activity_update',{requestId:'update-watch',id:planId,expectedVersion:1,trigger:{kind:'interval',anchorAt:new Date(Date.now()+120000).toISOString(),intervalMs:120000}}):toolResponse('dafeiyu_activity_plan',{requestId:'watch-plan',kind:'group-watch',watch:{mode:'joined',reply:true},goal:'查看群新消息，有具体观点时参与',trigger:{kind:'interval',anchorAt:new Date(Date.now()-1000).toISOString(),intervalMs:60000}});}

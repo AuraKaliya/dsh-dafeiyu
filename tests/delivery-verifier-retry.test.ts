@@ -4,7 +4,7 @@ import type {Context} from '@deepseek-ai/cordis';
 import type {GenerateOptions,StreamChunk} from '@deepseek-ai/dsh-llm';
 import {modelRetryDelay,transientModelFailure} from '@dafeiyu/contracts';
 import {verifyPersonaDelivery} from '../packages/memory/lib/expression-runtime.js';
-import {textResponse} from './sdk-fixture.js';
+import {verificationResponse} from './sdk-fixture.js';
 
 const input={question:'Report the recorded fact',evidence:[{id:'one',text:'The file contains the fixture marker.'}]};
 const context=(stream:(request:GenerateOptions)=>AsyncIterable<StreamChunk>)=>({
@@ -14,7 +14,7 @@ const context=(stream:(request:GenerateOptions)=>AsyncIterable<StreamChunk>)=>({
 test('a transient verifier retry discards partial output and keeps the same evidence and candidate',async()=>{
   const requests:GenerateOptions[]=[];const ctx=context(async function*(request){requests.push(request);
     if(requests.length===1){yield {type:'block-end',index:0,block:{type:'text',text:'incomplete'}};yield {type:'finish',reason:{kind:'error',failure:{code:'HTTP_ERROR',status:503,message:'temporary'}}};return;}
-    yield* textResponse('{"faithful":true,"issues":[]}');
+    yield* verificationResponse(request);
   });
   await verifyPersonaDelivery(ctx,input,'The file contains the fixture marker.',new AbortController().signal,()=>{});
   assert.equal(requests.length,2);assert.equal(requests[0]!.reasoningEffort,'low');assert.deepEqual(requests[0]!.messages,requests[1]!.messages);assert.notEqual(requests[0]!.sessionId,requests[1]!.sessionId);
@@ -25,7 +25,7 @@ test('account failures and definitive fidelity decisions are not retried',async(
   assert.equal(transientModelFailure({code:'TRANSPORT',status:401}),false);
   for(const status of [401,402,403]){let calls=0;const ctx=context(async function*(){calls++;yield {type:'finish',reason:{kind:'error',failure:{code:'HTTP_ERROR',status,message:'private provider detail'}}};});
     await assert.rejects(verifyPersonaDelivery(ctx,input,'fixture',new AbortController().signal,()=>{}),error=>error instanceof Error&&error.message==='DELIVERY_VERIFICATION_MODEL_ERROR'&&!JSON.stringify(error.cause).includes('private provider detail'));assert.equal(calls,1);}
-  let calls=0;const ctx=context(async function*(){calls++;yield* textResponse('{"faithful":false,"issues":["Unsupported claim"]}');});
+  let calls=0;const ctx=context(async function*(request){calls++;yield* verificationResponse(request,'Unsupported claim');});
   await assert.rejects(verifyPersonaDelivery(ctx,input,'fixture',new AbortController().signal,()=>{}),/delivery_unfaithful/);assert.equal(calls,1);
 });
 

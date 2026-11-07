@@ -8,7 +8,7 @@ import {LlmError} from '@deepseek-ai/dsh-llm';
 import type {Reply} from '@dafeiyu/contracts';
 import {QqStore} from '@dafeiyu/qq';
 import {QqSegmentedTransport} from '../packages/channel-qq/lib/transport.js';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
 test('an autonomous result uses verified native delivery without inventing an inbound and does not resend after restart',{timeout:30000},async t=>{
@@ -16,7 +16,7 @@ test('an autonomous result uses verified native delivery without inventing an in
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');const file=join(root,'host.json'),delivered:Reply[]=[],bvid='BV1xNpFedEwH';let step=0,renderAttempts=0;
   const qqStore=new QqStore(join(root,'qq.sqlite'));
   const adapter=new FixtureAdapter(request=>{
-    if(String(request.sessionId).startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
+    if(String(request.sessionId).startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){if(renderAttempts++===0)return (async function*(){throw new LlmError('fixture transient failure','TRANSPORT');})();return textResponse('{"qq_messages":[{"type":"text","text":"刚读到一条关于古画修复的视频资料，这轮还没有看画面。"}]}');}
     if(step++===0)return toolResponse('bili_video',{requestId:'video',bvid});
     if(step===2)return toolResponse('bili_reading_save',{requestId:'reading',bvid,status:'closed',conclusion:'资料介绍修复过程，未读画面。',gaps:['未读取画面'],nextStep:null});

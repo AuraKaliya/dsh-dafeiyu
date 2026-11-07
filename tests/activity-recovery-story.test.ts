@@ -10,7 +10,7 @@ import {LlmError} from '@deepseek-ai/dsh-llm';
 import type {Reply} from '@dafeiyu/contracts';
 import {QqStore} from '@dafeiyu/qq';
 import {QqSegmentedTransport} from '../packages/channel-qq/lib/transport.js';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
 test('real SDK recovery keeps the task, reads saved coverage, finishes and shares exactly once after restart',{timeout:45000},async t=>{
@@ -21,7 +21,7 @@ test('real SDK recovery keeps the task, reads saved coverage, finishes and share
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
     if(session.startsWith('dafeiyu-recovery-probe-'))return textResponse('OK');
-    if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
+    if(session.startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(session.startsWith('dafeiyu-delivery-'))return textResponse('{"qq_messages":[{"type":"text","text":"刚才的阅读已接着完成，沿用了已经读到的古画资料。"}]}');
     if(!restored){
       if(step++===0)return toolResponse('bili_video',{requestId:'initial-video',bvid});

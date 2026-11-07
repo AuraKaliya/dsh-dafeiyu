@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/qq",
-  "version": "0.28.3",
+  "version": "0.28.4",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -21,11 +21,11 @@
     "./management": "./lib/management-definition.js"
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.28.3",
-    "@dafeiyu/core": "0.28.3",
+    "@dafeiyu/contracts": "0.28.4",
+    "@dafeiyu/core": "0.28.4",
     "ws": "8.22.0",
     "zod": "4.4.3",
-    "@dafeiyu/journal": "0.28.3"
+    "@dafeiyu/journal": "0.28.4"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5"

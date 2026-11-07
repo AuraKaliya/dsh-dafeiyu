@@ -10,7 +10,7 @@ import {LlmError} from '@deepseek-ai/dsh-llm';
 import type {Reply} from '@dafeiyu/contracts';
 import {QqStore} from '@dafeiyu/qq';
 import {QqSegmentedTransport} from '../packages/channel-qq/lib/transport.js';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 import {readBiliBrowser} from '../packages/plugin/lib/bili-browser.js';
 
@@ -30,7 +30,7 @@ test('a paused media exploration resumes only the missing frame, delivers its fi
       if(visionCalls===2&&!restored)throw new LlmError('fixture vision unavailable','HTTP_ERROR',{status:402});
       yield* textResponse(JSON.stringify({schemaVersion:1,observations:input.images.map(image=>({image:image.image,description:'修复画面中的人工采样夹具',visibleText:[],uncertainties:[]})),gaps:[]}));return;
     }
-    if(session.startsWith('memory-expression-verify-')){yield* textResponse('{"faithful":true,"issues":[]}');return;}
+    if(session.startsWith('memory-expression-verify-')){yield* verificationResponse(request);return;}
     if(session.startsWith('dafeiyu-delivery-')){yield* textResponse('{"qq_messages":[{"type":"text","text":"刚把缺少的第二个采样画面补读了，已有画面没有重读；这仍只是采样。"}]}');return;}
     const found=[...new Set(JSON.stringify(request.messages).match(/frame:[0-9a-f-]{36}/g)??[])];if(found.length>=2)frameKeys=found.slice(0,2);
     if(!restored){

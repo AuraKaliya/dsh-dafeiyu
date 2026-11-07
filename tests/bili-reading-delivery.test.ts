@@ -6,7 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {z} from 'zod';
 import {API_VERSION,ActionOutcomeSchema,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
 import type {ExtensionHandle,Reply} from '@dafeiyu/contracts';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
 const large=process.env.DAFEIYU_LARGE_ACCEPTANCE==='1';
@@ -18,7 +18,7 @@ test('a message task reads multiple videos and delivers exactly one verified res
   const delivered:Reply[]=[],label=large?'七十条':'四条',alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',videos=Array.from({length:large?70:4},(_,i)=>'BV1xNpFedE'+alphabet[Math.floor(i/alphabet.length)]+alphabet[i%alphabet.length]);
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
-    if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
+    if(session.startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(session.startsWith('dafeiyu-delivery-')){
       assert.match(JSON.stringify(request.messages),/bilibili-reading-progress/);
       return textResponse(`已保存${label}视频的阅读记录。本轮依据视频资料，未完整观看视频或音轨。`);

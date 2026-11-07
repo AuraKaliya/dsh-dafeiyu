@@ -9,6 +9,7 @@ import Tools from '@deepseek-ai/dsh-tools';
 import LlmRuntime,{LlmAdapter,ToolCallId} from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions,LlmResolvedModelInfo,StreamChunk } from '@deepseek-ai/dsh-llm';
 import { randomUUID } from 'node:crypto';
+import {z} from 'zod';
 
 export class FixtureAdapter extends LlmAdapter {
   readonly requests:GenerateOptions[]=[];
@@ -20,6 +21,13 @@ export class FixtureAdapter extends LlmAdapter {
 export async function* textResponse(text:string):AsyncIterable<StreamChunk>{
   yield {type:'block-start',index:0,blockType:'text'};yield {type:'text-delta',index:0,text};
   yield {type:'block-end',index:0,block:{type:'text',text}};yield {type:'finish',reason:{kind:'stop'}};
+}
+/** Scripted protocol response; semantic correctness is exercised separately with real-model replay. */
+export function verificationResponse(request:GenerateOptions,issue?:string):AsyncIterable<StreamChunk>{
+  const text=request.messages.filter(message=>message.role==='user').flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).at(-1)!;
+  const body=z.object({stage:z.literal('final-factual-check'),candidatePassages:z.array(z.object({id:z.string()})),approvedEvidence:z.array(z.object({id:z.string()}))}).parse(JSON.parse(text));
+  const source=body.approvedEvidence[0]?.id;
+  return textResponse(JSON.stringify({checks:body.candidatePassages.map(p=>({passageId:p.id,status:issue?'unsupported':source?'supported':'non-factual',evidenceIds:source?[source]:[],issue:issue??null}))}));
 }
 export async function* toolResponse(name:string,args:unknown):AsyncIterable<StreamChunk>{
   const id=ToolCallId(randomUUID()),argumentsJson=JSON.stringify(args);

@@ -7,7 +7,7 @@ import {z} from 'zod';
 import {API_VERSION,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
 import type {ExtensionHandle} from '@dafeiyu/contracts';
 import {RuntimeStore} from '@dafeiyu/core/runtime-store';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 
 test('bare acknowledgements and progress queries reuse the real task instead of creating new goals',{timeout:30000},async t=>{
@@ -17,7 +17,7 @@ test('bare acknowledgements and progress queries reuse the real task instead of 
   let channel:ExtensionHandle|undefined;const actions:string[]=[];let toolRequests=0,nativeDeliveries=0;const nativeReads=new Set<string>();const results:any[]=[];
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
-    if(session.startsWith('memory-expression-verify-'))return textResponse('{"faithful":true,"issues":[]}');
+    if(session.startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(session.startsWith('dafeiyu-task-')||session.startsWith('dafeiyu-delivery-')){if(request.tools?.some(tool=>tool.name==='dafeiyu_memory_pending')&&!nativeReads.has(session)){nativeReads.add(session);return toolResponse('dafeiyu_memory_pending',{});}return textResponse('已依据当前对话答复。');}
     toolRequests++;
     if(toolRequests>12)throw new Error('SCRIPTED_TOOL_LOOP');

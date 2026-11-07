@@ -7,7 +7,7 @@ import {API_VERSION,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
 import type {Conversation,ExtensionHandle,Reply} from '@dafeiyu/contracts';
 import {QqStore,GroupDirectory,GroupSyncConfigSchema} from '@dafeiyu/qq';
 import {QqCapabilities,qqResourceRoute} from '../packages/channel-qq/lib/capabilities.js';
-import {FixtureAdapter,textResponse,toolResponse} from './sdk-fixture.js';
+import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
 import {LlmError} from '@deepseek-ai/dsh-llm';
 
@@ -19,7 +19,7 @@ test('an owner task delivers the actual group text and mention evidence through 
   qq.remember(qqResourceRoute(group),'group-message',owner.id,'GROUP_TEXT_MUST_REACH_OWNER',{occurredAt:new Date().toISOString(),unsupported:[],mentionedBot:true,groupGeneration:groups.generation(group.id)});
   let channel:ExtensionHandle|undefined,capabilities:QqCapabilities|undefined,submitted=false,taskStep=0,sawGroupEvidence=false,verificationCalls=0,renderingCalls=0;const delivered:Reply[]=[];
   const adapter=new FixtureAdapter(request=>{
-    if(String(request.sessionId).startsWith('memory-expression-verify-')){if(verificationCalls++===0)throw new LlmError('fixture transient verifier outage','TRANSPORT');return textResponse(verificationCalls===2?'{"faithful":false,"issues":["群消息和提及记录已存在，不能声称未收到。"]}':'{"faithful":true,"issues":[]}');}
+    if(String(request.sessionId).startsWith('memory-expression-verify-')){if(verificationCalls++===0)throw new LlmError('fixture transient verifier outage','TRANSPORT');return verificationResponse(request,verificationCalls===2?'群消息和提及记录已存在，不能声称未收到。':undefined);}
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){const text=request.messages.flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).join(' ');assert.match(text,/GROUP_TEXT_MUST_REACH_OWNER/);assert.match(text,/mentionedBot/);sawGroupEvidence=true;
       if(renderingCalls++===0)return textResponse('{"qq_messages":[{"type":"text","text":"群里没有收到主人消息。"}]}');
       assert.match(text,/previousCandidateUnapproved/);assert.match(text,/群消息和提及记录已存在/);return textResponse('{"qq_messages":[{"type":"text","text":"已核对群消息 GROUP_TEXT_MUST_REACH_OWNER，确实提到了我。"}]}');}
