@@ -13,12 +13,22 @@ test('an owner instruction becomes a durable patrol, authentic group replies sta
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');
   const owner:Conversation={channel:'qq',account:'100001',kind:'private',id:'200001'},a:Conversation={...owner,kind:'group',id:'300001'},b:Conversation={...a,id:'300002'},delivered:Reply[]=[];
   const actual:InboundMessage={id:'authentic-group-message',occurredAt:new Date().toISOString(),conversation:a,sender:{id:'200002',displayName:'真实测试成员'},text:'大家觉得古画修复中保留原貌重要吗？',mainText:'大家觉得古画修复中保留原貌重要吗？'};
-  let channel:ExtensionHandle|undefined,submitted=false,planned=false,patrolCalls=0,updating=false,planId='';
+  let channel:ExtensionHandle|undefined,submitted=false,planned=false,statusRequested=false,patrolCalls=0,updating=false,planId='',configurationChecks=0;
   const adapter=new FixtureAdapter(request=>{
     if(String(request.sessionId).startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){const evidence=request.messages.flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).join('\n');assert.ok(evidence.includes(updating?'120000':'60000'),'the final rendering must receive the recorded interval');return textResponse(updating?'群巡视已调整为每两分钟。':'群巡视计划已建立。');}
     if(request.tools?.some(tool=>tool.name==='fixture_task_submit')){if(submitted)return textResponse('已经承接巡视安排。');submitted=true;return toolResponse('fixture_task_submit',{requestId:'watch-owner-request',title:'定期看群'});}
-    if(request.tools?.some(tool=>tool.name==='dafeiyu_activity_plan')){if(planned)return textResponse('已保存持久群巡视计划。');planned=true;return updating?toolResponse('dafeiyu_activity_update',{requestId:'update-watch',id:planId,expectedVersion:1,trigger:{kind:'interval',anchorAt:new Date(Date.now()+120000).toISOString(),intervalMs:120000}}):toolResponse('dafeiyu_activity_plan',{requestId:'watch-plan',kind:'group-watch',watch:{mode:'joined',reply:true},goal:'查看群新消息，有具体观点时参与',trigger:{kind:'interval',anchorAt:new Date(Date.now()-1000).toISOString(),intervalMs:60000}});}
+    if(request.tools?.some(tool=>tool.name==='dafeiyu_activity_plan')){if(planned){
+      const material=JSON.stringify(request.messages);assert.match(material,/configuration-only/);assert.match(material,/sourceTaskMustSettle/);
+      if(!statusRequested){statusRequested=true;return toolResponse('dafeiyu_activity_status',{id:host.ctx.dafeiyuActivity.store.management()[0]!.body.id});}
+      return (async function*(){
+        assert.match(material,/waitsForCurrentTask\\?":true/);assert.match(material,/正在等待本次设置任务/);
+        const status=host.ctx.dafeiyuActivity.management('status',null) as {plans:{dispatch:{sourceState:string;foregroundBusy:boolean}}[]};
+        assert.equal(status.plans[0]!.dispatch.sourceState,'pending');assert.equal(status.plans[0]!.dispatch.foregroundBusy,true);
+        const before=patrolCalls;await host.ctx.dafeiyuActivity.tick();assert.equal(patrolCalls,before,'unfinished configuration must not wait for a patrol blocked by its own source');configurationChecks++;
+        yield* textResponse('配置已保存，结束本次设置任务后再由后台调度；此回执不表示已经巡视。');
+      })();
+    }planned=true;return updating?toolResponse('dafeiyu_activity_update',{requestId:'update-watch',id:planId,expectedVersion:1,trigger:{kind:'interval',anchorAt:new Date(Date.now()+120000).toISOString(),intervalMs:120000}}):toolResponse('dafeiyu_activity_plan',{requestId:'watch-plan',kind:'group-watch',watch:{mode:'joined',reply:true},goal:'查看群新消息，有具体观点时参与',trigger:{kind:'interval',anchorAt:new Date(Date.now()-1000).toISOString(),intervalMs:60000}});}
     const text=JSON.stringify(request.messages);assert.match(text,/主人授权的群巡视/);assert.doesNotMatch(text,/PRIVATE_SECRET|GROUP_B_SECRET/);patrolCalls++;return textResponse('{"qq_messages":[{"type":"text","text":"我会先区分哪些修复能撤销，哪些改变不可逆。"}]}');
   });
   await writeFile(join(root,'persona.md'),'隔离测试人格。');const file=join(root,'host.json');
@@ -36,10 +46,10 @@ test('an owner instruction becomes a durable patrol, authentic group replies sta
     assert.equal(patrolCalls,1);assert.equal(delivered.filter(reply=>reply.conversation.id===a.id).length,1);assert.equal(delivered.filter(reply=>reply.conversation.id===b.id).length,0);
     const count=adapter.requests.length;for(let i=0;i<100;i++)assert.equal(host.ctx.dafeiyu.pollPatrol({planId:plan.body.id,version:plan.body.version,anchor:plan.body.anchor!,target:a,cursor:1,reply:true}).state,'no-new-message');
     assert.equal(adapter.requests.length,count);
-    planId=plan.body.id;updating=true;submitted=false;planned=false;
+    planId=plan.body.id;updating=true;submitted=false;planned=false;statusRequested=false;
     channel!.ingest({id:'owner-adjust-watch',occurredAt:new Date().toISOString(),conversation:owner,sender:{id:owner.id,displayName:'主人'},text:'把已有群巡视改成每两分钟，不新增计划。',mainText:'把已有群巡视改成每两分钟，不新增计划。'});
     await host.ctx.dafeiyu.whenIdle();const changed=host.ctx.dafeiyuActivity.store.get(planId);assert.equal(changed.body.version,2);assert.equal(changed.body.trigger.kind,'interval');
-    if(changed.body.trigger.kind==='interval')assert.equal(changed.body.trigger.intervalMs,120000);assert.equal(host.ctx.dafeiyuActivity.store.management().length,1);
+    if(changed.body.trigger.kind==='interval')assert.equal(changed.body.trigger.intervalMs,120000);assert.equal(host.ctx.dafeiyuActivity.store.management().length,1);assert.equal(configurationChecks,2);
     await host.close();host=await ManagedHost.start(config,options);await host.ctx.dafeiyuActivity.tick();await host.ctx.dafeiyu.whenIdle();assert.equal(patrolCalls,1);
   }finally{await host.close();}
 });

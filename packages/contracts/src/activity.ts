@@ -36,10 +36,12 @@ export const ActivityScheduleBodySchema=z.strictObject({schemaVersion:z.literal(
   quiet:z.array(QuietWindowSchema).max(8),state:z.enum(['active','paused','cancelled']),createdAt:at,updatedAt:at,
 });
 export type ActivityScheduleBody=z.infer<typeof ActivityScheduleBodySchema>;
+export const ACTIVITY_PLAN_COMPLETION_RULE='计划配置保存与计划实际执行是两个阶段。只要求创建或修改配置时，取得保存后的版本回执即可结束设置任务并汇报配置；后台计划要等待来源任务结束或让出、前台空闲后才参与调度。不要在同一个设置任务里用sleep、等待命令或轮询来等它首次执行，否则会等待自己的结束。配置回执不代表已经巡视或发送，实际执行仍受到期时间、静默、权限和资源状态约束。';
+const activationPolicy=z.strictObject({sourceTaskMustSettle:z.literal(true),foregroundMustBeIdle:z.literal(true),evidence:z.literal('configuration-only'),note:z.literal(ACTIVITY_PLAN_COMPLETION_RULE)});
 /** Safe facts about the recorded plan revision, with no goal, source content or condition key. */
 export const ActivityPlanReceiptSchema=z.strictObject({id:z.uuid(),version,purpose:ActivityScheduleBodySchema.shape.purpose,state:ActivityScheduleBodySchema.shape.state,
   trigger:z.discriminatedUnion('kind',[ActivityTriggerSchema.options[0],ActivityTriggerSchema.options[1],ActivityTriggerSchema.options[2].omit({key:true})]),
-  timeZone:ActivityTimeZoneSchema,quiet:z.array(QuietWindowSchema).max(8),watch:GroupWatchSchema.omit({groupIds:true}).optional(),recordedAt:at});
+  timeZone:ActivityTimeZoneSchema,quiet:z.array(QuietWindowSchema).max(8),watch:GroupWatchSchema.omit({groupIds:true}).optional(),recordedAt:at,activationPolicy:activationPolicy.optional()});
 export const ActivityDomainEventSchema=z.strictObject({id:PersonaRequestIdSchema,type:z.enum(['task-settled','memory-pending','resource-restored']),
   key:z.string().min(1).max(2000),watermark:z.string().min(1).max(200),occurredAt:at,origin:z.enum(['primary','activity','maintenance']),causedBy:z.string().max(200).nullable()});
 export type ActivityDomainEvent=z.infer<typeof ActivityDomainEventSchema>;
