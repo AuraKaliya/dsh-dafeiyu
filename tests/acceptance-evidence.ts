@@ -19,6 +19,7 @@ export function acceptanceDatabase(root: string) {
       deliveries: db.prepare('SELECT run_id,state,receipt,body,anchor FROM native_deliveries').all().map(row => ({...row, anchor: decode(row.anchor)})),
       requests: db.prepare('SELECT id,body,settlement FROM model_requests').all().map(row => ({...row, body: decode(row.body), settlement: decode(row.settlement)})),
       operations: db.prepare('SELECT action,outcome FROM run_operations').all().map(row => ({...row, outcome: decode(row.outcome)})),
+      recoveryEvents: db.prepare("SELECT body FROM runtime_outbox WHERE json_extract(body,'$.type') LIKE 'native.delivery.recovery.%' ORDER BY ordinal").all().map(row=>decode(row.body)),
     };
   } finally { db.close(); }
 }

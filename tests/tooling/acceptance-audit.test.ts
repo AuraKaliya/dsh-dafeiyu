@@ -26,6 +26,13 @@ function fixture() {
       database:{...database,deliveries:[],operations:Array.from({length:16},(_,i)=>({action:i%2?'bili_reading_save':'bili_video',outcome:{status:'succeeded'}})),
         requests:Array.from({length:17},()=>({id:randomUUID(),body:{sessionId:'reading',phase:'task'},settlement:{receipt:{tokens:null}}}))}},
   };
+  for(const id of ['delivery-render-recovery','delivery-verifier-recovery']){
+    const deliveryId=randomUUID(),phases=id==='delivery-render-recovery'?['rendering','rendering','verification']:['rendering','verification','verification'];
+    const recoveryRequests=phases.map(phase=>({id:randomUUID(),body:{sessionId:phase,phase},settlement:{receipt:{tokens:null}}}));
+    evidence[id]={before:{deliveryId,taskId,runId:run,state:'rejected'},after:{deliveryId,taskId,runId:run,state:'sent'},delivered:[{text,conversation:target}],verificationInputs:['same candidate','same candidate'],
+      requests:recoveryRequests.map(row=>({sessionId:row.body.sessionId,inputBytes:100,toolResultBytes:20,repeatedToolResultBytes:10})),
+      database:{...database,requests:recoveryRequests,recoveryEvents:[{runId:run,type:'native.delivery.recovery.requested',data:{requestId:'r'}},{runId:run,type:'native.delivery.recovery.settled',data:{requestId:'r',state:'sent',error:null}}]}};
+  }
   const manifest={schemaVersion:1,runId,mode:'offline-sdk',criteriaVersion,revision:'d'.repeat(40),version:'0.28.7',apiVersion:7,sourceHash,driverHash,configHash:hash(offlineConfiguration),catalogHash:hash(catalog),startedAt:'2026-11-07T00:00:00.000Z',scenarios:catalog.map(row=>row.id)};
   const artifacts=new Map(catalog.map(spec=>[spec.id,{schemaVersion:1,runId,scenarioId:spec.id,capturedAt:'2026-11-07T00:01:00.000Z',version:manifest.version,apiVersion:7,sourceHash,driverHash,runtimeHash,evidence:evidence[spec.id]}]));
   const completion={schemaVersion:1,runId,finishedAt:'2026-11-07T00:02:00.000Z',testExitCode:0,sourceHash,driverHash,runtimeHash,artifactHashes:Object.fromEntries([...artifacts].map(([id,row])=>[id,hash(row)]))};

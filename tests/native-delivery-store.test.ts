@@ -53,3 +53,62 @@ test('queued autonomous shares start their validity window at admission and cool
     assert.throws(()=>store.nativeDeliveries.deferActivity(first.run.id),/DELIVERY_STATE_CONFLICT/,'a confirmed delivery is never reopened');
   }finally{store.close();}
 });
+
+test('recovery receipt is durable and single-flight, preserving the immutable material and candidate across restart',async()=>{
+  const path=await file();let store=new RuntimeStore(path,identity,{create:true});
+  try{
+    const {run,anchor,ref}=setup(store),delivery=store.nativeDeliveries;
+    delivery.create(anchor);delivery.start(run.id,{packetId:randomUUID(),sourceStamp:digest,foundationHash:digest,personaHash:digest,modelHash:digest});
+    delivery.candidate(run.id,ref);delivery.reject(run.id,'DELIVERY_VERIFICATION_MODEL_ERROR');
+    const before=delivery.get(run.id)!,input={requestId:randomUUID(),expectedVersion:before.version};
+    assert.throws(()=>delivery.requestRecovery(run.id,{...input,expectedVersion:before.version-1}),/VERSION_CONFLICT/);
+    const receipt=delivery.requestRecovery(run.id,input);assert.equal(receipt.phase,'verification');
+    assert.deepEqual(delivery.requestRecovery(run.id,input),receipt);
+    assert.throws(()=>delivery.requestRecovery(run.id,{...input,expectedVersion:before.version+1}),/IDEMPOTENCY_CONFLICT/);
+    assert.throws(()=>delivery.requestRecovery(run.id,{...input,requestId:randomUUID()}),/PENDING/);
+    store.close();store=new RuntimeStore(path,identity);store.nativeDeliveries.recover();
+    assert.deepEqual(store.nativeDeliveries.pendingRecovery(run.id),receipt);
+    store.nativeDeliveries.beginRecovery(run.id,input.requestId);
+    const after=store.nativeDeliveries.get(run.id)!;assert.equal(after.state,'verifying');assert.equal(after.id,before.id);
+    assert.deepEqual(after.anchor,before.anchor);assert.deepEqual(after.material,before.material);assert.deepEqual(store.nativeDeliveries.work(run.id).candidate,ref);
+    // A second crash during an authorized continuation resumes that request, not a new task.
+    store.close();store=new RuntimeStore(path,identity);store.nativeDeliveries.recover();
+    store.nativeDeliveries.beginRecovery(run.id,input.requestId);
+    store.nativeDeliveries.rendered(run.id,ref);store.nativeDeliveries.approve(run.id,body);store.nativeDeliveries.sending(run.id);store.nativeDeliveries.finish(run.id,'sent','confirmed',null);
+    store.nativeDeliveries.settleRecovery(run.id,input.requestId);
+    assert.equal(store.nativeDeliveries.pendingRecovery(run.id),null);assert.deepEqual(store.nativeDeliveries.requestRecovery(run.id,input),receipt);
+    assert.equal(store.nativeDeliveries.get(run.id)?.state,'sent');assert.deepEqual(store.get(run.id).result,ref);
+    assert.throws(()=>store.nativeDeliveries.requestRecovery(run.id,{requestId:randomUUID(),expectedVersion:store.nativeDeliveries.get(run.id)!.version}),/RECOVERY_STATE/);
+  }finally{store.close();}
+});
+
+test('repair history and three-draft limit survive interrupted verification and recovery',async()=>{
+  const store=new RuntimeStore(await file(),identity,{create:true});
+  try{const {run,anchor,ref}=setup(store),delivery=store.nativeDeliveries;
+    delivery.create(anchor);delivery.start(run.id,{packetId:randomUUID(),sourceStamp:digest,foundationHash:digest,personaHash:digest,modelHash:digest});
+    for(let i=0;i<3;i++){
+      const candidate={...ref,sessionId:'draft-'+i};delivery.candidate(run.id,candidate);
+      if(i===2){delivery.reject(run.id,'DELIVERY_VERIFICATION_MODEL_ERROR');const request={requestId:randomUUID(),expectedVersion:delivery.get(run.id)!.version};
+        delivery.requestRecovery(run.id,request);delivery.beginRecovery(run.id,request.requestId);assert.deepEqual(delivery.work(run.id).candidate,candidate);delivery.settleRecovery(run.id,request.requestId);}
+      store.appendExecutionEvent(run.id,'native.delivery.verification-rejected',{attempt:i,renderRef:candidate,feedback:{kind:'delivery-fidelity',issues:['issue-'+i]}});
+      if(i<2)delivery.repair(run.id);else delivery.reject(run.id,'DELIVERY_UNFAITHFUL');
+    }
+    assert.deepEqual(delivery.work(run.id).issues,['issue-0','issue-1','issue-2']);assert.equal(delivery.work(run.id).candidate,null);
+    assert.equal(delivery.recoveryView(run.id).reason,'DELIVERY_REPAIR_EXHAUSTED');
+    assert.throws(()=>delivery.requestRecovery(run.id,{requestId:randomUUID(),expectedVersion:delivery.get(run.id)!.version}),/REPAIR_EXHAUSTED/);
+  }finally{store.close();}
+});
+
+test('expired, stale and uncertain deliveries cannot be reopened as generation or verification work',async()=>{
+  const store=new RuntimeStore(await file(),identity,{create:true});
+  try{for(const failure of ['expired','stale','unknown'] as const){
+    const {run,anchor,ref}=setup(store),delivery=store.nativeDeliveries;
+    delivery.create(failure==='expired'?{...anchor,expiresAt:'2020-01-01T00:00:00.000Z'}:anchor);
+    delivery.start(run.id,{packetId:randomUUID(),sourceStamp:digest,foundationHash:digest,personaHash:digest,modelHash:digest});
+    if(failure==='unknown'){delivery.rendered(run.id,ref);delivery.approve(run.id,body);delivery.sending(run.id);delivery.recover();}
+    else delivery.reject(run.id,failure==='stale'?'SOURCE_STALE':'NATIVE_DELIVERY_FAILED');
+    const row=delivery.get(run.id)!;assert.equal(delivery.recoveryView(run.id).available,false);
+    assert.throws(()=>delivery.requestRecovery(run.id,{requestId:randomUUID(),expectedVersion:row.version}),/RECOVERY_/);
+    assert.deepEqual(delivery.get(run.id),row);
+  }}finally{store.close();}
+});

@@ -3,7 +3,7 @@ import {z} from 'zod';
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const count = z.number().int().nonnegative().safe();
 export const manifestSchema = z.strictObject({schemaVersion: z.literal(1), runId: z.uuid(), mode: z.literal('offline-sdk'),
-  criteriaVersion: z.string(), revision: z.string().regex(/^[a-f0-9]{40}$/), version: z.string(), apiVersion: count,
+  criteriaVersion: z.string(), revision: z.string().regex(/^[a-f0-9]{40}$/).nullable(), version: z.string(), apiVersion: count,
   sourceHash: digest, driverHash: digest, configHash: digest, catalogHash: digest, startedAt: z.iso.datetime(), scenarios: z.array(z.string()).min(1)});
 export const completionSchema = z.strictObject({schemaVersion: z.literal(1), runId: z.uuid(), finishedAt: z.iso.datetime(),
   testExitCode: z.number().int(), sourceHash: digest, driverHash: digest, runtimeHash: digest, artifactHashes: z.record(z.string(), digest)});

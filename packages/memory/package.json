@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/memory",
-  "version": "0.28.7",
+  "version": "0.28.8",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -33,10 +33,10 @@
     "./management": "./lib/management-definition.js"
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.28.7",
-    "@dafeiyu/core": "0.28.7",
-    "@dafeiyu/journal": "0.28.7",
-    "@dafeiyu/timeline": "0.28.7",
+    "@dafeiyu/contracts": "0.28.8",
+    "@dafeiyu/core": "0.28.8",
+    "@dafeiyu/journal": "0.28.8",
+    "@dafeiyu/timeline": "0.28.8",
     "zod": "4.4.3"
   },
   "peerDependencies": {

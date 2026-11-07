@@ -25,6 +25,8 @@ npm run test:acceptance -- --out .runtime/acceptance/my-first-run
 | owner-report | 主人任务读取群消息并三稿修订 | 原业务读取不重复、候选生成与核验请求数量、实际目标和送达 | 脚本核验；不证明自然语言事实判断 |
 | dsh-result-read | 真实 DSH 结果归档与读取 | 实际源码行内容及覆盖，不依赖调用函数名 | 不是宿主工具执行，也不是完整诊断 |
 | video-reading | 八条合成视频资料与阅读记录 | 同 Task、记录数量、读取次数、上下文及请求账本 | 没有真实字幕、画面或音轨，不代表完整观看 |
+| delivery-render-recovery | 生成故障后管理入口恢复 | 同任务与交付、持久请求、业务读取一次、最终送达 | 有效材料内的发送前恢复，不覆盖过期续期 |
+| delivery-verifier-recovery | 核验故障后主人 retry | 同候选及证据、生成不重做、重启不重复发送 | 脚本核验，不证明真实语义可靠性 |
 
 场景及判据在 `catalog.ts`、`audit.ts` 中版本管理。运行输出的 `passed` 只表示这个离线子集；`releaseAccepted` 始终为 `false`，全部业务要求的最终验收仍单列为未执行。
 
@@ -85,6 +87,6 @@ node scripts/acceptance/replay-verifier.ts <响应档案.json> <新的报告.jso
 
 ## 继续开发
 
-第 1 轮的生成失败和核验失败已放入 `native-delivery-interruption.test.ts` 与 `native-verification-interruption.test.ts`，测试名称明确标记 `R1.1 known gap`。当前断言用于复现“成果已存但交付恢复被终止状态挡住”，不是接受该行为为正确；R1.4 实现后必须将它们改为只恢复交付并最终送达的回归。
+第 1 轮的生成失败和核验失败位于 `native-delivery-interruption.test.ts` 与 `native-verification-interruption.test.ts`。0.28.8 已将原 `R1.1 known gap` 现状刻画改为成功恢复回归，核对同 Task/Run/交付 ID、实际业务读取不重复和最终送达。恢复取消、撤权、三稿上限及受理后停机另有独立测试进程。判据版本已更新为 `corrective-offline-2`，包含七个离线场景。
 
 完整真实故事、真实核验采集、视频补读和故障恢复的独立证据适配、真实模型费用基线及两小时驱动仍待后续工作项完成。当前离线结果不能替代这些退出条件。

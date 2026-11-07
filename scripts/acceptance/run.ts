@@ -17,8 +17,12 @@ mkdirSync(dirname(directory),{recursive:true});mkdirSync(directory);
 const pkg=z.object({version:z.string()}).parse(readJson(join(repository,'package.json')));
 const protocol=readFileSync(join(repository,'packages/contracts/src/protocol.ts'),'utf8');
 const apiVersion=Number(/API_VERSION\s*=\s*(\d+)/.exec(protocol)?.[1]);
+let revision:string|null=null;
+try{const options={cwd:repository,encoding:'utf8' as const,windowsHide:true,stdio:['ignore','pipe','ignore'] as ['ignore','pipe','ignore']};
+  if(resolve(execFileSync('git',['rev-parse','--show-toplevel'],options).trim())===repository)revision=execFileSync('git',['rev-parse','HEAD'],options).trim();
+}catch{/* Source archives have content identities without inventing a Git revision. */}
 const manifest=manifestSchema.parse({schemaVersion:1,runId,mode:'offline-sdk',criteriaVersion,
-  revision:execFileSync('git',['rev-parse','HEAD'],{cwd:repository,encoding:'utf8',windowsHide:true}).trim(),version:pkg.version,apiVersion,
+  revision,version:pkg.version,apiVersion,
   sourceHash:fingerprint('source'),driverHash:fingerprint('driver'),configHash:hash(offlineConfiguration),catalogHash:hash(catalog),
   startedAt:new Date().toISOString(),scenarios:catalog.map(row=>row.id)});
 saveJson(join(directory,'manifest.json'),manifest);

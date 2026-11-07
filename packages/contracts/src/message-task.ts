@@ -12,7 +12,7 @@ import type { Conversation } from './conversation.js';
 /** Model-side interpretation of how the current message relates to an existing task.
  * It never supplies authority: Core binds the message, owner, conversation and task version. */
 const MessageTaskIntentSchema=z.strictObject({
-  relation:z.enum(['new','amend','confirm','continue','retry','status']).default('new'),
+  relation:z.enum(['new','amend','confirm','continue','retry','status']).default('new').describe('已有任务用对应关系承接。业务已结束但生成或核验中断时，continue/retry仅请求原成果交付接续；status只查询，不重跑业务。'),
   targetTaskId:z.uuid().optional(),
   expectedVersion:z.number().int().positive().optional(),
   resolvedGoal:z.string().trim().min(1).describe('已有任务修订后的完整目标；新任务仍以当前用户原话为准。').optional(),

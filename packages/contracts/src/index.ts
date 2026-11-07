@@ -25,6 +25,7 @@ export * from './execution-memory.js';
 export * from './resource-observation.js';
 export * from './message-task.js';
 export * from './native-expression.js';
+export * from './delivery-recovery.js';
 export * from './memory-maintenance.js';
 export * from './activity.js';
 export * from './autonomy.js';

@@ -16,7 +16,7 @@ export function auditScenario(id: string, raw: unknown): {checks: Check[]; basel
   const check = (name: string, passed: boolean) => checks.push({id: name, passed});
   const evidence = record.parse(raw);
   let baseline: unknown = null;
-  if (id.startsWith('patrol-') || id === 'owner-report' || id === 'video-reading') {
+  if (id.startsWith('patrol-') || id === 'owner-report' || id === 'video-reading' || id.startsWith('delivery-')) {
     const database = databaseEvidenceSchema.parse(evidence.database);
     const requests = z.array(requestMeasurementSchema).parse(evidence.requests);
     const sessions = (values: readonly (string|null)[]) => [...values.reduce((counts, value) => counts.set(value, (counts.get(value) ?? 0) + 1), new Map<string|null,number>())].sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
@@ -51,6 +51,19 @@ export function auditScenario(id: string, raw: unknown): {checks: Check[]; basel
       check('final-observation', delivered[0]?.text.includes('GROUP_TEXT_MUST_REACH_OWNER')===true && delivered[0]?.text.includes('确实提到了我')===true);
       check('business-read-not-replayed', database.operations.filter(row=>row.action==='qq_browse'&&row.outcome?.status==='succeeded').length===1);
       check('bounded-repair-reused-material', database.requests.filter(row=>row.body.phase==='rendering').length===3 && database.requests.filter(row=>row.body.phase==='verification').length===4);
+    } else if(id.startsWith('delivery-')) {
+      const status=z.object({deliveryId:z.string(),taskId:z.string(),runId:z.string(),state:z.string()});
+      const before=status.parse(evidence.before),after=status.parse(evidence.after);
+      check('same-task-run-and-delivery',before.taskId===after.taskId&&before.runId===after.runId&&before.deliveryId===after.deliveryId&&before.state==='rejected'&&after.state==='sent');
+      check('business-not-replayed',database.runs.filter(run=>run.definition.taskId===before.taskId).length===1&&database.operations.filter(op=>op.action==='qq_browse'&&op.outcome?.status==='succeeded').length===1);
+      check('one-final-delivery',delivered.length===1&&database.deliveries.length===1);
+      const events=z.object({recoveryEvents:z.array(z.object({runId:z.string(),type:z.string(),data:z.record(z.string(),z.unknown())}))}).parse(evidence.database).recoveryEvents;
+      check('recovery-recorded-and-settled',events.filter(event=>event.runId===before.runId&&event.type==='native.delivery.recovery.requested').length===1&&events.some(event=>event.runId===before.runId&&event.type==='native.delivery.recovery.settled'&&event.data.state==='sent'&&event.data.error===null));
+      check('rendering-stage-only',database.requests.filter(row=>row.body.phase==='rendering').length===(id==='delivery-render-recovery'?2:1));
+      if(id==='delivery-verifier-recovery'){
+        const inputs=z.array(z.string()).parse(evidence.verificationInputs);
+        check('same-verification-candidate-and-evidence',inputs.length===2&&inputs[0]===inputs[1]);
+      }
     } else {
       const videos=z.array(z.string()).parse(evidence.videos),progress=z.object({kind:z.literal('bilibili-reading-progress'),total:z.number()}).parse(evidence.progress);
       check('eight-records-one-task', videos.length===8&&new Set(videos).size===8&&progress.total===8&&database.runs.length===1&&database.runs[0]?.state==='completed');

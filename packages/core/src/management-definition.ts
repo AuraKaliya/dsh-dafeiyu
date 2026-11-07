@@ -9,7 +9,7 @@ export const managementDefinitions=[
       {
         "id": "tasks",
         "title": "任务详情",
-        "description": "暂停与取消通过运行引擎提交，不能直接改写数据库状态。",
+        "description": "执行结果与交付分别显示。生成或核验中断可请求继续交付，仍核对当前授权与来源；暂停与取消通过运行引擎提交。",
         "fields": [],
         "panel": "tasks"
       },

@@ -167,6 +167,7 @@ export class DafeiyuService extends Service {
   private closedNativeDelivery:ReturnType<RuntimeStore['nativeDeliveries']['counts']>|null=null;
   private closedModelUsage:ReturnType<RuntimeStore['modelUsage']['summary']>|null=null;
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
+  resumeMessageTaskDelivery(runId:string,input:unknown){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.requestRecovery(runId,input);}
   messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
   taskDeliveryBusy(){return !!this.nativeTaskDelivery?.pending;}
   reconcileCapabilityChange(raw:unknown){if(!this.executions||this.taskDeliveryBusy())return {accepted:false,resumedRunId:null};return this.executions.reconcileCapabilityChange(raw);}
@@ -362,7 +363,7 @@ export class DafeiyuService extends Service {
   quiesce():void {this.gate.quiesce();}
   cancelRunning():void {this.quiesce();this.controller.abort();}
   get lifecycleState(){return this.gate.state;}
-  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.review.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1','delivery.status-feedback.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.mediaPort?['media.assets.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
+  private features(){return ['core.registration.v1','lifecycle.managed.v1','context.conversation.v1',...(this.repositoryPort?['task.repository.v1']:[]),...(this.executions?['execution.task.v1','execution.review.v1','execution.source-anchor.v1','execution.wake-ingress.v1','context.task.v1','execution.resource-scope.v1','execution.message-task.v1']:[]),...(this.nativeTaskDelivery?['delivery.task-result.v1','delivery.status-feedback.v1','delivery.task-recovery.v1']:[]),...(this.executionMemoryPort?['memory.execution.v1','continuity.checkpoint.v1','task.intent.v1']:[]),...(this.capabilityObservationPort?['memory.capability-observation.v1']:[]),...(this.nativeExpressionPort?['memory.native-expression.v1']:[]),...(this.mediaPort?['media.assets.v1']:[]),...(this.personas.configured?['persona.stage-state.v1','persona.growth-selection.v1']:[])];}
   bindMessageTasks(binding:MessageTaskBinding){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const channel=this.extensions.get(binding.channelExtensionId);
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
@@ -519,11 +520,13 @@ export class DafeiyuService extends Service {
     this.conversationRuns=new ConversationRuns(this.ctx,store,this.journal,this.config.agentId,run=>this.conversations.validateRunPersona(run),id=>this.executions?.conversationTaskHandoff(id)??null);
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registry,scheduler:this.scheduler,options,personas:this.personas,
       activitySharing:()=>this.activitySharingState(),
+      resumeDelivery:(runId,input)=>this.resumeMessageTaskDelivery(runId,input),
       isOwnerMessage:item=>this.ownerDirectories(item).length>0,messageResources:item=>this.ownerQueryResources(item),channelDescription:id=>this.conversations.deliveryChannel(this.journal.get(id))?.capability.description??'',repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
       turnTimeoutMs:this.config.turnTimeoutMs,taskTimeoutMs:this.config.taskTimeoutMs,reviewTimeoutMs:this.config.phaseTimeouts.review,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.conversations.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),progress:id=>this.nativeTaskDelivery?.progress(id)??Promise.resolve(null),settled:id=>{if(this.runStore?.get(id).state==='failed')void this.nativeTaskDelivery?.progress(id).catch(()=>{});else void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
     this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:NATIVE_RENDER_ATTEMPTS*(this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification)+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
       admitActivityShare:runId=>{const pressure=this.activityPressure(),policy=this.activitySharingState();return !!policy&&pressure.foregroundWaiting+pressure.foregroundRuns===0&&store.prepareActivityShare(runId,policy.policyHash,policy.cooldownMs);},
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
+      validateRecovery:id=>this.executions!.validateDeliveryRecovery(id),
       feedbackSource:id=>this.executions!.feedbackSource(id),
       feedback:this.feedback,
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),

@@ -1,8 +1,8 @@
 import { createHash,randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { TaskResultAnchorSchema } from '@dafeiyu/contracts';
-import type { Json,TaskResultAnchor,Conversation } from '@dafeiyu/contracts';
+import { TaskResultAnchorSchema,DeliveryRecoveryRequestSchema,DeliveryRecoveryReceiptSchema,DELIVERY_MAX_DRAFTS,NativeVerificationFeedbackSchema } from '@dafeiyu/contracts';
+import type { Json,TaskResultAnchor,Conversation,DeliveryRecoveryView } from '@dafeiyu/contracts';
 const canonical=(value:Json):string=>value===null||typeof value!=='object'?JSON.stringify(value):Array.isArray(value)?`[${value.map(canonical).join(',')}]`:`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key]!)}`).join(',')}}`;
 export const nativeDeliveryHash=(value:unknown)=>createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');
 const stateSchema=z.enum(['accepted','rendering','verifying','ready','sending','sent','not-sent','partial','uncertain','rejected','interrupted']);
@@ -13,6 +13,59 @@ const renderRef=z.strictObject({sessionId:z.string(),messageSeq:z.number().int()
 const rowSchema=z.object({id:z.uuid(),run_id:z.uuid(),state:stateSchema,version:z.number().int().positive(),anchor:z.string(),material:z.string().nullable(),render_ref:z.string().nullable(),body:z.string().nullable(),credential:z.string().nullable(),receipt:z.string().nullable(),error:z.string().nullable()});
 export class NativeDeliveryStore {
   constructor(private readonly db:DatabaseSync,private readonly atomic:<T>(work:()=>T)=>T,private readonly event:(runId:string,type:string,data:Record<string,Json>)=>unknown){}
+  private events(runId:string,type:string){return this.db.prepare("SELECT body FROM runtime_outbox WHERE json_extract(body,'$.runId')=? AND json_extract(body,'$.type')=? ORDER BY ordinal").all(z.uuid().parse(runId),type)
+    .map(row=>z.object({data:z.record(z.string(),z.json())}).parse(JSON.parse(String(row.body))).data);}
+  /** Drafts and rejection feedback already live in the immutable event ledger. */
+  work(runId:string){
+    const candidates=this.events(runId,'native.delivery.candidate').map(data=>renderRef.parse(data.renderRef));
+    const rejected=this.events(runId,'native.delivery.verification-rejected').map(data=>({ref:renderRef.parse(data.renderRef),feedback:NativeVerificationFeedbackSchema.parse(data.feedback)}));
+    const last=candidates.at(-1)??null;
+    const candidate=last&&!rejected.some(row=>nativeDeliveryHash(row.ref)===nativeDeliveryHash(last))?last:null;
+    return {draftCount:candidates.length,candidate,lastRejected:rejected.at(-1)?.ref??null,issues:[...new Set(rejected.flatMap(row=>row.feedback.issues))]};
+  }
+  recoveryReceipt(runId:string,requestId:string){return this.events(runId,'native.delivery.recovery.requested').map(data=>DeliveryRecoveryReceiptSchema.parse(data)).find(row=>row.requestId===requestId)??null;}
+  pendingRecovery(runId:string){const settled=new Set(this.events(runId,'native.delivery.recovery.settled').map(row=>row.requestId));
+    return this.events(runId,'native.delivery.recovery.requested').map(data=>DeliveryRecoveryReceiptSchema.parse(data)).find(row=>!settled.has(row.requestId))??null;}
+  pendingRecoveries(){return this.list().flatMap(row=>this.pendingRecovery(row.runId)?[row.runId]:[]);}
+  recoveryView(runId:string,ignorePending=false):DeliveryRecoveryView {
+    const row=this.get(runId),work=this.work(runId),pending=this.pendingRecovery(runId);
+    const phase=work.candidate?'verification' as const:'rendering' as const;
+    let reason:string|null=null;
+    if(!row||row.anchor.kind!=='task-result'||!['rejected','interrupted'].includes(row.state))reason='DELIVERY_RECOVERY_STATE';
+    else if(this.sendAttempted(runId)||row.credential||row.renderRef)reason='DELIVERY_RECOVERY_AFTER_DISPATCH';
+    else if(!row.material)reason='DELIVERY_RECOVERY_MATERIAL_MISSING';
+    else if(Date.parse(row.anchor.expiresAt)<=Date.now())reason='DELIVERY_RECOVERY_EXPIRED';
+    else if(!work.candidate&&work.draftCount>=DELIVERY_MAX_DRAFTS)reason='DELIVERY_REPAIR_EXHAUSTED';
+    else if(!['NATIVE_DELIVERY_FAILED','MODEL_INCOMPLETE','DEPENDENCY_UNAVAILABLE','DELIVERY_RENDER_TIMEOUT','DELIVERY_RENDER_ALREADY_EXISTS','PROCESS_INTERRUPTED','DELIVERY_CANCELLED',
+      'DELIVERY_VERIFICATION_TIMEOUT','DELIVERY_VERIFICATION_MODEL_ERROR','DELIVERY_VERIFICATION_ABORTED','DELIVERY_VERIFICATION_INVALID_RESULT','DELIVERY_VERIFICATION_MAX_TOKENS'].includes(row.error??''))reason='DELIVERY_RECOVERY_FAILURE_NOT_RETRYABLE';
+    if(pending&&!ignorePending)reason='DELIVERY_RECOVERY_PENDING';
+    const last=this.events(runId,'native.delivery.recovery.settled').at(-1);
+    return {available:reason===null,phase:reason===null?phase:null,reason,pendingRequestId:pending?.requestId??null,lastError:typeof last?.error==='string'?last.error:null,draftCount:work.draftCount};
+  }
+  requestRecovery(runId:string,raw:unknown){const input=DeliveryRecoveryRequestSchema.parse(raw);return this.atomic(()=>{
+    const prior=this.recoveryReceipt(runId,input.requestId);
+    if(prior){if(prior.expectedVersion!==input.expectedVersion)throw new Error('IDEMPOTENCY_CONFLICT');return prior;}
+    const row=this.get(runId);if(!row||row.version!==input.expectedVersion)throw new Error('DELIVERY_RECOVERY_VERSION_CONFLICT');
+    const view=this.recoveryView(runId);if(!view.available||!view.phase)throw new Error(view.reason??'DELIVERY_RECOVERY_DENIED');
+    const receipt=DeliveryRecoveryReceiptSchema.parse({...input,runId,deliveryId:row.id,phase:view.phase,requestedAt:new Date().toISOString()});
+    this.event(runId,'native.delivery.recovery.requested',receipt);return receipt;
+  });}
+  beginRecovery(runId:string,requestId:string){return this.atomic(()=>{
+    const pending=this.pendingRecovery(runId),row=this.get(runId);
+    if(!row||pending?.requestId!==requestId)throw new Error('DELIVERY_RECOVERY_REQUEST_MISSING');
+    const started=this.events(runId,'native.delivery.recovery.started').some(value=>value.requestId===requestId);
+    if(!started&&row.version!==pending.expectedVersion)throw new Error('DELIVERY_RECOVERY_VERSION_CONFLICT');
+    const view=this.recoveryView(runId,true);if(!view.available)throw new Error(view.reason??'DELIVERY_RECOVERY_DENIED');
+    // Preserve the failure, material, candidate, anchor and original Run. Only the stage advances.
+    this.event(runId,'native.delivery.recovery.started',{requestId,from:row.state,previousVersion:row.version,previousError:row.error,phase:view.phase});
+    return this.advance(runId,row.state,view.phase==='verification'?'verifying':'rendering');
+  });}
+  settleRecovery(runId:string,requestId:string,error:string|null=null){this.atomic(()=>{
+    const pending=this.pendingRecovery(runId);if(pending?.requestId!==requestId)return;
+    const row=this.get(runId);this.event(runId,'native.delivery.recovery.settled',{requestId,state:row?.state??'missing',version:row?.version??0,error});
+  });}
+  renderAttempt(runId:string){const row=this.get(runId);if(row?.state!=='rendering')throw new Error('DELIVERY_STATE_CONFLICT');
+    const id=randomUUID();this.event(runId,'native.delivery.render-attempt',{id,draftCount:this.work(runId).draftCount});return id;}
   get(runId:string){const raw=this.db.prepare('SELECT * FROM native_deliveries WHERE run_id=?').get(z.uuid().parse(runId));if(!raw)return null;const row=rowSchema.parse(raw);
     return {id:row.id,runId:row.run_id,state:row.state,version:row.version,anchor:TaskResultAnchorSchema.parse(JSON.parse(row.anchor)),material:row.material?materialSchema.parse(JSON.parse(row.material)):null,
       renderRef:row.render_ref?renderRef.parse(JSON.parse(row.render_ref)):null,body:row.body,credential:row.credential,receipt:row.receipt,error:row.error};}
@@ -22,7 +75,7 @@ export class NativeDeliveryStore {
     if(error!==null)z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/).parse(error);
     this.db.prepare('UPDATE native_deliveries SET state=?,version=version+1,error=? WHERE run_id=? AND version=?').run(to,error,runId,current.version);this.event(runId,`native.delivery.${to}`,{deliveryId:current.id,error});return this.get(runId)!;}
   start(runId:string,raw:NativeDeliveryMaterial){return this.atomic(()=>{const current=this.get(runId);if(!current||current.state!=='accepted')throw new Error('DELIVERY_STATE_CONFLICT');this.db.prepare('UPDATE native_deliveries SET material=? WHERE run_id=?').run(JSON.stringify(materialSchema.parse(raw)),runId);return this.advance(runId,'accepted','rendering');});}
-  candidate(runId:string,raw:z.infer<typeof renderRef>){return this.atomic(()=>{const row=this.get(runId);if(row?.state!=='rendering'||row.renderRef||row.credential)throw new Error('DELIVERY_STATE_CONFLICT');this.event(runId,'native.delivery.candidate',{renderRef:renderRef.parse(raw)});return this.advance(runId,'rendering','verifying');});}
+  candidate(runId:string,raw:z.infer<typeof renderRef>){return this.atomic(()=>{const row=this.get(runId);if(row?.state!=='rendering'||row.renderRef||row.credential)throw new Error('DELIVERY_STATE_CONFLICT');if(this.work(runId).draftCount>=DELIVERY_MAX_DRAFTS)throw new Error('DELIVERY_REPAIR_EXHAUSTED');this.event(runId,'native.delivery.candidate',{renderRef:renderRef.parse(raw)});return this.advance(runId,'rendering','verifying');});}
   repair(runId:string){return this.atomic(()=>{const row=this.get(runId);if(row?.state!=='verifying'||row.renderRef||row.credential)throw new Error('DELIVERY_STATE_CONFLICT');return this.advance(runId,'verifying','rendering');});}
   rendered(runId:string,raw:z.infer<typeof renderRef>){return this.atomic(()=>{const row=this.get(runId);if(!row||!['rendering','verifying'].includes(row.state)||row.renderRef)throw new Error('DELIVERY_STATE_CONFLICT');this.db.prepare('UPDATE native_deliveries SET render_ref=? WHERE run_id=?').run(JSON.stringify(renderRef.parse(raw)),runId);return this.advance(runId,row.state,'verifying');});}
   approve(runId:string,body:string){return this.atomic(()=>{const current=this.get(runId);if(!current||current.state!=='verifying'||!current.material||!current.renderRef)throw new Error('DELIVERY_STATE_CONFLICT');z.string().min(1).max(32000).parse(body);
@@ -43,5 +96,5 @@ export class NativeDeliveryStore {
   counts(){const values=new Map(this.db.prepare('SELECT state,count(*) AS n FROM native_deliveries GROUP BY state').all().map(row=>[stateSchema.parse(row.state),Number(row.n)])),sum=(states:readonly NativeDeliveryState[])=>states.reduce((n,state)=>n+(values.get(state)??0),0);
     return {total:[...values.values()].reduce((a,b)=>a+b,0),pending:sum(['accepted','rendering','verifying','ready','sending']),sent:sum(['sent']),partial:sum(['partial']),uncertain:sum(['uncertain']),blocked:sum(['not-sent','rejected','interrupted'])};}
   mediaSettlementPending(runId:string,manifestId:string){z.uuid().parse(manifestId);this.atomic(()=>{const row=this.get(runId);if(!row)throw new Error('DELIVERY_STATE_CONFLICT');this.event(runId,'native.delivery.media-settlement-pending',{manifestId,state:row.state});});}
-  status(runId:string){const row=this.get(runId);return row?{deliveryId:row.id,runId:row.runId,taskId:row.anchor.taskId,state:row.state,version:row.version,receiptId:row.receipt,error:row.error}:null;}
+  status(runId:string){const row=this.get(runId);return row?{deliveryId:row.id,runId:row.runId,taskId:row.anchor.taskId,state:row.state,version:row.version,receiptId:row.receipt,error:row.error,recovery:this.recoveryView(runId)}:null;}
 }
