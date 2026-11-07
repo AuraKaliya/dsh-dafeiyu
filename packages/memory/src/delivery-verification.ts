@@ -3,7 +3,7 @@ import type {Json} from '@dafeiyu/contracts';
 
 export interface ExpressionModelInput {question:string;evidence:{id:string;text:string;kind?:'reported'|'inference'}[]}
 const bundleSchema=z.strictObject({kind:z.literal('evidence-bundle'),items:z.array(z.strictObject({id:z.string(),text:z.string()}))});
-const checkSchema=z.strictObject({checks:z.array(z.strictObject({passageId:z.string(),status:z.enum(['supported','unsupported','contradicted','non-factual']),evidenceIds:z.array(z.string()),issue:z.string().max(300).nullable()}))});
+const checkSchema=z.strictObject({checks:z.array(z.strictObject({passageId:z.string(),status:z.enum(['supported','unsupported','contradicted','non-factual','scope-limited']),evidenceIds:z.array(z.string()),issue:z.string().max(300).nullable()}))});
 
 function structured(text:string):Json {
   if(!/^[\s]*[\[{]/u.test(text))return text;
@@ -44,9 +44,10 @@ export function checkDeliveryVerification(raw:unknown,body:ReturnType<typeof del
     if(check.evidenceIds.some(id=>!sources.has(id)))invalid('unknown-evidence');
     seen.add(check.passageId);
     if(check.status==='supported'&&(!check.evidenceIds.length||check.issue!==null)||check.status==='non-factual'&&(check.evidenceIds.length||check.issue!==null))invalid('inconsistent-support');
+    if(check.status==='scope-limited'&&check.issue!==null)invalid('inconsistent-scope');
     if(check.status==='unsupported'||check.status==='contradicted'){
       if(!check.issue?.trim())invalid('missing-issue');
-      issues.push((check.passageId+'：'+check.issue).slice(0,300));
+      issues.push((check.passageId+' 原句「'+passages.get(check.passageId)!.text.slice(0,180)+'」：'+check.issue).slice(0,600));
     }
   }
   if(!passages.size||seen.size!==passages.size)invalid('missing-passage');

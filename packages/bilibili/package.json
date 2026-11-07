@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/bilibili",
-  "version": "0.28.6",
+  "version": "0.28.7",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -33,9 +33,9 @@
     }
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.28.6",
-    "@dafeiyu/core": "0.28.6",
-    "@dafeiyu/journal": "0.28.6",
+    "@dafeiyu/contracts": "0.28.7",
+    "@dafeiyu/core": "0.28.7",
+    "@dafeiyu/journal": "0.28.7",
     "zod": "4.4.3"
   },
   "peerDependencies": {

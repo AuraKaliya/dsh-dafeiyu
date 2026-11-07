@@ -12,7 +12,7 @@ import { renderTaskResult,renderPublicProgress } from './target-renderer.js';
 import type {DeliveryRepair} from './target-renderer.js';
 import { readPersistedResult } from './agent-session.js';
 import { z } from 'zod';
-export const NATIVE_RENDER_ATTEMPTS=2;
+export const NATIVE_RENDER_ATTEMPTS=3;
 interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:string;signal:AbortSignal;timeoutMs:number;sendTimeoutMs:number;
   feedbackSource(runId:string):{item:PendingMessage;taskId:string;state:string;error:string|null;operations:readonly {action?:string;state:string;status:string|null;effects:string|null}[]}|null;
   describe(runId:string):{item:PendingMessage|null;anchor:TaskResultAnchor;autoDeliver:boolean|undefined}|null;
@@ -133,7 +133,7 @@ export class NativeTaskDelivery {
             if(!feedback.success)throw error;const safe=redactJson(z.json().parse(feedback.data));
             this.host.store.appendExecutionEvent(runId,'native.delivery.verification-rejected',{attempt,renderRef:rendered.resultRef,feedback:safe.value});this.host.flush();
             if(attempt+1>=NATIVE_RENDER_ATTEMPTS||safe.redacted)throw error;guard();
-            repair={previousAnswer:rendered.text,issues:feedback.data.issues};this.host.store.nativeDeliveries.repair(runId);this.host.flush();continue;}
+            repair={previousAnswer:rendered.text,issues:[...new Set([...(repair?.issues??[]),...feedback.data.issues])],round:attempt+1,focused:attempt>0};this.host.store.nativeDeliveries.repair(runId);this.host.flush();continue;}
           guard();this.host.store.nativeDeliveries.rendered(runId,rendered.resultRef);this.host.store.nativeDeliveries.approve(runId,rendered.text);this.host.flush();break;
         }
         }

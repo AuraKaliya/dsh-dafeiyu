@@ -19,10 +19,12 @@ test('an owner task delivers the actual group text and mention evidence through 
   qq.remember(qqResourceRoute(group),'group-message',owner.id,'GROUP_TEXT_MUST_REACH_OWNER',{occurredAt:new Date().toISOString(),unsupported:[],mentionedBot:true,groupGeneration:groups.generation(group.id)});
   let channel:ExtensionHandle|undefined,capabilities:QqCapabilities|undefined,submitted=false,taskStep=0,sawGroupEvidence=false,verificationCalls=0,renderingCalls=0;const delivered:Reply[]=[];
   const adapter=new FixtureAdapter(request=>{
-    if(String(request.sessionId).startsWith('memory-expression-verify-')){if(verificationCalls++===0)throw new LlmError('fixture transient verifier outage','TRANSPORT');return verificationResponse(request,verificationCalls===2?'群消息和提及记录已存在，不能声称未收到。':undefined);}
+    if(String(request.sessionId).startsWith('memory-expression-verify-')){if(verificationCalls++===0)throw new LlmError('fixture transient verifier outage','TRANSPORT');return verificationResponse(request,verificationCalls===2?'群消息和提及记录已存在，不能声称未收到。':verificationCalls===3?'单条消息不能证明所有群都没有过滤。':undefined);}
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){const text=request.messages.flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).join(' ');assert.match(text,/GROUP_TEXT_MUST_REACH_OWNER/);assert.match(text,/mentionedBot/);sawGroupEvidence=true;
       if(renderingCalls++===0)return textResponse('{"qq_messages":[{"type":"text","text":"群里没有收到主人消息。"}]}');
-      assert.match(text,/previousCandidateUnapproved/);assert.match(text,/群消息和提及记录已存在/);return textResponse('{"qq_messages":[{"type":"text","text":"已核对群消息 GROUP_TEXT_MUST_REACH_OWNER，确实提到了我。"}]}');}
+      assert.match(text,/previousCandidateUnapproved/);assert.match(text,/群消息和提及记录已存在/);
+      if(renderingCalls===2)return textResponse('{"qq_messages":[{"type":"text","text":"已查到 GROUP_TEXT_MUST_REACH_OWNER，所以所有群都没有过滤。"}]}');
+      assert.match(text,/单条消息不能证明所有群/);assert.match(text,/focused/);assert.match(String(request.sessionId),/-repair-2$/);return textResponse('{"qq_messages":[{"type":"text","text":"已核对群消息 GROUP_TEXT_MUST_REACH_OWNER，确实提到了我。"}]}');}
     if(!String(request.sessionId).startsWith('dafeiyu-task-')){if(submitted)return textResponse('已经承接检查。');submitted=true;return toolResponse('fixture_task_submit',{requestId:'inspect-groups',title:'检查群消息'});}
     if(taskStep++===0)return toolResponse('qq_groups',{});
     if(taskStep===2)return toolResponse('qq_browse',{requestId:'read-group',target:group,limit:20});return textResponse('群原文和提及记录已取得。');
@@ -36,6 +38,6 @@ test('an owner task delivers the actual group text and mention evidence through 
     ctx.dafeiyu.bindMessageTasks({id:'fixture-tasks',pluginId:'fixture-tasks',channelExtensionId:'channel-qq',channel:'qq',account:owner.account,ownerId:owner.id,policyId:'owner-task',version:'1',autoDeliver:true,active:()=>true,classify:message=>({kind:'submit',text:message.text})});
   }});
   try{channel!.ingest({id:'owner-request',occurredAt:new Date().toISOString(),conversation:owner,sender:{id:owner.id,displayName:'主人'},text:'请检查我在群里发的消息和@标记。',mainText:'请检查我在群里发的消息和@标记。'});await host.ctx.dafeiyu.whenIdle();assert.equal(delivered.length,1);assert.match(delivered[0]!.text,/GROUP_TEXT_MUST_REACH_OWNER/);assert.equal(delivered[0]!.conversation.kind,'private');assert.equal(delivered[0]!.conversation.id,owner.id);assert.equal(sawGroupEvidence,true);
-    assert.equal(verificationCalls,3);assert.equal(renderingCalls,2);assert.equal(taskStep,3,'completed inspection is not rerun during verifier retry or factual repair');
+    assert.equal(verificationCalls,4);assert.equal(renderingCalls,3);assert.equal(taskStep,3,'completed inspection is not rerun during verifier retry or factual repair');
   }finally{capabilities?.close();await host.close();groups.pause();await groups.whenIdle();qq.close();}
 });

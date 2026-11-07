@@ -15,7 +15,7 @@ export const NativeExpressionCandidateSchema=z.strictObject({source:PersonaSourc
 export const NativeExpressionPacketSchema=z.strictObject({id:z.uuid(),version:z.number().int().positive(),anchor:TaskResultAnchorSchema,question:z.string(),
   evidence:z.array(z.strictObject({id:z.string(),kind:z.enum(['reported','inference']),text:z.string()})).min(1),sourceStamp:z.string().length(64),resultIncluded:z.boolean(),media:NativeMediaMaterialSchema.optional()});
 export type NativeExpressionPacket=z.infer<typeof NativeExpressionPacketSchema>;
-export const NativeVerificationFeedbackSchema=z.strictObject({kind:z.literal('delivery-fidelity'),issues:z.array(z.string().min(1).max(300)).min(1).max(16)});
+export const NativeVerificationFeedbackSchema=z.strictObject({kind:z.literal('delivery-fidelity'),issues:z.array(z.string().min(1).max(600)).min(1).max(16)});
 /** Created by the core from persisted, verified native execution facts, never model-supplied. */
 export interface NativeExpressionAccess {readonly execution:PersonaAccess;readonly anchor:TaskResultAnchor;readonly question:string;readonly output:string;
   readonly handoff?:ContextHandoff;
