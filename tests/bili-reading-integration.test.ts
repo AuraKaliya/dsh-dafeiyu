@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { FixtureAdapter,textResponse,toolResponse } from './sdk-fixture.js';
 import { testTempDir } from './test-temp.js';
 import { biliActionIds } from '@dafeiyu/bilibili';
+import {captureAcceptance,acceptanceDatabase,requestMeasurements} from './acceptance-evidence.js';
 
 test('readings beyond the old three-video boundary use the real Host, tool loop and source ledger in one task',{timeout:45000},async t=>{
   const root=await mkdtemp(join(testTempDir(),'bili-long-host-')),file=join(root,'host.json');
@@ -61,6 +62,7 @@ test('readings beyond the old three-video boundary use the real Host, tool loop 
     const regions=z.object({regions:z.array(z.object({item:z.object({text:z.string()})}))}).parse(JSON.parse(section.text)).regions;
     const progress=regions.map(region=>JSON.parse(region.item.text) as {kind?:string;total?:number}).find(value=>value.kind==='bilibili-reading-progress');
     assert.equal(progress?.total,8);
+    if(process.env.DAFEIYU_ACCEPTANCE_DIR)captureAcceptance('video-reading',{videos,platformCalls,progress,database:acceptanceDatabase(root),requests:requestMeasurements(adapter.requests)});
     console.log('READING_INTEGRATION_METRICS '+JSON.stringify({videos:8,platformCalls,modelCalls:adapter.requests.length,sessions:1,
       requestBytes:adapter.requests.map(request=>Buffer.byteLength(JSON.stringify(request.messages))),realModel:false,realPlatform:false}));
   }finally{await host.close();}

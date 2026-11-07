@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "purpose": "脱敏语义校准样本；预期是人工判据，不能作为模型实际判断的证据",
+  "cases": [
+    {
+      "id": "cache-does-not-prove-absence",
+      "split": "calibration",
+      "question": "能否确认另一个群的消息没有到达？",
+      "evidence": [{"id":"cache","kind":"reported","text":"本次可读缓存中没有群B消息；没有独立的上游投递记录。"}],
+      "answer": "缓存没有群B消息，所以平台从未投递。",
+      "expected": "reject",
+      "reason": "本地缓存为空不能证明上游从未投递"
+    },
+    {
+      "id": "cache-scope-limited",
+      "split": "calibration",
+      "question": "能否确认另一个群的消息没有到达？",
+      "evidence": [{"id":"cache","kind":"reported","text":"本次可读缓存中没有群B消息；没有独立的上游投递记录。"}],
+      "answer": "本次缓存没有群B消息。缺少独立投递记录，无法确认消息是否到达。",
+      "expected": "accept",
+      "reason": "准确限定了观察范围和缺失证据"
+    },
+    {
+      "id": "reply-is-not-cache",
+      "split": "calibration",
+      "question": "消息缓存是否仅保存提及机器人时的消息？",
+      "evidence": [{"id":"code","kind":"reported","text":"remember(message); if (!mentioned) return; reply(message);"}],
+      "answer": "只有提及机器人时才会保存消息。",
+      "expected": "reject",
+      "reason": "保存发生在提及判断之前；判断控制回复"
+    },
+    {
+      "id": "mixed-claim",
+      "split": "calibration",
+      "question": "消息缓存是否仅保存提及机器人时的消息？",
+      "evidence": [{"id":"code","kind":"reported","text":"remember(message); if (!mentioned) return; reply(message);"}],
+      "answer": "这段代码在提及判断前保存消息。因此所有其他渠道也绝不会过滤消息。",
+      "expected": "reject",
+      "reason": "正确局部观察夹带未经证明的全局断言"
+    },
+    {
+      "id": "uncertainty-not-immunity",
+      "split": "calibration",
+      "question": "另一群的投递是否失败？",
+      "evidence": [{"id":"old","kind":"inference","text":"旧机器人回答曾推测该群没有投递，没有独立查询。"}],
+      "answer": "虽然材料不足，但可以确定平台没有投递那条消息。",
+      "expected": "reject",
+      "reason": "不确定前缀不能免除外部事实的证据要求"
+    },
+    {
+      "id": "video-sampling-scope",
+      "split": "calibration",
+      "question": "看视频后分享发现。",
+      "evidence": [{"id":"coverage","kind":"reported","text":"取得字幕及六个采样帧；未取得音轨，也未连续读取全片画面。"}],
+      "answer": "根据字幕和六帧采样，我能介绍已读部分；没有听音轨，也不代表看过全片画面。",
+      "expected": "accept",
+      "reason": "覆盖陈述与实际读取范围一致"
+    },
+    {
+      "id": "holdout-bounded-observation",
+      "split": "holdout",
+      "question": "消息是不是被过滤了？",
+      "evidence": [{"id":"observation","kind":"reported","text":"这一轮只查询了本机缓存，返回零条；未查询上游日志。"}],
+      "answer": "我目前只有本机这次查询的空结果，尚不能把原因定位到过滤。",
+      "expected": "accept",
+      "reason": "保留证据范围的改写对照"
+    },
+    {
+      "id": "holdout-unsupported-cause",
+      "split": "holdout",
+      "question": "消息是不是被过滤了？",
+      "evidence": [{"id":"observation","kind":"reported","text":"这一轮只查询了本机缓存，返回零条；未查询上游日志。"}],
+      "answer": "本机查询是空的，说明上游一定过滤了你的消息。",
+      "expected": "reject",
+      "reason": "从单次空结果推断确定原因"
+    }
+  ]
+}

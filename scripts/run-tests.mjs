@@ -53,7 +53,9 @@ try {
       rootDir: resolve(repository, 'tests'), outDir: resolve(repository, 'build-tests') }, include: [], files: sources }));
     await execute('test-types', ['node_modules/typescript/bin/tsc', '-p', config]);
   }
-  const tooling = (await readdir(join(repository, 'scripts/testing'))).filter(name => name.endsWith('.ts')).map(name => resolve(repository, 'scripts/testing', name));
+  const tooling = (await Promise.all(['scripts/testing', 'scripts/acceptance'].map(async directory =>
+    (await readdir(join(repository, directory))).filter(name => name.endsWith('.ts')).map(name => resolve(repository, directory, name))
+  ))).flat();
   const config = join(run.root, 'tooling-types.json');
   await writeFile(config, JSON.stringify({ extends: resolve(repository, 'scripts/testing/tsconfig.json'), include: [],
     files: [...tooling, ...selection.typecheck.filter(file => file.startsWith('tests/tooling/')).map(file => resolve(repository, file))] }));

@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {"noEmit": true, "allowImportingTsExtensions": true},
-  "include": ["*.ts", "../../tests/tooling/*.ts"]
+  "include": ["*.ts", "../acceptance/*.ts", "../../tests/tooling/*.ts"]
 }

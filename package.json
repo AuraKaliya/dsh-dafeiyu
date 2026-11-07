@@ -15,6 +15,7 @@
     "test": "node scripts/run-tests.mjs",
     "test:smoke": "node scripts/run-tests.mjs --smoke",
     "test:cleanup": "node scripts/cleanup-test-runs.mjs",
+    "test:acceptance": "node scripts/acceptance/run.ts",
     "check": "node scripts/run-tests.mjs --check",
     "build:release": "npm run build && node scripts/build-public-release.mjs",
     "deploy:prepare": "node scripts/prepare-local-deploy.mjs"

@@ -7,6 +7,7 @@ import {API_VERSION,MessageInstructionSubmitSchema} from '@dafeiyu/contracts';
 import type {Conversation,ExtensionHandle,Reply,InboundMessage} from '@dafeiyu/contracts';
 import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './sdk-fixture.js';
 import {testTempDir} from './test-temp.js';
+import {captureAcceptance,acceptanceDatabase,requestMeasurements} from './acceptance-evidence.js';
 
 export async function runPatrolScenario(t:TestContext,relation:'new'|'amend'){
   const root=await mkdtemp(join(testTempDir(),'group-patrol-'));process.env.DSH_HOME=join(root,'data/core/dsh-home');
@@ -14,6 +15,7 @@ export async function runPatrolScenario(t:TestContext,relation:'new'|'amend'){
   const owner:Conversation={channel:'qq',account:'100001',kind:'private',id:'200001'},a:Conversation={...owner,kind:'group',id:'300001'},b:Conversation={...a,id:'300002'},delivered:Reply[]=[];
   const actual:InboundMessage={id:'authentic-group-message',occurredAt:new Date().toISOString(),conversation:a,sender:{id:'200002',displayName:'真实测试成员'},text:'大家觉得古画修复中保留原貌重要吗？',mainText:'大家觉得古画修复中保留原貌重要吗？'};
   let channel:ExtensionHandle|undefined,submitted=false,planned=false,statusRequested=false,patrolCalls=0,updating=false,planId='',configurationChecks=0;
+  const configurationWaits:{sourceState:string;foregroundBusy:boolean;patrolBefore:number;patrolAfter:number}[]=[];
   const adapter=new FixtureAdapter(request=>{
     if(String(request.sessionId).startsWith('memory-expression-verify-'))return verificationResponse(request);
     if(String(request.sessionId).startsWith('dafeiyu-delivery-')){const evidence=request.messages.flatMap(message=>message.content.flatMap(block=>block.type==='text'?[block.text]:[])).join('\n');assert.ok(evidence.includes(updating?'120000':'60000'),'the final rendering must receive the recorded interval');return textResponse(updating?'群巡视已调整为每两分钟。':'群巡视计划已建立。');}
@@ -25,7 +27,7 @@ export async function runPatrolScenario(t:TestContext,relation:'new'|'amend'){
         assert.match(material,/waitsForCurrentTask\\?":true/);assert.match(material,/正在等待本次设置任务/);
         const status=host.ctx.dafeiyuActivity.management('status',null) as {plans:{dispatch:{sourceState:string;foregroundBusy:boolean}}[]};
         assert.equal(status.plans[0]!.dispatch.sourceState,'pending');assert.equal(status.plans[0]!.dispatch.foregroundBusy,true);
-        const before=patrolCalls;await host.ctx.dafeiyuActivity.tick();assert.equal(patrolCalls,before,'unfinished configuration must not wait for a patrol blocked by its own source');configurationChecks++;
+        const before=patrolCalls;await host.ctx.dafeiyuActivity.tick();configurationWaits.push({...status.plans[0]!.dispatch,patrolBefore:before,patrolAfter:patrolCalls});assert.equal(patrolCalls,before,'unfinished configuration must not wait for a patrol blocked by its own source');configurationChecks++;
         yield* textResponse('配置已保存，结束本次设置任务后再由后台调度；此回执不表示已经巡视。');
       })();
     }planned=true;if(updating&&relation==='amend')assert.deepEqual(host.ctx.dafeiyu.activityAnchorStatus(host.ctx.dafeiyuActivity.store.get(planId).body.anchor),{state:'stale',code:'TASK_NOT_ACTIVE'});
@@ -55,5 +57,8 @@ export async function runPatrolScenario(t:TestContext,relation:'new'|'amend'){
     assert.equal(host.ctx.dafeiyuActivity.store.patrolCursor(planId,JSON.stringify(a)),1,'changing the interval must preserve the last observed group watermark');
     if(relation==='amend'){assert.equal(changed.body.owner.kind==='task'&&changed.body.owner.taskId,plan.body.owner.kind==='task'&&plan.body.owner.taskId);assert.equal(changed.body.anchor?.intentVersion,2);assert.equal(host.ctx.dafeiyu.activityAnchorStatus(changed.body.anchor).state,'valid');assert.equal(host.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor).state,'stale','old authorization is not silently revived');}
     await host.close();host=await ManagedHost.start(config,options);await host.ctx.dafeiyuActivity.tick();await host.ctx.dafeiyu.whenIdle();assert.equal(patrolCalls,1);
+    if(process.env.DAFEIYU_ACCEPTANCE_DIR)captureAcceptance('patrol-'+relation,{before:plan,after:changed,afterRestart:host.ctx.dafeiyuActivity.store.get(planId),
+      cursor:host.ctx.dafeiyuActivity.store.patrolCursor(planId,JSON.stringify(a)),planCount:host.ctx.dafeiyuActivity.store.management().length,
+      configurationWaits,patrolCalls,delivered,database:acceptanceDatabase(root),requests:requestMeasurements(adapter.requests)});
   }finally{await host.close();}
 }
