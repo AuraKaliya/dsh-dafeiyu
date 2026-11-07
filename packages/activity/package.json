@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/activity",
-  "version": "0.28.5",
+  "version": "0.28.6",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -17,9 +17,9 @@
     "./management": "./lib/management-definition.js"
   },
   "dependencies": {
-    "@dafeiyu/contracts": "0.28.5",
-    "@dafeiyu/core": "0.28.5",
-    "@dafeiyu/journal": "0.28.5",
+    "@dafeiyu/contracts": "0.28.6",
+    "@dafeiyu/core": "0.28.6",
+    "@dafeiyu/journal": "0.28.6",
     "zod": "4.4.3"
   },
   "peerDependencies": {

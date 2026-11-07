@@ -73,7 +73,14 @@ export class ActivityService extends Service {
   update(context:ExecutionContext,raw:unknown){const input=updateSchema.parse(raw),access=this.basis(context,input.basis??[]),ownerControl=this.ctx.dafeiyu.isOwnerExecution(context,'activity'),plan=this.store.get(input.id,ownerControl?undefined:access.view.scope);
     if(plan.body.purpose==='maintenance'&&(input.goal!==undefined||input.basis!==undefined))throw new Error('SCOPE_DENIED');
     const pauseOnly=(input.state==='paused'||input.state==='cancelled')&&input.goal===undefined&&input.basis===undefined&&input.trigger===undefined&&input.missed===undefined&&input.quiet===undefined&&input.timeZone===undefined;
-    if(!pauseOnly&&plan.body.anchor&&this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor).state==='stale'&&input.goal===undefined)throw new Error('ACTIVITY_REPLAN_REQUIRED');
+    const source=plan.body.anchor?this.ctx.dafeiyu.activityAnchorStatus(plan.body.anchor):null;
+    // An authenticated owner amending this same task renews the authorization for its
+    // existing, source-free patrol configuration. Keep its ID/goal and capture a NEW
+    // current-intent anchor below; the old anchor remains stale and is never trusted.
+    const renewOwnedPatrol=ownerControl&&plan.status==='active'&&plan.body.purpose==='group-watch'&&plan.body.watch!==undefined&&plan.body.basis.length===0&&
+      source?.code==='TASK_NOT_ACTIVE'&&plan.body.anchor?.scope.kind==='task'&&access.view.scope.kind==='task'&&
+      plan.body.anchor.scope.taskId===access.view.scope.taskId&&plan.body.anchor.intentVersion<access.intentVersion;
+    if(!pauseOnly&&source?.state==='stale'&&input.goal===undefined&&!renewOwnedPatrol)throw new Error('ACTIVITY_REPLAN_REQUIRED');
     const anchor=pauseOnly?undefined:this.ctx.dafeiyu.captureActivityAnchor(context,'activity');const {id,...patch}=input;
     return this.receipt(this.store.update(id,ownerControl?plan.body.owner:access.view.scope,{...patch,...(input.goal!==undefined?{basis:input.basis??[]}:{}),...(input.trigger?{trigger:this.trigger(context,input.trigger)}:{}),...(anchor?{anchor,...(ownerControl?{owner:access.view.scope}:{})}:{}),configHash:this.configHash},this.now()));
   }
@@ -97,7 +104,7 @@ export class ActivityService extends Service {
     const make=(id:string,description:string,inputSchema:z.ZodType,write:boolean,fn:(input:unknown,c:ExecutionContext)=>unknown):ActionCapability=>({id,version:'1',description,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',scope:id===ACTIVITY_ACTIONS[2]?'any':'task',
       execute:async(input,c)=>{try{return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data:z.json().parse(fn(input,c)),sources:[],receipts:[]};}
         catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'ACTIVITY_FAILED';
-          return {status:'failed',effects:write&&!['INVALID_INPUT','SOURCE_NOT_EXPOSED','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','SCOPE_DENIED','ACTIVITY_CANCELLED','ACTIVITY_INTERVAL_TOO_SHORT','ACTIVITY_SOURCE_REQUIRED','ACTIVITY_REPLAN_REQUIRED','ACTIVITY_QUIET_ALL_DAY','PRIVATE_INPUT_REJECTED'].includes(code)?'unknown':'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}}});
+          return {status:'failed',effects:write&&!['INVALID_INPUT','SOURCE_NOT_EXPOSED','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','SCOPE_DENIED','PATROL_AUTHORIZATION_REQUIRED','ACTIVITY_CANCELLED','ACTIVITY_INTERVAL_TOO_SHORT','ACTIVITY_SOURCE_REQUIRED','ACTIVITY_REPLAN_REQUIRED','ACTIVITY_QUIET_ALL_DAY','PRIVATE_INPUT_REJECTED'].includes(code)?'unknown':'none',completeness:'unknown',data:code==='ACTIVITY_REPLAN_REQUIRED'?{next:'update-same-plan-with-current-goal',note:'仍使用原计划ID与当前版本调用更新，提供当前授权的goal及必要basis以重新绑定来源；这不是取消旧计划或新建替代计划的许可。'}:null,sources:[],receipts:[],errorCode:code};}}});
     return [make(ACTIVITY_ACTIONS[3],'当前活动完成后结束本轮并休息；不重置已经发生的用量。',z.strictObject({}),true,(_i,c)=>{this.access(c,true);return this.scheduler.rest(c.runId);}),make(ACTIVITY_ACTIONS[0],'创建持久计划。主人授权定期看群时 kind=group-watch，watch 指定 joined 或 fixed 与是否回复，trigger 使用 interval；兴趣探索使用 exploration。必须返回实际计划ID。计划不能扩大数据或发言权限。'+ACTIVITY_PLAN_COMPLETION_RULE,planSchema,true,(i,c)=>this.plan(c,i)),
       make(ACTIVITY_ACTIONS[1],'持版本调整自己计划的时间、频率或暂停／取消。改变探索目标创建新的工作代次，原Task目标不改写。'+ACTIVITY_PLAN_COMPLETION_RULE,updateSchema,true,(i,c)=>this.update(c,i)),
       make(ACTIVITY_ACTIONS[2],'查看当前Task拥有或正在执行的活动计划；认证主人也可查询获准管理的计划。dispatch区分等待来源任务与等待前台空闲，不把零次执行当成配置未保存。',z.strictObject({id:z.uuid().optional()}),false,(i,c)=>this.status(c,z.object({id:z.uuid().optional()}).parse(i).id))];

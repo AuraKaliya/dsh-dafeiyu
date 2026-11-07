@@ -36,8 +36,8 @@ export const ActivityScheduleBodySchema=z.strictObject({schemaVersion:z.literal(
   quiet:z.array(QuietWindowSchema).max(8),state:z.enum(['active','paused','cancelled']),createdAt:at,updatedAt:at,
 });
 export type ActivityScheduleBody=z.infer<typeof ActivityScheduleBodySchema>;
-export const ACTIVITY_PLAN_COMPLETION_RULE='计划配置保存与计划实际执行是两个阶段。只要求创建或修改配置时，取得保存后的版本回执即可结束设置任务并汇报配置；后台计划要等待来源任务结束或让出、前台空闲后才参与调度。不要在同一个设置任务里用sleep、等待命令或轮询来等它首次执行，否则会等待自己的结束。配置回执不代表已经巡视或发送，实际执行仍受到期时间、静默、权限和资源状态约束。';
-const activationPolicy=z.strictObject({sourceTaskMustSettle:z.literal(true),foregroundMustBeIdle:z.literal(true),evidence:z.literal('configuration-only'),note:z.literal(ACTIVITY_PLAN_COMPLETION_RULE)});
+export const ACTIVITY_PLAN_COMPLETION_RULE='计划配置保存与计划实际执行是两个阶段。只要求创建或修改配置时，取得保存后的版本回执即可结束设置任务并汇报配置；后台计划要等待来源任务结束或让出、前台空闲后才参与调度。不要在同一个设置任务里用sleep、等待命令或轮询来等它首次执行，否则会等待自己的结束。要求沿用原计划时必须保留计划ID，更新失败不能自行用取消旧计划再新建来替代；需要重新绑定来源时仍在原ID上更新，并说明当前授权目标。配置回执不代表已经巡视或发送，实际执行仍受到期时间、静默、权限和资源状态约束。';
+const activationPolicy=z.strictObject({sourceTaskMustSettle:z.literal(true),foregroundMustBeIdle:z.literal(true),evidence:z.literal('configuration-only'),note:z.string().min(1).max(1000)});
 /** Safe facts about the recorded plan revision, with no goal, source content or condition key. */
 export const ActivityPlanReceiptSchema=z.strictObject({id:z.uuid(),version,purpose:ActivityScheduleBodySchema.shape.purpose,state:ActivityScheduleBodySchema.shape.state,
   trigger:z.discriminatedUnion('kind',[ActivityTriggerSchema.options[0],ActivityTriggerSchema.options[1],ActivityTriggerSchema.options[2].omit({key:true})]),
