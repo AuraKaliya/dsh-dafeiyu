@@ -41,7 +41,7 @@ export class NativeRuntime {
   }
   async run(frame:TaskExecutionFrame){
     if(!frame.view.taskId||frame.view.scope.kind!=='task')throw new Error('TASK_REQUIRED');frame.guard();
-    if(frame.evidence?.binding().provider.policy.enabled!==false&&!this.ctx.get('tokenMeter'))await(this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter,{})));
+    if(frame.evidence&&!this.ctx.get('tokenMeter'))await(this.meterLoading??=Promise.resolve(this.ctx.plugin(TokenMeter,{})));
     let owned=this.sessions.get(frame.sessionId);
     if(!owned){let scope:Context|undefined,compaction:CompactionRuntime|undefined;const slot:{frame:TaskExecutionFrame|undefined}={frame};
       const handle=await openAgentSession(this.ctx,frame.sessionId,this.model,this.cwd,ctx=>{scope=ctx;ctx.tools.presentAs('native');

@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {matchesSchema} from '@dafeiyu/journal';
-import {RuntimeStore,RUNTIME_APPLICATION_ID} from '../packages/core/lib/runtime-store.js';
+import {RuntimeStore,RUNTIME_APPLICATION_ID,RUNTIME_SCHEMA_VERSION} from '../packages/core/lib/runtime-store.js';
 import {createStorageSchemaV5,createStorageSchema} from '../packages/core/lib/storage-schema.js';
 import {migrateRuntimeStorage,inspectRuntimeMigration} from '../packages/core/lib/runtime-migration.js';
 import {taskScopeKey} from '@dafeiyu/contracts';
@@ -25,7 +25,7 @@ test('v5 migration preserves every old record, adds query indexes and provides a
   db.prepare('INSERT INTO runtime_outbox(id,body) VALUES(?,?)').run(event.id,JSON.stringify(event));db.close();
   const original=await readFile(file);assert.throws(()=>new RuntimeStore(file,identity),/SCHEMA_UNSUPPORTED/);
   assert.throws(()=>migrateRuntimeStorage(file,{...identity,agentId:'other'},backup),/IDENTITY_MISMATCH/);assert.deepEqual(await readFile(file),original);
-  const migrated=migrateRuntimeStorage(file,identity,backup);assert.equal(migrated.version,6);assert.equal(migrated.migrated,true);
+  const migrated=migrateRuntimeStorage(file,identity,backup);assert.equal(migrated.version,RUNTIME_SCHEMA_VERSION);assert.equal(migrated.migrated,true);
   const after=new DatabaseSync(file,{readOnly:true}),before=new DatabaseSync(backup,{readOnly:true});
   try{for(const row of before.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()){
     const name=String(row.name).replaceAll('"','""');assert.deepEqual(after.prepare('SELECT * FROM "'+name+'"').all(),before.prepare('SELECT * FROM "'+name+'"').all(),name);

@@ -1,7 +1,7 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {ModelUsagePhaseSchema,ModelUsageWorkTypeSchema,ModelUsageBreakdownSchema,ModelUsageOverviewSchema} from '@dafeiyu/contracts';
+import {ModelUsagePhaseSchema,ModelUsageWorkTypeSchema,ModelUsageBreakdownSchema,ModelUsageOverviewSchema,ModelInputMeasurementSchema} from '@dafeiyu/contracts';
 import type {ModelUsagePhase,ModelUsageOverview} from '@dafeiyu/contracts';
 import type {UsageStart,UsageSettlement,UsageReceipt,UsageRecorder} from './usage.js';
 
@@ -16,6 +16,9 @@ CREATE INDEX model_requests_run ON model_requests(run_id);
 CREATE TRIGGER model_request_binding_immutable BEFORE UPDATE OF id,run_id,body ON model_requests BEGIN SELECT RAISE(ABORT,'Immutable model request');END;
 CREATE TRIGGER model_request_settlement_immutable BEFORE UPDATE OF settlement ON model_requests WHEN OLD.settlement IS NOT NULL BEGIN SELECT RAISE(ABORT,'Immutable model settlement');END;
 CREATE TRIGGER model_request_retain BEFORE DELETE ON model_requests BEGIN SELECT RAISE(ABORT,'Retain model requests');END;`);}
+export function addModelInputSchema(db:DatabaseSync){db.exec(`CREATE TABLE model_request_inputs(request_id TEXT PRIMARY KEY REFERENCES model_requests(id),body TEXT NOT NULL);
+CREATE TRIGGER model_request_input_immutable BEFORE UPDATE ON model_request_inputs BEGIN SELECT RAISE(ABORT,'Immutable model input measurement');END;
+CREATE TRIGGER model_request_input_retain BEFORE DELETE ON model_request_inputs BEGIN SELECT RAISE(ABORT,'Retain model input measurement');END;`);}
 
 /** Requests remain countable before a response and after a Run has completed. No prompt or credential is stored. */
 export class UsageLedger implements UsageRecorder {
@@ -31,10 +34,13 @@ export class UsageLedger implements UsageRecorder {
   private workType(runId:string|null):z.infer<typeof ModelUsageWorkTypeSchema>{if(!runId)return 'unassigned';
     const row=this.db.prepare("SELECT json_extract(r.definition,'$.scope.kind') scope,json_extract(r.definition,'$.policyId') policy,json_extract(r.definition,'$.origin.producerId') producer,json_extract(q.body,'$.messageSource.kind') motivation FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE r.id=?").get(runId);
     if(!row)return 'unassigned';if(row.scope==='conversation')return 'conversation';if(String(row.policy).includes('maintenance'))return 'maintenance';if(row.producer==='activity'||row.motivation==='self-exploration')return 'exploration';return 'owner-task';}
-  begin(input:UsageStart){const runId=this.resolveRun(input);this.insert(startSchema.parse({id:input.id,runId,phase:input.phase??'other',workType:input.workType??this.workType(runId),startedAt:input.startedAt,provider:input.provider,model:input.model,sessionId:input.sessionId??null}));}
-  private insert(value:z.infer<typeof startSchema>){this.atomic(()=>{const body=JSON.stringify(value),old=this.db.prepare('SELECT body FROM model_requests WHERE id=?').get(value.id);
-    if(old){if(old.body!==body)throw new Error('USAGE_REQUEST_CONFLICT');return;}
-    this.db.prepare('INSERT INTO model_requests VALUES(?,?,?,NULL)').run(value.id,value.runId,body);this.overview=undefined;});}
+  begin(input:UsageStart){const runId=this.resolveRun(input);this.insert(startSchema.parse({id:input.id,runId,phase:input.phase??'other',workType:input.workType??this.workType(runId),startedAt:input.startedAt,provider:input.provider,model:input.model,sessionId:input.sessionId??null}),input.inputContext);}
+  private insert(value:z.infer<typeof startSchema>,measurement?:unknown){const inputContext=measurement===undefined?undefined:ModelInputMeasurementSchema.parse(measurement);this.atomic(()=>{const body=JSON.stringify(value),old=this.db.prepare('SELECT body FROM model_requests WHERE id=?').get(value.id);
+      if(old){const previous=inputContext?this.db.prepare('SELECT body FROM model_request_inputs WHERE request_id=?').get(value.id):undefined;
+        if(old.body!==body||inputContext&&previous?.body!==JSON.stringify(inputContext))throw new Error('USAGE_REQUEST_CONFLICT');return;}
+    this.db.prepare('INSERT INTO model_requests VALUES(?,?,?,NULL)').run(value.id,value.runId,body);
+    if(inputContext)this.db.prepare('INSERT INTO model_request_inputs VALUES(?,?)').run(value.id,JSON.stringify(inputContext));
+    this.overview=undefined;});}
   finish(id:string,raw:UsageSettlement){const value=settlementSchema.parse(raw);if(value.receipt.id!==id)throw new Error('USAGE_REQUEST_MISMATCH');
     if(value.receipt.breakdown&&value.receipt.tokens!==value.receipt.breakdown.totalTokens)throw new Error('USAGE_TOTAL_MISMATCH');
     this.atomic(()=>{const old=this.db.prepare('SELECT settlement FROM model_requests WHERE id=?').get(id);if(!old)throw new Error('USAGE_REQUEST_MISSING');const body=JSON.stringify(value);
@@ -57,7 +63,13 @@ export class UsageLedger implements UsageRecorder {
     for(const phase of ModelUsagePhaseSchema.options){const matching=rows.filter(row=>row.start.phase===phase);if(matching.length)byPhase[phase]=this.totals(matching);}
     const byWorkType:Partial<Record<z.infer<typeof ModelUsageWorkTypeSchema>,ReturnType<UsageLedger['totals']>>>={};for(const type of ModelUsageWorkTypeSchema.options){const matching=rows.filter(row=>row.start.workType===type);if(matching.length)byWorkType[type]=this.totals(matching);}
     const unknownReasons:Record<string,number>={};for(const row of rows)if(!row.start.marker&&row.settlement?.receipt.tokens===null){const reason=row.settlement.reason??'USAGE_REASON_UNAVAILABLE';unknownReasons[reason]=(unknownReasons[reason]??0)+1;}
-    const result=ModelUsageOverviewSchema.parse({...this.totals(rows),scope:'observed-local-requests',since:times[0]??null,lastAt:times.at(-1)??null,unassignedCalls:rows.filter(row=>!row.start.runId&&!row.start.marker).length,byPhase,byWorkType,unknownReasons,legacyHistory:'not-reconstructed'});
+    const inputRows=runId===undefined?this.db.prepare('SELECT request_id,body FROM model_request_inputs').all():this.db.prepare('SELECT i.request_id,i.body FROM model_request_inputs i JOIN model_requests r ON r.id=i.request_id WHERE r.run_id=?').all(runId);
+    const measurements=new Map(inputRows.map(row=>[String(row.request_id),ModelInputMeasurementSchema.parse(JSON.parse(String(row.body)))]));
+    const inputs=[...measurements.values()],groups=new Map<string,number>();for(const input of inputs)groups.set(input.inputHash,(groups.get(input.inputHash)??0)+1);
+    const byEnvironment:Record<string,ReturnType<UsageLedger['totals']>>={};for(const environment of new Set(rows.map(row=>measurements.get(row.start.id)?.environment??'unclassified-history')))
+      byEnvironment[environment]=this.totals(rows.filter(row=>(measurements.get(row.start.id)?.environment??'unclassified-history')===environment));
+    const inputContext={measuredCalls:inputs.length,unmeasuredCalls:rows.filter(row=>!row.start.marker&&!measurements.has(row.start.id)).length,totalBytes:inputs.reduce((n,row)=>n+row.bytes,0),peakBytes:inputs.reduce((peak,row)=>Math.max(peak,row.bytes),0),largeInputCalls:inputs.filter(row=>row.bytes>512*1024).length,repeatedInputGroups:[...groups.values()].filter(count=>count>=3).length,byEnvironment,warningsOnly:true};
+    const result=ModelUsageOverviewSchema.parse({...this.totals(rows),scope:'observed-local-requests',since:times[0]??null,lastAt:times.at(-1)??null,unassignedCalls:rows.filter(row=>!row.start.runId&&!row.start.marker).length,byPhase,byWorkType,unknownReasons,legacyHistory:'not-reconstructed',inputContext});
     if(runId===undefined)this.overview=structuredClone(result);return result;
   }
 }

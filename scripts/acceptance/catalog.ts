@@ -15,8 +15,9 @@ export const catalog = [
   {id: 'task-send-not-sent', requirements: ['R06'], file: 'tests/task-unsent-recovery.test.ts', limitation: '渠道明确未发后的显式恢复'},
   {id: 'task-send-unknown', requirements: ['R06'], file: 'tests/task-send-unknown.test.ts', limitation: '未知回执保护；未执行真实平台回执查询'},
   {id: 'diagnostic-flow', requirements: ['R02'], file: 'tests/dsh-diagnostic-flow.test.ts', limitation: '真实SDK与本地源码读取、隔离DSH端口；非真实桌面或模型语义验收'},
+  {id: 'context-folding', requirements: ['R02','R09'], file: 'tests/context-folding.test.ts', limitation: '固定十二份材料的SDK输入字节与重复正文；不代表供应商缓存命中或实际费用下降'},
 ] as const;
-export const criteriaVersion = 'corrective-offline-3';
+export const criteriaVersion = 'corrective-offline-4';
 export const allRequirements = ['R01','R02','R03','R04','R05','R06','R07','R08','R09','R10'] as const;
 export const offlineConfiguration = {mode: 'offline-sdk', model: {provider: 'local-test', model: 'scripted'},
   realModel: false, realPlatform: false, paidCalls: false, serverAccess: false, contextCapacity: 1000000} as const;

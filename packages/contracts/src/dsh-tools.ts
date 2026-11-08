@@ -4,7 +4,7 @@ import { ExternalTaskAuthorizationSchema } from './external-execution.js';
 import { BiliBrowserRequestSchema } from './bili-browser.js';
 import type { Json } from './index.js';
 
-export const DSH_TOOL_ACTIONS=['dsh_tool_list','dsh_tool_call','dsh_result_read','dsh_tool_read'] as const;
+export const DSH_TOOL_ACTIONS=['dsh_tool_list','dsh_tool_call','dsh_result_read','dsh_tool_read','dsh_result_read_batch'] as const;
 export const DshToolSchema=z.strictObject({name:z.string().min(1).max(160),description:z.string().max(32000),parameters:z.record(z.string(),z.json())});
 export const DshToolCatalogSchema=z.strictObject({version:z.string().length(64),tools:z.array(DshToolSchema).max(256),environment:z.strictObject({workingDirectory:z.string(),developmentDirectory:z.string(),platform:z.string(),
   inspection:z.strictObject({kind:z.literal('local-instance-locators'),dataDirectory:z.string().max(2000),statusFile:z.string().max(2000),sourceFiles:z.array(z.strictObject({purpose:z.string().max(160),path:z.string().max(2000)})).max(8),filesRead:z.literal(false)}).optional()}).optional(),skills:z.array(z.strictObject({name:z.string(),description:z.string(),load:z.json()})).max(256).optional(),skillsComplete:z.boolean().optional(),pluginChanges:z.array(z.strictObject({id:z.uuid(),state:z.string(),updatedAt:z.iso.datetime()})).max(10).optional()});
@@ -25,6 +25,9 @@ export const DshToolCallSchema=z.strictObject({catalogVersion:z.string().length(
 export type DshToolCall=z.infer<typeof DshToolCallSchema>;
 export const DshResultReadSchema=z.strictObject({resultId:z.uuid(),path:z.array(z.string().max(1000)).max(32).default([]),offset:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(6000).default(4000)});
 export type DshResultRead=z.infer<typeof DshResultReadSchema>;
+export const DshResultReadBatchSchema=z.strictObject({reads:z.array(DshResultReadSchema).min(1).max(8)})
+  .refine(value=>value.reads.reduce((sum,read)=>sum+read.limit,0)<=12000,'Combined page limit exceeds 12000');
+export type DshResultReadBatch=z.infer<typeof DshResultReadBatchSchema>;
 export const DshReadScopeSchema=z.strictObject({agentId:z.string(),taskId:z.uuid(),runId:z.uuid(),operationId:z.uuid(),intentVersion:z.number().int().positive()});
 export type DshReadScope=z.infer<typeof DshReadScopeSchema>;
 export const DshCapabilityChangeSchema=z.strictObject({id:z.uuid(),state:z.enum(['applied','failed','restart-required','unknown']),authorization:ExternalTaskAuthorizationSchema,catalogVersion:z.string().length(64),toolNames:z.array(z.string().min(1).max(160)).max(256),runtimeReloaded:z.boolean()});

@@ -495,6 +495,18 @@ var dispositionLabels = { accepted: "\u5DF2\u53D7\u7406", completed: "\u5DF2\u5B
 function Fact({ label, children }) {
   return h7("div", { className: "df-fact" }, h7("dt", null, label), h7("dd", null, children ?? "\u2014"));
 }
+function InputContextSummary({ value }) {
+  if (!value) return null;
+  const names = { runtime: "\u5B9E\u4F8B\u8FD0\u884C", "deterministic-test": "\u786E\u5B9A\u6027\u6D4B\u8BD5", "real-validation": "\u771F\u5B9E\u5C40\u90E8\u590D\u9A8C", observation: "\u8FDE\u7EED\u89C2\u5BDF", "unclassified-history": "\u5386\u53F2\u672A\u5206\u7C7B" };
+  return h7(
+    "section",
+    { "data-input-context": true },
+    h7("h4", null, "\u8F93\u5165\u4E0E\u4F7F\u7528\u573A\u666F"),
+    h7("p", null, "\u5DF2\u6D4B\u91CF " + value.measuredCalls + " \u6B21\u8F93\u5165\uFF0C\u7D2F\u8BA1 " + value.totalBytes + " \u5B57\u8282\uFF0C\u5355\u6B21\u5CF0\u503C " + value.peakBytes + " \u5B57\u8282\uFF1B" + value.unmeasuredCalls + " \u6B21\u672A\u6D4B\u91CF\u3002\u5B57\u8282\u4E0D\u662F\u8BA1\u8D39 token\uFF0C\u4E0D\u80FD\u636E\u6B64\u8BA1\u7B97\u8D39\u7528\u3002"),
+    h7("ul", null, ...Object.entries(value.byEnvironment).map(([name, usage]) => h7("li", { key: name }, (names[name] ?? name) + "\uFF1A" + usage.calls + " \u6B21\uFF0C\u5DF2\u77E5 " + usage.knownTokens + " token\uFF0C\u672A\u77E5 " + usage.unknownCalls + " \u6B21"))),
+    (value.largeInputCalls > 0 || value.repeatedInputGroups > 0) && h7("p", { className: "df-note" }, "\u8F93\u5165\u63D0\u793A\uFF1A" + value.largeInputCalls + " \u6B21\u8D85\u8FC7 512 KiB\uFF0C" + value.repeatedInputGroups + " \u7EC4\u76F8\u540C\u8F93\u5165\u91CD\u590D\u81F3\u5C11\u4E09\u6B21\u3002\u4EC5\u4F9B\u68C0\u67E5\uFF0C\u4E0D\u505C\u6B62\u4EFB\u52A1\u3002")
+  );
+}
 function RuntimePanel({ snapshot, host = null, busy = false, notice = "", onControl, onRefresh }) {
   const state = snapshot ?? null;
   const availability = controlAvailability(state);
@@ -548,6 +560,7 @@ function RuntimePanel({ snapshot, host = null, busy = false, notice = "", onCont
       h7("p", { className: "df-muted" }, (usage.since ? "\u8BB0\u5F55\u672C\u5B9E\u4F8B\u4ECE " + formatTime(usage.since) + " \u8D77\u89C2\u6D4B\u7684\u8BF7\u6C42\u3002" : "\u542F\u52A8\u540E\u5C1A\u65E0\u6A21\u578B\u8BF7\u6C42\u3002") + "\u65E7\u7248\u672C\u6F0F\u8BB0\u7684\u5386\u53F2\u6CA1\u6709\u8865\u9020\uFF1B\u672A\u77E5\u7528\u91CF\u4E0D\u7B97\u96F6\u3002"),
       h7("dl", { className: "df-runtime-facts" }, h7(Fact, { label: "\u8BF7\u6C42\u6B21\u6570" }, String(usage.calls)), h7(Fact, { label: "\u8FDB\u884C\u4E2D" }, String(usage.pending)), h7(Fact, { label: "\u7528\u91CF\u672A\u77E5" }, String(usage.unknownCalls)), h7(Fact, { label: "\u5F85\u5F52\u5C5E\u8BF7\u6C42" }, String(usage.unassignedCalls)), h7(Fact, { label: "\u5DF2\u77E5 token" }, String(usage.knownTokens)), h7(Fact, { label: "\u975E\u7F13\u5B58\u8F93\u5165" }, String(usage.breakdown.inputTokens)), h7(Fact, { label: "\u7F13\u5B58\u8BFB\u53D6" }, String(usage.breakdown.cacheReadTokens)), h7(Fact, { label: "\u7F13\u5B58\u5199\u5165" }, String(usage.breakdown.cacheWriteTokens)), h7(Fact, { label: "\u8F93\u51FA" }, String(usage.breakdown.outputTokens))),
       Object.keys(usage.unknownReasons ?? {}).length > 0 && h7("p", { className: "df-note" }, Object.entries(usage.unknownReasons).map(([reason, count]) => ({ PROVIDER_USAGE_UNAVAILABLE: "\u63D0\u4F9B\u65B9\u672A\u8FD4\u56DE\u7528\u91CF", PROVIDER_USAGE_INVALID: "\u63D0\u4F9B\u65B9\u7528\u91CF\u6570\u636E\u4E0D\u4E00\u81F4", PROCESS_INTERRUPTED: "\u8FDB\u7A0B\u4E2D\u65AD\uFF0C\u672A\u53D6\u5F97\u7ED3\u7B97", EXTERNAL_USAGE_UNAVAILABLE: "\u5916\u90E8\u6267\u884C\u672A\u56DE\u62A5\u7528\u91CF" }[reason] ?? "\u672A\u77E5\u7528\u91CF") + "\uFF1A" + count + " \u6B21").join("\uFF1B")),
+      h7(InputContextSummary, { value: usage.inputContext }),
       h7("h4", null, "\u6309\u5DE5\u4F5C\u7C7B\u578B"),
       h7("ul", null, ...Object.entries(usage.byWorkType ?? {}).map(([type, value]) => h7("li", { key: type }, (workNames[type] ?? type) + "\uFF1A" + value.calls + " \u6B21\uFF0C\u5DF2\u77E5 " + value.knownTokens + " token\uFF0C\u672A\u77E5 " + value.unknownCalls + " \u6B21"))),
       h7("h4", null, "\u6309\u5904\u7406\u9636\u6BB5"),
@@ -701,7 +714,7 @@ function createManagementApp(request) {
     const [view, setView] = import_react8.default.useState(null), [tab, setTab] = import_react8.default.useState("overview"), [selected, setSelected] = import_react8.default.useState(null), [busy, setBusy] = import_react8.default.useState(false), [notice, setNotice] = import_react8.default.useState(""), [drafts, setDrafts] = import_react8.default.useState({}), [foundation, setFoundation] = import_react8.default.useState(null);
     const describeSequence = import_react8.default.useRef(createSequenceGuard());
     const send = (body) => request(body).then(unwrapResponse);
-    const invoke = async (body) => send({ apiVersion: 9, ...body });
+    const invoke = async (body) => send({ apiVersion: 10, ...body });
     const refresh = async () => {
       const token = describeSequence.current.issue();
       const value = await invoke({ kind: "describe" });
@@ -15288,7 +15301,7 @@ async function apply(ctx) {
       throw new Error(result.error.code);
     return JSON.parse(result.value);
   };
-  const App = createManagementApp((body) => request({ apiVersion: 9, ...body }));
+  const App = createManagementApp((body) => request({ apiVersion: 10, ...body }));
   ctx.effect(() => {
     const style = document.createElement("style");
     style.textContent = style_default;

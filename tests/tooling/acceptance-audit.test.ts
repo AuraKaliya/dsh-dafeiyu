@@ -48,6 +48,11 @@ function fixture() {
       transport:{state,total:2,confirmed:unknown?1:2,pending:0,unknown:unknown?1:0,segments:[{state:'sent',receipt:'1'},{state:unknown?'unknown':'sent',receipt:unknown?null:'2'}]}};
   }
   const code='source excerpt',sourceDigest=hash(code),operationId=randomUUID();
+  const taskInputs=Array.from({length:14},(_,index)=>'纠正 禁止修改文件 待办 '+(index>0&&index<13?`MATERIAL_${String(index-1).padStart(2,'0')}_`+'证'.repeat(3988):'archived-tool-result'));
+  const contextRequests=Array.from({length:16},()=>({id:randomUUID(),body:{sessionId:'task',phase:'task'},settlement:{receipt:{tokens:null}}}));
+  evidence['context-folding']={taskInputs,capacity:{maxTokens:1000000},requests:contextRequests.map(()=>({sessionId:'task',inputBytes:20000,toolResultBytes:100,repeatedToolResultBytes:0})),
+    inputUsage:{tokens:null,inputContext:{measuredCalls:16,totalBytes:320000,byEnvironment:{'deterministic-test':{calls:16}}}},
+    database:{...database,requests:contextRequests,deliveries:[{...database.deliveries[0]!,body:'十二份材料各读到前四千字符；第一份尾段已回查，其余尾段未读。禁止事项保持。'}],operations:[...Array.from({length:12},()=>({action:'dsh_tool_read',outcome:{status:'succeeded'}})),{action:'dsh_result_read',outcome:{status:'succeeded'}}]}};
   evidence['diagnostic-flow']={progress:{...progress,goal:{status:'met',source:'agent',programVerified:false},delivery:{state:'sent'}},requests:measurements,reads:1,sent:[sourceDigest],source:{version:'0.28.7',text:code,sha256:sourceDigest},
     database:{...database,operations:[{id:operationId,action:'dsh_tool_read',outcome:{status:'succeeded',data:{page:{view:{coverage:{complete:true},entries:[{key:'sha256',value:sourceDigest},{key:'version',value:'0.28.7'},{key:'sourceLines',value:[code]}]}}},receipts:[{kind:'dsh-operation',id:operationId}]}}]}};
   const manifest={schemaVersion:1,runId,mode:'offline-sdk',criteriaVersion,revision:'d'.repeat(40),version:'0.28.7',apiVersion:7,sourceHash,driverHash,configHash:hash(offlineConfiguration),catalogHash:hash(catalog),startedAt:'2026-11-07T00:00:00.000Z',scenarios:catalog.map(row=>row.id)};
@@ -114,6 +119,12 @@ test('phase-one audit rejects model-dependent notices, changed targets and false
 test('a diagnostic report must match actual returned source bytes, not a supplied success flag',()=>{
   const f=fixture(),wrong=Object.assign({},f.evidence['diagnostic-flow'],{source:{version:'0.28.7',text:'different file',sha256:hash('source excerpt')},passed:true});
   assert.ok(auditScenario('diagnostic-flow',wrong).checks.some(row=>row.id==='actual-file-and-report'&&!row.passed));
+});
+
+test('context savings cannot hide omitted evidence, lower capacity or extra original reads',()=>{
+  const f=fixture(),base=f.evidence['context-folding'];assert.ok(auditScenario('context-folding',base).checks.every(row=>row.passed));
+  const small=Object.assign({},base,{capacity:{maxTokens:128000}});assert.ok(auditScenario('context-folding',small).checks.some(row=>row.id==='million-capacity'&&!row.passed));
+  const missing=Object.assign({},base,{taskInputs:Array(14).fill('纠正 禁止修改文件 待办 archived-tool-result')});assert.ok(auditScenario('context-folding',missing).checks.some(row=>row.id==='all-material-first-exposed'&&!row.passed));
 });
 
 test('stage-aware waiting permits a valid 322-second report and reports a real deadline failure',async()=>{

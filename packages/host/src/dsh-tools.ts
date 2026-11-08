@@ -1,7 +1,7 @@
 import {API_VERSION} from '@dafeiyu/contracts';
 import type { Context } from '@deepseek-ai/cordis';
 import { z } from 'zod';
-import { DSH_TOOL_ACTIONS,DshToolCallSchema,DshResultReadSchema,ResourceProofSchema } from '@dafeiyu/contracts';
+import { DSH_TOOL_ACTIONS,DshToolCallSchema,DshResultReadSchema,DshResultReadBatchSchema,ResourceProofSchema } from '@dafeiyu/contracts';
 import type { DshToolsPort,ActionCapability,ResourceProof,Json,Conversation,ExecutionContext,ActionOutcome } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
 import { mkdirSync,writeFileSync,readFileSync } from 'node:fs';
@@ -17,7 +17,10 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
   mkdirSync(receiptDirectory,{recursive:true});const results=new DshResultStore(receiptDirectory);
   const file=(id:string)=>join(receiptDirectory,z.uuid().parse(id)+'.json');
   const current=(raw:ResourceProof)=>{try{const proof=ResourceProofSchema.parse(raw),detail=z.object({operationId:z.uuid(),taskId:z.uuid(),textHash:z.string()}).parse(proof.detail),saved=z.object({proof:ResourceProofSchema,page:z.json()}).parse(JSON.parse(readFileSync(file(detail.operationId),'utf8')));
-    return proof.provider==='dsh-tools'&&hash(proof)===hash(saved.proof)&&hash(saved.page)===detail.textHash;}catch{return false;}};
+    const batch=z.object({kind:z.literal('archived-result-batch'),items:z.array(z.object({status:z.string(),page:z.unknown().optional()}))}).safeParse(saved.page);
+    const pages=batch.success?batch.data.items.filter(item=>item.status==='ok').map(item=>item.page):[saved.page];
+    return proof.provider==='dsh-tools'&&hash(proof)===hash(saved.proof)&&hash(saved.page)===detail.textHash
+      &&pages.every(page=>{const parsed=z.object({resultId:z.uuid()}).safeParse(page);return parsed.success&&results.available(detail.taskId,proof.scene,parsed.data.resultId);});}catch{return false;}};
   const scene=(context:ExecutionContext):Conversation|null=>{try{return ctx.dafeiyu.quoteReplySource(context,'dsh-tools').target;}catch(e){if(e instanceof Error&&e.message==='MESSAGE_REQUIRED')return null;throw e;}};
   const observe=(context:ExecutionContext,target:Conversation|null,page:Json,receiptId:string,effect:ActionOutcome['effects'],failed=false):ActionOutcome=>{
     let data:Json=page,sources:ActionOutcome['sources']=[];
@@ -31,7 +34,7 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
   };
   const actions:ActionCapability[]=[{
     id:DSH_TOOL_ACTIONS[3],version:'1',effects:'read',scope:'task',
-    description:'在当前任务中执行宿主明确允许的只读工具。先用 dsh_tool_list 查名称、catalogVersion 和参数；不能执行 shell、写文件或安装插件。结果可用 dsh_result_read 继续读取。',
+    description:'在当前任务中执行宿主明确允许的只读工具。先查目录参数，用 glob/grep 等定位相关文件与范围，再按宿主实际参数读取必要正文和版本；已有归档优先 dsh_result_read 或 dsh_result_read_batch 回查。目录、路径和字段名不是正文证据。不能执行 shell、写文件或安装插件。',
     inputSchema:DshToolCallSchema,outputSchema:z.json(),execute:async(raw,context)=>{
       ctx.dafeiyu.executionAuthority(context,'dsh-tools');
       if(!port.read)return {status:'failed',effects:'none',completeness:'unknown',data:{dispatched:false},sources:[],receipts:[],errorCode:'DSH_READ_UNAVAILABLE'};
@@ -69,6 +72,15 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
     description:'继续读取本Task的已有结果，不重新执行原工具。path与offset来自read/next/unread入口；路径、字段名和数组大小不是正文。coverage.complete=false时必须读取与问题有关的子节点后才能说已检查内容；大文件按页读，不必重新执行读取命令。',
     inputSchema:DshResultReadSchema,outputSchema:z.json(),execute:async(raw,context)=>{ctx.dafeiyu.executionAuthority(context,'dsh-tools');const input=DshResultReadSchema.parse(raw),target=scene(context);
       try{return observe(context,target,results.read(context.taskId!,target,input),input.resultId,'none');}catch(e){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:errorCode(e)};}}
+  },{
+    id:DSH_TOOL_ACTIONS[4],version:'1',effects:'read',scope:'task',inputSchema:DshResultReadBatchSchema,outputSchema:z.json(),
+    description:'一次回查本Task最多8个相关归档页（各页limit之和最多12000），可组合不同结果或同结果的字段/范围，不重新执行宿主工具。沿先前read/next/unread入口提供参数；每页错误、原执行回执和coverage分别保留，complete只说明这些回查是否成功，不表示全文读完。',
+    execute:async(raw,context)=>{
+      const guard=()=>{context.signal.throwIfAborted();ctx.dafeiyu.executionAuthority(context,'dsh-tools');};guard();const target=scene(context);
+      try{const page=results.readBatch(context.taskId!,target,DshResultReadBatchSchema.parse(raw),guard),outcome=observe(context,target,page,context.operationId,'none');
+        const complete=z.object({complete:z.boolean()}).parse(page).complete;return complete?outcome:{...outcome,status:'partial',completeness:'partial',errorCode:'DSH_RESULT_BATCH_PARTIAL'};
+      }catch(error){return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:errorCode(error)};}
+    }
   }];
   const handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'dsh-tools',version:'1',agentId,provides:['dsh.tools.v1','dsh.results.v1'],requires:['execution.task.v1','memory.capability-observation.v1'],actions,
     resourceProofs:{current,epoch:()=>'',targetView:(proof,view,target,scope)=>{

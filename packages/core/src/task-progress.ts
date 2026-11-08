@@ -31,12 +31,16 @@ export function buildTaskProgress(input:TaskProgressInput):TaskProgress {
   const inspection={catalogCalls:0,dispatchCalls:0,resultReads:0,partialReads:0,failedCalls:0,failedCommands:0};
   for(const operation of operations){
     if(operation.action==='dsh_tool_list'){inspection.catalogCalls++;continue;}
-    if(!['dsh_tool_call','dsh_tool_read','dsh_result_read'].includes(operation.action))continue;
-    if(operation.action!=='dsh_result_read'&&operation.outcome?.receipts.some(receipt=>receipt.kind==='dsh-operation'&&receipt.id===operation.id))inspection.dispatchCalls++;
+    if(!['dsh_tool_call','dsh_tool_read','dsh_result_read','dsh_result_read_batch'].includes(operation.action))continue;
+    if(['dsh_tool_call','dsh_tool_read'].includes(operation.action)&&operation.outcome?.receipts.some(receipt=>receipt.kind==='dsh-operation'&&receipt.id===operation.id))inspection.dispatchCalls++;
     if(operation.outcome?.status==='failed'||operation.outcome?.status==='unknown'){inspection.failedCalls++;continue;}
-    const page=z.object({page:z.object({view:z.object({coverage:z.object({complete:z.boolean()}),entries:z.array(z.object({key:z.string(),value:z.unknown().optional()})).optional()})})}).safeParse(operation.outcome?.data);
-    if(page.success){inspection.resultReads++;if(!page.data.page.view.coverage.complete)inspection.partialReads++;
-      const exit=page.data.page.view.entries?.find(row=>row.key==='exitCode')?.value;if(exit!==undefined&&exit!==null&&Number(exit)!==0)inspection.failedCommands++;}
+    const outer=z.object({page:z.unknown()}).safeParse(operation.outcome?.data);
+    const batch=z.object({kind:z.literal('archived-result-batch'),items:z.array(z.object({status:z.string(),page:z.unknown().optional()}))}).safeParse(outer.success?outer.data.page:null);
+    if(batch.success)inspection.failedCalls+=batch.data.items.filter(item=>item.status==='failed').length;
+    const pages=batch.success?batch.data.items.filter(item=>item.status==='ok').map(item=>item.page):outer.success?[outer.data.page]:[];
+    for(const raw of pages){const page=z.object({view:z.object({coverage:z.object({complete:z.boolean()}),entries:z.array(z.object({key:z.string(),value:z.unknown().optional()})).optional()})}).safeParse(raw);
+      if(page.success){inspection.resultReads++;if(!page.data.view.coverage.complete)inspection.partialReads++;
+        const exit=page.data.view.entries?.find(row=>row.key==='exitCode')?.value;if(exit!==undefined&&exit!==null&&Number(exit)!==0)inspection.failedCommands++;}}
   }
   const measured=TaskDeliveryCountsSchema.safeParse(input.counts),counts=measured.success?measured.data:null;
   const deliveryState=counts&&(counts.unknown||counts.sending)&&delivery?.state==='sent'?'uncertain' as const:delivery?.state??'none';

@@ -9,7 +9,7 @@ import type {ChildProcess} from 'node:child_process';
 import type {ManagementControlResult,ManagementRuntimeSnapshot} from '@dafeiyu/contracts';
 import {API_VERSION} from '@dafeiyu/contracts';
 import {controlAvailability,controlNotice,controlRequest,createSequenceGuard,lifecycleLabel,pollInterval,unwrapResponse} from '../packages/plugin/lib/management-view.js';
-import {RuntimePanel} from '../packages/plugin/client/runtime-panel.js';
+import {RuntimePanel,InputContextSummary} from '../packages/plugin/client/runtime-panel.js';
 import {createManagementDispatch} from '../packages/plugin/lib/management-dispatch.js';
 import {ManagementSettings} from '../packages/plugin/lib/management-settings.js';
 import {ManagementRuntime} from '../packages/plugin/lib/management-runtime.js';
@@ -38,6 +38,11 @@ const snapshot=(overrides:Partial<ManagementRuntimeSnapshot>={}):ManagementRunti
   state:'stopped',phase:'idle',operationId:null,operation:null,generation:0,pid:null,code:null,codeAt:null,retryAttempt:0,retry:{attempt:0,nextAt:null},
   checkedAt:null,startedAt:null,readyAt:null,instance:'absent',error:null,history:[],capabilities:[],activity:null,...overrides});
 const temp=()=>mkdtempSync(join(testTempDir(),'ui-'));
+test('input byte warnings and deterministic test usage cannot be mistaken for a paid savings claim',()=>{
+  const totals={calls:3,pending:0,unknownCalls:3,knownTokens:0,tokens:null,breakdown:{inputTokens:0,cacheReadTokens:0,cacheWriteTokens:0,outputTokens:0,totalTokens:0}};
+  const html=renderToStaticMarkup(React.createElement(InputContextSummary,{value:{measuredCalls:3,unmeasuredCalls:1,totalBytes:2000000,peakBytes:800000,largeInputCalls:2,repeatedInputGroups:1,byEnvironment:{'deterministic-test':totals},warningsOnly:true}}));
+  assert.match(html,/确定性测试/);assert.match(html,/字节不是计费 token/);assert.match(html,/不停止任务/);assert.match(html,/未知 3 次/);assert.doesNotMatch(html,/节省|费用下降/);
+});
 test('model usage panel separates work type, processing stage and unknown usage',()=>{
   const totals={calls:2,pending:0,unknownCalls:1,knownTokens:14,tokens:null,breakdown:{inputTokens:2,cacheReadTokens:3,cacheWriteTokens:4,outputTokens:5,totalTokens:14}};
   const usage={...totals,since:new Date().toISOString(),unassignedCalls:0,byPhase:{verification:totals},byWorkType:{'owner-task':totals},unknownReasons:{PROVIDER_USAGE_UNAVAILABLE:1}};

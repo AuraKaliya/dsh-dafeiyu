@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "version": "0.28.9",
+  "revision": "3d04ae4",
+  "mode": "offline-sdk",
+  "paidCalls": false,
+  "sample": {
+    "reads": 12,
+    "characters": 6000,
+    "firstPage": 4000,
+    "reopenLimit": 2000,
+    "goal": "检查十二份材料。纠正：只核对收到的片段，不代表读完全文。禁止修改文件。待办：最后回查第一份尾段，再报告覆盖范围。"
+  },
+  "taskRequests": 14,
+  "allRequests": 16,
+  "taskInputBytes": [
+    58839,
+    72713,
+    86587,
+    100461,
+    114335,
+    128209,
+    142083,
+    155957,
+    169831,
+    183705,
+    197579,
+    211454,
+    225329,
+    233069
+  ],
+  "totalInputBytes": 2158040,
+  "totalTaskInputBytes": 2080151,
+  "peakTaskInputBytes": 233069,
+  "repeatedBodies": 90,
+  "foldedRequests": 0,
+  "reads": 12,
+  "reopens": 1,
+  "sent": "十二份材料各读到前四千字符；第一份尾段已回查，其余尾段未读。禁止事项保持。"
+}

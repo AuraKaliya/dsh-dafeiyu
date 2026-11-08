@@ -4,6 +4,14 @@ const h = React.createElement;
 const instanceLabels = {absent: '没有实例进程', starting: '实例启动中', unconfirmed: '状态待确认', ready: '实例已就绪'};
 const dispositionLabels = {accepted: '已受理', completed: '已完成', failed: '失败', rejected: '未受理'};
 function Fact({ label, children }) { return h('div', { className: 'df-fact' }, h('dt', null, label), h('dd', null, children ?? '—')); }
+export function InputContextSummary({value}) {
+  if(!value)return null;
+  const names={runtime:'实例运行','deterministic-test':'确定性测试','real-validation':'真实局部复验',observation:'连续观察','unclassified-history':'历史未分类'};
+  return h('section',{'data-input-context':true},h('h4',null,'输入与使用场景'),
+    h('p',null,'已测量 '+value.measuredCalls+' 次输入，累计 '+value.totalBytes+' 字节，单次峰值 '+value.peakBytes+' 字节；'+value.unmeasuredCalls+' 次未测量。字节不是计费 token，不能据此计算费用。'),
+    h('ul',null,...Object.entries(value.byEnvironment).map(([name,usage])=>h('li',{key:name},(names[name]??name)+'：'+usage.calls+' 次，已知 '+usage.knownTokens+' token，未知 '+usage.unknownCalls+' 次'))),
+    (value.largeInputCalls>0||value.repeatedInputGroups>0)&&h('p',{className:'df-note'},'输入提示：'+value.largeInputCalls+' 次超过 512 KiB，'+value.repeatedInputGroups+' 组相同输入重复至少三次。仅供检查，不停止任务。'));
+}
 /**
  * Pure lifecycle panel: enablement derives from the shared snapshot, never from a
  * local guess. `onControl` receives exactly the action name of the button.
@@ -41,6 +49,7 @@ export function RuntimePanel({ snapshot, host = null, busy = false, notice = '',
     usage&&h('section',{'data-model-usage':true},h('h3',null,'模型用量'),h('p',{className:'df-muted'},(usage.since?'记录本实例从 '+formatTime(usage.since)+' 起观测的请求。':'启动后尚无模型请求。')+'旧版本漏记的历史没有补造；未知用量不算零。'),
       h('dl',{className:'df-runtime-facts'},h(Fact,{label:'请求次数'},String(usage.calls)),h(Fact,{label:'进行中'},String(usage.pending)),h(Fact,{label:'用量未知'},String(usage.unknownCalls)),h(Fact,{label:'待归属请求'},String(usage.unassignedCalls)),h(Fact,{label:'已知 token'},String(usage.knownTokens)),h(Fact,{label:'非缓存输入'},String(usage.breakdown.inputTokens)),h(Fact,{label:'缓存读取'},String(usage.breakdown.cacheReadTokens)),h(Fact,{label:'缓存写入'},String(usage.breakdown.cacheWriteTokens)),h(Fact,{label:'输出'},String(usage.breakdown.outputTokens))),
       Object.keys(usage.unknownReasons??{}).length>0&&h('p',{className:'df-note'},Object.entries(usage.unknownReasons).map(([reason,count])=>({PROVIDER_USAGE_UNAVAILABLE:'提供方未返回用量',PROVIDER_USAGE_INVALID:'提供方用量数据不一致',PROCESS_INTERRUPTED:'进程中断，未取得结算',EXTERNAL_USAGE_UNAVAILABLE:'外部执行未回报用量'}[reason]??'未知用量')+'：'+count+' 次').join('；')),
+      h(InputContextSummary,{value:usage.inputContext}),
       h('h4',null,'按工作类型'),h('ul',null,...Object.entries(usage.byWorkType??{}).map(([type,value])=>h('li',{key:type},(workNames[type]??type)+'：'+value.calls+' 次，已知 '+value.knownTokens+' token，未知 '+value.unknownCalls+' 次'))),
       h('h4',null,'按处理阶段'),h('ul',null,...Object.entries(usage.byPhase).map(([phase,value])=>h('li',{key:phase},(phaseNames[phase]??phase)+'：'+value.calls+' 次，已知 '+value.knownTokens+' token，未知 '+value.unknownCalls+' 次')))),
     h('h3', null, '组件状态'),

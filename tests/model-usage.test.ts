@@ -9,6 +9,7 @@ import {inspectRuntimeMigration,migrateRuntimeStorage} from '@dafeiyu/core';
 import {taskScopeKey} from '@dafeiyu/contracts';
 import {createStorageSchemaV4} from '../packages/core/lib/storage-schema.js';
 import {testTempDir} from './test-temp.js';
+import {measureModelInput} from '../packages/core/lib/usage.js';
 
 const identity={agentId:'fish',profileId:'usage-test'};
 async function fixture(){const root=await mkdtemp(join(testTempDir(),'model-usage-')),file=join(root,'runtime.sqlite'),store=new RuntimeStore(file,identity,{create:true});
@@ -49,4 +50,17 @@ test('runtime v4 migration preserves existing rows and starts new accounting wit
   const before=await readFile(file);assert.throws(()=>migrateRuntimeStorage(file,{...identity,agentId:'other'},backup),/IDENTITY_MISMATCH/);assert.deepEqual(await readFile(file),before);
   const result=migrateRuntimeStorage(file,identity,backup);assert.equal(result.version,RUNTIME_SCHEMA_VERSION);assert.equal(result.verified?.find(row=>row.table==='message_intents')?.count,1);assert.equal(inspectRuntimeMigration(backup,identity).version,4);
   assert.equal(migrateRuntimeStorage(file,identity,join(root,'unused.sqlite')).migrated,false);const current=new RuntimeStore(file,identity);try{assert.equal(current.modelUsage.summary().calls,0);assert.equal(current.modelUsage.summary().legacyHistory,'not-reconstructed');}finally{current.close();}
+});
+
+test('input measurements stay bound to requests, separate environments and warn without inventing costs',async()=>{
+  const f=await fixture(),at=new Date().toISOString(),inputContext=measureModelInput({messages:[],tools:[]},'deterministic-test');
+  try{for(let index=0;index<4;index++){const id=randomUUID(),input={id,runId:f.run.id,phase:'task' as const,startedAt:at,provider:'fixture',model:'test',inputContext:index<3?inputContext:{...inputContext,environment:'real-validation' as const,inputHash:'c'.repeat(64),bytes:600000}};
+      f.store.modelUsage.begin(input);f.store.modelUsage.begin(input);assert.throws(()=>f.store.modelUsage.begin({...input,inputContext:{...input.inputContext,inputHash:'d'.repeat(64)}}),/USAGE_REQUEST_CONFLICT/);
+      f.store.modelUsage.finish(id,{state:'completed',finishedAt:at,reason:'PROVIDER_USAGE_UNAVAILABLE',receipt:{id,tokens:null,durationMs:1}});
+    }
+    const summary=f.store.modelUsage.summary(),view=summary.inputContext!;assert.equal(view.measuredCalls,4);assert.equal(view.unmeasuredCalls,0);assert.equal(view.largeInputCalls,1);assert.equal(view.repeatedInputGroups,1);
+    assert.equal(view.byEnvironment['deterministic-test']?.calls,3);assert.equal(view.byEnvironment['real-validation']?.unknownCalls,1);assert.equal(summary.tokens,null);assert.equal(view.warningsOnly,true);assert.equal(f.store.get(f.run.id).state,'accepted');
+    assert.equal(JSON.stringify(view).includes('messages'),false);
+  }finally{f.store.close();}
+  const reopened=new RuntimeStore(f.file,identity);try{assert.equal(reopened.modelUsage.summary().inputContext?.measuredCalls,4);}finally{reopened.close();}
 });

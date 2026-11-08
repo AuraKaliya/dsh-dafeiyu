@@ -94,6 +94,8 @@ node scripts/acceptance/replay-verifier.ts <响应档案.json> <新的报告.jso
 
 第 1 轮的生成失败和核验失败位于 `native-delivery-interruption.test.ts` 与 `native-verification-interruption.test.ts`。0.28.8 已将原 `R1.1 known gap` 改为成功恢复回归。0.28.9 再加入统一状态、系统通知、文字/媒体发送接续及实际源码诊断，判据为 `corrective-offline-3`，包含十五个离线场景。取消、撤权、三稿上限和真实进程退出另有回归，不能用测试数量替代需求覆盖。
 
+0.28.10 的 `corrective-offline-4` 保留上述十五个场景，加入 `context-folding`。固定基线为 `tests/fixtures/acceptance/context-baseline.json`，由 0.28.9 在实现前测得；不重新生成基线使新代码通过。`context-audit.ts` 独立核对十四次任务请求、十二份材料首次暴露、纠正/禁止/待办、一次归档回查、最终相同报告、百万容量及输入账本，再比较重复正文和总输入字节。费用仍为未知。批量回查、重启、来源失效和大文本解析另由程序回归覆盖。
+
 本版修正一项验收器误拒：配置任务尚未结束时，必须等待来源任务，但前台确认此时可以已结束。审计继续检查 sourceState=pending、调度未提前执行、原计划 ID/版本/水位；不再把 foregroundBusy 必须为 true 当作业务条件。已补“前台空闲但来源仍 pending 可接受”和“仅前台忙碌不能替代来源 pending”的正反例。
 
 完整真实故事、真实核验采集、视频补读和故障恢复的独立证据适配、真实模型费用基线及两小时驱动仍待后续工作项完成。当前离线结果不能替代这些退出条件。

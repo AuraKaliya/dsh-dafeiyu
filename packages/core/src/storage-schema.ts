@@ -1,5 +1,5 @@
 import type {DatabaseSync} from 'node:sqlite';
-import {addModelUsageSchema} from './usage-ledger.js';
+import {addModelUsageSchema,addModelInputSchema} from './usage-ledger.js';
 
 /** Complete current schema. Called only for an empty database. */
 export function createStorageSchemaV2(db:DatabaseSync):void {
@@ -51,4 +51,5 @@ export function addTaskStatusIndexes(db:DatabaseSync):void {db.exec(`
 CREATE INDEX runtime_outbox_run_type ON runtime_outbox(json_extract(body,'$.runId'),json_extract(body,'$.type'),ordinal);
 CREATE INDEX runtime_runs_task ON runs(json_extract(definition,'$.taskId'));
 `);}
-export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV5(db);addTaskStatusIndexes(db);}
+export function createStorageSchemaV6(db:DatabaseSync):void {createStorageSchemaV5(db);addTaskStatusIndexes(db);}
+export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV6(db);addModelInputSchema(db);}

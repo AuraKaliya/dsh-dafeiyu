@@ -12,7 +12,7 @@ import { NativeDeliveryStore } from './native-delivery-store.js';
 import {UsageLedger} from './usage-ledger.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
-export const RUNTIME_SCHEMA_VERSION = 6;
+export const RUNTIME_SCHEMA_VERSION = 7;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const shareSchema=z.strictObject({id:z.uuid(),runId:z.uuid(),target:ConversationSchema,policyHash:hashSchema,notBefore:z.number().int().nonnegative(),expiresAt:z.iso.datetime(),createdAt:z.iso.datetime()});
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
@@ -205,7 +205,7 @@ export class RuntimeStore {
     const knownTokens=current.knownTokens+rows.reduce((sum,row)=>sum+(row.tokens??0),0),external=this.operations(runId).some(operation=>operation.plugin==='server-executor'&&operation.action.startsWith('dafeiyu_server_execute_'))&&!rows.some(row=>row.external)&&!recorded.some(row=>row.start.external);
     const details=rows.flatMap(row=>row.breakdown?[row.breakdown]:[]),sum=(key:keyof z.infer<typeof breakdown>)=>details.reduce((n,row)=>n+row[key],0);
     return {tokens:!rows.length&&current.calls&&current.tokens!==null&&!external?knownTokens:null,knownTokens,calls:current.calls+rows.filter(row=>!row.marker).length,externalPending:external,
-      unknownCalls:current.unknownCalls+rows.filter(row=>!row.marker&&row.tokens===null).length,pendingCalls:current.pending,breakdownKnownCalls:details.length+recorded.filter(row=>row.settlement?.receipt.breakdown).length,legacyCalls:rows.filter(row=>!row.marker&&row.tokens!==null&&!row.breakdown).length,coverage:rows.length?'legacy-partial':'recorded-requests',byPhase:current.byPhase,
+      unknownCalls:current.unknownCalls+rows.filter(row=>!row.marker&&row.tokens===null).length,pendingCalls:current.pending,breakdownKnownCalls:details.length+recorded.filter(row=>row.settlement?.receipt.breakdown).length,legacyCalls:rows.filter(row=>!row.marker&&row.tokens!==null&&!row.breakdown).length,coverage:rows.length?'legacy-partial':'recorded-requests',byPhase:current.byPhase,...(current.inputContext?{inputContext:current.inputContext}:{}),
       breakdown:{inputTokens:current.breakdown.inputTokens+sum('inputTokens'),outputTokens:current.breakdown.outputTokens+sum('outputTokens'),cacheReadTokens:current.breakdown.cacheReadTokens+sum('cacheReadTokens'),cacheWriteTokens:current.breakdown.cacheWriteTokens+sum('cacheWriteTokens'),totalTokens:current.breakdown.totalTokens+sum('totalTokens')}};
   }
   list(states?:readonly RunState[]):StoredRun[]{this.open();if(states?.length===0)return [];const filter=states?.map(value=>RunStateSchema.parse(value));

@@ -1,4 +1,5 @@
-import type {ManagementRuntimeSnapshot} from '@dafeiyu/contracts';
+import type {ManagementRuntimeSnapshot,ModelUsageOverview} from '@dafeiyu/contracts';
+export declare function InputContextSummary(props:{value:ModelUsageOverview['inputContext']}):unknown;
 export interface RuntimePanelProps {
   readonly snapshot:ManagementRuntimeSnapshot|null;
   readonly host?:unknown;

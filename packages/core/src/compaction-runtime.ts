@@ -203,7 +203,6 @@ export class CompactionRuntime {
     if (!binding || !agent) return;
     if(this.ctx.get('compaction'))throw new Error('Conflicting DSH compaction writer');
     const p = binding.provider.policy, session = agent.session, meter = this.ctx.get('tokenMeter');
-    if(p.enabled===false)return;
     if (!meter) throw new Error('DSH token meter unavailable');
     const measurement = meter.measure(session);
     // DSH's heuristic is not a Chinese tokenizer. A UTF-8 byte floor deliberately overestimates
@@ -214,20 +213,28 @@ export class CompactionRuntime {
     const pressure = Math.max(measurement.totalTokens+(pending?meter.estimateMessage(pending):0),
       Math.ceil((Buffer.byteLength(JSON.stringify(history),'utf8')+(pending?Buffer.byteLength(JSON.stringify(pending),'utf8'):0))/3));
     const target = Math.floor(p.inputTokens * p.targetRatio), threshold = p.inputTokens * p.thresholdRatio;
-    if (pressure < threshold) { this.record('below-threshold', pressure, target); return; }
-    if(this.item?.inputKind==='dafeiyu-execution'&&this.ctx.tools.schemas(agent).some(tool=>tool.name==='dafeiyu_execution_source_open')){
+    // Exact archived bodies can leave the working view without enabling semantic summaries
+    // or waiting for the million-token window to fill. Keep the two newest results in full.
+    if(this.item?.inputKind==='dafeiyu-execution'&&this.ctx.tools.schemas(agent).some(tool=>tool.name==='dsh_result_read')){
       const all=session.snapshotEvents(),bySeq=new Map(all.map(event=>[event.seq,event])),visible=session.surface.nodes.map(seq=>bySeq.get(seq)).filter((event):event is Extract<SessionEvent,{type:'tool/result'}>=>event?.type==='tool/result');
       const exposed=new Set(readProvenance(session).flatMap(event=>event.type==='plugin:dafeiyu/request-sources'?event.data.parents:[]));let saved=0,count=0;
-      for(const event of visible.slice(0,-8)){
+      const prices=new Map(measurement.nodes.map(node=>[node.seq,node.heuristicTokens]));let archived=false;
+      const names=new Map(all.flatMap(event=>event.type==='tool/call'?[[String(event.data.callId),event.data.name] as const]:[]));
+      for(const event of visible.slice(0,-2)){
         signal.throwIfAborted();if(!exposed.has(event.seq))continue;const record=this.provenance.get(event.seq);if(!record||!this.provenance.valid(record))continue;
         const content=event.data.message.content;if(content.some(block=>block.type!=='text'))continue;
-        const text=content.map(block=>block.type==='text'?block.text:'').join('\n'),view=toolReceiptView(text,event.data.meta,String(event.data.message.toolCallId));if(!view)continue;
+        const callId=String(event.data.message.toolCallId),text=content.map(block=>block.type==='text'?block.text:'').join('\n'),view=toolReceiptView(text,event.data.meta,callId,names.get(callId)??'');if(!view)continue;
         const message={...event.data.message,content:[{type:'text' as const,text:view}]},benefit=meter.estimateMessage(event.data.message)-meter.estimateMessage(message);if(benefit<=0)continue;
-        priceRetirement(this.ctx,session,[event.seq]);const replacement=session.append('tool/result',{...event.data,message},{surfaceOp:{op:'replace',startSeq:event.seq,endSeq:event.seq},sourceEventSeqs:[event.seq]});
-        this.provenance.recordReplacement(replacement.seq,event.seq);saved+=benefit;count++;if(pressure-saved<=target)break;
+        if(!archived){if(!await this.ctx.sessions.flush(session))throw new Error('PERSISTENCE_FAILED');archived=true;}
+        signal.throwIfAborted();if(!this.provenance.valid(record))continue;
+        session.append('compaction/prune',{shadowedRange:{start:event.seq,end:event.seq},shadowedSeqs:[event.seq],shadowedTokenCount:prices.get(event.seq)??0});
+        const replacement=session.append('tool/result',{...event.data,message},{surfaceOp:{op:'replace',startSeq:event.seq,endSeq:event.seq},sourceEventSeqs:[event.seq]});
+        this.provenance.recordReplacement(replacement.seq,event.seq);saved+=benefit;count++;
       }
-      if(count){this.record('tool-receipts-compacted',pressure,target,saved);this.audit(this.item,{status:'tool-receipts-compacted',count,saved,retainedRecent:8},[]);if(!await this.ctx.sessions.flush(session))throw new Error('PERSISTENCE_FAILED');return;}
+      if(count){this.record('tool-receipts-compacted',pressure,target,saved);this.audit(this.item,{status:'tool-receipts-compacted',count,saved,retainedRecent:2,measurement:'sdk-estimated-tokens',semantic:false},[]);if(!await this.ctx.sessions.flush(session))throw new Error('PERSISTENCE_FAILED');return;}
     }
+    if(p.enabled===false)return;
+    if (pressure < threshold) { this.record('below-threshold', pressure, target); return; }
     const events = readCompactionEvents(session), last = events.findLast(e => e.type === 'plugin:dafeiyu/compaction-check' && ['compacted', 'composed', 'rewritten', 'rewrite-failed', 'rewrite-no-benefit', 'summary-failed', 'no-benefit', 'conflict'].includes(e.data.status));
     if (last?.type === 'plugin:dafeiyu/compaction-check' && (Date.now() - last.data.at < p.cooldownMs
       || pressure - (last.data.pressure - last.data.saved) < p.minGrowthTokens)) { this.record('cooldown-or-growth', pressure, target); return; }
