@@ -6,6 +6,8 @@ import {existsSync,mkdirSync,readFileSync,realpathSync,writeFileSync} from 'node
 import {join,resolve,relative} from 'node:path';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
+import {saveJson} from './acceptance/io.mjs';
+import {inspectReleaseIntegrity,inspectInstalledDependencies} from './release-integrity.mjs';
 
 // Real release entry, CLI, SDK, process and stores; loopback fixtures replace platforms.
 const flags=new Map();
@@ -14,6 +16,7 @@ const packageRoot=flags.get('--package'),work=flags.get('--workdir');
 if(!packageRoot||!work||existsSync(work))throw new Error('FRESH_INSTALL_NEW_WORKDIR_REQUIRED');
 const inside=relative(packageRoot,work);if(!inside.startsWith('..'))throw new Error('FRESH_INSTALL_WORKDIR_INSIDE_PACKAGE');
 const pkg=JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));assert.equal(pkg.name,'dsh-dafeiyu');
+const release=inspectReleaseIntegrity(packageRoot),dependencyIdentity=inspectInstalledDependencies(packageRoot);
 const require=createRequire(join(packageRoot,'package.json'));
 const outside=Object.keys(pkg.dependencies).filter(name=>!realpathSync(require.resolve(name)).toLowerCase().startsWith(realpathSync(packageRoot).toLowerCase()+'\\'));
 assert.deepEqual(outside,[],'Release dependencies must resolve inside its own directory');
@@ -48,23 +51,23 @@ websocket.on('connection',socket=>socket.send(JSON.stringify({post_type:'meta_ev
 const settings=join(work,'dafeiyu.config.json'),credentials=join(work,'model.credentials.yaml');
 writeFileSync(credentials,'version: 1\nrefs:\n  DEEPSEEK_API_KEY: fictional-offline-test-credential\n',{mode:0o600});
 writeFileSync(join(work,'onebot.token'),'fictional-onebot-token-0000000000000000',{mode:0o600});
-writeFileSync(settings,JSON.stringify({schemaVersion:1,instanceName:'fresh-install-check',dataDir:'./data',dshTools:false,
+saveJson(settings,{schemaVersion:1,instanceName:'fresh-install-check',dataDir:'./data',dshTools:false,
   model:{model:'deepseek-chat',credentialStore:'./model.credentials.yaml',baseURL:`http://127.0.0.1:${port}/anthropic`},
-  qq:{botId:'99900001',ownerId:'99900002',tokenFile:'./onebot.token',httpURL:`http://127.0.0.1:${port}/`,wsURL:`ws://127.0.0.1:${port}/`,groupIds:[],joinedGroups:false,stickers:{enabled:false}},activity:{enabled:false}},null,2));
+  qq:{botId:'99900001',ownerId:'99900002',tokenFile:'./onebot.token',httpURL:`http://127.0.0.1:${port}/`,wsURL:`ws://127.0.0.1:${port}/`,groupIds:[],joinedGroups:false,stickers:{enabled:false}},activity:{enabled:false}});
 const cli=join(packageRoot,'bin/dafeiyu.mjs'),env={...process.env,NODE_PATH:'',NODE_OPTIONS:'',DSH_HOME:join(work,'dsh-home')};
 const command=mode=>{
   const result=spawnSync(process.execPath,[cli,mode,'--settings',settings],{cwd:work,env,windowsHide:true,encoding:'utf8',timeout:30000});
   if(result.status!==0)throw new Error('FRESH_INSTALL_'+mode.toUpperCase()+'_FAILED '+result.stdout.trim());
   return JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
 };
-let child;const starts=[];
+let child;const starts=[],stops=[],duplicateStarts=[];
 const stop=async()=>{
   if(!child)return;const current=child;child=undefined;
   if(current.exitCode!==null)return;
   const closed=new Promise(resolve=>current.once('close',resolve));
   if(current.connected)current.send({type:'stop'});
   const timer=setTimeout(()=>current.kill(),15000);
-  try{await closed;assert.equal(current.exitCode,0);}finally{clearTimeout(timer);}
+  try{await closed;assert.equal(current.exitCode,0);const status=command('status');assert.equal(status.online,false);stops.push({pid:current.pid,exitCode:current.exitCode,online:status.online});}finally{clearTimeout(timer);}
 };
 const start=async()=>{
   child=spawn(process.execPath,[cli,'start','--settings',settings],{cwd:work,env,windowsHide:true,stdio:['ignore','pipe','pipe','ipc']});
@@ -76,9 +79,18 @@ const start=async()=>{
     current.on('message',message);current.once('error',reject);current.once('close',()=>{clearTimeout(timer);reject(new Error('FRESH_INSTALL_PROCESS_CLOSED'));});
   });
   const status=command('status');assert.equal(status.online,true);assert.equal(status.snapshot.accepting,true);
+  assert.equal(status.snapshot.pid,child.pid);
+  assert.equal(status.snapshot.services.usage?.calls,0,'Initialization must not dispatch model requests');
   assert.equal(status.snapshot.services.qq.state,'online');
-  assert.ok(status.snapshot.plugins.filter(plugin=>plugin.version&&plugin.id!=='model-deepseek').every(plugin=>plugin.version===pkg.version));
-  starts.push({pid:child.pid,phase:status.snapshot.phase,online:true,qq:'online'});
+  const loadedPlugins=status.snapshot.plugins.filter(plugin=>plugin.version&&plugin.id!=='model-deepseek');
+  assert.ok(loadedPlugins.every(plugin=>plugin.version===pkg.version));
+  assert.ok(['timeline','memory','channel-qq'].every(id=>loadedPlugins.some(plugin=>plugin.id===id&&plugin.state==='ready')));
+  const duplicate=spawnSync(process.execPath,[cli,'start','--settings',settings],{cwd:work,env,windowsHide:true,encoding:'utf8',timeout:30000});
+  assert.notEqual(duplicate.status,0);assert.equal(duplicate.error,undefined);
+  const refusal=JSON.parse(duplicate.stdout.trim().split(/\r?\n/).at(-1));assert.ok(['HOST_ALREADY_OWNED','HOST_STORE_OWNED'].includes(refusal.code),refusal.code);
+  const same=command('status');assert.equal(same.online,true);assert.equal(same.snapshot.pid,child.pid);assert.equal(same.snapshot.instanceId,status.snapshot.instanceId);
+  duplicateStarts.push({code:refusal.code,pidPreserved:true,instancePreserved:true});
+  starts.push({pid:child.pid,observedPid:status.snapshot.pid,instanceId:status.snapshot.instanceId,phase:status.snapshot.phase,online:true,qq:'online',loadedPlugins});
 };
 try{
   assert.equal(command('check').code,'INSTALL_CONFIGURATION_VALID');assert.equal(command('init').code,'INSTALL_INITIALIZED');
@@ -87,15 +99,16 @@ try{
   await start();await stop();await start();await stop();assert.deepEqual(JSON.parse(readFileSync(metadata,'utf8')),identity);
   const extended=JSON.parse(readFileSync(settings,'utf8'));
   extended.bilibili={capabilities:true};extended.media={ffmpeg:process.execPath,ffprobe:process.execPath};extended.activity.enabled=true;
-  writeFileSync(settings,JSON.stringify(extended,null,2));assert.equal(command('init').code,'INSTALL_INITIALIZED');
+  saveJson(settings,extended);assert.equal(command('init').code,'INSTALL_INITIALIZED');
   const versions={};for(const name of ['runtime','bilibili','media','activity']){const db=new DatabaseSync(join(work,'data/core',name+'.sqlite'),{readOnly:true});try{versions[name]=db.prepare('PRAGMA user_version').get().user_version;}finally{db.close();}}
   assert.equal(versions.bilibili,6);assert.equal(versions.runtime,JSON.parse(readFileSync(join(packageRoot,'release.json'),'utf8')).stores.runtime);
-  extended.activity.enabled=false;writeFileSync(settings,JSON.stringify(extended,null,2));assert.equal(command('init').code,'INSTALL_INITIALIZED');
+  extended.activity.enabled=false;saveJson(settings,extended);assert.equal(command('init').code,'INSTALL_INITIALIZED');
   await start();await stop();assert.deepEqual(JSON.parse(readFileSync(metadata,'utf8')),identity);
   assert.equal(counts.modelGenerations,0,JSON.stringify(counts));assert.equal(counts.platformSends,0,JSON.stringify(counts));
-  const report={passed:true,version:pkg.version,packageRoot,workdir:work,dependencies:Object.keys(pkg.dependencies).length,
-    entryImported:true,initialized:true,identityPreserved:true,optionalStores:versions,starts,counts,realPlatforms:false,mediaProcessing:false};
-  writeFileSync(join(work,'acceptance.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+  assert.equal(inspectReleaseIntegrity(packageRoot).contentHash,release.contentHash);assert.deepEqual(inspectInstalledDependencies(packageRoot),dependencyIdentity);
+  const report={passed:true,version:pkg.version,packageRoot,workdir:work,releaseHash:release.contentHash,dependencyIdentity,dependencies:Object.keys(pkg.dependencies).length,
+    entryImported:true,initialized:true,identityPreserved:true,optionalStores:versions,starts,stops,duplicateStarts,counts,realPlatforms:false,mediaProcessing:false};
+  saveJson(join(work,'acceptance.json'),report);console.log(JSON.stringify({...report,dependencyIdentity:{...dependencyIdentity,dependencies:dependencyIdentity.dependencies.length}}));
 }finally{
   await stop();for(const client of websocket.clients)client.terminate();await new Promise(resolve=>websocket.close(resolve));await new Promise(resolve=>server.close(resolve));
 }

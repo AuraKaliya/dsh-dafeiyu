@@ -1,6 +1,7 @@
 import {readdirSync,lstatSync,readFileSync} from 'node:fs';
 import {join,resolve,relative,sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {inspectReleaseIntegrity} from './release-integrity.mjs';
 
 /** Local denylist values are supplied by the reviewer; findings never repeat their content. */
 export function inspectPublicRelease(root,{forbiddenValues=[]}={}){
@@ -18,6 +19,7 @@ export function inspectPublicRelease(root,{forbiddenValues=[]}={}){
   if(Object.keys(manifest.dependencies??{}).some(name=>name.startsWith('@dafeiyu/')))findings.push({path:'package.json',code:'PRIVATE_PACKAGE_DEPENDENCY'});
   for(const key of ['botId','ownerId','tokenFile'])if(example.qq?.[key]!=='')findings.push({path:'examples/dafeiyu.config.json',code:'IDENTITY_DEFAULT'});
   if(example.model?.credentialStore!==''||example.model?.model!=='')findings.push({path:'examples/dafeiyu.config.json',code:'MODEL_DEFAULT'});
+  try{inspectReleaseIntegrity(root);}catch(error){findings.push({path:'release.json',code:error instanceof Error&&/^[A-Z_]+$/.test(error.message)?error.message:'RELEASE_MANIFEST_INVALID'});}
   return {passed:findings.length===0,files,bytes,findings};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const result=inspectPublicRelease(resolve(process.argv[2]));console.log(JSON.stringify(result));if(!result.passed)process.exitCode=1;}

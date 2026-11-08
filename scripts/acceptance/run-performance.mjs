@@ -21,6 +21,6 @@ try{const heavy=read('heavy.json'),cancel=read('cancellation.json'),recovery=rea
     sameWork:heavy.reads===baseline.reads&&heavy.requests===baseline.requests&&heavy.sent===baseline.sent&&heavy.taskRuns===1&&heavy.capacity===1000000,
     responsive:heavy.maxLoopDelayMs<manifest.thresholds.maxLoopDelayMs,cancelled:cancel.reads===48&&cancel.sent===null&&cancel.cancelResponseMs<1000&&cancel.cancelSettledMs<1500,
     recovered:recovery.reads===0&&recovery.requests===0&&recovery.storedRequests===67&&recovery.taskRuns===1&&recovery.sent===baseline.sent};
-  report={runId,passed:Object.values(checks).every(Boolean),checks,baseline,heavy,cancel,recovery,profile:summarizeCpuProfile(read('heavy.cpuprofile')),releaseAccepted:false,realCost:null};
+  report={runId,runtimeHash:fingerprint('runtime'),passed:Object.values(checks).every(Boolean),checks,baseline,heavy,cancel,recovery,profile:summarizeCpuProfile(read('heavy.cpuprofile')),releaseAccepted:false,realCost:null};
 }catch(error){report={runId,passed:false,code:'PERFORMANCE_EVIDENCE_INCOMPLETE',testExitCode:code};}
 saveJson(join(directory,'audit.json'),report);console.log(JSON.stringify({runId,passed:report.passed,report:join(directory,'audit.json')}));if(!report.passed)process.exitCode=1;

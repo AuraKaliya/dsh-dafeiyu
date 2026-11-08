@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { TestStorage, childEnvironment, budgetCheck, repository } from './testing/workspace.ts';
 import { freeBytes, removeTree } from './testing/files.ts';
 import { selectTests } from './testing/selection.ts';
+import {fingerprint,saveJson} from './acceptance/io.mjs';
 
 const available = (await Promise.all(['tests', 'tests/tooling', 'tests/smoke'].map(async directory =>
   (await readdir(join(repository, directory))).filter(name => name.endsWith('.test.ts')).map(name => directory + '/' + name)
@@ -12,7 +13,7 @@ const selection = selectTests(available, process.argv.slice(2));
 
 const storage = new TestStorage();
 const unlock = await storage.lock();
-let run, child, stopped = null, monitoring = false, timer;
+let run, child, stopped = null, monitoring = false, timer,identity=null,identityAfter=null;
 const stages = [];
 const stop = reason => {
   stopped ??= reason;
@@ -45,6 +46,7 @@ try {
   }, 2000);
   console.log(`Test suite: ${selection.suite} (${selection.files.length} files)`);
   await execute('build', ['scripts/build.mjs']);
+  identity={sourceHash:fingerprint('source'),driverHash:fingerprint('driver'),runtimeHash:fingerprint('runtime')};
   // Imports compile the small shared fixtures transitively. There are no path-loaded subprocess scenarios.
   const sources = selection.typecheck.filter(file => !file.startsWith('tests/tooling/')).map(file => resolve(repository, file));
   if (sources.length) {
@@ -64,6 +66,8 @@ try {
   await execute('tests', ['scripts/testing/driver.ts', ...files]);
   const summary = JSON.parse(await readFile(join(run.root, 'summary.json'), 'utf8'));
   if (!summary.success || summary.counts.tests < 1) throw new Error('TEST_SUMMARY_FAILED');
+  identityAfter={sourceHash:fingerprint('source'),driverHash:fingerprint('driver'),runtimeHash:fingerprint('runtime')};
+  if(JSON.stringify(identityAfter)!==JSON.stringify(identity))throw new Error('TEST_CONTENT_CHANGED');
 } catch (error) {
   stopped ??= error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : 'TEST_RUN_FAILED';
   process.exitCode = 1;
@@ -74,10 +78,10 @@ try {
     let summary = null; try { summary = JSON.parse(await readFile(join(run.root, 'summary.json'), 'utf8')); } catch { /* A build failure has no test summary. */ }
     const cleanup = await storage.finish(run, stopped ? stopped === 'TEST_INTERRUPTED' ? 'interrupted' : 'failed' : 'passed', stopped);
     if (cleanup.blocked.length) process.exitCode = 1;
-    const report = { schemaVersion: 1, runId: run.id, suite: selection.suite, files: selection.files, startedAt: run.createdAt, finishedAt: new Date().toISOString(), stages, summary,
+    const report = { schemaVersion: 1, runId: run.id, suite: selection.suite, files: selection.files, identity,identityAfter,startedAt: run.createdAt, finishedAt: new Date().toISOString(), stages, summary,
       reason: stopped, cleanup, freeBytes: await freeBytes(storage.root), realModel: false, realPlatform: false, serverAccess: false };
     const reports = join(repository, '.runtime', 'test-reports'); await mkdir(reports, { recursive: true });
-    await writeFile(join(reports, run.id + '.json'), JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
+    saveJson(join(reports,run.id+'.json'),report);
     // Only bounded, metadata-only runner reports; formal acceptance reports live elsewhere.
     const old = await Promise.all((await readdir(reports)).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).map(async name => ({ name, time: (await stat(join(reports, name))).mtimeMs })));
     for (const entry of old.sort((a, b) => b.time - a.time).slice(20)) await removeTree(join(reports, entry.name), reports);

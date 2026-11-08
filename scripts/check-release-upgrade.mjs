@@ -1,0 +1,72 @@
+import {mkdirSync,existsSync,readFileSync,writeFileSync,copyFileSync,readdirSync,lstatSync} from 'node:fs';
+import {join,resolve,relative,dirname} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
+import {randomUUID,createHash} from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
+import assert from 'node:assert/strict';
+import {saveJson} from './acceptance/io.mjs';
+import {inspectReleaseIntegrity,inspectInstalledDependencies,fileInventory} from './release-integrity.mjs';
+
+const flags=new Map();for(let index=2;index<process.argv.length;index+=2){if(!['--from','--to','--workdir'].includes(process.argv[index])||!process.argv[index+1])throw new Error('UPGRADE_ARGUMENTS');flags.set(process.argv[index],resolve(process.argv[index+1]));}
+const from=flags.get('--from'),to=flags.get('--to'),work=flags.get('--workdir');if(!from||!to||!work||existsSync(work))throw new Error('UPGRADE_NEW_WORKDIR_REQUIRED');
+for(const root of [from,to]){const rest=relative(root,work);if(!rest.startsWith('..'))throw new Error('UPGRADE_WORKDIR_INSIDE_PACKAGE');}
+const oldRelease=inspectReleaseIntegrity(from),newRelease=inspectReleaseIntegrity(to),oldDependencies=inspectInstalledDependencies(from),newDependencies=inspectInstalledDependencies(to);
+mkdirSync(work,{recursive:true});const original=join(work,'original'),backup=join(work,'backup'),upgraded=join(work,'upgraded'),rollback=join(work,'rollback'),afterUpgrade=join(work,'after-upgrade');mkdirSync(original);
+const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const files=root=>readdirSync(root,{withFileTypes:true}).flatMap(entry=>{const path=join(root,entry.name),stat=lstatSync(path);if(stat.isSymbolicLink())throw new Error('UPGRADE_LINK_REFUSED');return stat.isDirectory()?files(path):[path];});
+const tables=file=>{const db=new DatabaseSync(file,{readOnly:true});try{assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');return db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(row=>{
+  const name=String(row.name),rows=db.prepare('SELECT * FROM "'+name.replaceAll('"','""')+'"').all();return {name,count:rows.length,hash:digest(rows.map(row=>JSON.stringify(row)).sort())};});}finally{db.close();}};
+const snapshot=(source,target)=>{assert.equal(existsSync(target),false);mkdirSync(target,{recursive:true});const evidence=[];
+  for(const file of files(source)){if(/\.sqlite-(?:wal|shm)$/.test(file))continue;const name=relative(source,file),destination=join(target,name);mkdirSync(dirname(destination),{recursive:true});
+    if(file.endsWith('.sqlite')){const before=tables(file),db=new DatabaseSync(file,{readOnly:true});try{db.prepare('VACUUM INTO ?').run(destination);}finally{db.close();}assert.deepEqual(tables(destination),before);evidence.push({path:name,tables:before});}
+    else copyFileSync(file,destination);
+  }return evidence;};
+const cli=(root,mode,instance,okay=true)=>{const result=spawnSync(process.execPath,[join(root,'bin/dafeiyu.mjs'),mode,'--settings',join(instance,'settings.json')],{cwd:instance,windowsHide:true,encoding:'utf8',timeout:30000,env:{...process.env,DSH_HOME:join(work,'dsh-home'),NODE_PATH:'',NODE_OPTIONS:''}});
+  if(result.error)throw result.error;const report=JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));if(okay)assert.equal(result.status,0,report.code);else assert.notEqual(result.status,0);return report;};
+// Synthetic credentials are used only for check/init/migrate. No Host or model is started.
+writeFileSync(join(original,'credentials.yaml'),'version: 1\nrefs:\n  DEEPSEEK_API_KEY: fictional-offline-upgrade-fixture\n');writeFileSync(join(original,'onebot.token'),'fictional-offline-upgrade-token-000000000000');
+saveJson(join(original,'settings.json'),{schemaVersion:1,instanceName:'upgrade-rehearsal',dataDir:'./data',dshTools:false,model:{model:'deepseek-chat',credentialStore:'./credentials.yaml',baseURL:'http://127.0.0.1:9/anthropic'},qq:{botId:'99900001',ownerId:'99900002',tokenFile:'./onebot.token',httpURL:'http://127.0.0.1:9/',wsURL:'ws://127.0.0.1:9/',groupIds:[],joinedGroups:false,stickers:{enabled:false}},activity:{enabled:true},bilibili:{capabilities:true},media:{ffmpeg:process.execPath,ffprobe:process.execPath}});
+assert.equal(cli(from,'init',original).code,'INSTALL_INITIALIZED');
+const configuration=JSON.parse(readFileSync(join(original,'data/configuration/host.json'),'utf8')),identity={agentId:configuration.agent.id,profileId:configuration.profileId};
+const locations={runtime:relative(original,join(configuration.paths.core,'runtime.sqlite')),memory:relative(original,join(configuration.paths.memory,'memory.sqlite')),qq:relative(original,join(configuration.paths.channels.qq,'qq.sqlite')),activity:relative(original,join(configuration.paths.core,'activity.sqlite'))};
+const load=async(root,path)=>import(pathToFileURL(join(root,'runtime',path)).href);
+const oldRuntime=await load(from,'core/lib/runtime-store.js'),newRuntime=await load(to,'core/lib/runtime-store.js'),oldMemory=await load(from,'memory/lib/store.js'),oldQq=await load(from,'channel-qq/lib/store.js'),oldActivity=await load(from,'activity/lib/store.js'),contracts=await load(from,'contracts/lib/index.js'),persona=await load(from,'core/lib/persona-manifest.js');
+const runtime=new oldRuntime.RuntimeStore(join(original,locations.runtime),identity),memory=new oldMemory.MemoryStore(join(original,locations.memory)),qq=new oldQq.QqStore(join(original,locations.qq)),activity=new oldActivity.ActivityStore(join(original,locations.activity),identity);
+const tasks=memory.taskWorkspace(()=>false,()=>false),model={provider:'local-test',model:'scripted'},stamp='a'.repeat(64),ids={};
+const start=(name)=>{const taskId=tasks.create(identity.agentId,{requestId:name,title:name,goal:'合成迁移夹具，保留历史与未知状态。'}),request=runtime.prepareRequest('upgrade-fixture',name,{});runtime.bindTask(request.id,taskId);
+  let run=runtime.acceptRun(request.id,{taskId,scope:{kind:'task',agentId:identity.agentId,taskId,scopeKey:contracts.taskScopeKey(identity.agentId,taskId)},origin:{kind:'native',producerId:'upgrade-fixture',requestId:name},intentVersion:1,policyId:'upgrade-fixture'});run=runtime.transition(run.id,run.version,'queued');
+  run=runtime.start(run.id,run.version,{sessionId:'fixture-'+run.id,personaVersion:stamp,model,registryVersion:stamp,authorityVersion:stamp,inputs:[]},persona.foundationManifest(run,{text:'合成存储夹具',version:stamp,fileIdentity:stamp},model));return {taskId,run};};
+try{
+  for(const mode of ['pending','unknown']){const {taskId,run}=start(mode),body=JSON.stringify({qq_messages:[{type:'text',text:mode+' first'},{type:'text',text:mode+' second'}]}),ref={sessionId:run.snapshot.sessionId,messageSeq:1,turnEndSeq:2,textHash:createHash('sha256').update(body).digest('hex')};
+    runtime.complete(run.id,run.version,ref);const anchor={kind:'task-result',schemaVersion:1,taskId,runId:run.id,inboundId:randomUUID(),target:{channel:'qq',account:'99900001',kind:'private',id:'99900002'},intentVersion:1,authorityVersion:stamp,expiresAt:new Date(Date.now()+86400000).toISOString()};
+    const delivery=runtime.nativeDeliveries.create(anchor);runtime.nativeDeliveries.start(run.id,{packetId:randomUUID(),sourceStamp:stamp,foundationHash:stamp,personaHash:stamp,modelHash:stamp});runtime.nativeDeliveries.rendered(run.id,ref);runtime.nativeDeliveries.approve(run.id,body);
+    const reply={id:'native-delivery:'+delivery.id,conversation:anchor.target,sourceMessageId:'synthetic-'+mode,text:body,taskResult:anchor};qq.delivery.prepare(reply);
+    if(mode==='unknown'){qq.delivery.begin(reply.id,0);qq.delivery.confirm(reply.id,0,'10001');qq.delivery.begin(reply.id,1);qq.delivery.unknown(reply.id,1,'PLATFORM_RESULT_UNKNOWN');runtime.nativeDeliveries.sending(run.id);runtime.nativeDeliveries.finish(run.id,'uncertain',null,'PLATFORM_RESULT_UNKNOWN');}
+    ids[mode]={runId:run.id,taskId,deliveryId:delivery.id,replyId:reply.id,body};
+  }
+  const interrupted=start('unknown-operation'),operation=runtime.beginOperation(interrupted.run.id,'external-attempt','fixture_write','fixture','1',{});
+  runtime.finishOperation(operation.id,{status:'unknown',effects:'unknown',completeness:'unknown',data:{attempted:true},sources:[],receipts:[],errorCode:'FIXTURE_UNKNOWN'});const checkpoint=runtime.checkpoint(interrupted.run.id,{note:'已保存进度，未知操作不得重做',operationId:operation.id});runtime.transition(interrupted.run.id,interrupted.run.version,'interrupted','PROCESS_INTERRUPTED');ids.interrupted={runId:interrupted.run.id,operationId:operation.id,checkpoint};
+  const now=Date.now(),scope={kind:'task',agentId:identity.agentId,taskId:ids.pending.taskId,scopeKey:contracts.taskScopeKey(identity.agentId,ids.pending.taskId)};
+  const plan=activity.create({schemaVersion:1,requestId:'patrol-plan',agentId:identity.agentId,owner:scope,purpose:'group-watch',goal:'只保存合成巡视安排，不执行',basis:[],anchor:{schemaVersion:1,id:randomUUID(),runId:ids.pending.runId,operationId:randomUUID(),scope,intentVersion:1,kind:'execution',hash:stamp},maintenanceId:null,policyId:'activity-explore',configHash:oldActivity.activityHash({}),trigger:{kind:'interval',anchorAt:new Date(now).toISOString(),intervalMs:60000},missed:'coalesce',timeZone:'Asia/Shanghai',quiet:[],state:'active',watch:{mode:'fixed',groupIds:['99900003'],reply:false}},now);
+  activity.update(plan.id,scope,{requestId:'revise-frequency',expectedVersion:1,trigger:{kind:'interval',anchorAt:new Date(now).toISOString(),intervalMs:120000}},now+1);
+  activity.recordPatrol(plan.id,2,'synthetic-group',0,{cursor:9,state:'no-reply',inboundId:null},now+2);ids.plan={id:plan.id,version:2,cursor:9};
+}finally{runtime.close();memory.close();qq.close();activity.close();}
+const baseline=snapshot(original,backup);snapshot(backup,upgraded);
+const profileFile=join(upgraded,'data/core/host-profile.json'),profile=JSON.parse(readFileSync(profileFile,'utf8'));
+saveJson(profileFile,{...profile,agentId:'wrong-identity'});const wrong=cli(to,'migrate',upgraded,false);assert.match(wrong.code,/IDENTITY_MISMATCH/);for(const item of baseline)assert.deepEqual(tables(join(upgraded,item.path)),item.tables);saveJson(profileFile,profile);
+const held=new oldRuntime.RuntimeStore(join(upgraded,locations.runtime),identity);try{assert.match(cli(to,'migrate',upgraded,false).code,/ALREADY_OWNED|STORE_OWNED/);}finally{held.close();}
+const migration=cli(to,'migrate',upgraded);assert.equal(migration.code,oldRuntime.RUNTIME_SCHEMA_VERSION===newRuntime.RUNTIME_SCHEMA_VERSION?'INSTALL_CURRENT':'INSTALL_MIGRATED');
+for(const item of baseline){const after=tables(join(upgraded,item.path));for(const previous of item.tables)assert.deepEqual(after.find(row=>row.name===previous.name),previous);}
+assert.equal(cli(to,'init',upgraded).code,'INSTALL_INITIALIZED');assert.deepEqual(JSON.parse(readFileSync(join(upgraded,'data/installation.json'),'utf8')),JSON.parse(readFileSync(join(original,'data/installation.json'),'utf8')));
+const current=new newRuntime.RuntimeStore(join(upgraded,locations.runtime),identity),newQq=await load(to,'channel-qq/lib/store.js'),newActivity=await load(to,'activity/lib/store.js');const queue=new newQq.QqStore(join(upgraded,locations.qq)),schedule=new newActivity.ActivityStore(join(upgraded,locations.activity),identity);
+try{current.recover();current.nativeDeliveries.recover();assert.equal(current.nativeDeliveries.get(ids.pending.runId).state,'ready');assert.equal(current.nativeDeliveries.verifyCredential(ids.pending.runId),ids.pending.body);assert.equal(current.nativeDeliveries.get(ids.unknown.runId).state,'uncertain');
+  assert.equal(queue.delivery.progress(ids.pending.replyId).pending,2);assert.equal(queue.delivery.progress(ids.unknown.replyId).confirmed,1);assert.equal(queue.delivery.progress(ids.unknown.replyId).unknown,1);assert.equal(current.operation(ids.interrupted.operationId).outcome.effects,'unknown');assert.deepEqual(current.checkpoints(ids.interrupted.runId),[ids.interrupted.checkpoint]);
+  assert.equal(schedule.get(ids.plan.id).body.version,2);assert.equal(schedule.patrolCursor(ids.plan.id,'synthetic-group'),9);current.prepareRequest('upgrade-fixture','post-upgrade-record',{retained:true});
+}finally{current.close();queue.close();schedule.close();}
+snapshot(upgraded,afterUpgrade);snapshot(backup,rollback);if(oldRuntime.RUNTIME_SCHEMA_VERSION!==newRuntime.RUNTIME_SCHEMA_VERSION)assert.throws(()=>new oldRuntime.RuntimeStore(join(upgraded,locations.runtime),identity),/SCHEMA_UNSUPPORTED/);
+const restored=new oldRuntime.RuntimeStore(join(rollback,locations.runtime),identity);try{assert.equal(restored.nativeDeliveries.verifyCredential(ids.pending.runId),ids.pending.body);assert.equal(restored.nativeDeliveries.get(ids.unknown.runId).state,'uncertain');assert.equal(restored.findRequest('upgrade-fixture','post-upgrade-record'),null);}finally{restored.close();}
+for(const item of baseline)assert.deepEqual(tables(join(rollback,item.path)),item.tables);
+assert.equal(inspectReleaseIntegrity(from).contentHash,oldRelease.contentHash);assert.deepEqual(inspectInstalledDependencies(from),oldDependencies);assert.equal(inspectReleaseIntegrity(to).contentHash,newRelease.contentHash);assert.deepEqual(inspectInstalledDependencies(to),newDependencies);
+const report={schemaVersion:1,passed:true,fixture:'synthetic-storage-no-model',from:{directory:from,version:oldRelease.version,contentHash:oldRelease.contentHash,runtime:oldRuntime.RUNTIME_SCHEMA_VERSION,lockHash:oldDependencies.lockHash,dependencyHash:oldDependencies.contentHash},to:{directory:to,version:newRelease.version,contentHash:newRelease.contentHash,runtime:newRuntime.RUNTIME_SCHEMA_VERSION},identityPreserved:true,wrongIdentityRefused:true,activeOwnerRefused:true,pendingResultPreserved:true,unknownOperationPreserved:true,unknownSendPreserved:true,planVersionPreserved:true,watermarkPreserved:true,matchingRollback:true,postUpgradeCopyPreserved:true,baseline,backupDirectory:backup,afterUpgradeDirectory:afterUpgrade,rollbackDirectory:rollback,backupFiles:fileInventory(backup),afterUpgradeFiles:fileInventory(afterUpgrade),rollbackFiles:fileInventory(rollback),migration,modelsCalled:0,platformSends:0,realData:false};
+saveJson(join(work,'acceptance.json'),report);console.log(JSON.stringify({...report,baseline:baseline.length,backupFiles:report.backupFiles.length,migration:migration.code}));
