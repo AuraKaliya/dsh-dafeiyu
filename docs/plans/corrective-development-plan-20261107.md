@@ -2,7 +2,7 @@
 
 日期：2026-11-07。计划基线：0.28.7 / API 7；整理时仓库修订为 `0a37c96cda9aacb1e3341420a3e015dfbcee406f`。后续发布使用新版本，具体版本号、API 和存储版本按实际变更确定。
 
-状态：三个范围取舍已获用户确认；用户随后于 2026-11-07 授权开始开发。第 0 轮首批资产见[首批开发记录](../results/corrective-development-start-20261107.md)；0.28.8 已完成两条发送前生成/核验缺口的实际恢复及相关离线回归，见[交付恢复验证](../results/delivery-recovery-20261107.md)。各轮整体退出条件仍单独核对，不启动付费测试，不部署或重启正式实例。
+状态：三个范围取舍已获用户确认；用户随后于 2026-11-07 授权开始开发。第 0 轮首批资产见[首批开发记录](../results/corrective-development-start-20261107.md)；0.28.8 已完成两条发送前生成/核验缺口的恢复，见[交付恢复验证](../results/delivery-recovery-20261107.md)。2026-11-08 的 0.28.9 已完成第 1 轮剩余本地开发、542 项程序回归和 15 个独立离线场景，逐项状态见[第 1 轮本地验收](../results/phase1-local-20261108.md)。R1.7 真实模型局部样本仍未执行，整轮退出条件未全部满足；不启动付费测试，不部署或重启正式实例。
 
 本计划承接[开发迭代与验收流程讨论稿](iteration-process-20261107.md)与[多轮迭代复盘](../results/iteration-review-20261107.md)。本版围绕任务承接、实际执行、故障接续、报告和送达建立可复核的业务流程，并治理重复读取和重复输入造成的长任务开销。完成标准是本计划范围内的业务目标、进度保留、阶段恢复、最终交付及费用归属得到验证，不承诺消除全部模型随机性或外部服务故障。
 
@@ -165,6 +165,8 @@
 复用测试：`group-patrol.test.ts`、`group-patrol-amend.test.ts`、`message-intent-continuation.test.ts`、`native-delivery-store.test.ts`、`delivery-verifier-retry.test.ts`、`qq-delivery-ledger.test.ts`、`qq-media-delivery-ledger.test.ts`、`owner-task-delivery.test.ts`；新增“成果完成但未交付”全过程及重启夹具。
 
 退出条件：R01、R02、R06、R07 的确定性回归通过；适用存储迁移通过；必要且已授权的局部真实样本证明模型能走通下一步。真实样本未执行时保留该退出条件未满足，不把脚本模型结果替代为真实验证。
+
+2026-11-08 执行记录：R1.1–R1.6 的本地实现与回归已完成；R1.7 管理视图与本地验证已完成，真实模型短样本按用户要求未启动。当前为 0.28.9 / API 9 / runtime v6；显式迁移、独立安装初始化和匹配旧包回退保护均通过。详见[状态、通知与发送接续契约](phase1-status-delivery-contract-20261108.md)及[逐项结果](../results/phase1-local-20261108.md)。
 
 ### 5.3 第 2 轮 上下文与成本治理
 
