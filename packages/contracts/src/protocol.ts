@@ -2,4 +2,4 @@
 export const API_VERSION = 10 as const;
 
 /** All modules in this development release ship together. */
-export const RELEASE_VERSION = "0.28.11" as const;
+export const RELEASE_VERSION = "0.28.12" as const;

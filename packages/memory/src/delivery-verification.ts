@@ -42,6 +42,7 @@ export function checkDeliveryVerification(raw:unknown,body:ReturnType<typeof del
     if(!passages.has(check.passageId))invalid('unknown-passage');
     if(seen.has(check.passageId))invalid('duplicate-passage');
     if(check.evidenceIds.some(id=>!sources.has(id)))invalid('unknown-evidence');
+    if(new Set(check.evidenceIds).size!==check.evidenceIds.length)invalid('duplicate-evidence');
     seen.add(check.passageId);
     if(check.status==='supported'&&(!check.evidenceIds.length||check.issue!==null)||check.status==='non-factual'&&(check.evidenceIds.length||check.issue!==null))invalid('inconsistent-support');
     if(check.status==='scope-limited'&&check.issue!==null)invalid('inconsistent-scope');

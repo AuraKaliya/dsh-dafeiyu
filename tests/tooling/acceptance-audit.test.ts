@@ -6,6 +6,7 @@ import {catalog,criteriaVersion,offlineConfiguration} from '../../scripts/accept
 import {hash} from '../../scripts/acceptance/io.mjs';
 import {waitForStage} from '../../scripts/acceptance/wait.ts';
 import type {StageObservation} from '../../scripts/acceptance/wait.ts';
+import {combinedAuditEvidence} from './combined-audit-fixture.ts';
 
 function fixture() {
   const runId=randomUUID(),taskId=randomUUID(),run=randomUUID(),sourceHash='a'.repeat(64),driverHash='b'.repeat(64),runtimeHash='c'.repeat(64);
@@ -55,6 +56,7 @@ function fixture() {
     database:{...database,requests:contextRequests,inputMeasurements:contextRequests.map(request=>({request_id:request.id,body:{stage:'sdk-pre-adapter',bytes:20000,inputHash:'a'.repeat(64)}})),deliveries:[{...database.deliveries[0]!,body:'十二份材料各读到前四千字符；第一份尾段已回查，其余尾段未读。禁止事项保持。'}],operations:[...Array.from({length:12},()=>({action:'dsh_tool_read',outcome:{status:'succeeded'}})),{action:'dsh_result_read',outcome:{status:'succeeded'}}]}};
   evidence['diagnostic-flow']={progress:{...progress,goal:{status:'met',source:'agent',programVerified:false},delivery:{state:'sent'}},requests:measurements,reads:1,sent:[sourceDigest],source:{version:'0.28.7',text:code,sha256:sourceDigest},
     database:{...database,operations:[{id:operationId,action:'dsh_tool_read',outcome:{status:'succeeded',data:{page:{view:{coverage:{complete:true},entries:[{key:'sha256',value:sourceDigest},{key:'version',value:'0.28.7'},{key:'sourceLines',value:[code]}]}}},receipts:[{kind:'dsh-operation',id:operationId}]}}]}};
+  for(const spec of catalog)if(spec.id.startsWith('combined-'))evidence[spec.id]=combinedAuditEvidence(spec.id.slice('combined-'.length));
   const manifest={schemaVersion:1,runId,mode:'offline-sdk',criteriaVersion,revision:'d'.repeat(40),version:'0.28.7',apiVersion:7,sourceHash,driverHash,configHash:hash(offlineConfiguration),catalogHash:hash(catalog),startedAt:'2026-11-07T00:00:00.000Z',scenarios:catalog.map(row=>row.id)};
   const artifacts=new Map(catalog.map(spec=>[spec.id,{schemaVersion:1,runId,scenarioId:spec.id,capturedAt:'2026-11-07T00:01:00.000Z',version:manifest.version,apiVersion:7,sourceHash,driverHash,runtimeHash,evidence:evidence[spec.id]}]));
   const completion={schemaVersion:1,runId,finishedAt:'2026-11-07T00:02:00.000Z',testExitCode:0,sourceHash,driverHash,runtimeHash,artifactHashes:Object.fromEntries([...artifacts].map(([id,row])=>[id,hash(row)]))};
@@ -136,4 +138,15 @@ test('stage-aware waiting permits a valid 322-second report and reports a real d
   await assert.rejects(waitForStage(async()=>({state:'active',phase:'verification',progressId:'candidate-1',deadlineAt:500}),clock),/ACCEPTANCE_STAGE_TIMEOUT/);
   const aborted=new AbortController();aborted.abort();
   await assert.rejects(waitForStage(read,{...clock,signal:aborted.signal}));
+});
+
+test('combined audit rejects duplicated parts, foreign recipients, fabricated completion and extra model calls',()=>{
+  const good=combinedAuditEvidence('chain');assert.ok(auditScenario('combined-chain',good).checks.every(row=>row.passed));
+  const wrong=Object.assign({},good,{sends:[{runId:'foreign',text:'part-0',receipt:'1',target:{channel:'qq',account:'100001',kind:'private',id:'other'},sourceMessageId:'owner-original'}]});
+  assert.ok(auditScenario('combined-chain',wrong).checks.some(row=>row.id==='actual-target-and-source'&&!row.passed));
+  const repeated=Object.assign({},good,{transport:{state:'sent',total:2,confirmed:2,pending:0,unknown:0,segments:[{state:'sent',receipt:'1'},{state:'sent',receipt:'1'}]}});
+  assert.ok(auditScenario('combined-chain',repeated).checks.some(row=>row.id==='receipt-counts-match-actual-sends'&&!row.passed));
+  const probe=Object.assign({},combinedAuditEvidence('probe-business'),{gates:{first:{generation:1},failedContinuation:{generation:1,reason:'restored'},current:{generation:1,reason:'restored'}}});
+  assert.ok(auditScenario('combined-probe-business',probe).checks.some(row=>row.id==='probe-not-business-proof'&&!row.passed));
+  const extra=Object.assign({},good,{requests:[{sessionId:'unrecorded',inputBytes:1,toolResultBytes:0,repeatedToolResultBytes:0}]});assert.ok(auditScenario('combined-chain',extra).checks.some(row=>row.id==='requests-reconciled'&&!row.passed));
 });

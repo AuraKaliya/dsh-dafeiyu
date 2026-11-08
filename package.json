@@ -1,6 +1,6 @@
 {
   "name": "dafeiyu-project",
-  "version": "0.28.11",
+  "version": "0.28.12",
   "private": true,
   "type": "module",
   "engines": {
@@ -19,7 +19,8 @@
     "check": "node scripts/run-tests.mjs --check",
     "build:release": "npm run build && node scripts/build-public-release.mjs",
     "deploy:prepare": "node scripts/prepare-local-deploy.mjs",
-    "test:performance": "node scripts/acceptance/run-performance.mjs"
+    "test:performance": "node scripts/acceptance/run-performance.mjs",
+    "prepare:calibration": "npm run build && node scripts/acceptance/prepare-calibration.ts"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",

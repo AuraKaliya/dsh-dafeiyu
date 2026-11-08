@@ -103,6 +103,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     put(destination,'source/tests/fixtures/acceptance/context-baseline.json',readFileSync(join(repository,'tests/fixtures/acceptance/context-baseline.json')));
     put(destination,'source/docs/plans/phase2-performance-contract-20261108.md',readFileSync(join(repository,'docs/plans/phase2-performance-contract-20261108.md')));
     put(destination,'source/tests/fixtures/acceptance/heavy-baseline.json',readFileSync(join(repository,'tests/fixtures/acceptance/heavy-baseline.json')));
+    put(destination,'source/docs/plans/phase3-combination-contract-20261108.md',readFileSync(join(repository,'docs/plans/phase3-combination-contract-20261108.md')));
     const selected=['management.test.ts','management-client.test.ts','activity-rounds.test.ts','activity-idle.test.ts','context-snapshots.test.ts','current-api.test.ts','current-storage.test.ts','autobiography.test.ts','plugin-startup.test.ts','host-status.test.ts','test-temp.ts','smoke/host.test.ts','smoke/onebot.test.ts','tooling/test-selection.test.ts','tooling/test-storage.test.ts','tooling/deploy-check.test.ts'];
     const visited=new Set();function testFile(path){if(visited.has(path))return;visited.add(path);const bytes=readFileSync(join(repository,'tests',path),'utf8');put(destination,'source/tests/'+path,bytes);
       for(const match of bytes.matchAll(/(?:from\s*|import\()\s*['"](\.\/[^'"]+)['"]/g)){const dependency=portable(join(dirname(path),match[1])).replace(/\.js$/,'.ts');if(existsSync(join(repository,'tests',dependency)))testFile(dependency);}}
@@ -115,6 +116,7 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     selected.push('conversation-handoff.test.ts','journal-trace-events.test.ts','dsh-result-store.test.ts','media-store.test.ts','dsh-catalog-view.test.ts','delivery-verifier-retry.test.ts','bili-timed-text.test.ts','bili-browser-verification.test.ts');
     selected.push('context-folding.test.ts','context-folding-batch.test.ts','context-folding-source.test.ts','context-folding-recovery.test.ts','dsh-result-cache.test.ts','tool-receipt-view.test.ts','runtime-v7-migration.test.ts');
     selected.push('heavy-task-performance.test.ts','heavy-task-cancellation.test.ts','heavy-task-recovery.test.ts','immutable-proof-cache.test.ts','cooperative-stream.test.ts','tooling/performance-profile.test.ts');
+    selected.push('combined-chain.test.ts','combined-unknown.test.ts','combined-cancel.test.ts','combined-revise.test.ts','combined-revoke-query.test.ts','combined-revoke-render.test.ts','combined-revoke-verification.test.ts','combined-revoke-send.test.ts','combined-revoke-between.test.ts','combined-media-revoke.test.ts','combined-probe-business.test.ts','combined-media-scopes.test.ts','qq-proof-generation.test.ts','qq-media-generation.test.ts');
     selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }

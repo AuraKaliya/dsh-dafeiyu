@@ -13,7 +13,7 @@ import type { OneBot } from './onebot.js';
 export const QQ_MEDIA_ACTIONS=['qq_media_list'] as const;
 const listSchema=z.strictObject({messageId:z.string().min(1).max(80).optional(),target:ConversationSchema.optional()});
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-interface Host {agentId:string;store:QqStore;api:OneBot;settings:z.output<typeof QqMediaConfigSchema>;allowed(scene:Conversation):boolean;available():boolean;sourceEpoch():string;rejectIdentity():void}
+interface Host {agentId:string;store:QqStore;api:OneBot;settings:z.output<typeof QqMediaConfigSchema>;allowed(scene:Conversation):boolean;available():boolean;sourceEpoch():string;groupGeneration(scene:Conversation):number|null;rejectIdentity():void}
 export class QqMedia {
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtension']>;
   private readonly unregister:()=>void;
@@ -30,13 +30,14 @@ export class QqMedia {
       catch(error){if(error instanceof Error&&error.message==='ACCOUNT_MISMATCH')host.rejectIdentity();throw error;}
     }});}catch(error){this.handle.dispose();throw error;}
   }
-  private current(proof:ResourceProof){if(this.controller.signal.aborted||proof.provider!==QQ_MEDIA_PROVIDER||!this.host.allowed(proof.scene))return false;
+  private current(proof:ResourceProof):boolean{if(this.controller.signal.aborted||proof.provider!==QQ_MEDIA_PROVIDER||!this.host.allowed(proof.scene))return false;
     if(proof.key.startsWith('list:')){const detail=z.strictObject({kind:z.literal('media-list'),messageId:z.string().max(80),messageIds:z.array(z.string().max(80)).min(1).max(10).optional(),parts:z.array(ResourceProofSchema).max(8)}).safeParse(proof.detail);
       if(!detail.success||proof.version!==1||proof.key!=='list:'+digest(proof.detail)||proof.hash!==digest(proof.detail)||digest(proof.roots)!==digest((detail.data.messageIds??[detail.data.messageId]).map(id=>`qq:${proof.scene.account}:${proof.scene.kind}:${proof.scene.id}:message:${id}`)))return false;
-      return digest((detail.data.messageIds??[detail.data.messageId]).flatMap(id=>this.host.store.media.list(proof.scene,id)).map(d=>d.origin))===digest(detail.data.parts)&&detail.data.parts.every(p=>this.host.store.media.current(p));}
+      return digest((detail.data.messageIds??[detail.data.messageId]).flatMap(id=>this.host.store.media.list(proof.scene,id)).filter(d=>this.current(d.origin)).map(d=>d.origin))===digest(detail.data.parts)&&detail.data.parts.every(p=>this.current(p));}
+    if(proof.scene.kind==='group'){try{const detail=z.object({groupGeneration:z.number().int().nonnegative()}).parse(proof.detail);if(detail.groupGeneration!==this.host.groupGeneration(proof.scene))return false;}catch{return false;}}
     return this.host.store.media.current(proof);}
   remember(scene:Conversation,messageId:string,sender:string,envelope:unknown,parts:readonly {type:string;data:Record<string,unknown>}[],positionOffset=0):{attachments:MediaAttachment[];positions:Set<number>}{
-    if(!this.host.allowed(scene)||!this.host.available())throw new Error('TARGET_NOT_ALLOWED');const ids=this.host.store.media.remember(scene,messageId,sender,createHash('sha256').update(JSON.stringify(envelope)).digest('hex'),parts,positionOffset),descriptions=ids.map(id=>this.host.store.media.describe(id));this.host.store.media.prune();
+    if(!this.host.allowed(scene)||!this.host.available())throw new Error('TARGET_NOT_ALLOWED');const generation=this.host.groupGeneration(scene);const ids=this.host.store.media.remember(scene,messageId,sender,createHash('sha256').update(JSON.stringify(envelope)).digest('hex'),parts,positionOffset,generation??undefined),descriptions=ids.map(id=>this.host.store.media.describe(id));this.host.store.media.prune();
     return {attachments:descriptions.map(d=>MediaAttachmentSchema.parse({schemaVersion:1,source:d.ref,kind:d.kind,name:d.name})),positions:new Set(descriptions.map(d=>z.object({position:z.number()}).parse(d.origin.detail).position))};
   }
   private list(context:ExecutionContext,raw:unknown){this.ctx.dafeiyu.executionAuthority(context,QQ_MEDIA_PROVIDER);const input=listSchema.parse(raw);
@@ -44,7 +45,7 @@ export class QqMedia {
     const target=input.target??inbound?.message.conversation;if(!target)throw new Error('RESOURCE_TARGET_REQUIRED');this.ctx.dafeiyu.authorizeCapabilityResource(context,QQ_MEDIA_PROVIDER,target);
     if(!this.host.allowed(target)||this.controller.signal.aborted)throw new Error('TARGET_NOT_ALLOWED');const messageId=input.messageId??inbound?.message.id;if(!messageId)throw new Error('MESSAGE_REQUIRED');
     const messageIds=!input.messageId&&inbound?.message.batch?messageParts(inbound.message).map(part=>part.id):[messageId];
-    const data={target,messageId,messageIds,media:messageIds.flatMap(id=>this.host.store.media.list(target,id)),readProgress:ReadProgressSchema.parse({state:'unread',subject:'reference',completeness:'unknown'}),coverage:'仅实际收到的至多8个媒体段；未取得内容，不包含离线历史'};
+    const data={target,messageId,messageIds,media:messageIds.flatMap(id=>this.host.store.media.list(target,id)).filter(item=>this.current(item.origin)),readProgress:ReadProgressSchema.parse({state:'unread',subject:'reference',completeness:'unknown'}),coverage:'仅实际收到的至多8个媒体段；未取得内容，不包含离线历史'};
     if(!data.media.length)return data;const detail={kind:'media-list',messageId,messageIds,parts:data.media.map(d=>d.origin)},hash=digest(detail);
     const observation=this.ctx.dafeiyu.recordCapabilityObservation(context,QQ_MEDIA_PROVIDER,{requestId:'list:'+digest([context.runId,context.operationId,hash]),proof:{provider:QQ_MEDIA_PROVIDER,scene:target,key:'list:'+hash,version:1,hash,roots:messageIds.map(id=>`qq:${target.account}:${target.kind}:${target.id}:message:${id}`),detail},
       text:JSON.stringify(data),occurredAt:new Date().toISOString(),coverage:['只曝光媒体元信息，未处理任何媒体正文'],counts:{received:data.media.length,processed:0}});

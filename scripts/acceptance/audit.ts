@@ -6,6 +6,7 @@ import {artifactSchema, manifestSchema, completionSchema, databaseEvidenceSchema
 import {readJson, hash, saveJson, fingerprint} from './io.mjs';
 import {auditPhaseOne} from './phase1-audit.ts';
 import {auditContextFolding} from './context-audit.ts';
+import {auditPhaseThree} from './phase3-audit.ts';
 
 const record = z.record(z.string(), z.unknown());
 const deliveredSchema = z.array(z.object({text:z.string(),conversation:z.object({kind:z.string(),id:z.string()})}));
@@ -14,6 +15,7 @@ export interface ScenarioAudit {id: string; state: 'passed'|'failed'|'not-execut
 
 /** Uses program records and observed outputs; it never accepts a scenario's claimed verdict. */
 export function auditScenario(id: string, raw: unknown): {checks: Check[]; baseline: unknown} {
+  if(id.startsWith('combined-'))return auditPhaseThree(id,raw);
   if(id==='context-folding')return auditContextFolding(raw);
   if(id.includes('fault-notice')||id.startsWith('task-send-')||id==='diagnostic-flow')return auditPhaseOne(id,raw);
   const checks: Check[] = [];

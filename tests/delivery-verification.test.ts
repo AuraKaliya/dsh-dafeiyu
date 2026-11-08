@@ -12,6 +12,7 @@ test('final verification cannot approve an omitted passage or an unknown source'
   assert.throws(()=>checkDeliveryVerification({checks:[okay,okay]},body),/INVALID_RESULT/);
   assert.throws(()=>checkDeliveryVerification({checks:[okay,{...okay,passageId:'P2',evidenceIds:['invented']}]},body),/INVALID_RESULT/);
   assert.throws(()=>checkDeliveryVerification({checks:[okay,{...okay,passageId:'P2',evidenceIds:[]}]},body),/INVALID_RESULT/);
+  assert.throws(()=>checkDeliveryVerification({checks:[okay,{...okay,passageId:'P2',evidenceIds:['code','code']}]},body),/INVALID_RESULT/);
 });
 
 test('one contradicted passage prevents sending and retains precise repair feedback',()=>{

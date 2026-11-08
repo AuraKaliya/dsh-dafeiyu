@@ -100,6 +100,10 @@ node scripts/acceptance/replay-verifier.ts <响应档案.json> <新的报告.jso
 
 完整真实故事、真实核验采集、视频补读和故障恢复的独立证据适配、真实模型费用基线及两小时驱动仍待后续工作项完成。当前离线结果不能替代这些退出条件。
 
+0.28.12 的 `corrective-offline-5` 保留原十六个场景，加入十一项组合场景，共二十七项。`phase3-audit.ts` 从实际状态、分段回执、目标绑定、恢复事件、控制操作和请求账本核对结果，包含错目标、重复回执、伪造业务恢复及额外请求的否定对照。
+
+`npm run prepare:calibration` 在新目录生成 24 例待复验输入、单独预期、空观察模板及未执行报告。输入不包含答案表；语料、指令和每例正文均有摘要。`replay-verifier.ts` 按 calibration / holdout 分开计数，服务失败不算正确拒绝，尚无可比较观察时误判率为 null。整个准备和离线回放过程不调用模型。
+
 ## 本地性能与取消恢复
 
 `npm run test:performance` 在新的 `.runtime/performance/` 目录串行运行 64 次读取、运行中管理取消、缓冲流取消和真实子进程退出恢复。保存源码/驱动摘要、固定阈值、原始测试日志、CPU 采样及 `audit.json`；基线来自 `tests/fixtures/acceptance/heavy-baseline.json`。比较同时启用 CPU 采样的前后样本；普通并行回归不把机器资源竞争当成耗时门槛失败。

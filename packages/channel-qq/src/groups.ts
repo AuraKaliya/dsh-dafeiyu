@@ -75,6 +75,8 @@ export class GroupDirectory {
     if (!group || !this.effective().includes(id)) throw new Error('GROUP_ACCESS_REVOKED');
     return group.generation;
   }
+  /** Durable refresh revision avoids an ABA epoch when the same membership returns. */
+  authorityEpoch():string{return this.state()+':'+(this.snapshot?.revision??0);}
   /** Existing accepted work uses the durable activation boundary, not the reconnect ingress cutoff. */
   processingSignal(id: string, occurredAt: number): AbortSignal {
     const group = this.snapshot?.groups.find(group => group.id === id), controller = this.signals.get(id);

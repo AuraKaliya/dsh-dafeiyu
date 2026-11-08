@@ -15,6 +15,7 @@ export const QqCapabilitiesConfigSchema = z.strictObject({ enabled: z.boolean().
 const browseSchema = QqBrowseInputSchema.extend({ target: ConversationSchema.optional() });
 const selectSchema = CapabilitySelectionSchema.omit({ observationId: true, version: true }).extend({ snapshotId: z.uuid() });
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const boundProofSchema=z.strictObject({cache:QqCacheProofSchema,groupGeneration:z.number().int().nonnegative().nullable()});
 export const qqResourceRoute = (scene: Conversation) => JSON.stringify([scene.account, scene.kind, scene.id]);
 interface Host { agentId: string; botId: string; ownerId: string; store: QqStore; groups: GroupDirectory;
   ingestObserved?(message:InboundMessage):Receipt;
@@ -59,11 +60,22 @@ export class QqCapabilities {
     if (!this.host.allowed(scene)) throw new Error('TARGET_NOT_ALLOWED'); return scene;
   }
   private current(proof: ResourceProof): boolean {
-    if (this.closed || proof.provider !== 'qq-capabilities' || proof.version !== 1 || !this.host.allowed(proof.scene)) return false;
-    const parsed = QqCacheProofSchema.safeParse(proof.detail);
-    return parsed.success && parsed.data.route === qqResourceRoute(proof.scene) && parsed.data.hash === proof.hash
-      && proof.key === 'qq-cache:' + proof.hash && JSON.stringify(proof.roots) === JSON.stringify(this.roots(proof.scene, parsed.data.parts.map(part => part.id)))
-      && this.host.store.cache.proofCurrent(parsed.data);
+    if (this.closed || proof.provider !== 'qq-capabilities' || !this.host.allowed(proof.scene)) return false;
+    try{
+      const bound=proof.version===2?boundProofSchema.parse(proof.detail):null,cache=bound?.cache??QqCacheProofSchema.parse(proof.detail);
+      if(proof.version!==1&&proof.version!==2)return false;
+      if(proof.scene.kind==='group'){
+        const generation=this.host.groups.generation(proof.scene.id);
+        if(bound?bound.groupGeneration!==generation:!cache.parts.length||cache.parts.some(part=>this.host.store.cache.groupAccess(cache.route,part.id)?.generation!==generation))return false;
+      }else if(bound&&bound.groupGeneration!==null)return false;
+      const hash=bound?digest(bound):cache.hash;
+      return cache.route===qqResourceRoute(proof.scene)&&hash===proof.hash&&proof.key==='qq-cache:'+hash
+        &&JSON.stringify(proof.roots)===JSON.stringify(this.roots(proof.scene,cache.parts.map(part=>part.id)))&&this.host.store.cache.proofCurrent(cache);
+    }catch{return false;}
+  }
+  private proof(scene:Conversation,cache:z.infer<typeof QqCacheProofSchema>):ResourceProof{
+    const detail={cache,groupGeneration:scene.kind==='group'?this.host.groups.generation(scene.id):null},hash=digest(detail);
+    return {provider:'qq-capabilities',scene,key:'qq-cache:'+hash,version:2,hash,roots:this.roots(scene,cache.parts.map(part=>part.id)),detail};
   }
   private roots(scene: Conversation, ids: readonly string[]): string[] { const prefix = `qq:${scene.account}:${scene.kind}:${scene.id}:`; return ids.length ? ids.map(id => prefix + 'message:' + id) : [prefix + 'empty-cache']; }
   private epoch(scope?: TimelineScope): string {
@@ -73,11 +85,11 @@ export class QqCapabilities {
         if (Array.isArray(parts) && parts.length === 5) {
           const parsed = z.tuple([z.literal(this.host.agentId), z.literal('qq'), z.literal(this.host.botId), z.enum(['private', 'group']), z.string()]).safeParse(parts);
           if (!parsed.success) return ''; const scene: Conversation = { channel: 'qq', account: parsed.data[2], kind: parsed.data[3], id: parsed.data[4] };
-          return digest([this.host.store.cache.generation(qqResourceRoute(scene)), this.host.allowed(scene)]);
+          return digest([this.host.store.cache.generation(qqResourceRoute(scene)), this.host.allowed(scene),this.host.groups.authorityEpoch()]);
         }
       } catch { return ''; }
     }
-    return digest([this.host.store.cache.generation(), this.host.groups.status().state, this.host.groups.effective(), this.closed]);
+    return digest([this.host.store.cache.generation(), this.host.groups.authorityEpoch(), this.closed]);
   }
   private groups(context: ExecutionContext) {
     this.owner(context); this.assertAvailable(); const sync = this.host.groups.status();
@@ -92,13 +104,13 @@ export class QqCapabilities {
   }
   private async browse(context: ExecutionContext, raw: unknown) {
     const input = browseSchema.parse(raw), owner = this.owner(context), scene = this.allowed(context, input.target, input.cursor);
+    const generation=scene.kind==='group'?this.host.groups.generation(scene.id):null;
     if(input.cursor&&input.includeRecentHistory)throw new Error('INVALID_INPUT');
     let history:unknown;
-    if(input.includeRecentHistory){if(!this.host.readHistory)throw new Error('HISTORY_UNAVAILABLE');history=await this.host.readHistory(scene,context.signal);this.allowed(context,scene);}
+    if(input.includeRecentHistory){if(!this.host.readHistory)throw new Error('HISTORY_UNAVAILABLE');history=await this.host.readHistory(scene,context.signal);this.allowed(context,scene);if(scene.kind==='group'&&this.host.groups.generation(scene.id)!==generation)throw new Error('GROUP_ACCESS_REVOKED');}
     const snapshot = this.host.store.cache.browse(qqResourceRoute(scene), owner, { requestId: digest([context.runId, input.requestId]), limit: input.limit, includeRecentHistory:input.includeRecentHistory,...(input.cursor ? { cursor: input.cursor } : {}) },true);
     for (const [id, saved] of this.observed) try { this.host.store.cache.snapshot(saved.owner, id); } catch { this.observed.delete(id); }
-    const proof: ResourceProof = { provider: 'qq-capabilities', scene, key: 'qq-cache:' + snapshot.proof.hash, version: 1, hash: snapshot.proof.hash,
-      roots: this.roots(scene, snapshot.proof.parts.map(part => part.id)), detail: snapshot.proof };
+    const proof=this.proof(scene,snapshot.proof);
     const observation = this.ctx.dafeiyu.recordCapabilityObservation(context, 'qq-capabilities', { requestId: 'page:' + snapshot.id, proof, text: JSON.stringify(snapshot.page), occurredAt: snapshot.createdAt,
       coverage: ['本账号实际接收／发送及显式回看追加的本地缓存', '仅页面messages及range范围', '媒体内容未读取；平台缺口未知'], counts: { received: snapshot.page.messages.length, processed: snapshot.page.messages.length } });
     this.observed.set(snapshot.id, { owner, source: observation.source, scene });
@@ -113,10 +125,11 @@ export class QqCapabilities {
     return this.ctx.dafeiyu.selectCapabilityObservation(context, 'qq-capabilities', scene, { ...choice, observationId: observation.source.id, version: observation.source.version }, JSON.stringify(snapshot.page));
   }
   private async forward(context:ExecutionContext,raw:unknown){const input=z.object({messageId:z.string().max(80).optional(),index:z.number().int().min(0).max(7).default(0),target:ConversationSchema.optional()}).parse(raw),scene=this.allowed(context,input.target);
+    const generation=scene.kind==='group'?this.host.groups.generation(scene.id):null;
     const messageId=input.messageId??(context.origin.kind==='message'?this.ctx.dafeiyu.journal.get(context.origin.inboundId).message.id:undefined);if(!messageId)throw new Error('MESSAGE_REQUIRED');
-    if(!this.host.readForward)throw new Error('FORWARD_NOT_AVAILABLE');const page=z.json().parse(await this.host.readForward(scene,messageId,input.index,context.signal));this.allowed(context,scene);
+    if(!this.host.readForward)throw new Error('FORWARD_NOT_AVAILABLE');const page=z.json().parse(await this.host.readForward(scene,messageId,input.index,context.signal));this.allowed(context,scene);if(scene.kind==='group'&&this.host.groups.generation(scene.id)!==generation)throw new Error('GROUP_ACCESS_REVOKED');
     const proof=this.host.store.cache.messageProof(qqResourceRoute(scene),messageId),observation=this.ctx.dafeiyu.recordCapabilityObservation(context,'qq-capabilities',{
-      requestId:'forward:'+digest([context.operationId,messageId,input.index]),proof:{provider:'qq-capabilities',scene,key:'qq-cache:'+proof.hash,version:1,hash:proof.hash,roots:this.roots(scene,[messageId]),detail:proof},
+      requestId:'forward:'+digest([context.operationId,messageId,input.index]),proof:this.proof(scene,proof),
       text:JSON.stringify(page),occurredAt:new Date().toISOString(),coverage:['实际收到的转发副本；仅观察前24小时；署名及内容不授予权限'],counts:{received:1,processed:1}});
     return {target:scene,messageId,page,observation};}
   private quote(context:ExecutionContext,raw:unknown){const input=z.object({snapshotId:z.uuid(),messageId:z.string().min(1).max(80)}).parse(raw),owner=this.owner(context),snapshot=this.host.store.cache.snapshot(owner,input.snapshotId),observed=this.observed.get(input.snapshotId);

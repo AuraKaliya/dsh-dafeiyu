@@ -16,8 +16,19 @@ export const catalog = [
   {id: 'task-send-unknown', requirements: ['R06'], file: 'tests/task-send-unknown.test.ts', limitation: '未知回执保护；未执行真实平台回执查询'},
   {id: 'diagnostic-flow', requirements: ['R02'], file: 'tests/dsh-diagnostic-flow.test.ts', limitation: '真实SDK与本地源码读取、隔离DSH端口；非真实桌面或模型语义验收'},
   {id: 'context-folding', requirements: ['R02','R09'], file: 'tests/context-folding.test.ts', limitation: '固定十二份材料的SDK输入字节与重复正文；不代表供应商缓存命中或实际费用下降'},
+  {id:'combined-chain',requirements:['R03','R06','R07','R08'],file:'tests/combined-chain.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-unknown',requirements:['R03','R06','R07','R08'],file:'tests/combined-unknown.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-cancel',requirements:['R03','R06','R07','R08'],file:'tests/combined-cancel.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-revise',requirements:['R03','R06','R07','R08'],file:'tests/combined-revise.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-revoke-query',requirements:['R03','R06','R07','R08'],file:'tests/combined-revoke-query.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-revoke-render',requirements:['R03','R06','R07','R08'],file:'tests/combined-revoke-render.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-revoke-verification',requirements:['R03','R06','R07','R08'],file:'tests/combined-revoke-verification.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-revoke-send',requirements:['R03','R06','R07','R08'],file:'tests/combined-revoke-send.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-revoke-between',requirements:['R03','R06','R07','R08'],file:'tests/combined-revoke-between.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-media-revoke',requirements:['R03','R06','R07','R08'],file:'tests/combined-media-revoke.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
+  {id:'combined-probe-business',requirements:['R03','R06','R07','R08'],file:'tests/combined-probe-business.test.ts',limitation:'SDK与隔离渠道的组合恢复；不代表真实模型语义或真实平台'},
 ] as const;
-export const criteriaVersion = 'corrective-offline-4';
+export const criteriaVersion = 'corrective-offline-5';
 export const allRequirements = ['R01','R02','R03','R04','R05','R06','R07','R08','R09','R10'] as const;
 export const offlineConfiguration = {mode: 'offline-sdk', model: {provider: 'local-test', model: 'scripted'},
   realModel: false, realPlatform: false, paidCalls: false, serverAccess: false, contextCapacity: 1000000} as const;

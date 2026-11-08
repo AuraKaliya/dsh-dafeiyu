@@ -163,7 +163,7 @@ export class QqChannel extends Service {
         allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing),readHistory:(scene,signal)=>this.readHistory(scene,signal),readForward:(scene,messageId,index,signal)=>this.readForward(scene,messageId,index,signal)});
       if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,deliverResults:this.config.tasks.deliverResults,naturalNames:this.config.naturalNames,voiceDirectives:this.config.media.voiceDirectives,...(this.config.tasks.explorationResources?{explorationResources:this.config.tasks.explorationResources}:{}),...(this.config.tasks.expressionPolicy?{expressionPolicy:this.config.tasks.expressionPolicy}:{})});
       if(this.config.tasks.enabled)this.progress=bindQqProgress(ctx,this.config.agentId);
-      if(this.config.media.enabled)this.media=new QqMedia(ctx,{agentId:this.config.agentId,store:this.store,api:this.api,settings:this.config.media,allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&this.state==='online',sourceEpoch:()=>JSON.stringify([this.state==='rejected',this.groups.effective()]),rejectIdentity:()=>{this.verified=false;this.state='rejected';this.error='ACCOUNT_MISMATCH';this.socket?.terminate();}});
+      if(this.config.media.enabled)this.media=new QqMedia(ctx,{agentId:this.config.agentId,store:this.store,api:this.api,settings:this.config.media,allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&this.state==='online',sourceEpoch:()=>JSON.stringify([this.state==='rejected',this.groups.authorityEpoch()]),groupGeneration:scene=>scene.kind==='group'?this.groups.generation(scene.id):null,rejectIdentity:()=>{this.verified=false;this.state='rejected';this.error='ACCOUNT_MISMATCH';this.socket?.terminate();}});
       if(this.config.stickers.enabled)this.stickers=new QqStickers(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store.stickers,allowed:scene=>this.allowed(scene)});
     } catch (error) {this.progress?.dispose();this.stickers?.close();this.media?.close();this.tasks?.close();this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
     ctx.effect(()=>ctx.dafeiyu.bindActivityPressure('qq',()=>this.stopped?0:this.batches.count()));
@@ -350,7 +350,8 @@ export class QqChannel extends Service {
     if (!receipt.duplicate) this.counters.accepted++;
   }
   private readHistory(scene:Conversation,signal:AbortSignal) {
-    return readRecentQqHistory({botId:this.config.botId,windowMs:this.config.historyWindowMs,allowed:target=>!this.stopped&&this.verified&&this.state==='online'&&this.allowed(target),
+    const generation=scene.kind==='group'?this.groups.generation(scene.id):null;
+    return readRecentQqHistory({botId:this.config.botId,windowMs:this.config.historyWindowMs,allowed:target=>!this.stopped&&this.verified&&this.state==='online'&&this.allowed(target)&&(target.kind!=='group'||this.groups.generation(target.id)===generation),
       fetch:(target,anchor,workSignal)=>this.api.history(target,anchor,workSignal),append:(target,message)=>{
         const route=this.cacheRoute(target);if(this.store.cache.recalled(route,message.message_id))return {added:false,media:0};
         const media=this.media?.remember(target,message.message_id,message.user_id,message,message.message);
@@ -360,7 +361,7 @@ export class QqChannel extends Service {
         return {added:this.store.appendHistory(route,message.message_id,message.user_id,text||'[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,mentionedBot:message.message.some(part=>part.type==='at'&&String(part.data.qq)===this.config.botId),...(forwardIds.length?{forwardIds}:{}),...(media?.attachments.length?{media:media.attachments}:{})}),media:media?.attachments.length??0};
       }},scene,AbortSignal.any([signal,this.controller.signal]));
   }
-  private async readForward(scene:Conversation,messageId:string,index:number,signal:AbortSignal){const guard=()=>{signal.throwIfAborted();if(this.stopped||!this.verified||!this.allowed(scene))throw new Error('TARGET_NOT_ALLOWED');};guard();
+  private async readForward(scene:Conversation,messageId:string,index:number,signal:AbortSignal){const generation=scene.kind==='group'?this.groups.generation(scene.id):null;const guard=()=>{signal.throwIfAborted();if(this.stopped||!this.verified||!this.allowed(scene)||scene.kind==='group'&&this.groups.generation(scene.id)!==generation)throw new Error('TARGET_NOT_ALLOWED');};guard();
     const route=this.cacheRoute(scene),handle=this.store.cache.forward(route,messageId,index),proof=this.store.cache.messageProof(route,messageId);
     await this.api.verify(signal);const raw=await this.api.call('get_forward_msg',{id:handle},signal);await this.api.verify(signal);guard();
     if(!this.store.cache.proofCurrent(proof))throw new Error('SOURCE_STALE');const result=recentForwardNodes(raw,Date.now(),this.config.historyWindowMs),sender=this.store.find(route,messageId)?.sender??this.config.ownerId;let remaining=8;

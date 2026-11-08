@@ -13,13 +13,13 @@ import {FixtureAdapter,textResponse,toolResponse,verificationResponse} from './s
 import {testTempDir} from './test-temp.js';
 import {captureAcceptance,acceptanceDatabase,requestMeasurements} from './acceptance-evidence.js';
 
-export async function runTaskSendRecovery(t:TestContext,mode:'text'|'media'|'not-sent'|'unknown') {
+export async function runTaskSendRecovery(t:TestContext,mode:'text'|'media'|'not-sent'|'unknown',revokeAfterRestart=false) {
   const root=await mkdtemp(join(testTempDir(),'task-send-recovery-'));process.env.DSH_HOME=join(root,'data/core/dsh-home');
   const {ManagedHost,loadHostConfig,initializeProfile}=await import('@dafeiyu/host');
   const owner:Conversation={channel:'qq',account:'100001',kind:'private',id:'200001'};
   const bytes=Buffer.from('isolated document bytes'),contentHash=createHash('sha256').update(bytes).digest('hex');
   const source:MediaSourceDescription={ref:{provider:'fixture-files',key:'document'},origin:{provider:'fixture-files',scene:owner,key:'document',version:1,hash:contentHash,roots:['fixture-document'],detail:{}},kind:'document',name:'fixture.txt',mimeHint:'text/plain',bytesHint:bytes.length,durationMsHint:null,rangeReadable:false,publicContent:false};
-  let channel:ExtensionHandle|undefined,submitted=false,step=0,blocked=true,acquisitions=0;
+  let channel:ExtensionHandle|undefined,submitted=false,step=0,blocked=true,acquisitions=0,sourceAllowed=true;
   const sends:string[]=[],attempts:string[]=[],mediaManifests:string[]=[],notices:string[]=[];
   const adapter=new FixtureAdapter(request=>{
     const session=String(request.sessionId);
@@ -57,7 +57,7 @@ export async function runTaskSendRecovery(t:TestContext,mode:'text'|'media'|'not
     ctx.dafeiyu.registerExtension({id:'fixture-tasks',version:'1',protocolVersion:API_VERSION,agentId:'fish',actions:[{id:'fixture_task_submit',version:'1',description:'受理任务',inputSchema:MessageInstructionSubmitSchema,outputSchema:z.json(),effects:'local-write',scope:'conversation',execute:async(input,context)=>({status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(ctx.dafeiyu.submitMessageTask(context,'fixture-tasks',{...MessageInstructionSubmitSchema.parse(input),kind:'explicit-task'})),sources:[],receipts:[]})}]});
     ctx.dafeiyu.bindMessageTasks({id:'fixture-tasks',pluginId:'fixture-tasks',channelExtensionId:'fixture-qq',channel:'qq',account:owner.account,ownerId:owner.id,policyId:'owner-task',version:'1',autoDeliver:true,active:()=>true,classify:message=>({kind:'submit',text:message.text})});
     if(mode==='media'){
-      ctx.dafeiyu.registerExtension({id:'fixture-files',version:'1',protocolVersion:API_VERSION,agentId:'fish',resourceProofs:{current:proof=>JSON.stringify(proof)===JSON.stringify(source.origin),epoch:()=> 'fixture'}});
+      ctx.dafeiyu.registerExtension({id:'fixture-files',version:'1',protocolVersion:API_VERSION,agentId:'fish',resourceProofs:{current:proof=>sourceAllowed&&JSON.stringify(proof)===JSON.stringify(source.origin),epoch:()=> 'fixture-'+sourceAllowed}});
       ctx.dafeiyu.registerMediaProvider({id:'fixture-files',describe:key=>key==='document'?source:null,open:async()=>{acquisitions++;return {bytes:bytes.length,mime:'text/plain',stream:(async function*(){yield bytes;})()};}});
     }
   }};
@@ -76,9 +76,11 @@ export async function runTaskSendRecovery(t:TestContext,mode:'text'|'media'|'not
       return;
     }
     assert.equal(before.recovery.phase,'sending');assert.equal(sends.length,mode==='not-sent'?0:1);
-    const calls=adapter.requests.length;await host.close();host=await ManagedHost.start(config,options);await host.ctx.dafeiyu.whenIdle();
+    const calls=adapter.requests.length;await host.close();if(revokeAfterRestart)sourceAllowed=false;host=await ManagedHost.start(config,options);await host.ctx.dafeiyu.whenIdle();
     assert.equal(sends.length,mode==='not-sent'?0:1,'restart alone cannot retry a settled failure');blocked=false;
     host.ctx.dafeiyu.resumeMessageTaskDelivery(run.id,{requestId:randomUUID(),expectedVersion:before.version});await host.ctx.dafeiyu.whenIdle();
+    if(revokeAfterRestart){assert.equal(sends.length,1);assert.equal(acquisitions,1);assert.equal(adapter.requests.length,calls);assert.equal(host.core.messageTaskDeliveryStatus(run.id)?.recovery.pendingRequestId,null);
+      if(process.env.DAFEIYU_ACCEPTANCE_DIR)captureAcceptance('combined-media-revoke',{before,after:host.core.messageTaskDeliveryStatus(run.id),sends,attempts,acquisitions,mediaManifests,modelCallsBeforeRecovery:calls,requests:requestMeasurements(adapter.requests),database:acceptanceDatabase(root),progress:host.core.taskProgress(run.id),transport:qq.mediaDelivery.progress('native-delivery:'+before.deliveryId)});return;}
     const after=host.ctx.dafeiyu.messageTaskDeliveryStatus(run.id)!;assert.equal(after.state,'sent');assert.equal(after.deliveryId,before.deliveryId);assert.equal(after.taskId,before.taskId);
     assert.equal(sends.length,2);assert.equal(new Set(sends).size,2);assert.equal(adapter.requests.length,calls,'sending reuses approved text and media without model calls');
     if(mode==='media'){assert.equal(acquisitions,1);assert.equal(mediaManifests.length,2);assert.equal(new Set(mediaManifests).size,1);}

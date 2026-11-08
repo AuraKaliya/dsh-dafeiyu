@@ -35,8 +35,13 @@ export function replayVerifier(casesRaw:unknown,observationsRaw:unknown) {
     }
     return {...common,actual,matchesExpectation:actual===item.expected,code};
   });
+  const score=(subset:typeof results)=>{const comparable=subset.filter(row=>row.actual==='accept'||row.actual==='reject'),negative=comparable.filter(row=>row.expected==='reject'),positive=comparable.filter(row=>row.expected==='accept');
+    return {planned:subset.length,comparable:comparable.length,falseAccept:negative.filter(row=>row.actual==='accept').length,falseReject:positive.filter(row=>row.actual==='reject').length,
+      falseAcceptRate:negative.length?negative.filter(row=>row.actual==='accept').length/negative.length:null,falseRejectRate:positive.length?positive.filter(row=>row.actual==='reject').length/positive.length:null,
+      unavailable:subset.filter(row=>row.actual==='unavailable').length,notExecuted:subset.filter(row=>row.actual==='not-executed').length,invalid:subset.filter(row=>row.actual==='invalid-evidence'||row.actual==='invalid-response').length};};
   return {schemaVersion:1,scope:'archived-verifier-response-replay',mode:saved.mode,casesHash:hash(cases),
     realModelCalled:false,semanticReliabilityProven:false,matchesExpectations:results.every(row=>row.matchesExpectation),results,
+    bySplit:{calibration:score(results.filter(row=>row.split==='calibration')),holdout:score(results.filter(row=>row.split==='holdout'))},
     counts:{falseAccept:results.filter(row=>row.expected==='reject'&&row.actual==='accept').length,
       falseReject:results.filter(row=>row.expected==='accept'&&row.actual==='reject').length,
       unavailable:results.filter(row=>row.actual==='unavailable').length,notExecuted:results.filter(row=>row.actual==='not-executed').length,
