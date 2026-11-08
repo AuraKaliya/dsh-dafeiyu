@@ -1,5 +1,5 @@
 import {mkdirSync,existsSync,readFileSync,openSync,closeSync} from 'node:fs';
-import {join} from 'node:path';
+import {join,resolve} from 'node:path';
 import {spawn,execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {repository,fingerprint,saveJson} from './io.mjs';
@@ -8,7 +8,10 @@ import {summarizeCpuProfile} from './performance-profile.mjs';
 const runId=randomUUID(),directory=join(repository,'.runtime','performance',new Date().toISOString().replaceAll(':','-')+'-'+runId);
 if(existsSync(directory))throw new Error('PERFORMANCE_NEW_DIRECTORY_REQUIRED');mkdirSync(directory,{recursive:true});
 const version=JSON.parse(readFileSync(join(repository,'package.json'),'utf8')).version;
-const manifest={schemaVersion:1,runId,version,mode:'offline-sdk',revision:execFileSync('git',['rev-parse','HEAD'],{cwd:repository,encoding:'utf8',windowsHide:true}).trim(),sourceHash:fingerprint('source'),driverHash:fingerprint('driver'),
+let revision=null;try{const options={cwd:repository,encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']};
+  if(resolve(execFileSync('git',['rev-parse','--show-toplevel'],options).trim())===repository)revision=execFileSync('git',['rev-parse','HEAD'],options).trim();
+}catch{/* A source archive is identified by content; do not borrow an enclosing repository's revision. */}
+const manifest={schemaVersion:1,runId,version,mode:'offline-sdk',revision,sourceHash:fingerprint('source'),driverHash:fingerprint('driver'),
   thresholds:{maxLoopDelayMs:1000,cancelResponseMs:1000,cancelSettledMs:1500},concurrency:1,profileEnabled:true,paidCalls:false,realPlatforms:false};saveJson(join(directory,'manifest.json'),manifest);
 console.log(JSON.stringify({runId,directory,mode:manifest.mode}));const log=openSync(join(directory,'tests.log'),'wx');let code;
 try{code=await new Promise((done,reject)=>{const child=spawn(process.execPath,['scripts/run-tests.mjs','tests/heavy-task-performance.test.ts','tests/heavy-task-cancellation.test.ts','tests/heavy-task-recovery.test.ts','tests/cooperative-stream.test.ts'],{cwd:repository,windowsHide:true,stdio:['ignore',log,log],env:{...process.env,DAFEIYU_TEST_CONCURRENCY:'1',DAFEIYU_PERFORMANCE_SLO:'1',DAFEIYU_PERFORMANCE_DIR:directory}});child.once('error',reject);child.once('exit',done);});}finally{closeSync(log);}
