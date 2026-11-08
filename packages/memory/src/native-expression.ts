@@ -15,7 +15,14 @@ export class NativeExpression implements NativeExpressionPort {
   private readonly pending=new Set<Promise<void>>();
   constructor(private readonly ctx:Context,private readonly db:DatabaseSync,private readonly store:MemoryStore,private readonly expression:MemoryExpressionAccess,readonly ready:()=>boolean,private readonly flush:()=>void){}
   private audit(access:NativeExpressionAccess,type:string,data:unknown){const id=randomUUID();this.db.prepare('INSERT INTO execution_memory_outbox(id,body) VALUES(?,?)').run(id,JSON.stringify({id,type,scope:access.execution.view.scope,runId:access.anchor.runId,origin:access.execution.view.origin,operationId:access.anchor.runId,causedBy:null,producer:'memory-native-expression',at:new Date().toISOString(),data}));}
-  private build(access:NativeExpressionAccess,allowExpired=false){access.guard();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const anchor=TaskResultAnchorSchema.parse(access.anchor),scope=access.execution.view.scope;
+  private build(access:NativeExpressionAccess,allowExpired=false){
+    let result!:ReturnType<NativeExpression['buildRead']>;
+    const read=()=>{result=this.buildRead(access,allowExpired);};
+    // The complete build is a pure synchronous read. Reuse checked shared ancestors
+    // inside it, while the core checks authority at both boundaries of this batch.
+    if(access.readSources)access.readSources(read);else read();return result;
+  }
+  private buildRead(access:NativeExpressionAccess,allowExpired=false){access.guard();if(!this.ready())throw new Error('DEPENDENCY_UNAVAILABLE');const anchor=TaskResultAnchorSchema.parse(access.anchor),scope=access.execution.view.scope;
     if(scope.kind!=='task'||scope.taskId!==anchor.taskId||access.execution.view.runId!==anchor.runId||access.execution.intentVersion!==anchor.intentVersion||!allowExpired&&Date.parse(anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');
     if(access.media&&hash(this.ctx.dafeiyu.nativeMediaTargetMaterial(access))!==hash(access.media))throw new Error('SOURCE_STALE');
     // This read is synchronous: retain per-source checks and validate the entire authority/history
