@@ -9,7 +9,7 @@ export const ModelUsageBreakdownSchema=z.strictObject({inputTokens:count,cacheRe
   .refine(value=>value.totalTokens===value.inputTokens+value.cacheReadTokens+value.cacheWriteTokens+value.outputTokens,'Usage components must sum to the reported total');
 export const ModelUsageTotalsSchema=z.strictObject({calls:count,pending:count,unknownCalls:count,knownTokens:count,tokens:count.nullable(),breakdown:ModelUsageBreakdownSchema});
 export const ModelUsageEnvironmentSchema=z.enum(['runtime','deterministic-test','real-validation','observation']);
-export const ModelInputMeasurementSchema=z.strictObject({schemaVersion:z.literal(1),environment:ModelUsageEnvironmentSchema,inputHash:z.string().regex(/^[a-f0-9]{64}$/),
+export const ModelInputMeasurementSchema=z.strictObject({schemaVersion:z.literal(1),stage:z.literal('sdk-pre-adapter'),environment:ModelUsageEnvironmentSchema,inputHash:z.string().regex(/^[a-f0-9]{64}$/),
   bytes:count,messagesBytes:count,toolsBytes:count,toolHistoryBytes:count,messageCount:count,toolCount:count,measurement:z.literal('utf8-serialized-input-not-billable-tokens')});
 export type ModelInputMeasurement=z.infer<typeof ModelInputMeasurementSchema>;
 export const ModelInputOverviewSchema=z.strictObject({measuredCalls:count,unmeasuredCalls:count,totalBytes:count,peakBytes:count,largeInputCalls:count,repeatedInputGroups:count,

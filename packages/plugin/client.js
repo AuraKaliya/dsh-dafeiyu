@@ -502,7 +502,7 @@ function InputContextSummary({ value }) {
     "section",
     { "data-input-context": true },
     h7("h4", null, "\u8F93\u5165\u4E0E\u4F7F\u7528\u573A\u666F"),
-    h7("p", null, "\u5DF2\u6D4B\u91CF " + value.measuredCalls + " \u6B21\u8F93\u5165\uFF0C\u7D2F\u8BA1 " + value.totalBytes + " \u5B57\u8282\uFF0C\u5355\u6B21\u5CF0\u503C " + value.peakBytes + " \u5B57\u8282\uFF1B" + value.unmeasuredCalls + " \u6B21\u672A\u6D4B\u91CF\u3002\u5B57\u8282\u4E0D\u662F\u8BA1\u8D39 token\uFF0C\u4E0D\u80FD\u636E\u6B64\u8BA1\u7B97\u8D39\u7528\u3002"),
+    h7("p", null, "\u5DF2\u6D4B\u91CF " + value.measuredCalls + " \u6B21 SDK \u9002\u914D\u524D\u8F93\u5165\uFF0C\u7D2F\u8BA1 " + value.totalBytes + " \u5B57\u8282\uFF0C\u5355\u6B21\u5CF0\u503C " + value.peakBytes + " \u5B57\u8282\uFF1B" + value.unmeasuredCalls + " \u6B21\u672A\u6D4B\u91CF\u3002SDK \u540E\u7EED\u6295\u5F71\u53EF\u80FD\u6539\u53D8\u8F93\u5165\uFF1B\u5B57\u8282\u4E0D\u662F\u8BA1\u8D39 token\uFF0C\u4E0D\u80FD\u636E\u6B64\u8BA1\u7B97\u8D39\u7528\u3002"),
     h7("ul", null, ...Object.entries(value.byEnvironment).map(([name, usage]) => h7("li", { key: name }, (names[name] ?? name) + "\uFF1A" + usage.calls + " \u6B21\uFF0C\u5DF2\u77E5 " + usage.knownTokens + " token\uFF0C\u672A\u77E5 " + usage.unknownCalls + " \u6B21"))),
     (value.largeInputCalls > 0 || value.repeatedInputGroups > 0) && h7("p", { className: "df-note" }, "\u8F93\u5165\u63D0\u793A\uFF1A" + value.largeInputCalls + " \u6B21\u8D85\u8FC7 512 KiB\uFF0C" + value.repeatedInputGroups + " \u7EC4\u76F8\u540C\u8F93\u5165\u91CD\u590D\u81F3\u5C11\u4E09\u6B21\u3002\u4EC5\u4F9B\u68C0\u67E5\uFF0C\u4E0D\u505C\u6B62\u4EFB\u52A1\u3002")
   );

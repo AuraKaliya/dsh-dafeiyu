@@ -18,6 +18,7 @@ export function acceptanceDatabase(root: string) {
       runs: db.prepare('SELECT id,state,definition,result FROM runs').all().map(row => ({...row, definition: decode(row.definition), result: decode(row.result)})),
       deliveries: db.prepare('SELECT run_id,state,receipt,body,anchor FROM native_deliveries').all().map(row => ({...row, anchor: decode(row.anchor)})),
       requests: db.prepare('SELECT id,body,settlement FROM model_requests').all().map(row => ({...row, body: decode(row.body), settlement: decode(row.settlement)})),
+      inputMeasurements:db.prepare('SELECT request_id,body FROM model_request_inputs').all().map(row=>({...row,body:decode(row.body)})),
       operations: db.prepare('SELECT id,action,outcome FROM run_operations').all().map(row => ({...row, outcome: decode(row.outcome)})),
       recoveryEvents: db.prepare("SELECT body FROM runtime_outbox WHERE json_extract(body,'$.type') LIKE 'native.delivery.recovery.%' ORDER BY ordinal").all().map(row=>decode(row.body)),
       sources:db.prepare("SELECT run_id runId,json_extract(body,'$.messageSource.inboundId') inboundId,json_extract(body,'$.messageSource.conversation') target FROM execution_requests WHERE run_id IS NOT NULL AND json_extract(body,'$.messageSource.schemaVersion')=1").all().map(row=>({...row,target:decode(row.target)})),

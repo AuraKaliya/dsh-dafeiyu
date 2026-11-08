@@ -27,6 +27,8 @@ test('folding keeps partial page coverage and unsuccessful command facts without
   const f=fixture(),resultId=randomUUID();const outcome={...f.outcome,status:'partial',completeness:'partial',data:{page:{resultId,path:['output'],execution:{receiptId:resultId,isError:false,effect:'none'},view:{coverage:{start:10,end:20,total:100,complete:false},entries:[{key:'exitCode',value:3},{key:'timedOut',value:true},{key:'stdout',value:'x'.repeat(10000)}]}}}};
   const meta={dafeiyuExecution:{...f.meta.dafeiyuExecution,outcomeHash:runtimeHash(outcome)}},text=toolReceiptView(JSON.stringify(outcome),meta,f.callId,'dsh_tool_read')!;
   const view=JSON.parse(text);assert.equal(view.completeness,'partial');assert.equal(view.data.reading.coverage.complete,false);assert.deepEqual(view.data.reading.commands,[{key:'exitCode',value:3},{key:'timedOut',value:true}]);assert.doesNotMatch(text,/x{100}/);
+  const encoded={...outcome,data:{page:{...outcome.data.page,view:{...outcome.data.page.view,entries:[{key:'exitCode',value:'3'},{key:'stdout',value:'x'.repeat(10000)}]}}}};
+  const preserved=toolReceiptView(JSON.stringify(encoded),{dafeiyuExecution:{...meta.dafeiyuExecution,outcomeHash:runtimeHash(encoded)}},f.callId,'dsh_tool_read')!;assert.deepEqual(JSON.parse(preserved).data.reading.commands,[{key:'exitCode',value:'3'}]);
 });
 
 test('a valid receipt with only observation metadata or a pending handoff is not a raw archive proof',()=>{

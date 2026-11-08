@@ -21,7 +21,7 @@ export function usageBreakdown(usage:TokenUsage):UsageBreakdown|null {const tota
 export function measureModelInput(options:Pick<GenerateOptions,'messages'|'tools'|'toolHistory'>,environment:ModelInputMeasurement['environment']):ModelInputMeasurement{
   const messages=JSON.stringify(options.messages),tools=JSON.stringify(options.tools??[]),history=JSON.stringify(options.toolHistory??null);
   const input=`{"messages":${messages},"tools":${tools},"toolHistory":${history}}`;
-  return {schemaVersion:1,environment,inputHash:createHash('sha256').update(input).digest('hex'),bytes:Buffer.byteLength(input),messagesBytes:Buffer.byteLength(messages),toolsBytes:Buffer.byteLength(tools),toolHistoryBytes:Buffer.byteLength(history),messageCount:options.messages.length,toolCount:options.tools?.length??0,measurement:'utf8-serialized-input-not-billable-tokens'};
+  return {schemaVersion:1,stage:'sdk-pre-adapter',environment,inputHash:createHash('sha256').update(input).digest('hex'),bytes:Buffer.byteLength(input),messagesBytes:Buffer.byteLength(messages),toolsBytes:Buffer.byteLength(tools),toolHistoryBytes:Buffer.byteLength(history),messageCount:options.messages.length,toolCount:options.tools?.length??0,measurement:'utf8-serialized-input-not-billable-tokens'};
 }
 function phaseFor(session:string|undefined,fallback:ModelUsagePhase):ModelUsagePhase{
   if(session?.startsWith('media-analysis-'))return 'media';

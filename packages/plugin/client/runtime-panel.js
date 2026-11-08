@@ -8,7 +8,7 @@ export function InputContextSummary({value}) {
   if(!value)return null;
   const names={runtime:'实例运行','deterministic-test':'确定性测试','real-validation':'真实局部复验',observation:'连续观察','unclassified-history':'历史未分类'};
   return h('section',{'data-input-context':true},h('h4',null,'输入与使用场景'),
-    h('p',null,'已测量 '+value.measuredCalls+' 次输入，累计 '+value.totalBytes+' 字节，单次峰值 '+value.peakBytes+' 字节；'+value.unmeasuredCalls+' 次未测量。字节不是计费 token，不能据此计算费用。'),
+    h('p',null,'已测量 '+value.measuredCalls+' 次 SDK 适配前输入，累计 '+value.totalBytes+' 字节，单次峰值 '+value.peakBytes+' 字节；'+value.unmeasuredCalls+' 次未测量。SDK 后续投影可能改变输入；字节不是计费 token，不能据此计算费用。'),
     h('ul',null,...Object.entries(value.byEnvironment).map(([name,usage])=>h('li',{key:name},(names[name]??name)+'：'+usage.calls+' 次，已知 '+usage.knownTokens+' token，未知 '+usage.unknownCalls+' 次'))),
     (value.largeInputCalls>0||value.repeatedInputGroups>0)&&h('p',{className:'df-note'},'输入提示：'+value.largeInputCalls+' 次超过 512 KiB，'+value.repeatedInputGroups+' 组相同输入重复至少三次。仅供检查，不停止任务。'));
 }

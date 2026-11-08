@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {z} from 'zod';
-import {repository} from './io.mjs';
+import {repository,hash} from './io.mjs';
 import {databaseEvidenceSchema,requestMeasurementSchema} from './schema.ts';
 
 /** Independent comparison: material must actually appear in admitted requests and be delivered. */
@@ -20,7 +20,12 @@ export function auditContextFolding(raw:unknown){
   check('same-delivered-report',data.database.deliveries.length===1&&data.database.deliveries[0]?.state==='sent'&&!!data.database.deliveries[0]?.receipt&&data.database.deliveries[0]?.body===baseline.sent);
   check('million-capacity',data.capacity.maxTokens===1000000);
   const context=data.inputUsage.inputContext;
-  check('input-accounting',data.database.requests.length===data.requests.length&&data.database.requests.every(row=>row.settlement!==null)&&context.measuredCalls===data.requests.length&&context.totalBytes===bytes&&context.byEnvironment['deterministic-test']?.calls===data.requests.length);
+  const measurement=z.object({stage:z.literal('sdk-pre-adapter'),bytes:z.number(),inputHash:z.string()});
+  const audit=z.object({preflight:z.array(z.object({sessionId:z.string().nullable(),bytes:z.number(),inputHash:z.string()})),database:z.object({inputMeasurements:z.array(z.object({request_id:z.string(),body:measurement}))})}).parse(raw);
+  const recorded=audit.database.inputMeasurements.map(row=>({sessionId:data.database.requests.find(request=>request.id===row.request_id)?.body.sessionId??null,bytes:row.body.bytes,inputHash:row.body.inputHash}));
+  const sorted=(rows:typeof recorded)=>rows.map(row=>JSON.stringify(row)).sort();
+  check('input-accounting',data.database.requests.length===data.requests.length&&data.database.requests.every(row=>row.settlement!==null)&&context.measuredCalls===data.requests.length&&context.totalBytes===recorded.reduce((sum,row)=>sum+row.bytes,0)&&context.byEnvironment['deterministic-test']?.calls===data.requests.length
+    &&new Set(audit.database.inputMeasurements.map(row=>row.request_id)).size===data.requests.length&&hash(sorted(recorded))===hash(sorted(audit.preflight)));
   check('unknown-cost-is-not-zero',data.inputUsage.tokens===null);
-  return {checks,baseline:{kind:'offline-context-byte-comparison',beforeBytes:baseline.totalInputBytes,afterBytes:bytes,beforeRepeatedBodies:baseline.repeatedBodies,afterRepeatedBodies:repeated,paidCalls:false,monetaryCost:null}};
+  return {checks,baseline:{kind:'offline-context-byte-comparison',beforeBytes:baseline.totalInputBytes,afterBytes:bytes,preAdapterBytes:context.totalBytes,beforeRepeatedBodies:baseline.repeatedBodies,afterRepeatedBodies:repeated,paidCalls:false,monetaryCost:null}};
 }

@@ -11,7 +11,7 @@ function readingFacts(data:unknown):unknown{
   if(batch.success)return {kind:batch.data.kind,items:batch.data.items.map(item=>({status:item.status,code:item.code??null,reading:readingFacts(item.page)}))};
   const page=z.object({resultId:z.uuid().optional(),path:z.array(z.string().max(1000)).max(32).optional(),execution:execution.optional(),view:z.object({coverage:coverage.optional(),entries:z.array(z.object({key:z.string(),value:z.unknown().optional()})).optional()}).optional()}).safeParse(raw);
   if(!page.success)return undefined;
-  const commands=page.data.view?.entries?.flatMap(entry=>['exitCode','timedOut'].includes(entry.key)&&['number','boolean'].includes(typeof entry.value)?[{key:entry.key,value:entry.value}]:[])??[];
+  const commands=page.data.view?.entries?.flatMap(entry=>['exitCode','timedOut'].includes(entry.key)&&(['number','boolean'].includes(typeof entry.value)||entry.key==='exitCode'&&typeof entry.value==='string'&&/^-?\d{1,9}$/.test(entry.value))?[{key:entry.key,value:entry.value}]:[])??[];
   return {resultId:page.data.resultId??null,path:page.data.path??null,execution:page.data.execution??null,coverage:page.data.view?.coverage??null,commands};
 }
 /** Shorten only confirmed, reopenable native results. No model summary and no action replay. */
