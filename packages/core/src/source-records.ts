@@ -4,6 +4,7 @@ import { pluginRecordOf,SessionSeq,SessionLogOffset } from '@deepseek-ai/dsh-ses
 import type { Session,SessionEvent } from '@deepseek-ai/dsh-session';
 import { SourceDependencySchema } from '@dafeiyu/contracts';
 import type { SourceDependency } from '@dafeiyu/contracts';
+import {immutableRecordReader} from './immutable-record.js';
 
 export const digestSource=(text:string)=>createHash('sha256').update(text).digest('hex');
 export const dependenciesSchema=z.array(SourceDependencySchema);
@@ -27,9 +28,10 @@ declare module '@deepseek-ai/dsh-session' { interface PluginRecordMap {
   'plugin:dafeiyu/source-record':SourceRecord;
   'plugin:dafeiyu/request-sources':z.infer<typeof requestSchema>;
 } }
+const decodeProvenance=immutableRecordReader(provenanceRecordSchema);
 export function readProvenance(session:Session,fromSeq=0){return session.snapshotEvents(SessionLogOffset(fromSeq)).flatMap(event=>{
   const record=pluginRecordOf(event);return record&&(record.type==='plugin:dafeiyu/source-record'||record.type==='plugin:dafeiyu/request-sources')
-    ?[provenanceRecordSchema.parse(record)]:[];
+    ?[decodeProvenance(event,record)]:[];
 });}
 export function eventText(event:SessionEvent|undefined):string|null {
   const message=event?.type==='user/message'?event.data:event?.type==='assistant/message'||event?.type==='tool/result'?event.data.message:null;

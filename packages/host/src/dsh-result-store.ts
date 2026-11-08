@@ -1,6 +1,7 @@
-import { readFileSync,writeFileSync,mkdirSync,readdirSync,statSync,lstatSync,linkSync,unlinkSync } from 'node:fs';
+import { mkdirSync,readdirSync,statSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash,randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import {VerifiedJsonCache,publishJson} from './verified-json-cache.js';
 import { z } from 'zod';
 import { DshResultReadSchema,DshResultReadBatchSchema,redactJson } from '@dafeiyu/contracts';
 import type { Json,DshResultRead,DshResultReadBatch,Conversation } from '@dafeiyu/contracts';
@@ -27,28 +28,20 @@ function prepare(saved:z.infer<typeof savedSchema>){
 }
 /** Immutable, sanitized task results. A page contains whole JSON values or explicit child handles. */
 export class DshResultStore {
-  private readonly cache=new Map<string,{stamp:string;bytes:number;saved:z.infer<typeof savedSchema>;prepared:ReturnType<typeof prepare>}>();
-  private readonly counters={diskLoads:0,cacheHits:0};
-  diagnostics(){return {...this.counters,cachedResults:this.cache.size,cachedBytes:[...this.cache.values()].reduce((sum,row)=>sum+row.bytes,0)};}
-  constructor(private readonly directory:string){mkdirSync(directory,{recursive:true});}
+  private readonly cache:VerifiedJsonCache<{saved:z.infer<typeof savedSchema>;prepared:ReturnType<typeof prepare>}>;
+  diagnostics(){return this.cache.diagnostics();}
+  constructor(private readonly directory:string,cacheEntries=128){mkdirSync(directory,{recursive:true});this.cache=new VerifiedJsonCache(raw=>{
+    const saved=savedSchema.parse(raw);if(saved.hash!==digest(saved.result))throw new Error('SCOPE_DENIED');return {saved,prepared:prepare(saved)};
+  },cacheEntries);}
   private file(id:string,taskId:string){return join(this.directory,z.uuid().parse(taskId)+'.'+z.uuid().parse(id)+'.result.json');}
   available(taskId:string,scene:Conversation|null,id:string):boolean{try{const {saved}=this.load(this.file(id,taskId));return saved.taskId===taskId&&digest(saved.scene)===digest(scene);}catch{return false;}}
-  private identity(file:string){const value=lstatSync(file,{bigint:true});if(!value.isFile()||value.isSymbolicLink())throw new Error('SCOPE_DENIED');return {stamp:[value.dev,value.ino,value.size,value.mtimeNs,value.ctimeNs].join(':'),bytes:Number(value.size)};}
   private load(file:string){
-    const before=this.identity(file),old=this.cache.get(file);
-    if(old?.stamp===before.stamp){this.cache.delete(file);this.cache.set(file,old);this.counters.cacheHits++;return old;}
-    this.cache.delete(file);if(before.bytes>4*1024*1024)throw new Error('SCOPE_DENIED');
-    const saved=savedSchema.parse(JSON.parse(readFileSync(file,'utf8')));this.counters.diskLoads++;
-    if(this.identity(file).stamp!==before.stamp||saved.hash!==digest(saved.result))throw new Error('SCOPE_DENIED');
-    while(this.cache.size>=8||[...this.cache.values()].reduce((sum,row)=>sum+row.bytes,before.bytes)>8*1024*1024)this.cache.delete(this.cache.keys().next().value!);
-    const loaded={...before,saved,prepared:prepare(saved)};this.cache.set(file,loaded);return loaded;
+    return this.cache.get(file);
   }
   save(id:string,taskId:string,scene:Conversation|null,result:Json){const safe=redactJson(result).value,body={schemaVersion:1,taskId,scene:z.json().parse(scene),result:safe,hash:digest(safe)};
     const bytes=Buffer.byteLength(JSON.stringify(body)),files=readdirSync(this.directory).filter(name=>name.endsWith('.result.json')),sizes=files.map(name=>({name,bytes:statSync(join(this.directory,name)).size}));
     if(bytes>4*1024*1024||sizes.filter(file=>file.name.startsWith(taskId+'.')).reduce((n,file)=>n+file.bytes,bytes)>64*1024*1024||sizes.reduce((n,file)=>n+file.bytes,bytes)>2*1024**3)throw new Error('DSH_RESULT_STORAGE_LIMIT');
-    const target=this.file(id,taskId),temp=target+'.'+randomUUID()+'.tmp';
-    writeFileSync(temp,JSON.stringify(savedSchema.parse(body)),{flag:'wx'});
-    try{linkSync(temp,target);}finally{unlinkSync(temp);} // Atomic exclusive publication; an existing receipt is never overwritten.
+    publishJson(this.file(id,taskId),savedSchema.parse(body));
   }
   read(taskId:string,scene:Conversation|null,raw:DshResultRead):Json {
     const input=DshResultReadSchema.parse(raw);let loaded:ReturnType<DshResultStore['load']>;try{loaded=this.load(this.file(input.resultId,taskId));}catch{throw new Error('SCOPE_DENIED');}

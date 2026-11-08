@@ -99,3 +99,9 @@ node scripts/acceptance/replay-verifier.ts <响应档案.json> <新的报告.jso
 本版修正一项验收器误拒：配置任务尚未结束时，必须等待来源任务，但前台确认此时可以已结束。审计继续检查 sourceState=pending、调度未提前执行、原计划 ID/版本/水位；不再把 foregroundBusy 必须为 true 当作业务条件。已补“前台空闲但来源仍 pending 可接受”和“仅前台忙碌不能替代来源 pending”的正反例。
 
 完整真实故事、真实核验采集、视频补读和故障恢复的独立证据适配、真实模型费用基线及两小时驱动仍待后续工作项完成。当前离线结果不能替代这些退出条件。
+
+## 本地性能与取消恢复
+
+`npm run test:performance` 在新的 `.runtime/performance/` 目录串行运行 64 次读取、运行中管理取消、缓冲流取消和真实子进程退出恢复。保存源码/驱动摘要、固定阈值、原始测试日志、CPU 采样及 `audit.json`；基线来自 `tests/fixtures/acceptance/heavy-baseline.json`。比较同时启用 CPU 采样的前后样本；普通并行回归不把机器资源竞争当成耗时门槛失败。
+
+性能审计要求同样的业务读取和最终正文、最长事件循环延迟低于 1 秒、取消受理低于 1 秒、取消结算低于 1.5 秒。恢复使用原数据和身份，不初始化空库；不得增加模型请求或重执已完成读取。命令不调用真实模型或平台，`releaseAccepted` 仍为 false。`performance-profile.mjs` 可只读分析已有 CPU 采样的指定时间窗口；栈包含时间存在重叠，不能直接相加。

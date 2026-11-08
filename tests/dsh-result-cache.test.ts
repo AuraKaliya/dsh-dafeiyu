@@ -24,7 +24,7 @@ test('related archive pages are read in one batch with their exact individual co
 });
 
 test('cached results still detect tampering, keep writes exclusive and reopen after restart',async()=>{
-  const root=await mkdtemp(join(testTempDir(),'dsh-query-cache-')),store=new DshResultStore(root),task=randomUUID(),id=randomUUID(),file=join(root,task+'.'+id+'.result.json'),request=DshResultReadSchema.parse({resultId:id});
+  const root=await mkdtemp(join(testTempDir(),'dsh-query-cache-')),store=new DshResultStore(root,8),task=randomUUID(),id=randomUUID(),file=join(root,task+'.'+id+'.result.json'),request=DshResultReadSchema.parse({resultId:id});
   store.save(id,task,null,{effect:'none',value:'original'});const original=await readFile(file,'utf8'),first=store.read(task,null,request);
   assert.throws(()=>store.save(id,task,null,{value:'replacement'}),/EEXIST/);assert.equal(await readFile(file,'utf8'),original);assert.ok(!(await readdir(root)).some(file=>file.endsWith('.tmp')));
   assert.deepEqual(new DshResultStore(root).read(task,null,request),first);

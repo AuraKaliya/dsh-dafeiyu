@@ -18,12 +18,19 @@ const recordSchema=z.strictObject({schemaVersion:z.literal(1),kind:z.enum(['obse
   rawRetained:z.literal(false)});
 type RecordBody=z.infer<typeof recordSchema>;
 type Validator=(scope:TimelineScope,body:RecordBody,access:PersonaAccess|undefined)=>boolean;
+type ObservationRow={body:RecordBody;ref:PersonaSourceRef};
+const freezeTree=<T>(value:T):T=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.freeze(value);for(const child of Object.values(value))freezeTree(child);}return value;};
 
 /** Observation receipts retain hashes/coverage. Only an explicit selection creates a memory item. */
 export class CapabilityObservations {
   private validator:Validator|undefined;
   private access:PersonaAccess|undefined;
   private readonly checking=new Set<string>();
+  private readonly rows=new Map<string,{value:ObservationRow;bytes:number}>();
+  private rowBytes=0;
+  private rowEpoch=-1;
+  private readonly statements=new Map<string,import('node:sqlite').StatementSync>();
+  private statement(sql:string){let value=this.statements.get(sql);if(!value){value=this.db.prepare(sql);this.statements.set(sql,value);}return value;}
   constructor(private readonly db:DatabaseSync,private readonly memory:MemoryStore){}
   bind(validator:Validator):()=>void {if(this.validator)throw new Error('DUPLICATE_PROVIDER');this.validator=validator;return ()=>{if(this.validator===validator)this.validator=undefined;};}
   withAccess<T>(access:PersonaAccess,work:()=>T):T {access.guard();const old=this.access;this.access=access;try{return work();}finally{this.access=old;}}
@@ -37,10 +44,16 @@ export class CapabilityObservations {
     }
     return false;
   }
-  private row(scope:TimelineScope,id:string){const row=this.db.prepare('SELECT body,content_hash FROM capability_observations WHERE id=? AND agent_id=? AND scope_key=?').get(id,scope.agentId,scope.route);
+  private row(scope:TimelineScope,id:string){
+    const epoch=Number(this.statement('PRAGMA data_version').get()?.data_version);if(epoch!==this.rowEpoch){this.rows.clear();this.rowBytes=0;this.rowEpoch=epoch;}
+    const key=JSON.stringify([scope.agentId,scope.route,id]),cached=this.rows.get(key);if(cached){this.rows.delete(key);this.rows.set(key,cached);return cached.value;}
+    const row=this.statement('SELECT body,content_hash FROM capability_observations WHERE id=? AND agent_id=? AND scope_key=?').get(id,scope.agentId,scope.route);
     if(!row)return null;const body=recordSchema.parse(JSON.parse(String(row.body)));if(digest(body)!==row.content_hash||personaScope(body.scope)!==scope.route||body.scope.agentId!==scope.agentId)return null;
-    return {body,ref:PersonaSourceRefSchema.parse({kind:'execution-source',id,agentId:scope.agentId,scopeKey:scope.route,version:1,contentHash:row.content_hash})};}
-  reference(scope:TimelineScope,id:string):PersonaSourceRef|null {return this.row(scope,id)?.ref??null;}
+    const value=freezeTree({body,ref:PersonaSourceRefSchema.parse({kind:'execution-source',id,agentId:scope.agentId,scopeKey:scope.route,version:1,contentHash:row.content_hash})}),bytes=Buffer.byteLength(String(row.body));
+    // New rows read inside a transaction may roll back. Only retain committed immutable rows.
+    if(!this.db.isTransaction&&bytes<=4*1024*1024){while(this.rows.size&&(this.rows.size>=256||this.rowBytes+bytes>4*1024*1024)){const first=this.rows.keys().next().value!;this.rowBytes-=this.rows.get(first)!.bytes;this.rows.delete(first);}this.rows.set(key,{value,bytes});this.rowBytes+=bytes;}
+    return value;}
+  reference(scope:TimelineScope,id:string):PersonaSourceRef|null {const ref=this.row(scope,id)?.ref;return ref?structuredClone(ref):null;}
   valid(scope:TimelineScope,ref:PersonaSourceRef,exposedHash?:string):boolean {
     if(ref.kind!=='execution-source'||ref.agentId!==scope.agentId||ref.scopeKey!==scope.route||ref.version!==1||this.checking.has(ref.id)||this.checking.size>=128)return false;
     this.checking.add(ref.id);
@@ -53,10 +66,10 @@ export class CapabilityObservations {
     // The observation was formed in the authorized reader's scope. Its proof retains the original group.
     const binding=row.body.scope.kind==='task'?{executionScope:row.body.scope}:{ingressPluginId:row.body.producer};
     if(row.body.scope.kind==='task'&&purpose!=='internal')return null;
-    return {ref:row.ref,hash:row.ref.contentHash,version:1,deleted:false,boundary:conservativeBoundary(scope,'conservative-create',binding),body:row.body};
+    return {ref:structuredClone(row.ref),hash:row.ref.contentHash,version:1,deleted:false,boundary:conservativeBoundary(scope,'conservative-create',binding),body:structuredClone(row.body)};
   }
   material(access:PersonaAccess,ref:PersonaSourceRef){return this.withAccess(access,()=>{const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||!this.valid(scope,ref))return null;
-    return {text:JSON.stringify(row.body),dependencies:row.body.parent?[row.body.parent]:[],rootSources:row.body.proof.roots};});}
+    return {text:JSON.stringify(row.body),dependencies:row.body.parent?[structuredClone(row.body.parent)]:[],rootSources:[...row.body.proof.roots]};});}
   expressionView(access:PersonaAccess,ref:PersonaSourceRef,target:Conversation,view:string,publicMedia=false,publicView?:(proof:ResourceProof,view:string)=>boolean,
     targetView?:(proof:ResourceProof,view:string)=>ResourceTargetView|null):{text:string;fence:string;target?:ResourceTargetView}|null{return this.withAccess(access,()=>{
     const scope=this.scope(access),row=this.row(scope,ref.id);if(!row||row.body.kind!=='observed'||!this.valid(scope,ref,textHash(view))||this.suppressed(scope,row.body.proof)||this.suppressed({agentId:scope.agentId,route:conversationKey(scope.agentId,target)},row.body.proof))return null;

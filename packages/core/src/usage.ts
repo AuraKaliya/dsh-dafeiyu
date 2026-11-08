@@ -1,4 +1,5 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {cooperativeStream} from './cooperative-stream.js';
 import {randomUUID,createHash} from 'node:crypto';
 import type {Context} from '@deepseek-ai/cordis';
 import type {TokenUsage,GenerateOptions} from '@deepseek-ai/dsh-llm';
@@ -39,7 +40,7 @@ export function observeUsage(ctx:Context,recorder?:()=>UsageRecorder|undefined){
     ...(!context.runId&&work?{runId:work.runId,workItemId:work.workItemId}:{}),phase:phaseFor(options.sessionId,context.phase??(work?.stage==='conversation'?'conversation':work?'task':'other')),
     inputContext:measureModelInput(options,context.environment??(['local-test','fixture'].includes(String(options.provider))?'deterministic-test':'runtime'))};
   sink?.begin(input);let usage:TokenUsage|undefined,finished=false;
-  try{for await(const chunk of next()){if(chunk.type==='usage')usage=chunk.usage;if(chunk.type==='finish')finished=!['error','aborted','max-tokens'].includes(chunk.reason.kind);yield chunk;}}
+  try{for await(const chunk of cooperativeStream(next(),options.signal)){if(chunk.type==='usage')usage=chunk.usage;if(chunk.type==='finish')finished=!['error','aborted','max-tokens'].includes(chunk.reason.kind);yield chunk;}}
   finally{const breakdown=usage?usageBreakdown(usage):null,receipt:UsageReceipt={id,tokens:breakdown?.totalTokens??null,durationMs:Math.max(0,Math.round(performance.now()-start)),provider:input.provider,model:input.model,...(input.sessionId?{sessionId:input.sessionId}:{}),...(breakdown?{breakdown}:{})};
     if(sink)sink.finish(id,{state:finished?'completed':options.signal?.aborted?'cancelled':'failed',finishedAt:new Date().toISOString(),reason:breakdown?null:usage?'PROVIDER_USAGE_INVALID':'PROVIDER_USAGE_UNAVAILABLE',receipt});
     else bound?.settle?.(receipt);

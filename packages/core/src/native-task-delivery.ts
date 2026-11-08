@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
+import {setImmediate as yieldEventLoop} from 'node:timers/promises';
 import {withRunUsage,withUsageContext} from './usage.js';
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
 import { NativeExpressionPacketSchema,NativeVerificationFeedbackSchema,ContextItemSchema,conversationKey,qqVisibleText,redactJson,DELIVERY_MAX_DRAFTS } from '@dafeiyu/contracts';
@@ -125,11 +126,14 @@ export class NativeTaskDelivery {
       const sendTaskResult=channel.capability.deliverTaskResult.bind(channel.capability);
       signal=AbortSignal.any([signal,channel.signal,...(provider.signal?[provider.signal]:[])]);
       if(nativeDeliveryHash(record.anchor)!==nativeDeliveryHash(access.anchor)||item&&route!==item.route)throw new Error('DELIVERY_BINDING_CONFLICT');
+      await yieldEventLoop();signal.throwIfAborted();access.guard();
       stage='packet-prepare';const packet=NativeExpressionPacketSchema.parse(record.material?provider.open(access,record.material.packetId):provider.prepare(access));
       if(nativeDeliveryHash(packet.anchor)!==nativeDeliveryHash(record.anchor))throw new Error('DELIVERY_BINDING_CONFLICT');
       const guardMaterial=()=>{signal.throwIfAborted();if(!this.host.accepting())throw new Error('DELIVERY_HOST_QUIESCING');if(recovery)this.host.validateRecovery(runId);access.guard();if(this.host.expression()!==provider||!provider.ready()||channelAt()?.identity!==channel.identity)throw new Error('DEPENDENCY_UNAVAILABLE');
         if(provider.open(access,packet.id).sourceStamp!==packet.sourceStamp||Date.parse(record.anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');};
+      await yieldEventLoop();guardMaterial();
       stage='persona-prepare';const persona=item?this.host.persona(item,record.id,signal,guardMaterial):this.host.activityPersona?.(runId,signal,guardMaterial);if(!persona)throw new Error('DEPENDENCY_UNAVAILABLE');
+      await yieldEventLoop();signal.throwIfAborted();
       const model=this.host.model(),material={packetId:packet.id,sourceStamp:packet.sourceStamp,foundationHash:persona.foundationHash,personaHash:persona.stamp,modelHash:nativeDeliveryHash(model),...(packet.media?{mediaStamp:packet.media.sourceStamp}:{})};
       const guard=()=>{persona.guard();if(nativeDeliveryHash(this.host.model())!==material.modelHash)throw new Error('SOURCE_STALE');};guard();
       if(recovery){if(nativeDeliveryHash(record.material)!==nativeDeliveryHash(material))throw new Error('SOURCE_STALE');
@@ -177,6 +181,7 @@ export class NativeTaskDelivery {
           try{return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),sending,check,position=>{check();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));}
           catch{return {status:'unknown' as const,code:'MEDIA_DELIVERY_UNKNOWN'};}});
       }else{result=await this.host.enqueue(route,async()=>{
+        await yieldEventLoop();
         const writeBudget=new AbortController(),sending=AbortSignal.any([signal,writeBudget.signal]),check=()=>{sending.throwIfAborted();guard();};let timer:ReturnType<typeof setTimeout>|undefined,remaining=this.host.sendTimeoutMs,active=false;
         try{check();}catch{return {status:'not-sent' as const,code:'SOURCE_STALE'};}
         const begin=()=>{check();if(active||remaining<=0||deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');

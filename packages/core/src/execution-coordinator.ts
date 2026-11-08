@@ -1,4 +1,5 @@
 import {withRunUsage} from './usage.js';
+import {setImmediate as yieldEventLoop} from 'node:timers/promises';
 import {buildTaskProgress} from './task-progress.js';
 import {ActivityPlanReceiptSchema,TaskDispositionSchema} from '@dafeiyu/contracts';
 import {stageHandoff} from './context-handoff.js';
@@ -420,6 +421,7 @@ export class ExecutionCoordinator {
           if(!(dependency.owner==='memory'&&dependency.region==='growth'))derivedInputComplete=false;}
       }else {opaque=true;derivedInputComplete=false;}
     }};visit(proof);for(const [key,candidate] of candidates)candidate.view=views.get(key)??candidate.view;
+    await yieldEventLoop();guard();
     const anchor=this.describeMessageResult(id)!.anchor;
     const expressionPolicy=source?this.validateMessageSource(source).binding.expressionPolicy:undefined;
     const progress=this.d.store.readInput(run.id,'automatic-progress');

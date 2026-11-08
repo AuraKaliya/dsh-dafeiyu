@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "version": "0.28.10",
+  "revision": "f1538bf",
+  "profileEnabled": true,
+  "sample": {
+    "reads": 64,
+    "characters": 6000,
+    "model": "scripted",
+    "maxTokens": 1000000
+  },
+  "durationMs": 32558.2755,
+  "maxLoopDelayMs": 1907.359743,
+  "p99LoopDelayMs": 762.314751,
+  "phases": {
+    "evidence.validate": {
+      "calls": 490,
+      "totalMs": 19218.694400000037,
+      "maxMs": 148.78259999999864
+    },
+    "expression.open": {
+      "calls": 8,
+      "totalMs": 2904.3354999999974,
+      "maxMs": 373.58440000000337
+    }
+  },
+  "reads": 64,
+  "requests": 67,
+  "taskRuns": 1,
+  "sent": "六十四份资料各读取了前四千字符，剩余部分未读。未修改文件。",
+  "capacity": 1000000
+}

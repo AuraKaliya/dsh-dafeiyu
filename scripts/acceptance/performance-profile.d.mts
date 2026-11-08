@@ -1,0 +1,1 @@
+export function summarizeCpuProfile(profile:{nodes:{id:number;callFrame:{functionName:string;url:string;lineNumber:number};children?:number[]}[];samples:number[];timeDeltas:number[]},fromMs?:number,toMs?:number):{fromMs:number;toMs:number|null;sampledMs:number;self:{fn:string;file:string;line:number;ms:number}[];inclusive:{fn:string;file:string;line:number;ms:number}[]};

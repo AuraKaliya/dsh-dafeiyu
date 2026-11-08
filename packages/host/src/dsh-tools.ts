@@ -4,29 +4,34 @@ import { z } from 'zod';
 import { DSH_TOOL_ACTIONS,DshToolCallSchema,DshResultReadSchema,DshResultReadBatchSchema,ResourceProofSchema } from '@dafeiyu/contracts';
 import type { DshToolsPort,ActionCapability,ResourceProof,Json,Conversation,ExecutionContext,ActionOutcome } from '@dafeiyu/contracts';
 import { createHash } from 'node:crypto';
-import { mkdirSync,writeFileSync,readFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DshResultStore } from './dsh-result-store.js';
 import {DshCatalogQuerySchema,catalogView} from './dsh-catalog-view.js';
+import {VerifiedJsonCache,publishJson} from './verified-json-cache.js';
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const execution=z.object({isError:z.boolean().optional(),effect:z.enum(['none','confirmed','unknown']).optional()});
+const detailSchema=z.object({operationId:z.uuid(),taskId:z.uuid(),textHash:z.string()});
+const savedProofSchema=z.object({proof:ResourceProofSchema,page:z.json()});
+const batchSchema=z.object({kind:z.literal('archived-result-batch'),items:z.array(z.object({status:z.string(),page:z.unknown().optional()}))});
+const resultIdSchema=z.object({resultId:z.uuid()});
 const errorCode=(e:unknown)=>e instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(e.message)?e.message:'DSH_RESULT_PROCESSING_FAILED';
 
 /** DSH executes once. Result reads are separate, scoped observations of immutable sanitized material. */
 export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receiptDirectory:string){
   mkdirSync(receiptDirectory,{recursive:true});const results=new DshResultStore(receiptDirectory);
+  const proofs=new VerifiedJsonCache(raw=>{const saved=savedProofSchema.parse(raw),batch=batchSchema.safeParse(saved.page),pages=batch.success?batch.data.items.filter(item=>item.status==='ok').map(item=>item.page):[saved.page];
+    return {...saved,proofHash:hash(saved.proof),pageHash:hash(saved.page),resultIds:pages.map(page=>resultIdSchema.parse(page).resultId)};});
   const file=(id:string)=>join(receiptDirectory,z.uuid().parse(id)+'.json');
-  const current=(raw:ResourceProof)=>{try{const proof=ResourceProofSchema.parse(raw),detail=z.object({operationId:z.uuid(),taskId:z.uuid(),textHash:z.string()}).parse(proof.detail),saved=z.object({proof:ResourceProofSchema,page:z.json()}).parse(JSON.parse(readFileSync(file(detail.operationId),'utf8')));
-    const batch=z.object({kind:z.literal('archived-result-batch'),items:z.array(z.object({status:z.string(),page:z.unknown().optional()}))}).safeParse(saved.page);
-    const pages=batch.success?batch.data.items.filter(item=>item.status==='ok').map(item=>item.page):[saved.page];
-    return proof.provider==='dsh-tools'&&hash(proof)===hash(saved.proof)&&hash(saved.page)===detail.textHash
-      &&pages.every(page=>{const parsed=z.object({resultId:z.uuid()}).safeParse(page);return parsed.success&&results.available(detail.taskId,proof.scene,parsed.data.resultId);});}catch{return false;}};
+  const current=(raw:ResourceProof)=>{try{const proof=ResourceProofSchema.parse(raw),detail=detailSchema.parse(proof.detail),saved=proofs.get(file(detail.operationId));
+    return proof.provider==='dsh-tools'&&hash(proof)===saved.proofHash&&saved.pageHash===detail.textHash
+      &&saved.resultIds.every(id=>results.available(detail.taskId,proof.scene,id));}catch{return false;}};
   const scene=(context:ExecutionContext):Conversation|null=>{try{return ctx.dafeiyu.quoteReplySource(context,'dsh-tools').target;}catch(e){if(e instanceof Error&&e.message==='MESSAGE_REQUIRED')return null;throw e;}};
   const observe=(context:ExecutionContext,target:Conversation|null,page:Json,receiptId:string,effect:ActionOutcome['effects'],failed=false):ActionOutcome=>{
     let data:Json=page,sources:ActionOutcome['sources']=[];
     const processing=z.object({processing:z.object({state:z.enum(['failed','unavailable']),code:z.string()})}).safeParse(page);
     try{if(target){const detail={operationId:context.operationId,taskId:context.taskId!,textHash:hash(page)},proof:ResourceProof={provider:'dsh-tools',scene:target,key:'operation:'+context.operationId,version:1,hash:hash(detail),roots:['dsh-operation:'+receiptId],detail};
-      writeFileSync(file(context.operationId),JSON.stringify({proof,page}),{flag:'wx'});
+      publishJson(file(context.operationId),{proof,page});
       const observation=ctx.dafeiyu.recordCapabilityObservation(context,'dsh-tools',{requestId:context.operationId,proof,text:JSON.stringify(page),occurredAt:new Date().toISOString(),coverage:['DSH真实工具返回；仅覆盖本页实际内容，子结果须通过提供的读取入口继续','工具报告不是外部事实真实性担保'],counts:{received:1,processed:processing.success?0:1}});
       data=z.json().parse({page,observation});const ref=observation.source;sources=[{id:ref.id,scopeKey:ref.scopeKey,version:ref.version,contentHash:ref.contentHash}];}
       return {status:processing.success?'partial':failed?'failed':'succeeded',effects:effect,completeness:processing.success?'unknown':'complete',data,sources,receipts:[{kind:'dsh-operation',id:receiptId}],...(processing.success?{errorCode:processing.data.processing.code}:failed?{errorCode:'DSH_TOOL_FAILED'}:{})};
@@ -84,7 +89,7 @@ export function bindDshTools(ctx:Context,agentId:string,port:DshToolsPort,receip
   }];
   const handle=ctx.dafeiyu.registerExtension({protocolVersion:API_VERSION,id:'dsh-tools',version:'1',agentId,provides:['dsh.tools.v1','dsh.results.v1'],requires:['execution.task.v1','memory.capability-observation.v1'],actions,
     resourceProofs:{current,epoch:()=>'',targetView:(proof,view,target,scope)=>{
-    if(!current(proof)||hash(proof.scene)!==hash(target)||scope.kind!=='task')return null;const detail=z.object({taskId:z.string(),operationId:z.uuid()}).parse(proof.detail),saved=z.object({page:z.json()}).parse(JSON.parse(readFileSync(file(detail.operationId),'utf8')));
+    if(!current(proof)||hash(proof.scene)!==hash(target)||scope.kind!=='task')return null;const detail=detailSchema.parse(proof.detail),saved=proofs.get(file(detail.operationId));
     return scope.taskId===detail.taskId&&view===JSON.stringify(saved.page)?{kind:'reported',stamp:hash([proof,view,target,scope])}:null;
   }}});
   try{const release=ctx.dafeiyu.bindHarnessCatalog(port);return {...handle,dispose:()=>{release();handle.dispose();}};}catch(error){handle.dispose();throw error;}

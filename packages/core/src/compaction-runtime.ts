@@ -11,6 +11,8 @@ import type { CompactionBasis, CompactionProvider, CompactionScope, CompactionSo
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {toolReceiptView} from './tool-receipt-view.js';
+import {immutableRecordReader} from './immutable-record.js';
+import {setImmediate as yieldEventLoop} from 'node:timers/promises';
 import { SourceTracker,provenanceRecordSchema,dependenciesSchema,unionDependencies,readProvenance } from './provenance.js';
 import type { SourceDependency } from '@dafeiyu/contracts';
 import type { ContextEvidenceView } from './context-runtime.js';
@@ -36,13 +38,14 @@ const recordSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('plugin:dafeiyu/turn-seal'),seq:z.number().transform(SessionSeq),data:turnSchema}),
   z.object({type:z.literal('plugin:dafeiyu/compaction-check'),seq:z.number().transform(SessionSeq),data:z.strictObject({status:z.string(),pressure:z.number(),target:z.number(),saved:z.number(),at:z.number(),policy:z.string()})}),
 ]).or(provenanceRecordSchema).or(fragmentRecordSchema);
+const decodeRecord=immutableRecordReader(recordSchema);
 /** DSH's supported plugin-record seam preserves these non-surface records across resume. */
 export function readCompactionEvents(session:Session):(SessionEvent|z.infer<typeof recordSchema>)[]{
   return session.snapshotEvents().map(event=>{const record=pluginRecordOf(event);
     // Diagnostics share the namespace but are not compaction/provenance state records.
     return record&&['plugin:dafeiyu/turn-open','plugin:dafeiyu/turn-seal','plugin:dafeiyu/compaction-check',
       'plugin:dafeiyu/source-record','plugin:dafeiyu/request-sources','plugin:dafeiyu/summary-manifest','plugin:dafeiyu/summary-view'].includes(record.type)
-      ?recordSchema.parse(record):event;});
+      ?decodeRecord(event,record):event;});
 }
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap {
   'dafeiyu-compaction-retired': { kind: 'dafeiyu-compaction-retired' };
@@ -199,6 +202,7 @@ export class CompactionRuntime {
     const previousGeneration=this.agent?.session.surface.replaceGeneration;
     this.clean();
     if(this.agent&&previousGeneration!==this.agent.session.surface.replaceGeneration&&!await this.ctx.sessions.flush(this.agent.session))throw new Error('Summary view checkpoint unavailable');
+    await yieldEventLoop();signal.throwIfAborted();
     const binding = this.binding(), agent = this.agent;
     if (!binding || !agent) return;
     if(this.ctx.get('compaction'))throw new Error('Conflicting DSH compaction writer');
