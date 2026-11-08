@@ -72,7 +72,7 @@ export const MessageSchema = MessagePartSchema.extend({
 export type InboundMessage = z.infer<typeof MessageSchema>;
 export const messageParts=(message:InboundMessage)=>message.batch?.sources??[message];
 export const messageMainText=(message:Pick<InboundMessage,'mainText'|'batch'>)=>message.batch?message.batch.sources.map(part=>part.mainText??'').join('\n'):message.mainText??'';
-export const messageDisplayText=(message:InboundMessage)=>message.batch?message.batch.sources.map(part=>`[原消息 ${part.id}；${part.occurredAt}${part.replyTo?'；引用 '+part.replyTo:''}]\n${part.text}`).join('\n\n'):message.text;
+export const messageDisplayText=(message:InboundMessage)=>message.batch?'[同一发送者的连续消息，按发生顺序合并。结合全部要求一次处理，后来的更正优先；复用已经取得的材料，不逐条重复相同查询。每条原消息的引用和来源仍独立。]\n'+message.batch.sources.map(part=>`[原消息 ${part.id}；${part.occurredAt}${part.replyTo?'；引用 '+part.replyTo:''}]\n${part.text}`).join('\n\n'):message.text;
 export const ObservationSchema = z.strictObject({
   conversation: ConversationSchema,
   type: z.enum(['connection.opened', 'connection.closed', 'connection.rejected', 'message.ignored', 'message.unsupported', 'message.recalled', 'delivery.diagnostic']),

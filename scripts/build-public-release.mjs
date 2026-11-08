@@ -120,6 +120,8 @@ export function buildPublicRelease(output,{includeSource=true}={}) {
     selected.push('heavy-task-performance.test.ts','heavy-task-cancellation.test.ts','heavy-task-recovery.test.ts','immutable-proof-cache.test.ts','cooperative-stream.test.ts','tooling/performance-profile.test.ts');
     selected.push('combined-chain.test.ts','combined-unknown.test.ts','combined-cancel.test.ts','combined-revise.test.ts','combined-revoke-query.test.ts','combined-revoke-render.test.ts','combined-revoke-verification.test.ts','combined-revoke-send.test.ts','combined-revoke-between.test.ts','combined-media-revoke.test.ts','combined-probe-business.test.ts','combined-media-scopes.test.ts','qq-proof-generation.test.ts','qq-media-generation.test.ts');
     selected.push('tooling/release-integrity.test.ts','tooling/candidate-audit.test.ts');
+    selected.push('qq-reading-regressions.test.ts','qq-busy-batch.test.ts','tool-input-recovery.test.ts','bili-comment-cursor-recovery.test.ts','qq-media-source.test.ts','qq-delivery-ledger.test.ts');
+    selected.push('qq-directed-sticker.test.ts','qq-directed-sticker-host.test.ts','qq-image-collection.test.ts','delivery-operation-facts.test.ts','media-images-contract.test.ts');
     selected.forEach(testFile);
     for(const name of ['host.test.json','persona.test.md','persona.foundation.md'])put(destination,'source/profiles/'+name,readFileSync(join(repository,'profiles',name)));
   }

@@ -714,7 +714,7 @@ function createManagementApp(request) {
     const [view, setView] = import_react8.default.useState(null), [tab, setTab] = import_react8.default.useState("overview"), [selected, setSelected] = import_react8.default.useState(null), [busy, setBusy] = import_react8.default.useState(false), [notice, setNotice] = import_react8.default.useState(""), [drafts, setDrafts] = import_react8.default.useState({}), [foundation, setFoundation] = import_react8.default.useState(null);
     const describeSequence = import_react8.default.useRef(createSequenceGuard());
     const send = (body) => request(body).then(unwrapResponse);
-    const invoke = async (body) => send({ apiVersion: 10, ...body });
+    const invoke = async (body) => send({ apiVersion: 11, ...body });
     const refresh = async () => {
       const token = describeSequence.current.issue();
       const value = await invoke({ kind: "describe" });
@@ -15301,7 +15301,7 @@ async function apply(ctx) {
       throw new Error(result.error.code);
     return JSON.parse(result.value);
   };
-  const App = createManagementApp((body) => request({ apiVersion: 10, ...body }));
+  const App = createManagementApp((body) => request({ apiVersion: 11, ...body }));
   ctx.effect(() => {
     const style = document.createElement("style");
     style.textContent = style_default;

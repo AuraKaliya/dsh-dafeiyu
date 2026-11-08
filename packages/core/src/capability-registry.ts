@@ -4,6 +4,15 @@ import type { Conversation,ExecutionScope,ResourceTargetView } from '@dafeiyu/co
 import type { ActionCapability, Extension, ExtensionHandle, ExecutionContext, ActionOutcome, Json, TaskContextContributor, ResourceProof, ResourceProofProvider, TimelineScope } from '@dafeiyu/contracts';
 import { toolParameters } from './tool-schema.js';
 
+/** A local validation failure carries bounded field guidance, never the rejected input values. */
+export class ActionInputError extends Error {
+  readonly issues:{field:string;code:string;message:string}[];
+  constructor(error:unknown){
+    super('INVALID_INPUT');
+    this.issues=error instanceof z.ZodError?error.issues.slice(0,8).map(issue=>({field:issue.path.map(String).join('.').slice(0,160),code:issue.code,message:issue.message.slice(0,240)})):[];
+  }
+}
+
 export interface BoundAction {
   readonly id: string; readonly owner: string; readonly version: string;readonly pluginVersion:string; readonly description: string;
   readonly input: Record<string, unknown>; readonly effects: ActionCapability['effects']; readonly scope:'conversation'|'task'|'any';
@@ -87,7 +96,7 @@ export class CapabilityRegistry {
       freezeTree(input);
       const parameters=toolParameters(input);freezeTree(parameters);
       const parseInput = action.inputSchema.parse.bind(action.inputSchema), parseOutput = action.outputSchema.parse.bind(action.outputSchema), execute = action.execute.bind(action),readiness=action.readiness?.bind(action);
-      const validateInput=(raw:unknown):Json=>{let parsed:Json;try{parsed=z.json().parse(parseInput(raw));}catch{throw new Error('INVALID_INPUT');}if(Buffer.byteLength(JSON.stringify(parsed),'utf8')>128000)throw new Error('ACTION_INPUT_TOO_LARGE');return parsed;};
+      const validateInput=(raw:unknown):Json=>{let parsed:Json;try{parsed=z.json().parse(parseInput(raw));}catch(error){throw new ActionInputError(error);}if(Buffer.byteLength(JSON.stringify(parsed),'utf8')>128000)throw new Error('ACTION_INPUT_TOO_LARGE');return parsed;};
       bound.push(Object.freeze({ ...meta, owner: metadata.id,pluginVersion:metadata.version, input: Object.freeze(input),parameters, signal:entry.controller.signal,active: () => entry.active&&entry.ready(),...(readiness?{readiness:()=>ActionReadinessSchema.parse(readiness())}:{}),validateInput,
         execute: async (raw: unknown, context: ExecutionContext):Promise<ActionOutcome> => {
           if (!entry.active || !entry.ready()) throw new Error('CAPABILITY_UNAVAILABLE');

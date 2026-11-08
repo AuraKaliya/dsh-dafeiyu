@@ -17,7 +17,7 @@ test('a transient verifier retry discards partial output and keeps the same evid
     yield* verificationResponse(request);
   });
   await verifyPersonaDelivery(ctx,input,'The file contains the fixture marker.',new AbortController().signal,()=>{});
-  assert.equal(requests.length,2);assert.equal(requests[0]!.reasoningEffort,'low');assert.deepEqual(requests[0]!.messages,requests[1]!.messages);assert.notEqual(requests[0]!.sessionId,requests[1]!.sessionId);
+  assert.equal(requests.length,2);assert.equal(requests[0]!.reasoningEffort,'off');assert.deepEqual(requests[0]!.messages,requests[1]!.messages);assert.notEqual(requests[0]!.sessionId,requests[1]!.sessionId);
   assert.equal(modelRetryDelay({code:'RATE_LIMIT',status:429,providerRetryAfterMs:5000},0),5000);
 });
 

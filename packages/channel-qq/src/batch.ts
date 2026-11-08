@@ -6,7 +6,7 @@ import type { InboundMessage } from '@dafeiyu/contracts';
 
 export const QqBatchConfigSchema=z.strictObject({enabled:z.boolean().default(false),quietMs:z.number().int().min(10).max(10000).default(5000),maxWaitMs:z.number().int().min(10).max(30000).default(15000),maxMessages:z.number().int().min(2).max(10).default(10)}).refine(v=>v.maxWaitMs>=v.quietMs);
 const bodySchema=z.strictObject({started:z.number(),last:z.number(),parts:z.array(z.strictObject({message:MessagePartSchema,focused:z.boolean()})).min(1).max(10)});
-export interface QqBatchHost {current(message:InboundMessage):boolean;submit(message:InboundMessage):void;failed():void}
+export interface QqBatchHost {current(message:InboundMessage):boolean;busy?(message:InboundMessage):boolean;submit(message:InboundMessage):void;failed():void}
 /** Pending inputs are durable before acknowledgement. Submission is idempotent in Core. */
 export class QqMessageBatches {
   private timer:ReturnType<typeof setTimeout>|undefined;
@@ -48,11 +48,11 @@ export class QqMessageBatches {
     const now=this.now();for(const row of this.waiting()){
       const parts=row.body.parts.filter(part=>this.host.current(part.message));if(!parts.some(part=>part.focused)){this.finish(row.id,'cancelled');continue;}
       if(parts.length!==row.body.parts.length)this.db.prepare('UPDATE qq_message_batches SET body=? WHERE id=?').run(JSON.stringify({...row.body,parts}),row.id);
-      if(now>=Math.min(row.body.last+this.config.quietMs,row.body.started+this.config.maxWaitMs))this.flush(row.id);
+      if(!this.host.busy?.(parts.at(-1)!.message)&&now>=Math.min(row.body.last+this.config.quietMs,row.body.started+this.config.maxWaitMs))this.flush(row.id);
     }this.arm();
   }
   private arm(){if(this.timer)clearTimeout(this.timer);this.timer=undefined;if(!this.running)return;
-    const deadlines=this.waiting().map(row=>Math.min(row.body.last+this.config.quietMs,row.body.started+this.config.maxWaitMs));if(!deadlines.length)return;
+    const deadlines=this.waiting().map(row=>this.host.busy?.(row.body.parts.at(-1)!.message)?this.now()+250:Math.min(row.body.last+this.config.quietMs,row.body.started+this.config.maxWaitMs));if(!deadlines.length)return;
     this.timer=setTimeout(()=>{this.timer=undefined;try{this.drain();}catch{this.host.failed();}},Math.max(1,Math.min(30000,Math.min(...deadlines)-this.now())));this.timer.unref();
   }
   start(){this.running=true;this.drain();}

@@ -182,6 +182,10 @@ export class Journal {
     return rows.filter(row => !statesToRead || statesToRead.includes(state(row.state))).map(row => this.get(text(row.id)));
   }
   latestMessageId(route:string):string|null {const row=this.db.prepare('SELECT id FROM inbox WHERE route=? ORDER BY ordinal DESC LIMIT 1').get(route);return row?text(row.id):null;}
+  /** Channel admission can hold a durable batch while this conversation is already executing or sending. */
+  hasPendingConversation(route:string):boolean {
+    return !!this.recallStatement("SELECT 1 FROM inbox WHERE route=? AND state IN ('accepted','processing','reply-ready','sending') LIMIT 1").get(route);
+  }
   /** Scope filtering happens in the query, before exposing event bodies. No global model-facing query. */
   events(route: string): EventRecord[] {
     return this.db.prepare("SELECT seq,body FROM events WHERE route=? AND json_extract(body,'$.visibility.kind')='conversation' ORDER BY seq").all(route)

@@ -14,11 +14,11 @@ const itemSchema = z.strictObject({ id: z.string(), sender: z.string(), received
   occurredAt: z.iso.datetime().nullable(), unsupported: z.array(z.string()), metadataKnown: z.boolean(), cacheTextTruncated: z.boolean().nullable(),
   media:z.array(MediaAttachmentSchema).max(8).optional(),history:z.literal(true).optional(),mentionedBot:z.boolean().optional(),
   range: z.strictObject({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative(), total: z.number().int().nonnegative() }) });
-const pageSchema = z.strictObject({ order: z.literal('received-newest-first'), watermark: z.number().int().nonnegative(), oldestCachedSequence: z.number().int().nonnegative(),
+const pageSchema = z.strictObject({ order: z.enum(['received-newest-first','occurred-newest-first']), watermark: z.number().int().nonnegative(), oldestCachedSequence: z.number().int().nonnegative(),
   messages: z.array(itemSchema).max(20), limitations: z.array(z.string()) });
-const querySchema = z.strictObject({ watermark: z.number().int().nonnegative(), sequence: z.number().int().nonnegative(), offset: z.number().int().nonnegative(), epoch: z.number().int().nonnegative(), limit: z.number().int().min(1).max(20),observedAt:z.iso.datetime().optional() });
+const querySchema = z.strictObject({ watermark: z.number().int().nonnegative(), sequence: z.number().int().nonnegative(), offset: z.number().int().nonnegative(), epoch: z.number().int().nonnegative(), limit: z.number().int().min(1).max(20),observedAt:z.iso.datetime().optional(),windowMs:z.number().int().positive().optional(),chronological:z.boolean().optional() });
 const snapshotSchema = z.strictObject({ page: pageSchema, proof: QqCacheProofSchema, next: querySchema.nullable(), createdAt: z.iso.datetime() });
-export const QqBrowseInputSchema = z.strictObject({ requestId: key, limit: z.number().int().min(1).max(20).default(20), cursor: z.uuid().optional(),includeRecentHistory:z.boolean().default(false) });
+export const QqBrowseInputSchema = z.strictObject({ requestId: key, limit: z.number().int().min(1).max(20).default(20), cursor: z.uuid().optional(),includeRecentHistory:z.boolean().default(false),historyMode:z.enum(['latest','recent']).default('latest') });
 export interface QqCacheOptions { clock?: () => number; snapshotTtlMs?: number; maxSnapshots?: number }
 interface CachedRow { seq: number; id: string; sender: string; text: string }
 const rowSchema = z.object({ seq: z.number().int().safe(), id: z.string(), sender: z.string(), text: z.string() });
@@ -76,7 +76,7 @@ export class QqCache {
   }
   forward(route:string,id:string,index:number){const row=this.db.prepare('SELECT body,deleted FROM qq_message_meta WHERE route=? AND id=?').get(route,id);
     if(!row||row.deleted===1)throw new Error('SOURCE_STALE');const meta=metadataSchema.parse(JSON.parse(String(row.body))),handle=meta.forwardIds?.[index];
-    if(!handle)throw new Error('FORWARD_NOT_AVAILABLE');if(!meta.occurredAt||Date.parse(meta.occurredAt)<this.now()-86400000)throw new Error('FORWARD_OUTSIDE_WINDOW');return handle;}
+    if(!handle)throw new Error('FORWARD_NOT_AVAILABLE');return handle;}
   groupAccess(route:string,id:string):{generation:number;occurredAt:string}|null {
     const row=this.db.prepare('SELECT body FROM qq_message_meta WHERE route=? AND id=?').get(route,id);
     if(!row)return null;
@@ -138,9 +138,10 @@ export class QqCache {
     const value = snapshotSchema.parse(JSON.parse(String(row.body))); if (!this.proofCurrent(value.proof)) throw new Error('SOURCE_STALE');
     return { id, ...value, expiresAt: new Date(Number(row.expires_at)).toISOString() };
   }
-  browse(route: string, owner: string, raw: unknown,recentOnly=false) {
+  browse(route: string, owner: string, raw: unknown,recentOnly:boolean|number=false,chronological=false) {
     routeSchema.parse(route); z.string().min(1).max(4000).parse(owner); const input = QqBrowseInputSchema.parse(raw);
-    const fingerprint = digest({ route, input,recentOnly });
+    const windowMs=recentOnly===true?86400000:recentOnly===false?null:z.number().int().positive().parse(recentOnly);
+    const fingerprint = digest({ route, input,recentOnly,chronological });
     return this.atomic(() => {
       this.db.prepare('DELETE FROM qq_browse_snapshots WHERE expires_at<=? OR instance_id<>?').run(this.now(), this.instance);
       const prior = this.db.prepare('SELECT id,fingerprint FROM qq_browse_snapshots WHERE instance_id=? AND owner=? AND request_id=?').get(this.instance, owner, input.requestId);
@@ -148,19 +149,25 @@ export class QqCache {
       if (Number(this.db.prepare('SELECT count(*) AS n FROM qq_browse_snapshots').get()?.n) >= this.max) throw new Error('SNAPSHOT_CAPACITY_EXCEEDED');
       const maximum = Number(this.db.prepare('SELECT coalesce(max(seq),0) AS n FROM messages WHERE route=?').get(route)?.n);
       const oldest = Number(this.db.prepare('SELECT coalesce(min(seq),0) AS n FROM messages WHERE route=?').get(route)?.n);
-      let query:z.infer<typeof querySchema> = { watermark: maximum, sequence: maximum, offset: 0, epoch: this.epoch(route), limit: input.limit,...(recentOnly?{observedAt:new Date(this.now()).toISOString()}:{}) };
+      let query:z.infer<typeof querySchema> = { watermark: maximum, sequence: maximum, offset: 0, epoch: this.epoch(route), limit: input.limit,...(windowMs!==null?{observedAt:new Date(this.now()).toISOString(),windowMs}:{}),...(chronological?{chronological:true}:{}) };
       if (input.cursor) {
         const previous = this.snapshot(owner, input.cursor);
         if (previous.proof.route !== route || previous.next?.limit !== input.limit || previous.next.epoch !== this.epoch(route)) throw new Error('CURSOR_STALE');
         query = previous.next;
       }
-      const page: z.infer<typeof pageSchema> = { order: 'received-newest-first', watermark: query.watermark, oldestCachedSequence: oldest, messages: [],
-        limitations: ['至多200条本地缓存，可能含显式回看追加的最近24小时历史；不是平台全量记录。', '按本地接收/追加顺序分页，聊天发生时间以occurredAt为准；媒体种类不等于已读取媒体内容。', '未知时间／旧元信息不可推断，文字范围以每条range为准。'] };
+      const page: z.infer<typeof pageSchema> = { order: query.chronological?'occurred-newest-first':'received-newest-first', watermark: query.watermark, oldestCachedSequence: oldest, messages: [],
+        limitations: ['至多200条本地缓存，可能含显式回看追加的历史；不是平台全量记录。', query.chronological?'按实际消息时间从新到旧分页，时间不明的记录放在末尾；媒体种类不等于已读取媒体内容。':'按本地接收/追加顺序分页，聊天发生时间以occurredAt为准；媒体种类不等于已读取媒体内容。', '未知时间／旧元信息不可推断，文字范围以每条range为准。'] };
       const refs: z.infer<typeof refSchema>[] = []; let next: z.infer<typeof querySchema> | null = null;
-      const rows = (query.observedAt
-        ?this.db.prepare("SELECT m.seq,m.id,m.sender,m.text FROM messages m JOIN qq_message_meta d ON d.route=m.route AND d.id=m.id WHERE m.route=? AND m.seq<=? AND m.seq<=? AND julianday(json_extract(d.body,'$.occurredAt'))>=julianday(?) ORDER BY m.seq DESC LIMIT ?").all(route,query.watermark,query.sequence,new Date(Date.parse(query.observedAt)-86400000).toISOString(),input.limit+1)
-        :this.db.prepare('SELECT seq,id,sender,text FROM messages WHERE route=? AND seq<=? AND seq<=? ORDER BY seq DESC LIMIT ?').all(route, query.watermark, query.sequence, input.limit + 1)).map(row => rowSchema.parse(row));
-      if(query.observedAt)page.limitations.push('本次观察时间 '+query.observedAt+'，只呈现其前24小时内时间明确的缓存；时间未知的旧缓存不呈现。');
+      let rows = (query.observedAt
+        ?this.db.prepare("SELECT m.seq,m.id,m.sender,m.text FROM messages m JOIN qq_message_meta d ON d.route=m.route AND d.id=m.id WHERE m.route=? AND m.seq<=? AND m.seq<=? AND julianday(json_extract(d.body,'$.occurredAt'))>=julianday(?) AND julianday(json_extract(d.body,'$.occurredAt'))<=julianday(?) ORDER BY m.seq DESC LIMIT ?").all(route,query.watermark,query.chronological?query.watermark:query.sequence,new Date(Date.parse(query.observedAt)-(query.windowMs??86400000)).toISOString(),query.observedAt,query.chronological?200:input.limit+1)
+        :this.db.prepare('SELECT seq,id,sender,text FROM messages WHERE route=? AND seq<=? AND seq<=? ORDER BY seq DESC LIMIT ?').all(route, query.watermark, query.chronological?query.watermark:query.sequence, query.chronological?200:input.limit+1)).map(row => rowSchema.parse(row));
+      if(query.chronological){
+        const dated=rows.map(row=>({row,time:this.meta(route,row).occurredAt}));
+        dated.sort((a,b)=>(b.time??'').localeCompare(a.time??'')||b.row.seq-a.row.seq);rows=dated.map(value=>value.row);
+        if(input.cursor){const at=rows.findIndex(row=>row.seq===query.sequence);if(at<0)throw new Error('CURSOR_STALE');rows=rows.slice(at);}
+        rows=rows.slice(0,input.limit+1);
+      }
+      if(query.observedAt)page.limitations.push('本次观察时间 '+query.observedAt+'，只呈现配置窗口 '+(query.windowMs??86400000)+' 毫秒内时间明确的缓存。');
       for (const row of rows) {
         if (page.messages.length >= input.limit) { next = { ...query, sequence: row.seq, offset: 0 }; break; }
         const meta = this.meta(route, row); if (meta.deleted) continue;

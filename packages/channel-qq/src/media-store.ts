@@ -26,7 +26,8 @@ export class QqMediaStore {
         this.db.prepare('INSERT INTO qq_media_sources VALUES(?,?,?,?,?,0,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,body=excluded.body,body_hash=excluded.body_hash,private_body=excluded.private_body,updated_at=excluded.updated_at')
           .run(id,route,messageId,position,Number(old?.version??0)+1,JSON.stringify(body),hash,JSON.stringify(locator.data),Date.now());
       }
-      for(const row of this.db.prepare('SELECT id FROM qq_media_sources WHERE route=? AND message_id=? AND deleted=0').all(route,messageId))if(!ids.includes(String(row.id)))this.db.prepare('UPDATE qq_media_sources SET deleted=1,version=version+1,private_body=NULL WHERE id=?').run(row.id!);
+      // Each forwarded node owns a separate position range. Reading another node/page must not revoke earlier images.
+      for(const row of this.db.prepare('SELECT id FROM qq_media_sources WHERE route=? AND message_id=? AND position>=? AND position<? AND deleted=0').all(route,messageId,positionOffset,positionOffset+1000))if(!ids.includes(String(row.id)))this.db.prepare('UPDATE qq_media_sources SET deleted=1,version=version+1,private_body=NULL WHERE id=?').run(row.id!);
       this.db.exec('COMMIT');return ids;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }

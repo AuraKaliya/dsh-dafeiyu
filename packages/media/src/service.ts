@@ -47,6 +47,8 @@ declare module '@deepseek-ai/cordis' {interface Context {dafeiyuMedia:MediaServi
 /** Frames from one batch differ by key, name and position; group by their shared provenance instead. */
 export function imageSetGroupKey(raw:unknown):string {
   const value=z.record(z.string(),z.json()).safeParse(raw),data=value.success?value.data:{};
+  const qq=z.object({provider:z.literal('qq-media'),scene:z.json(),roots:z.array(z.string()),detail:z.object({groupGeneration:z.number().optional()})}).safeParse(data.origin);
+  if(qq.success&&data.kind==='image')return mediaHash({provider:'qq-media',scene:qq.data.scene,roots:qq.data.roots,generation:qq.data.detail.groupGeneration??null});
   const frame=z.object({durationMs:z.number().optional()}).safeParse(data.sourceFrame);
   return mediaHash({origin:data.origin??null,kind:data.kind??null,mime:data.mimeHint??null,duration:frame.success?frame.data.durationMs??null:null,rangeReadable:data.rangeReadable??false});
 }
@@ -169,15 +171,16 @@ export function validateImageObservations(observations:readonly {image:number}[]
     }
     const resolved=assets.map(asset=>this.store.sourceForAsset(asset.id)),description=resolved[0]!.description;
     if(new Set(resolved.map(source=>imageSetGroupKey(source.description))).size>1)throw new Error('MEDIA_IMAGE_SET_MIXED');
-    const {provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),source=this.store.rememberSource(access,description);
+    const accesses=resolved.map(item=>{const current=this.describe(item.description.ref);return this.access(context,owner,current.description,current.provider);});
+    const first=accesses[0]!,access={...first,guard:()=>{for(const item of accesses)item.guard();}},source=this.store.rememberSource(access,description);
     const {requestId:_requestId,...options}=input,fingerprint={options,assets:assets.map(asset=>asset.sha256),vision:VISION_ANALYSIS_VERSION,route:this.config.vision,source:source.id,sourceVersion:source.version,epoch:access.execution.intentVersion},prior=this.store.readReceipt(access,input.requestId,fingerprint);
     if(prior)return this.observed(context,access,this.store.exposure(access,prior));
     const cached=this.store.cachedRead(access,fingerprint);if(cached){this.store.reuseRead(access,input.requestId,fingerprint,cached);return {...this.observed(context,access,this.store.exposure(access,cached)),cacheHit:true};}
     const jobId=randomUUID();this.store.beginJob(access,jobId,fingerprint);const leases:string[]=[];
     try{
       const images:DecodedImage[]=[];
-      for(const [index,asset] of assets.entries()){signal.throwIfAborted();access.guard();this.store.requireRef(access,asset);
-        leases.push(this.store.lease(access,asset,'analysis',Date.now()+this.config.timeoutMs+60000));
+      for(const [index,asset] of assets.entries()){signal.throwIfAborted();access.guard();this.store.requireRef(accesses[index]!,asset);
+        leases.push(this.store.lease(accesses[index]!,asset,'analysis',Date.now()+this.config.timeoutMs+60000));
         const file=await this.files.verified(asset),metadata=await this.stage('probe',()=>this.decoder.inspect({file},signal));
         if(metadata.kind!=='image')throw new Error('MEDIA_MODE_MISMATCH');
         const decoded=await this.stage('decode',()=>this.decoder.image({file},signal)),frame=resolved[index]!.description.sourceFrame;
@@ -192,7 +195,7 @@ export function validateImageObservations(observations:readonly {image:number}[]
         const actual=lease.exposure(),frames=images.map((i,index)=>({image:index,source:resolved[index]!.description.ref,requestedMs:i.requestedMs,ptsMs:i.ptsMs,width:i.width,height:i.height}));
         const coverage={acquiredBytes:assets.reduce((n,asset)=>n+asset.bytes,0),processed:images.map(i=>({kind:i.ptsMs===null?'image' as const:'frame' as const,unit:i.ptsMs===null?'whole-image' as const:'milliseconds' as const,start:i.ptsMs??0,end:i.ptsMs??1})),exposed:true,gaps:['仅附带图像；未听音轨，不代表完整视频',...result.gaps],completeness:'partial' as const};
         const text='视觉模型推断（observations仅针对本次图像，未独立核实）：\n'+JSON.stringify({observations:result.observations,frames,gaps:coverage.gaps});
-        const exposure=this.store.recordExposure(access,input.requestId,fingerprint,source,{assets,coverage,text,occurredAt:new Date().toISOString(),detail:{mode:input.mode,route,actual,frames}});
+        const exposure=this.store.recordExposure(access,input.requestId,fingerprint,source,{assets,coverage,text,occurredAt:new Date().toISOString(),detail:{mode:input.mode,route,actual,frames}},accesses);
         const observation=this.observed(context,access,exposure);this.store.finishJob(access,jobId,{exposureId:exposure.id},null);return observation;
       }finally{lease.close();}
     }catch(error){this.store.abortJob(access,jobId,failureCode(error));throw error;}finally{for(const lease of leases)this.store.releaseLease(lease,'analysis');}
@@ -263,14 +266,19 @@ export function validateImageObservations(observations:readonly {image:number}[]
       coverage:{acquiredBytes:data.length,processed:[],exposed:false,gaps:['已核验／归一化输出字节，不代表模型已理解'],completeness:'unknown'}});p.access.guard();return {asset:prepared,source:p.source.description};
   });}
   prepareReply(context:ExecutionContext,input:unknown,owner='media'){return this.serial(()=>this.replies.prepare(context,input,owner));}
-  imageOriginal(context:ExecutionContext,owner:string,exposureId:string){return this.serial(async()=>{
+  imageOriginal(context:ExecutionContext,owner:string,exposureId:string,imageIndex?:number){return this.serial(async()=>{
     const description=this.store.exposureOrigin(exposureId),{provider}=this.describe(description.ref),access=this.access(context,owner,description,provider),exposure=this.store.exposure(access,exposureId),observation=this.store.observation(exposureId);
-    if(description.kind!=='image'||!z.object({mode:z.literal('image')}).safeParse(exposure.detail).success||!exposure.coverage.exposed)throw new Error('IMAGE_OBSERVATION_REQUIRED');
+    const mode=z.object({mode:z.enum(['image','images'])}).safeParse(exposure.detail);
+    if(description.kind!=='image'||!mode.success||!exposure.coverage.exposed)throw new Error('IMAGE_OBSERVATION_REQUIRED');
+    if(mode.data.mode==='images'&&exposure.assets.length>1&&imageIndex===undefined)throw new Error('IMAGE_INDEX_REQUIRED');
+    const index=imageIndex??0;if(!Number.isInteger(index)||index<0||index>=exposure.assets.length)throw new Error('IMAGE_INDEX_INVALID');
+    if(!this.store.validateExposure(this.store.exposureProof(exposure),source=>this.sourceCurrent(source)))throw new Error('MEDIA_SOURCE_STALE');
     if(!access.execution.historyTracked||!access.execution.historyDependencies?.some(d=>(d.kind==='capability'||d.kind==='execution-source')&&mediaHash(d.ref)===mediaHash(observation)))throw new Error('OBSERVATION_NOT_EXPOSED');
-    return this.withInput(context,owner,{requestId:'sticker-original:'+exposureId,source:description.ref,mode:'inspect'},async p=>{
+    const selected=mode.data.mode==='images'?this.store.sourceForAsset(exposure.assets[index]!.id).description:description;
+    return this.withInput(context,owner,{requestId:'sticker-original:'+exposureId+':'+index,source:selected.ref,mode:'inspect'},async p=>{
       if(!p.parent||p.parent.bytes>16*1024**2)throw new Error('STICKER_FORMAT_UNSUPPORTED');
       const data=await this.files.bytes(p.parent,p.signal,p.access.guard),mime=data.subarray(0,6).toString('ascii').match(/^GIF8[79]a$/)?'image/gif':data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':data[0]===255&&data[1]===216&&data[2]===255?'image/jpeg':data.subarray(0,4).toString('ascii')==='RIFF'&&data.subarray(8,12).toString('ascii')==='WEBP'?'image/webp':null;
-      if(!mime)throw new Error('STICKER_FORMAT_UNSUPPORTED');access.guard();return {data,mime,source:description};
+      if(!mime)throw new Error('STICKER_FORMAT_UNSUPPORTED');access.guard();return {data,mime,source:p.source.description};
     });
   });}
   replyDraft(runId:string){return this.replies.pending(runId);}
@@ -309,7 +317,7 @@ export function validateImageObservations(observations:readonly {image:number}[]
   voiceCurrent(raw:MediaVoiceEvidence){try{if(!this.ready())return false;const evidence=MediaVoiceEvidenceSchema.parse(raw),body=this.store.exposureWitness(evidence.exposure.key),actual=voiceWitness(this.store,body);
     return mediaHash(actual.evidence)===mediaHash(evidence)&&this.ctx.dafeiyu.capabilityResourceCurrent(evidence.exposure)&&this.ctx.dafeiyu.capabilityObservationCurrent({agentId:body.scope.agentId,route:body.scope.kind==='task'?body.scope.scopeKey:body.scope.route},evidence.observation);
   }catch{return false;}}
-  private actions():ActionCapability[]{const make=(id:string,inputSchema:z.ZodType,write:boolean,execute:(input:unknown,c:ExecutionContext)=>unknown|Promise<unknown>):ActionCapability=>({id,version:'1',description:({[MEDIA_ACTIONS[0]]:'按需取得已登记媒体源的字节，不表示已经理解。',[MEDIA_ACTIONS[1]]:'检查当前作用域内媒体资产及覆盖。',[MEDIA_ACTIONS[2]]:'读取实际图片、视频帧、音轨区间或文档片段。文档next.offset是单元序号，next.textOffset是该单元内Unicode字符位置；按返回游标继续。',[MEDIA_ACTIONS[3]]:'对已经读到的媒体观察选择不保存、原文、片段或摘要。'} as Record<string,string>)[id]!,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(i,c)=>{
+  private actions():ActionCapability[]{const make=(id:string,inputSchema:z.ZodType,write:boolean,execute:(input:unknown,c:ExecutionContext)=>unknown|Promise<unknown>):ActionCapability=>({id,version:'1',description:({[MEDIA_ACTIONS[0]]:'按需取得已登记媒体源的字节，不表示已经理解。',[MEDIA_ACTIONS[1]]:'检查当前作用域内媒体资产及覆盖。',[MEDIA_ACTIONS[2]]:'读取实际图片、视频帧、音轨区间或文档片段。单图mode=image配source或asset；同一转发多图mode=images配sources数组，一次理解后可用exposureId和imageIndex直接收录，不必重读。文档next.offset是单元序号，next.textOffset是该单元内Unicode字符位置；按返回游标继续。',[MEDIA_ACTIONS[3]]:'对已经读到的媒体观察选择不保存、原文、片段或摘要。'} as Record<string,string>)[id]!,inputSchema,outputSchema:z.json(),effects:write?'local-write':'read',execute:async(i,c)=>{
       try{const data=z.json().parse(await execute(i,c)),observation=z.object({observation:z.object({source:z.object({id:z.string(),scopeKey:z.string(),version:z.number(),contentHash:z.string()})})}).safeParse(data);
         return {status:'succeeded',effects:write?'confirmed':'none',completeness:id===MEDIA_ACTIONS[2]?'partial':'complete',data,sources:observation.success?[observation.data.observation.source]:[],receipts:[]};}
       catch(error){const code=failureCode(error);if(write&&!['INVALID_INPUT','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','SOURCE_STALE','MEDIA_SOURCE_STALE','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT','OBSERVATION_NOT_EXPOSED','HISTORY_UNTRACKED','SOURCE_SUPPRESSED','EMPTY_OBSERVATION','PRIVATE_INPUT_REJECTED','MEDIA_SIZE_LIMIT','MEDIA_CACHE_FULL','MEDIA_TTS_NOT_CONFIGURED','MEDIA_DRAFT_FROZEN','MEDIA_IMAGE_ASSET_REQUIRED','MEDIA_AUDIO_INTERVAL_REQUIRED'].includes(code))throw error;

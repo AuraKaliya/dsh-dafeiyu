@@ -21,7 +21,7 @@ export function mediaFailure(error:unknown,stage:MediaStage):MediaFailure{
   const code=/^(?:MEDIA|BILI|MODEL|SOURCE|RESOURCE|DEPENDENCY|INVALID|SCOPE|OBSERVATION|PRIVATE)_[A-Z0-9_]{1,80}$/.test(message)?message:
     systemCode?`MEDIA_${systemCode}`:error instanceof z.ZodError?'INVALID_INPUT':'MEDIA_UNEXPECTED_FAILURE';
   const network=!!systemCode&&(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','EAI_AGAIN','ENETUNREACH','EHOSTUNREACH','EPIPE'].includes(systemCode)||systemCode.startsWith('UND_ERR_'))||/HTTP_(ECONN|ETIMEDOUT)|TIMEOUT|MODEL_HTTP_(429|500|502|503|504)|MODEL_TRANSPORT/.test(code);
-  const cancelled=/CANCELLED|ABORT|PARENT_EXITED/.test(code),permission=/SCOPE_DENIED|NOT_EXPOSED|PRIVATE_INPUT|ACCESS_REVOKED/.test(code),input=/INVALID_INPUT|INTERVAL_INVALID|MODE_MISMATCH|PIXEL_LIMIT|SIZE_LIMIT/.test(code);
+  const cancelled=/CANCELLED|ABORT|PARENT_EXITED/.test(code),permission=/SCOPE_DENIED|NOT_EXPOSED|PRIVATE_INPUT|ACCESS_REVOKED/.test(code),input=/INVALID_INPUT|INTERVAL_INVALID|MODE_MISMATCH|PIXEL_LIMIT|SIZE_LIMIT|IMAGE_SET_MIXED|IMAGE_INDEX_|IMAGE_OBSERVATION_REQUIRED/.test(code);
   const dependency=/NOT_CONFIGURED|WORKER_START_FAILED|MEMORY_GUARD_UNAVAILABLE|MODEL_HTTP_(401|402|403)/.test(code)||systemCode==='ENOENT'&&stage!=='download';
   const category=cancelled?'cancelled':permission?'permission':input?'input':dependency?'dependency':network?'transport':code==='MEDIA_UNEXPECTED_FAILURE'?'unknown':'resource';
   const sites=error instanceof Error?(error.stack??'').split('\n').slice(1).flatMap(line=>{const match=/([^/\\()\s]+\.(?:m?js|ts):\d+:\d+)/.exec(line);return match?[match[1]!]:[];}).slice(0,4):[];

@@ -7,14 +7,18 @@ import { messageMainText,ResourceProofSchema } from '@dafeiyu/contracts';
 import type { ActionCapability,Conversation,ExecutionContext,ResourceProof } from '@dafeiyu/contracts';
 import { QQ_STICKER_PROVIDER,StickerMetadataSchema } from './sticker-store.js';
 import type { QqStickerStore } from './sticker-store.js';
+import {directedStickerTarget,QqDirectSendLedger} from './direct-sticker-send.js';
+import {platformId} from './onebot.js';
+import type {OneBot} from './onebot.js';
 
-export const QQ_STICKER_ACTIONS=['qq_sticker_list','qq_sticker_collect','qq_sticker_use','qq_sticker_manage'] as const;
+export const QQ_STICKER_ACTIONS=['qq_sticker_list','qq_sticker_collect','qq_sticker_use','qq_sticker_manage','qq_sticker_send'] as const;
 const requestId=z.string().regex(/^[a-zA-Z0-9._:-]{1,100}$/),digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const collectSchema=StickerMetadataSchema.extend({exposureId:z.uuid()});
+const collectSchema=StickerMetadataSchema.extend({exposureId:z.uuid(),imageIndex:z.number().int().min(0).max(5).optional().describe('批量images观察包含多张图片时，使用observations的image序号；单图可省略。')});
 const useSchema=z.strictObject({id:z.uuid().nullable(),requestId,expectedVersion:z.number().int().nonnegative()});
 const listSchema=z.strictObject({query:z.string().max(100).default('')});
 const catalogProof=z.strictObject({kind:z.literal('catalog'),entries:z.array(z.strictObject({id:z.uuid(),version:z.number().int().positive()})).max(40)});
-interface Host {agentId:string;botId:string;ownerId:string;store:QqStickerStore;allowed(scene:Conversation):boolean}
+interface Host {agentId:string;botId:string;ownerId:string;store:QqStickerStore;allowed(scene:Conversation):boolean;
+  directSend?:{api:Pick<OneBot,'verify'|'call'>;ledger:QqDirectSendLedger;groups():{id:string;name:string|null}[];generation(id:string):number;available():boolean}}
 /** Local selection/collection only. Core binds the target, final reply and delivery authority. */
 export class QqStickers {
   private readonly handle:ReturnType<Context['dafeiyu']['registerExtension']>;
@@ -39,7 +43,7 @@ export class QqStickers {
       requestId:'catalog:'+digest([context.runId,context.operationId,hash]),proof:{provider:QQ_STICKER_PROVIDER,scene:target,key:'catalog:'+hash,hash,version:1,roots:detail.entries.map(row=>'qq-sticker:'+row.id),detail},text,occurredAt:new Date().toISOString(),coverage:['名称、标签和描述来自收录记录；发送前仍核对原字节与库版本。'],counts:{received:stickers.length,processed:stickers.length}});
     return {stickers,observation};
   }
-  private async collect(context:ExecutionContext,raw:unknown){const input=collectSchema.parse(raw),access=this.ctx.dafeiyu.personaAccess(context,QQ_STICKER_PROVIDER,'local-write'),original=await this.ctx.dafeiyu.originalImage(context,QQ_STICKER_PROVIDER,input.exposureId);
+  private async collect(context:ExecutionContext,raw:unknown){const input=collectSchema.parse(raw),access=this.ctx.dafeiyu.personaAccess(context,QQ_STICKER_PROVIDER,'local-write'),original=await this.ctx.dafeiyu.originalImage(context,QQ_STICKER_PROVIDER,input.exposureId,input.imageIndex);
     if(original.source.ref.provider!=='qq-media'||!this.host.allowed(original.source.origin.scene))throw new Error('QQ_IMAGE_SOURCE_REQUIRED');
     const detail=z.object({messageId:z.string().min(1).max(80),sender:z.string().min(1).max(80)}).parse(original.source.origin.detail);access.guard();
     return this.host.store.collect(original.source.origin.scene,detail,StickerMetadataSchema.parse({name:input.name,description:input.description,tags:input.tags}),original.data,original.mime);
@@ -47,7 +51,31 @@ export class QqStickers {
   private async use(context:ExecutionContext,raw:unknown){const input=useSchema.parse(raw),target=this.target(context);let parts:unknown[]=[];
     if(input.id){const source=this.host.store.lease(input.id,target,digest([context.runId,input.requestId])),asset=await this.ctx.dafeiyu.acquireMedia(context,QQ_STICKER_PROVIDER,{requestId:'sticker:'+digest([context.runId,input.requestId]),source:source.ref});
       this.host.store.bind(source.ref.key,asset);parts=[{kind:'asset',asset,as:'image'}];}
-    return this.ctx.dafeiyu.prepareReplyMedia(context,QQ_STICKER_PROVIDER,{requestId:input.requestId,expectedVersion:input.expectedVersion,parts});
+    const result=await this.ctx.dafeiyu.prepareReplyMedia(context,QQ_STICKER_PROVIDER,{requestId:input.requestId,expectedVersion:input.expectedVersion,parts});
+    return {...z.record(z.string(),z.json()).parse(result),target,sticker:input.id?this.host.store.summary(this.host.store.get(input.id)):null,sent:false};
+  }
+  private async send(context:ExecutionContext,raw:unknown){
+    const input=z.strictObject({id:z.uuid(),targetGroupId:z.string().regex(/^[1-9]\d{4,14}$/).optional(),requestId}).parse(raw),port=this.host.directSend;
+    if(!port||!port.available())throw new Error('QQ_GROUP_SEND_UNAVAILABLE');
+    const authority=this.ctx.dafeiyu.authorizeExternalTask(context,QQ_STICKER_PROVIDER),source=authority.authorization.source;
+    if(source.kind!=='owner-message'||source.modality!=='text'||source.senderId!==this.host.ownerId||source.conversation.kind!=='private'||source.conversation.id!==this.host.ownerId||source.conversation.account!==this.host.botId)throw new Error('OWNER_PRIVATE_REQUIRED');
+    const item=this.ctx.dafeiyu.journal.get(source.inboundId),all=this.ctx.dafeiyu.journal.list(),at=all.findIndex(row=>row.id===item.id);
+    const previous=all.slice(0,at).reverse().filter(row=>row.route===item.route&&row.message.sender.id===this.host.ownerId&&!this.ctx.dafeiyu.journal.messageRecalled({agentId:this.host.agentId,route:row.route},row.message.id)).slice(0,50).map(row=>messageMainText(row.message));
+    const groupId=directedStickerTarget(messageMainText(item.message),previous,port.groups(),input.targetGroupId),target:Conversation={channel:'qq',account:this.host.botId,kind:'group',id:groupId};
+    this.ctx.dafeiyu.authorizeCapabilityResource(context,QQ_STICKER_PROVIDER,target);
+    const row=this.host.store.get(input.id),generation=port.generation(groupId);
+    if(row.body.deleted||!row.body.enabled||row.body.scene.account!==this.host.botId||row.body.scope!=='global'&&digest(row.body.scene)!==digest(source.conversation))throw new Error('STICKER_SCOPE_DENIED');
+    const binding={sourceId:source.inboundId,sourceHash:source.messageHash,stickerId:row.id,stickerVersion:row.version,sha256:row.sha256,groupId,groupGeneration:generation};
+    const guard=()=>{authority.guard();if(!port.available()||!this.host.allowed(target)||port.generation(groupId)!==generation)throw new Error('GROUP_ACCESS_REVOKED');const current=this.host.store.get(row.id);if(current.version!==row.version||current.body.deleted||!current.body.enabled)throw new Error('STICKER_SOURCE_STALE');};
+    guard();const prior=port.ledger.read(source.inboundId);
+    if(prior){if(prior.binding.sourceHash!==source.messageHash||prior.binding.groupId!==groupId)throw new Error('QQ_GROUP_SEND_LEDGER_CONFLICT');return {state:prior.state==='sending'?'unknown':prior.state,target,stickerId:prior.binding.stickerId,receiptId:prior.receiptId,duplicate:true,code:prior.code};}
+    const bytes=this.host.store.bytes(row);await port.api.verify(context.signal);guard();
+    if(!port.ledger.claim(binding))return {state:'unknown',target,stickerId:row.id,receiptId:null,code:'QQ_GROUP_SEND_ALREADY_CLAIMED'};
+    let invoked=false;
+    try{guard();invoked=true;const response=await port.api.call('send_group_msg',{group_id:Number(groupId),message:[{type:'image',data:{file:'base64://'+Buffer.from(bytes).toString('base64')}}]},context.signal);
+      const receiptId=z.object({message_id:platformId}).parse(response).message_id;port.ledger.settle(binding,'sent',receiptId,null);
+      return {state:'sent',target,stickerId:row.id,stickerVersion:row.version,stickerName:row.body.name,receiptId,duplicate:false};
+    }catch(error){const code=error instanceof Error&&/^[A-Z_0-9]+$/.test(error.message)?error.message:'QQ_GROUP_SEND_UNCERTAIN';try{port.ledger.settle(binding,invoked?'unknown':'not-sent',null,code);}catch{/* The durable sending claim already prevents any replay. */}return {state:invoked?'unknown':'not-sent',target,stickerId:row.id,receiptId:null,code};}
   }
   private manage(context:ExecutionContext){this.ctx.dafeiyu.executionAuthority(context,QQ_STICKER_PROVIDER);if(context.origin.kind!=='message')throw new Error('OWNER_COMMAND_REQUIRED');
     const item=this.ctx.dafeiyu.journal.get(context.origin.inboundId),scene=item.message.conversation;
@@ -63,13 +91,16 @@ export class QqStickers {
     try{const data=z.json().parse(await work(context,input)),observed=z.object({observation:z.object({source:z.object({id:z.string(),scopeKey:z.string(),version:z.number(),contentHash:z.string()})})}).safeParse(data);
       return {status:'succeeded',effects:write?'confirmed':'none',completeness:'complete',data,sources:observed.success?[observed.data.observation.source]:[],receipts:[]};
     }catch(error){const code=error instanceof z.ZodError?'INVALID_INPUT':error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'STICKER_OPERATION_FAILED';
-      if(write&&!['INVALID_INPUT','STICKER_SCOPE_DENIED','STICKER_NOT_FOUND','STICKER_SOURCE_STALE','STICKER_TARGET_DENIED','QQ_IMAGE_SOURCE_REQUIRED','OWNER_COMMAND_REQUIRED','OWNER_PRIVATE_REQUIRED','STICKER_NAME_AMBIGUOUS','STICKER_LIBRARY_FULL','STICKER_FORMAT_UNSUPPORTED','IMAGE_OBSERVATION_REQUIRED','OBSERVATION_NOT_EXPOSED','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','SOURCE_STALE','MEDIA_SOURCE_STALE','MEDIA_NOT_CONFIGURED','MEDIA_DRAFT_FROZEN','HISTORY_UNTRACKED','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT'].includes(code))throw new Error(code);
-      return {status:'failed',effects:'none',completeness:'unknown',data:null,sources:[],receipts:[],errorCode:code};}
+      if(write&&!['INVALID_INPUT','STICKER_SCOPE_DENIED','STICKER_NOT_FOUND','STICKER_SOURCE_STALE','STICKER_TARGET_DENIED','QQ_IMAGE_SOURCE_REQUIRED','OWNER_COMMAND_REQUIRED','OWNER_PRIVATE_REQUIRED','STICKER_NAME_AMBIGUOUS','STICKER_LIBRARY_FULL','STICKER_FORMAT_UNSUPPORTED','IMAGE_OBSERVATION_REQUIRED','IMAGE_INDEX_REQUIRED','IMAGE_INDEX_INVALID','OBSERVATION_NOT_EXPOSED','SCOPE_DENIED','RESOURCE_SCOPE_DENIED','SOURCE_STALE','MEDIA_SOURCE_STALE','MEDIA_NOT_CONFIGURED','MEDIA_DRAFT_FROZEN','HISTORY_UNTRACKED','IDEMPOTENCY_CONFLICT','VERSION_CONFLICT'].includes(code))throw new Error(code);
+      return {status:'failed',effects:'none',completeness:'unknown',data:code==='IMAGE_INDEX_REQUIRED'||code==='IMAGE_INDEX_INVALID'?{next:'保留已读exposureId，填写其中observations.image对应的imageIndex；不要重新识图。'}:null,sources:[],receipts:[],errorCode:code};}
   }});
     return [make(QQ_STICKER_ACTIONS[0],'检索本地表情库，返回本会话可用与主人设为通用的候选；结合名称、描述、标签自主挑选，必要时用返回图片源实际读图。不需要每轮都发。',listSchema,false,(c,i)=>this.list(c,i)),
-      make(QQ_STICKER_ACTIONS[1],'自主挑选已经dafeiyu_media_read(mode:image)实际看过的QQ图片收录为表情。只收适合反复表达情绪的表情图，不自动收私人照片、聊天截图、文档截图。传实际exposureId、名称、内容描述与适用场景标签。保存原图／GIF；默认仅来源会话可用，去重且长期保存。',collectSchema,true,(c,i)=>this.collect(c,i)),
+      make(QQ_STICKER_ACTIONS[1],'收录已经dafeiyu_media_read(mode:image或images)实际看过的QQ表情图，无需重新识图。批量观察使用exposureId和imageIndex（observations.image），单图可省略imageIndex。只收适合反复表达情绪的表情，不自动收私人照片或截图。保存原图／GIF，默认仅来源会话可用；主人明确指定群时qq_sticker_send可获得单次发送许可。',collectSchema,true,(c,i)=>this.collect(c,i)),
       make(QQ_STICKER_ACTIONS[2],'选择一个本地表情作为本轮回复（尚未发送），可配最终文字，也可最终正文为空只发表情。id取列表；null取消。expectedVersion首次0，后续用currentVersion。只用库内原图，GIF保留动画，不拼接下载链接。文本延迟规则保持不变。',useSchema,true,(c,i)=>this.use(c,i)),
-      make(QQ_STICKER_ACTIONS[3],'仅执行主人本条原文的管理命令：私聊表情管理：列表（可附名称关键词）；表情管理：通用/停用/启用/删除 名称或ID；表情管理：改名 名称或ID => 新名称；表情管理：标签 名称或ID => 标签1,标签2。不能替他决定提升通用或删除。同名不猜。',z.strictObject({}),true,c=>this.manage(c))];
+      make(QQ_STICKER_ACTIONS[3],'仅执行主人本条原文的管理命令：私聊表情管理：列表（可附名称关键词）；表情管理：通用/停用/启用/删除 名称或ID；表情管理：改名 名称或ID => 新名称；表情管理：标签 名称或ID => 标签1,标签2。不能替他决定提升通用或删除。同名不猜。',z.strictObject({}),true,c=>this.manage(c)),
+      {id:'qq_sticker_send',version:'1',effects:'external-write',scope:'task',inputSchema:z.strictObject({id:z.uuid(),targetGroupId:z.string().regex(/^[1-9]\d{4,14}$/).optional(),requestId}),outputSchema:z.json(),
+        description:'按主人当前私聊的明确指令，向指定群发送一张本地表情并返回真实回执。id来自qq_sticker_list；目标必须匹配主人指令中的群名/群号，“那个群”只从主人的上文明确群名解析，歧义时不能发送。仅本次允许来源私聊表情跨到该群，不提升全局范围。每条主人指令最多发送一次；unknown不可自动重试。qq_sticker_use只是私聊回复选择，不能代替本工具。',
+        execute:async(input,context)=>{try{const data=await this.send(context,input);return {status:data.state==='sent'?'succeeded':data.state==='unknown'?'unknown':'failed',effects:data.state==='sent'?'confirmed':data.state==='unknown'?'unknown':'none',completeness:'complete',data:z.json().parse(data),sources:[],receipts:data.state==='sent'&&data.receiptId?[{kind:'qq-group-message',id:data.receiptId}]:[]};}catch(error){const code=error instanceof Error&&/^[A-Z0-9_]+$/.test(error.message)?error.message:'QQ_GROUP_SEND_FAILED';return {status:code==='QQ_GROUP_SEND_LEDGER_UNCERTAIN'?'unknown':'failed',effects:code==='QQ_GROUP_SEND_LEDGER_UNCERTAIN'?'unknown':'none',completeness:'unknown',data:{dispatched:code==='QQ_GROUP_SEND_LEDGER_UNCERTAIN'?null:false,next:'核对真实主人指令、目标群及表情范围；未知回执不可重发，不要用私聊预览代替群发送。'},sources:[],receipts:[],errorCode:code};}}}];
   }
   close(){if(this.closed)return;this.closed=true;this.unregister();this.handle.dispose();}
 }

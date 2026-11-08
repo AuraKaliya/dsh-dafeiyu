@@ -10,8 +10,9 @@ import type { Reply } from '@dafeiyu/contracts';
 import { testTempDir } from './test-temp.js';
 const reply:Reply={id:'fictional-reply',conversation:{channel:'qq',account:'12345678',kind:'group',id:'11223344'},sourceMessageId:'-123',text:'鱼'.repeat(1601)};
 
-test('plain QQ prose uses one or two sentences per bubble without relying on blank lines',()=>{
-  assert.deepEqual(splitQqText('第一句。第二句！第三句？第四句。第五句。'),['第一句。第二句！','第三句？第四句。','第五句。']);
+test('short QQ prose remains one bubble regardless of sentences, quoted names and blank lines',()=>{
+  const prose='第一句。第二句！第三句？第四句。第五句。';assert.deepEqual(splitQqText(prose),[prose]);
+  const names='可以查看「甲群」「一起讨论吧！」「乙群」。\n\n你想查看哪个群？';assert.deepEqual(splitQqText(names),[names]);
   const document='```ts\nconst url="https://example.test/a.b";\n```\n保留代码。这里有说明。还有一句。';
   assert.deepEqual(splitQqText(document),[document]);
   const long='好。'.repeat(15000);const parts=splitQqText(long);
@@ -23,7 +24,7 @@ test('QQ splitting preserves newlines, CRLF and surrogate pairs without adding o
   for(const text of ['鱼','a'.repeat(4000),'a'.repeat(3999)+'🐟'+'中'.repeat(5000),'a'.repeat(3999)+'\r\n'+'b'.repeat(4000),('第一行\n'+'鱼'.repeat(3900)+'🐟\n').repeat(7),'a'.repeat(32000),('\n'+'a'.repeat(800)).repeat(40).slice(0,32000)]){
     const parts=splitQqText(text);assert.equal(parts.join(''),text);assert.ok(parts.every(part=>part.length>0&&part.length<=800&&Buffer.byteLength(part)<=2400));assert.ok(parts.length<=64);
     assert.ok(parts.every(part=>!/[\uD800-\uDBFF]$/.test(part)&&!/^[\uDC00-\uDFFF]/.test(part)));}
-  assert.equal(splitQqText('short\n'+'a'.repeat(4000))[0],'short\n');
+  assert.equal(splitQqText('short\n'+'a'.repeat(4000))[0]!.length,800);
   for(const text of ['', 'x'.repeat(32001),'bad\ud800','\udfff'])assert.throws(()=>splitQqText(text),/TEXT_SIZE_UNSUPPORTED|INVALID_TEXT_ENCODING/);
 });
 

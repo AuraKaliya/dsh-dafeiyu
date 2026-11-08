@@ -13,8 +13,10 @@ import { loopbackURL, OneBot, platformId,oneBotDiagnostic } from './onebot.js';
 import { QqStore } from './store.js';
 import { GroupDirectory, GroupSyncConfigSchema } from './groups.js';
 import { readRecentQqHistory,QQ_HISTORY_WINDOW_MS } from './history.js';
+import type { QqHistoryReadOptions } from './history.js';
 import { waitForQqReply,waitBetweenQqMessages,deliveryAbortCode,QqReplyDelaySchema } from './reply-delay.js';
-import { forwardHandles,recentForwardNodes } from './forward.js';
+import { forwardHandles,readForwardNodes,QqForwardCache } from './forward.js';
+import type { QqForwardPageOptions } from './forward.js';
 export { qqReplyDelayMs,QqReplyDelaySchema } from './reply-delay.js';
 import { naturallyAddressed } from './trigger.js';
 import { QqCapabilities, QqCapabilitiesConfigSchema, QQ_ACTIONS, qqResourceRoute } from './capabilities.js';
@@ -29,6 +31,7 @@ import { QqMediaDeliveryLedger } from './media-delivery.js';
 import { QqMessageBatches,QqBatchConfigSchema } from './batch.js';
 import { qqTaskDirective } from './tasks.js';
 import { QqStickers,QQ_STICKER_ACTIONS } from './stickers.js';
+import {QqDirectSendLedger} from './direct-sticker-send.js';
 import { QqStickersConfigSchema } from './sticker-store.js';
 import { bindQqProgress,QQ_PROGRESS_ACTIONS } from './progress.js';
 export { QQ_PROGRESS_ACTIONS } from './progress.js';
@@ -101,6 +104,7 @@ export class QqChannel extends Service {
   private readonly tasks:QqTaskCapabilities|undefined;
   private readonly media:QqMedia|undefined;
   private readonly batches:QqMessageBatches;
+  private readonly forwardCache=new QqForwardCache();
   private readonly stickers:QqStickers|undefined;
   private readonly sourceSignals=new Map<string,AbortController>();
   private readonly processingSignals=new WeakMap<AbortController,{sources:readonly AbortSignal[];signal:AbortSignal}>();
@@ -158,13 +162,13 @@ export class QqChannel extends Service {
           description: QQ_EXPRESSION_DEFAULTS+'\n'+QQ_SEQUENCE_INSTRUCTIONS+'\n'+JSON.stringify({kind:'channel-capabilities',channel:'qq',observation:{enabled:this.config.capabilities.enabled,scope:'current-authorized-conversation',historyWindowMs:this.config.historyWindowMs,historyTriggersReplies:false,forwardReadable:this.config.capabilities.enabled},media:{input:this.config.media.enabled,output:this.config.media.sendEnabled,localStickers:this.config.stickers.enabled},note:'内容是否已理解以实际观察及覆盖为准。可自主选择回看、引用、表情与表达方式；精确操作以当前能力声明为准。'}),
           ...(this.config.media.enabled&&(this.config.media.sendEnabled||this.config.stickers.enabled)?{mediaDelivery:'parts-v1' as const,deliverMedia:(reply:Reply&{media:ReplyMediaManifest},signal:AbortSignal,authority:()=>void,bytes:(position:number)=>Promise<Uint8Array>)=>this.deliverMedia(reply,signal,authority,bytes)}:{}),
           deliver: (reply, signal, authority) => this.deliver(reply, signal, authority),deliverTaskResult:(reply,anchor,signal,authority,writeWindow)=>this.deliverTaskResult(reply,anchor,signal,authority,writeWindow) }] });
-      this.batches=this.store.batches(this.config.messageBatch,{current:message=>{try{this.processingSignal(message).throwIfAborted();return true;}catch{return false;}},submit:message=>{const receipt=this.handle.ingest(message);if(!receipt.duplicate)this.counters.accepted++;},failed:()=>{this.error='BATCH_SUBMISSION_FAILED';}});
+      this.batches=this.store.batches(this.config.messageBatch,{current:message=>{try{this.processingSignal(message).throwIfAborted();return true;}catch{return false;}},busy:message=>ctx.dafeiyu.journal.hasPendingConversation(conversationKey(this.config.agentId,message.conversation)),submit:message=>{const receipt=this.handle.ingest(message);if(!receipt.duplicate)this.counters.accepted++;},failed:()=>{this.error='BATCH_SUBMISSION_FAILED';}});
       if(this.config.capabilities.enabled)this.capabilities=new QqCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store,groups:this.groups,ingestObserved:message=>this.handle.ingest(message),
-        allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing),readHistory:(scene,signal)=>this.readHistory(scene,signal),readForward:(scene,messageId,index,signal)=>this.readForward(scene,messageId,index,signal)});
+        allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&(this.state==='online'||this.quiescing),historyWindowMs:this.config.historyWindowMs,readHistory:(scene,signal,options)=>this.readHistory(scene,signal,options),readForward:(scene,messageId,index,signal,options)=>this.readForward(scene,messageId,index,signal,options)});
       if(this.config.tasks.enabled)this.tasks=new QqTaskCapabilities(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,policyId:this.config.tasks.policyId,deliverResults:this.config.tasks.deliverResults,naturalNames:this.config.naturalNames,voiceDirectives:this.config.media.voiceDirectives,...(this.config.tasks.explorationResources?{explorationResources:this.config.tasks.explorationResources}:{}),...(this.config.tasks.expressionPolicy?{expressionPolicy:this.config.tasks.expressionPolicy}:{})});
       if(this.config.tasks.enabled)this.progress=bindQqProgress(ctx,this.config.agentId);
       if(this.config.media.enabled)this.media=new QqMedia(ctx,{agentId:this.config.agentId,store:this.store,api:this.api,settings:this.config.media,allowed:scene=>this.allowed(scene),available:()=>!this.stopped&&this.verified&&this.state==='online',sourceEpoch:()=>JSON.stringify([this.state==='rejected',this.groups.authorityEpoch()]),groupGeneration:scene=>scene.kind==='group'?this.groups.generation(scene.id):null,rejectIdentity:()=>{this.verified=false;this.state='rejected';this.error='ACCOUNT_MISMATCH';this.socket?.terminate();}});
-      if(this.config.stickers.enabled)this.stickers=new QqStickers(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store.stickers,allowed:scene=>this.allowed(scene)});
+      if(this.config.stickers.enabled)this.stickers=new QqStickers(ctx,{agentId:this.config.agentId,botId:this.config.botId,ownerId:this.config.ownerId,store:this.store.stickers,allowed:scene=>this.allowed(scene),directSend:{api:this.api,ledger:new QqDirectSendLedger(resolve(this.config.dataDir,'direct-sends')),groups:()=>this.groups.effective().map(id=>({id,name:this.groups.info(id)?.name??null})),generation:id=>this.groups.generation(id),available:()=>!this.stopped&&this.verified&&this.state==='online'}});
     } catch (error) {this.progress?.dispose();this.stickers?.close();this.media?.close();this.tasks?.close();this.capabilities?.close();registration?.dispose();this.store.close(); throw error; }
     ctx.effect(()=>ctx.dafeiyu.bindActivityPressure('qq',()=>this.stopped?0:this.batches.count()));
     ctx.effect(()=>ctx.dafeiyu.bindFeedbackReceipts({lookup:async input=>this.feedbackReceipt(input)}),'qq.feedback-receipts');
@@ -349,7 +353,7 @@ export class QqChannel extends Service {
     this.store.acknowledge(route, message.message_id);
     if (!receipt.duplicate) this.counters.accepted++;
   }
-  private readHistory(scene:Conversation,signal:AbortSignal) {
+  private readHistory(scene:Conversation,signal:AbortSignal,options?:QqHistoryReadOptions) {
     const generation=scene.kind==='group'?this.groups.generation(scene.id):null;
     return readRecentQqHistory({botId:this.config.botId,windowMs:this.config.historyWindowMs,allowed:target=>!this.stopped&&this.verified&&this.state==='online'&&this.allowed(target)&&(target.kind!=='group'||this.groups.generation(target.id)===generation),
       fetch:(target,anchor,workSignal)=>this.api.history(target,anchor,workSignal),append:(target,message)=>{
@@ -359,15 +363,16 @@ export class QqChannel extends Service {
         const unsupported=[...new Set(message.message.filter((part,index)=>!['text','at','reply'].includes(part.type)&&!media?.positions.has(index)).map(part=>part.type))];
         const forwardIds=forwardHandles(message.message);
         return {added:this.store.appendHistory(route,message.message_id,message.user_id,text||'[非文字消息]',{occurredAt:new Date(message.time*1000).toISOString(),unsupported,mentionedBot:message.message.some(part=>part.type==='at'&&String(part.data.qq)===this.config.botId),...(forwardIds.length?{forwardIds}:{}),...(media?.attachments.length?{media:media.attachments}:{})}),media:media?.attachments.length??0};
-      }},scene,AbortSignal.any([signal,this.controller.signal]));
+      }},scene,AbortSignal.any([signal,this.controller.signal]),options);
   }
-  private async readForward(scene:Conversation,messageId:string,index:number,signal:AbortSignal){const generation=scene.kind==='group'?this.groups.generation(scene.id):null;const guard=()=>{signal.throwIfAborted();if(this.stopped||!this.verified||!this.allowed(scene)||scene.kind==='group'&&this.groups.generation(scene.id)!==generation)throw new Error('TARGET_NOT_ALLOWED');};guard();
+  private async readForward(scene:Conversation,messageId:string,index:number,signal:AbortSignal,options?:QqForwardPageOptions){const generation=scene.kind==='group'?this.groups.generation(scene.id):null;const guard=()=>{signal.throwIfAborted();if(this.stopped||!this.verified||!this.allowed(scene)||scene.kind==='group'&&this.groups.generation(scene.id)!==generation)throw new Error('TARGET_NOT_ALLOWED');};guard();
     const route=this.cacheRoute(scene),handle=this.store.cache.forward(route,messageId,index),proof=this.store.cache.messageProof(route,messageId);
-    await this.api.verify(signal);const raw=await this.api.call('get_forward_msg',{id:handle},signal);await this.api.verify(signal);guard();
-    if(!this.store.cache.proofCurrent(proof))throw new Error('SOURCE_STALE');const result=recentForwardNodes(raw,Date.now(),this.config.historyWindowMs),sender=this.store.find(route,messageId)?.sender??this.config.ownerId;let remaining=8;
-    const messages=result.messages.map(({parts,...node})=>{const selected=parts.filter(p=>['image','record','video','file'].includes(p.type)).slice(0,remaining);remaining-=selected.length;
-      const media=this.media?.remember(scene,messageId,sender,{forward:proof.hash,node:node.index,parts:selected},selected,1000+(index*20+node.index)*1000);
-      return {...node,kinds:[...new Set(parts.map(p=>p.type))],...(media?.attachments.length?{media:media.attachments}:{})};});return {...result,messages};}
+    const current=()=>{guard();if(!this.store.cache.proofCurrent(proof))throw new Error('SOURCE_STALE');};
+    const {raw,cacheHit}=await this.forwardCache.read(JSON.stringify([route,messageId,index,proof.hash,generation]),async()=>{await this.api.verify(signal);const value=await this.api.call('get_forward_msg',{id:handle},signal);await this.api.verify(signal);return value;},current);
+    current();const result=readForwardNodes(raw,Date.now(),options),sender=this.store.find(route,messageId)?.sender??this.config.ownerId;let remaining=8;
+    const messages=result.messages.map(({parts,...node})=>{const available=parts.filter(p=>['image','record','video','file'].includes(p.type)),selected=available.slice(0,remaining);remaining-=selected.length;
+      const media=this.media?.remember(scene,messageId,sender,{forward:proof.hash,node:node.index,parts:selected},selected,1000+(index*200+node.index)*1000);
+      return {...node,kinds:[...new Set(parts.map(p=>p.type))],mediaOmitted:available.length-selected.length,...(media?.attachments.length?{media:media.attachments}:{})};});return {...result,messages,cacheHit};}
   /** Program-only local delegation transport. The source remains local-owner, never a forged QQ inbound. */
   deliverLocalOwner(reply:Reply,signal:AbortSignal,authority?:()=>void,writeWindow?:()=>()=>void):Promise<DeliveryResult>{
     if(typeof authority!=='function'||reply.media)return Promise.resolve({status:'not-sent',code:'TARGET_NOT_ALLOWED'});

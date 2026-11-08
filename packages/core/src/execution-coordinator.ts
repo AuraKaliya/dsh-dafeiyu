@@ -18,6 +18,8 @@ import { RuntimeStore,runtimeHash } from './runtime-store.js';
 import type { StoredRun } from './runtime-store.js';
 import type { DshRuntime } from './runtime.js';
 import type { CapabilityRegistry,BoundAction } from './capability-registry.js';
+import {ActionInputError} from './capability-registry.js';
+import {deliveryOperationFact} from './delivery-operation-facts.js';
 import type { RunLeaseControl,RunScheduler } from './run-scheduler.js';
 import type { NativeAction,TaskExecutionFrame } from './execution-frame.js';
 import { TaskReviewSchema,WakeWorkSchema,ToolStageSchema } from '@dafeiyu/contracts';
@@ -387,7 +389,11 @@ export class ExecutionCoordinator {
         const operation=this.d.store.operation(dependency.operationId),outcome=operation.outcome;visit(z.array(SourceDependencySchema).parse(this.d.store.readInput(operation.runId,`operation-inputs:${operation.id}`)));
         const page=z.object({page:z.json(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
         const media=z.object({text:z.string(),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data);
+        const catalog=z.object({stickers:z.array(z.json()),observation:z.object({source:PersonaSourceRefSchema})}).safeParse(outcome?.data),fact=deliveryOperationFact({plugin:operation.plugin,action:operation.action,outcome});
+        if(fact)operationalEvidence.push({id:'OP'+operation.id,...fact});
         if(media.success&&operation.plugin==='media'&&operation.action==='dafeiyu_media_read'){const key=runtimeHash(media.data.observation.source);views.set(key,media.data.text);add(media.data.observation.source);}
+        else if(catalog.success&&operation.plugin==='qq-stickers'&&operation.action==='qq_sticker_list'){const key=runtimeHash(catalog.data.observation.source);views.set(key,JSON.stringify({stickers:catalog.data.stickers}));add(catalog.data.observation.source);opaque=true;derivedInputComplete=false;}
+        else if(fact){opaque=true;derivedInputComplete=false;/* Add evidence without bypassing the existing final rendering and verification boundary. */}
         else if(page.success){const key=runtimeHash(page.data.observation.source);views.set(key,JSON.stringify(page.data.page));add(page.data.observation.source);
           if(!(operation.plugin==='qq-capabilities'&&['qq_browse','qq_forward_read'].includes(operation.action))&&!(operation.plugin==='dsh-tools'&&['dsh_tool_call','dsh_tool_read','dsh_result_read','dsh_result_read_batch'].includes(operation.action)))opaque=true;}
         else if(operation.plugin==='dsh-tools'&&operation.action==='dsh_tool_list'){/* Capability schemas are operational, not evidence about the task result. */}
@@ -1082,7 +1088,8 @@ export class ExecutionCoordinator {
     return {definition:action,metadata:value=>value&&typeof value==='object'?metadata.get(value):undefined,execute:async(raw,callId,toolSignal)=>{
       guard();
       if(run.definition.scope.kind==='task'&&this.lineage(run).toolStage==='bili-reading'&&!BILI_READING_ACTIONS.has(action.id))throw new Error('SCOPE_DENIED');
-      const input=action.validateInput(raw);
+      let input:Json,inputError:ActionInputError|undefined;
+      try{input=action.validateInput(raw);}catch(error){if(!(error instanceof ActionInputError))throw error;inputError=error;input=z.json().parse(raw);}
       if(action.effects!=='read'&&this.d.store.list().filter(value=>runtimeHash(value.definition.scope)===runtimeHash(run.definition.scope)).some(value=>this.d.store.operations(value.id).some(operation=>operation.plugin===action.owner&&(operation.state==='unknown'||operation.outcome?.effects==='unknown'))))throw new Error('OPERATION_UNCERTAIN');
       if(action.effects!=='read'&&run.definition.parentRunId){let parentId:string|null=run.definition.parentRunId;
         const fingerprint=runtimeHash({action:action.id,plugin:action.owner,pluginVersion:action.pluginVersion,actionVersion:action.version,input});
@@ -1105,6 +1112,11 @@ export class ExecutionCoordinator {
           const outcome={status:'failed',effects:'none',completeness:'unknown',data:{dispatched:false,previousError:repeated.at(-1)!.outcome!.errorCode??null,retryAfter:new Date(Date.now()+60000).toISOString(),next:'相同输入连续失败且条件未改变。请改用可用通道、继续独立步骤，或汇报具体阻碍；不要只更换 requestId。'},sources:[],receipts:[],errorCode:'TOOL_NO_PROGRESS'};
           this.d.store.finishOperation(operation.id,outcome);this.flushEvents();return result(operation.id,callId,outcome);
         }
+      }
+      if(inputError){
+        const data=redactJson(z.json().parse({dispatched:false,stage:'input-validation',issues:inputError.issues,next:'参数在本机校验时被拒绝，未调用平台。请按字段提示修正；不要把它解释为平台故障，也不要只更换requestId重试。'})).value;
+        const outcome={status:'failed',effects:'none',completeness:'unknown',data,sources:[],receipts:[],errorCode:'INVALID_INPUT'};
+        this.d.store.finishOperation(operation.id,outcome);this.flushEvents();return result(operation.id,callId,outcome);
       }
       if(run.definition.scope.kind==='task'&&action.effects!=='read'&&action.id!=='dafeiyu_task_object'){
         const intent=this.d.memory()?.intent(this.d.personas.access(run,this.inputsFor(run),signal,commitGuard));

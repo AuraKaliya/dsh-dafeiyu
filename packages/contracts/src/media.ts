@@ -44,7 +44,13 @@ export const MediaAcquireSchema=z.strictObject({requestId:PersonaRequestIdSchema
 export const MediaReadSchema=z.strictObject({requestId:PersonaRequestIdSchema,asset:MediaAssetRefSchema.optional(),source:MediaProviderRefSchema.optional(),
   mode:z.enum(['inspect','image','frames','images','audio','document']),assets:z.array(MediaAssetRefSchema).min(1).max(6).optional(),sources:z.array(MediaProviderRefSchema).min(1).max(6).optional(),pointsMs:z.array(z.number().int().nonnegative()).max(8).optional(),interval:MediaIntervalSchema.optional(),
   offset:z.number().int().nonnegative().optional(),textOffset:z.number().int().nonnegative().optional(),limit:z.number().int().min(1).max(5000).optional()}).refine(v=>[!!v.asset,!!v.source,!!v.assets,!!v.sources].filter(Boolean).length===1,'Choose one asset, source, asset set or source set')
-  .refine(v=>(v.mode==='frames'?!!v.pointsMs?.length:v.pointsMs===undefined)&&(v.mode==='audio'?!!v.interval:v.interval===undefined)&&(v.mode==='images'?!!(v.assets?.length||v.sources?.length):v.assets===undefined&&v.sources===undefined)&&(v.mode==='document'||v.offset===undefined&&v.textOffset===undefined&&v.limit===undefined),'Read options must match the selected mode');
+  .superRefine((v,ctx)=>{
+    if(v.mode==='images'&&!v.assets?.length&&!v.sources?.length)ctx.addIssue({code:'custom',path:['sources'],message:'mode=images需要sources或assets数组；单张也可使用mode=image配source或asset。'});
+    if(v.mode!=='images'&&(v.sources!==undefined||v.assets!==undefined))ctx.addIssue({code:'custom',path:[v.sources!==undefined?'sources':'assets'],message:'当前mode接受单个source或asset，不能传sources/assets数组；多张图片请用mode=images。'});
+    if(v.mode==='frames'?!v.pointsMs?.length:v.pointsMs!==undefined)ctx.addIssue({code:'custom',path:['pointsMs'],message:'只有mode=frames使用并要求pointsMs时间点数组。'});
+    if(v.mode==='audio'?!v.interval:v.interval!==undefined)ctx.addIssue({code:'custom',path:['interval'],message:'只有mode=audio使用并要求interval。'});
+    if(v.mode!=='document'&&(v.offset!==undefined||v.textOffset!==undefined||v.limit!==undefined))ctx.addIssue({code:'custom',path:['mode'],message:'offset、textOffset和limit只用于mode=document。'});
+  });
 export interface MediaAccess {readonly execution:PersonaAccess;readonly origin:ResourceProof;guard():void}
 export interface MediaByteStream {readonly bytes:number|null;readonly mime:string|null;readonly stream:AsyncIterable<Uint8Array>;
   readonly totalBytes?:number;readonly range?:{start:number;end:number}|null}
@@ -63,7 +69,7 @@ export interface MediaPort {
   acquire(context:ExecutionContext,owner:string,input:z.infer<typeof MediaAcquireSchema>):Promise<MediaAssetRef>;
   inspect(context:ExecutionContext,owner:string,ref:MediaAssetRef):unknown;
   read(context:ExecutionContext,owner:string,input:z.infer<typeof MediaReadSchema>):Promise<unknown>;
-  imageOriginal?(context:ExecutionContext,owner:string,exposureId:string):Promise<{data:Uint8Array;mime:string;source:MediaSourceDescription}>;
+  imageOriginal?(context:ExecutionContext,owner:string,exposureId:string,imageIndex?:number):Promise<{data:Uint8Array;mime:string;source:MediaSourceDescription}>;
   prepareReply?(context:ExecutionContext,input:unknown,owner?:string):Promise<unknown>;
   voice?(context:ExecutionContext,owner:string,exposureId:string):{text:string;evidence:MediaVoiceEvidence};
   voiceCurrent?(evidence:MediaVoiceEvidence):boolean;

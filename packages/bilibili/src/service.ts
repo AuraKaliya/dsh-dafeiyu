@@ -49,7 +49,7 @@ const browserReadSchema=z.strictObject({...request,bvid:BvidSchema.optional(),ai
 });
 const searchSchema=BiliSearchQuerySchema.extend(request);
 const commentsSchema=z.strictObject({...request,...paging,aid:NumberIdSchema.optional(),parent:NumberIdSchema.nullable().optional(),sort:z.enum(['time','hot']).default('hot'),cursor:z.uuid().describe('直接使用上一次返回的 nextCursor 字符串，不包装成对象。').optional()})
-  .refine(value=>!!value.aid!==!!value.cursor,'Provide aid or a returned cursor');
+  .refine(value=>!!value.aid||!!value.cursor,'首次读取需要aid；续页需要上一次返回的cursor。');
 const framesSchema=z.strictObject({...request,bvid:BvidSchema,pointsMs:z.array(z.number().int().nonnegative().max(21600000)).min(1).max(6)})
   .refine(value=>new Set(value.pointsMs).size===value.pointsMs.length,'Frame points must be distinct');
 const readingSaveSchema=z.strictObject({...request,bvid:BvidSchema,status:z.enum(['open','checkpoint','closed']),conclusion:z.string().max(2000).nullable().default(null),gaps:z.array(z.string().max(200)).max(20).default([]),nextStep:z.string().max(300).nullable().default(null)});
@@ -92,6 +92,7 @@ export class BiliService extends Service {
   private commentsInput(context:ExecutionContext,raw:unknown){
     const input=commentsSchema.parse(raw),cursor=input.cursor?this.store.commentCursor(context,input.cursor)
       :BiliCommentCursorSchema.parse({aid:input.aid,parent:input.parent??null,sort:input.sort,page:input.page,seen:[]});
+    if(input.cursor&&input.aid&&input.aid!==cursor.aid)throw new Error('BILI_COMMENT_CURSOR_MISMATCH');
     return {...cursor,requestId:input.requestId,limit:input.limit};
   }
   private observed(context:ExecutionContext,page:BiliPage){const guard=this.guard(context),view=pageView(page),text=JSON.stringify(view);if(text.length>8000)throw new Error('BILI_PAGE_LIMIT');guard();const items=z.object({items:z.array(z.unknown())}).safeParse(page.data),count=items.success?items.data.items.length:1;

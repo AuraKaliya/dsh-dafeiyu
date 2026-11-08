@@ -18,7 +18,7 @@ export async function verifyPersonaDelivery(ctx:Context,input:ExpressionModelInp
   const model=ctx.dafeiyu.analysisModelRoute(),verification=deliveryVerificationBody(input,answer),body=JSON.stringify(verification);if(answer.length>bounds.maxAnswerChars)throw new Error('delivery_capacity');
   guard();const timer=AbortSignal.timeout(bounds.timeoutMs??ctx.dafeiyu.phaseTimeouts().verification),deadline=AbortSignal.any([signal,timer]);
   try{const info=await ctx.llm.resolveModelInfo(model.provider,model.model,deadline);
-  const effort=['low','off'].find(id=>info.reasoning?.efforts.some(value=>value.id===id))??model.reasoningEffort;
+  const effort=['off','low'].find(id=>info.reasoning?.efforts.some(value=>value.id===id))??model.reasoningEffort;
   const messages=[createSystemMessage(DELIVERY_VERIFICATION_INSTRUCTIONS),createUserMessage({source:{kind:'user'},content:[{type:'text',text:body}]})];
   // Verification has no external writes. Retain the exact candidate/evidence and one shared deadline across bounded transport retries.
   let retries=0;

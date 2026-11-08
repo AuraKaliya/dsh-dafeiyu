@@ -126,7 +126,7 @@ export function loadHostConfig(input:string):PreparedHostConfig{
     if(qq&&QqPluginConfigSchema.parse(qq.config).stickers.enabled){
       if(!qqMedia?.enabled||!qqCapabilities)throw new Error('HOST_QQ_STICKER_DEPENDENCY_REQUIRED');
       const policy=config.authorityPolicies.find(policy=>policy.id==='conversation'&&policy.producers.includes('channel-qq'));
-      if(!policy?.allowLocalWrite||QQ_STICKER_ACTIONS.some(action=>!policy.actions.includes(action)))throw new Error('HOST_QQ_STICKER_POLICY_REQUIRED');
+      if(!policy?.allowLocalWrite||QQ_STICKER_ACTIONS.filter(action=>action!=='qq_sticker_send').some(action=>!policy.actions.includes(action)))throw new Error('HOST_QQ_STICKER_POLICY_REQUIRED');
     }
     if(qqCapabilities){if(!memory)throw new Error('HOST_QQ_MEMORY_REQUIRED');
 

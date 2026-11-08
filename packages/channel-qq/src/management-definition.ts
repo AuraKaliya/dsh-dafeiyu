@@ -123,20 +123,20 @@ export const managementDefinition={
         },
         {
           "path": "qq.historyWindowMs",
-          "label": "按需历史回看窗口",
+          "label": "近期模式的回看窗口",
           "kind": "number",
           "unit": "小时",
           "scale": 3600000,
           "minimum": 0.0002777777777777778,
           "maximum": 168,
-          "description": "主动读取的窗口；最多 5 页，每页 20 条；不会自动回复旧消息。"
+          "description": "仅 historyMode=recent 使用；主动回看默认按条数读取最近最多100条，可跨越此窗口，不会自动回复旧消息。"
         }
       ]
     },
     {
       "id": "batch",
       "title": "消息收发 · 连续消息合并",
-      "description": "同一发送者、同一会话的连续真实消息按顺序合并。",
+      "description": "同一发送者、同一会话的连续真实消息按顺序合并；前一轮忙碌时继续保留补充消息，空闲后一次处理。",
       "fields": [
         {
           "path": "qq.messageBatch.enabled",
@@ -156,7 +156,7 @@ export const managementDefinition={
         },
         {
           "path": "qq.messageBatch.maxWaitMs",
-          "label": "最长等待",
+          "label": "空闲时最长等待",
           "kind": "number",
           "description": "保存后重启实例生效。",
           "unit": "秒",
@@ -232,7 +232,7 @@ export const managementDefinition={
     {
       "id": "stickers",
       "title": "消息收发 · 表情包管理",
-      "description": "管理收集素材的名称、说明、标签与可用状态。原件与缓存分开保存；删除不抹去历史使用记录。",
+      "description": "管理名称、说明、标签与可用状态。表情默认限来源会话；主人私聊明确指定群时可单次发送，不自动设为通用。原件和发送回执独立保存。",
       "fields": [
         {
           "path": "qq.stickers.enabled",

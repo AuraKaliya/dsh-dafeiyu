@@ -1,8 +1,8 @@
-# 大肥鱼 · dsh-dafeiyu 0.28.13
+# 大肥鱼 · dsh-dafeiyu 0.28.15
 
 基于 DeepSeek Harness 的可成长智能体，整合记忆、QQ、B站、媒体、持续任务和自主活动。管理入口位于 DSH 设置中的“大肥鱼管理中心”。
 
-本版为第 4 轮本地候选；程序回归、隔离新装与迁移回退证据单独保存。真实语义、费用及同进程两小时观察尚未执行，不能据本地候选认定正式发布验收通过。
+本版增加主人明确指令下的单次群发表情，保留发送目标与回执；修复交付证据缺失、多图理解与表情收录衔接，并优化错误提示。程序回归与独立包检查分别记录；真实语义、费用及持续业务表现须在实际部署后复验。
 
 ## 安装
 
@@ -30,7 +30,7 @@ node bin/dafeiyu.mjs init --settings <配置文件绝对路径>
 node bin/dafeiyu.mjs status --settings <配置文件绝对路径>
 ~~~
 
-旧数据用 migrate 显式升级，先停止并备份。当前 API 10、B站库 v6、运行库 v7、QQ 库 v8、Activity/Media 库 v4。独立 start 仅适用于 dshTools:false，已启用桌面桥的实例使用管理中心启动。
+旧数据用 migrate 显式升级，先停止并备份。当前 API 11、B站库 v6、运行库 v7、QQ 库 v8、Activity/Media 库 v4。独立 start 仅适用于 dshTools:false，已启用桌面桥的实例使用管理中心启动。
 
 ## 文档
 

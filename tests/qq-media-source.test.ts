@@ -12,6 +12,17 @@ const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).d
 const metadata={occurredAt:'2026-10-25T00:00:00Z',unsupported:['image']};
 async function bytes(stream:MediaByteStream){const chunks:Buffer[]=[];for await(const chunk of stream.stream)chunks.push(Buffer.from(chunk));return Buffer.concat(chunks);}
 
+test('reading successive forwarded nodes and pages keeps earlier image sources valid until the wrapper is recalled',async()=>{
+  const root=await mkdtemp(join(testTempDir(),'qq-forward-media-')),store=new QqStore(join(root,'qq.sqlite'));
+  try{store.remember(route,'forward','sender','forwarded copy',metadata);const refs=[];
+    for(let node=0;node<22;node++){const parts=[{type:'image',data:{file:'fixture-image-'+node}}];const ids=store.media.remember(scene,'forward','sender',hash(parts),parts,1000+node*1000);refs.push(store.media.describe(ids[0]!));}
+    for(const ref of refs)assert.equal(store.media.current(ref.origin),true);
+    const old=refs[0]!,replacement=[{type:'image',data:{file:'replacement'}}];store.media.remember(scene,'forward','sender',hash(replacement),replacement,1000);
+    assert.equal(store.media.current(old.origin),false);for(const ref of refs.slice(1))assert.equal(store.media.current(ref.origin),true);
+    store.cache.revoke(route,'forward');for(const ref of refs)assert.equal(store.media.current(ref.origin),false);
+  }finally{store.close();}
+});
+
 test('QQ media descriptors bind actual account, message and segment while keeping platform handles out of public data',async()=>{
   const root=await mkdtemp(join(testTempDir(),'qq-media-store-')),file=join(root,'qq.sqlite'),store=new QqStore(file);
   try{store.remember(route,'m1','sender','文字',metadata);const parts=[{type:'image',data:{file:'private-platform-handle',url:'https://fixture.invalid/private-url',name:'image.png',file_size:5}}];

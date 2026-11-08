@@ -164,10 +164,11 @@ export class MediaStore {
     return null;
   }
   reuseRead(access:MediaAccess,key:string,input:unknown,id:string){this.exposure(access,id);return this.atomic(()=>this.request(access,'read:'+key,input,v=>z.uuid().parse(v),()=>id));}
-  recordExposure(access:MediaAccess,key:string,input:unknown,source:StoredMediaSource,value:Omit<MediaExposure,'schemaVersion'|'id'|'scope'|'taskEpoch'|'sourceId'|'sourceVersion'>){return this.atomic(()=>{
+  recordExposure(access:MediaAccess,key:string,input:unknown,source:StoredMediaSource,value:Omit<MediaExposure,'schemaVersion'|'id'|'scope'|'taskEpoch'|'sourceId'|'sourceVersion'>,assetAccesses?:readonly MediaAccess[]){return this.atomic(()=>{
     const id=this.request(access,'read:'+key,input,v=>z.uuid().parse(v),()=>{
-      const body=exposureSchema.parse({...value,schemaVersion:1,id:randomUUID(),scope:access.execution.view.scope,taskEpoch:access.execution.view.scope.kind==='task'?access.execution.intentVersion:null,sourceId:source.id,sourceVersion:source.version});
-      if(redactJson(z.json().parse(body)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');for(const ref of body.assets)this.requireRef(access,ref);
+      const detail=assetAccesses?{...z.record(z.string(),z.json()).parse(value.detail),assetOrigins:value.assets.map(ref=>{const origin=this.sourceForAsset(ref.id);if(mediaHash(origin.description.origin.scene)!==mediaHash(source.description.origin.scene))throw new Error('SCOPE_DENIED');return {sourceId:origin.id,sourceVersion:origin.version,originHash:mediaHash(origin.description.origin)};})}:value.detail;
+      const body=exposureSchema.parse({...value,detail,schemaVersion:1,id:randomUUID(),scope:access.execution.view.scope,taskEpoch:access.execution.view.scope.kind==='task'?access.execution.intentVersion:null,sourceId:source.id,sourceVersion:source.version});
+      if(redactJson(z.json().parse(body)).redacted)throw new Error('PRIVATE_INPUT_REJECTED');for(const [index,ref] of body.assets.entries()){const bound=assetAccesses?.[index]??access;if(scopeKey(bound.execution.view.scope)!==scopeKey(access.execution.view.scope)||bound.execution.intentVersion!==access.execution.intentVersion)throw new Error('SCOPE_DENIED');this.requireRef(bound,ref);}
       if(!body.coverage.exposed)throw new Error('MEDIA_IMAGE_NOT_EXPOSED');this.db.prepare('INSERT INTO media_exposures VALUES(?,?,?,?,?,?)').run(body.id,scopeKey(body.scope),access.execution.view.runId,access.execution.operationId,JSON.stringify(body),mediaHash(body));
       this.audit(access,'media.exposure.recorded',{exposureId:body.id,assets:body.assets.map(a=>a.id),coverage:body.coverage});return body.id;});return this.exposure(access,id);
   });}
@@ -175,7 +176,7 @@ export class MediaStore {
     const body=exposureSchema.parse(JSON.parse(String(row.body)));if(mediaHash(body)!==row.body_hash)throw new Error('MEDIA_STATE_CORRUPT');return body;}
   exposure(access:MediaAccess,id:string){this.check(access);const body=this.exposureRow(id);if(body.scope.agentId!==access.execution.view.scope.agentId||scopeKey(body.scope)!==scopeKey(access.execution.view.scope)||body.taskEpoch!==(body.scope.kind==='task'?access.execution.intentVersion:null))throw new Error('SCOPE_DENIED');
     if(mediaHash(this.source(body.sourceId).description.origin)!==mediaHash(access.origin)||!this.exposureCurrent(id))throw new Error('MEDIA_SOURCE_STALE');return body;}
-  exposureProof(body:MediaExposure):ResourceProof {const origin=this.source(body.sourceId).description.origin;return {provider:'media',scene:origin.scene,key:body.id,version:1,hash:mediaHash(body),roots:origin.roots,detail:{exposureId:body.id}};}
+  exposureProof(body:MediaExposure):ResourceProof {const origin=this.source(body.sourceId).description.origin;return {provider:'media',scene:origin.scene,key:body.id,version:1,hash:mediaHash(body),roots:[...new Set([...origin.roots,...body.assets.flatMap(ref=>this.sourceForAsset(ref.id).description.origin.roots)])],detail:{exposureId:body.id}};}
   exposureOrigin(id:string){return this.source(this.exposureRow(id).sourceId).description;}
   /** Program-only immutable witness lookup; public reads must first pass exposure(access, id). */
   exposureWitness(id:string){const body=this.exposureRow(id);if(!this.exposureCurrent(id))throw new Error('MEDIA_SOURCE_STALE');return body;}
@@ -205,7 +206,9 @@ export class MediaStore {
   private contentCurrent(ref:MediaAssetRef,seen=new Set<string>()):boolean {if(seen.has(ref.id)||seen.size>=32)return false;seen.add(ref.id);const asset=this.asset(ref.id),source=this.source(asset.sourceId);
     return !source.deleted&&source.version===asset.sourceVersion&&(asset.state==='ready'||asset.state==='evicted')&&asset.version===ref.version&&mediaHash(this.ref(asset))===mediaHash(ref)&&(!asset.parent||this.contentCurrent(asset.parent,seen));}
   exposureCurrent(id:string){try{const body=this.exposureRow(id),source=this.source(body.sourceId);if(source.deleted||source.version!==body.sourceVersion)return false;
-    return body.assets.every(ref=>{const asset=this.asset(ref.id),origin=this.source(asset.sourceId);return this.contentCurrent(ref)&&mediaHash(origin.description.origin)===mediaHash(source.description.origin);});}catch{return false;}}
+    const recorded=z.object({assetOrigins:z.array(z.object({sourceId:z.string(),sourceVersion:z.number(),originHash:z.string()}))}).safeParse(body.detail);
+    if(recorded.success&&recorded.data.assetOrigins.length!==body.assets.length)return false;
+    return body.assets.every((ref,index)=>{const asset=this.asset(ref.id),origin=this.source(asset.sourceId),bound=recorded.success?recorded.data.assetOrigins[index]:null;return this.contentCurrent(ref)&&(bound?bound.sourceId===origin.id&&bound.sourceVersion===origin.version&&bound.originHash===mediaHash(origin.description.origin)&&mediaHash(origin.description.origin.scene)===mediaHash(source.description.origin.scene):mediaHash(origin.description.origin)===mediaHash(source.description.origin));});}catch{return false;}}
   validateExposure(proof:ResourceProof,current:(source:MediaSourceDescription)=>boolean){try{const body=this.exposureRow(proof.key);return this.exposureCurrent(body.id)&&mediaHash(proof)===mediaHash(this.exposureProof(body))
     &&current(this.source(body.sourceId).description)&&body.assets.every(ref=>current(this.sourceForAsset(ref.id).description));}catch{return false;}}
   abortJob(access:MediaAccess,id:string,code:string){if(!/^[A-Z0-9_]{1,100}$/.test(code))throw new Error('INVALID_INPUT');this.db.prepare("UPDATE media_jobs SET state='failed',error=? WHERE id=? AND scope_key=? AND operation_id=? AND state='running'").run(code,id,scopeKey(access.execution.view.scope),access.execution.operationId);}
