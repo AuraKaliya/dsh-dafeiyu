@@ -8,9 +8,12 @@ export function reconcileMedia(core:DafeiyuService,media:MediaService,qqDirector
     return media.reconcile(manifest=>{try{if(manifest.anchor.kind==='activity-result')return 'conflict';const item=core.deliveryFact(manifest.anchor.inboundId);if(item.sourceMessageId!==manifest.sourceMessageId||runtimeHash(item.target)!==runtimeHash(manifest.target))return 'conflict';
       const transport=readQqMediaDelivery(qqDirectory,manifest.replyId),progress=transport?.progress;
       if(transport&&runtimeHash(transport.manifest)!==runtimeHash(manifest))return 'conflict';
-      if(progress?.state==='sent')return 'sent';if(progress&&(progress.unknown||progress.confirmed||progress.state==='sending'))return 'unknown';
-      if(manifest.anchor.kind==='task-result'){const native=core.messageTaskDeliveryStatus(manifest.runId);if(!native)return 'conflict';if(['uncertain','partial'].includes(native.state))return 'unknown';if(['rejected','interrupted','not-sent'].includes(native.state))return 'blocked';if(native.state==='sent')return 'conflict';}
-      else{if(!item.reply||item.reply.id!==manifest.replyId||item.reply.textHash!==manifest.textHash)return 'conflict';if(item.state==='uncertain')return 'unknown';if(item.state==='failed')return 'blocked';if(item.state==='delivered')return 'conflict';}
+      if(progress?.state==='sent')return 'sent';if(progress&&(progress.unknown||progress.state==='sending'))return 'unknown';
+      if(manifest.anchor.kind==='task-result'){const native=core.messageTaskDeliveryStatus(manifest.runId);if(!native)return 'conflict';if(native.state==='uncertain')return 'unknown';
+        if(native.state==='partial')return progress&&progress.pending>0&&Date.parse(manifest.expiresAt)>Date.now()?'pending':'unknown';
+        if(native.state==='not-sent')return Date.parse(manifest.expiresAt)>Date.now()?'pending':'blocked';
+        if(['rejected','interrupted'].includes(native.state))return 'blocked';if(native.state==='sent')return 'conflict';}
+      else{if(progress?.confirmed)return 'unknown';if(!item.reply||item.reply.id!==manifest.replyId||item.reply.textHash!==manifest.textHash)return 'conflict';if(item.state==='uncertain')return 'unknown';if(item.state==='failed')return 'blocked';if(item.state==='delivered')return 'conflict';}
       return Date.parse(manifest.expiresAt)<=Date.now()?'blocked':'pending';
     }catch{return 'conflict';}});
 }

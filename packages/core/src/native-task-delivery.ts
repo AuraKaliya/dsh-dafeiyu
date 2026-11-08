@@ -2,13 +2,14 @@ import type { Context } from '@deepseek-ai/cordis';
 import {withRunUsage,withUsageContext} from './usage.js';
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
 import { NativeExpressionPacketSchema,NativeVerificationFeedbackSchema,ContextItemSchema,conversationKey,qqVisibleText,redactJson,DELIVERY_MAX_DRAFTS } from '@dafeiyu/contracts';
-import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply,Conversation } from '@dafeiyu/contracts';
+import type { NativeExpressionAccess,NativeExpressionPort,PendingMessage,TaskResultAnchor,ContextItem,ContextRequest,MediaPort,MediaReplyAccess,MediaReplyAuthority,Reply,Conversation,TaskProgress } from '@dafeiyu/contracts';
+import {taskFailureNotice} from './task-progress.js';
 import type { ContextCoordinator } from './context.js';
 import type { RuntimeStore } from './runtime-store.js';
 import type { DeliveryChannel } from './delivery-channel.js';
 import type { FeedbackLedger } from './feedback-ledger.js';
 import { nativeDeliveryHash } from './native-delivery-store.js';
-import { renderTaskResult,renderPublicProgress } from './target-renderer.js';
+import { renderTaskResult } from './target-renderer.js';
 import type {DeliveryRepair} from './target-renderer.js';
 import { readPersistedResult } from './agent-session.js';
 import { z } from 'zod';
@@ -18,6 +19,7 @@ interface Host {ctx:Context;store:RuntimeStore;contexts:ContextCoordinator;cwd:s
   describe(runId:string):{item:PendingMessage|null;anchor:TaskResultAnchor;autoDeliver:boolean|undefined}|null;
   access(runId:string):Promise<NativeExpressionAccess>;expression():NativeExpressionPort|undefined;
   validateRecovery(runId:string):void;
+  progressView(runId:string):TaskProgress;dispatchFeedback():Promise<number>;
   persona(item:PendingMessage,id:string,signal:AbortSignal,guard:()=>void):{text:string;foundationHash:string;stamp:string;items:readonly ContextItem[];guard():void};
   model():AgentOptions;channel(item:PendingMessage):DeliveryChannel|null;accepting():boolean;flush():void;
   activityChannel?(target:Conversation):DeliveryChannel|null;
@@ -50,9 +52,9 @@ export class NativeTaskDelivery {
     }
     const rows=this.host.store.nativeDeliveries.recent(request.conversation).filter(row=>conversationKey(scope.agentId,row.anchor.target)===scope.route);
     for(const row of rows){try{
-      const status=this.host.store.nativeDeliveries.status(row.runId);if(status&&terminal.has(row.state)&&row.state!=='sent'){
+      const status=this.status(row.runId);if(status&&terminal.has(row.state)&&row.state!=='sent'){
         const item=ContextItemSchema.parse({id:`native-status:${row.id}`,version:String(row.version),text:JSON.stringify({kind:'task-delivery-status',...status,note:'程序交付事实；不包含结果正文，不能由运行结束推断已送达。'}),expiresAt:'9999-12-31T23:59:59.999Z',sources:[{ref:`dafeiyu:native-status:${row.id}`,version:String(row.version),hash:nativeDeliveryHash(status)}]});
-        views.set(item.id,{hash:nativeDeliveryHash(item),guard:()=>{this.host.contexts.scopeFor(request);if(nativeDeliveryHash(this.host.store.nativeDeliveries.status(row.runId))!==nativeDeliveryHash(status))throw new Error('SOURCE_STALE');}});items.push(item);continue;}
+        views.set(item.id,{hash:nativeDeliveryHash(item),guard:()=>{this.host.contexts.scopeFor(request);if(nativeDeliveryHash(this.status(row.runId))!==nativeDeliveryHash(status))throw new Error('SOURCE_STALE');}});items.push(item);continue;}
       const provider=this.host.expression();if(!provider?.ready()||!row.material)continue;const access=await this.host.access(row.runId);request.signal.throwIfAborted();const packet=provider.open(access,row.material.packetId,'context');
       const guard=()=>{this.host.contexts.scopeFor(request);if(this.host.expression()!==provider||this.host.store.nativeDeliveries.get(row.runId)?.state!=='sent')throw new Error('SOURCE_STALE');access.guard();if(provider.open(access,packet.id,'context').sourceStamp!==row.material!.sourceStamp)throw new Error('SOURCE_STALE');};guard();
       const body=this.host.store.nativeDeliveries.verifyCredential(row.runId),characters=Array.from(body),excerpt=characters.slice(0,1000).join('');
@@ -66,18 +68,18 @@ export class NativeTaskDelivery {
     if(automatic&&!description.autoDeliver)return Promise.resolve(null);if(!automatic&&!this.host.accepting())throw new Error('HOST_NOT_READY');
     const record=this.host.store.nativeDeliveries.create(description.anchor);this.host.flush();
     const recovery=this.host.store.nativeDeliveries.pendingRecovery(runId);
-    if(recovery&&['sent','partial','uncertain'].includes(record.state)){
+    if(recovery&&['sent','uncertain'].includes(record.state)){
       this.host.store.nativeDeliveries.settleRecovery(runId,recovery.requestId,record.state==='sent'?null:'DELIVERY_EFFECT_UNCERTAIN');this.host.flush();
-      return Promise.resolve(this.host.store.nativeDeliveries.status(runId));
+      return Promise.resolve(this.status(runId));
     }
-    const pending=this.active.get(runId);if(pending)return pending;if(terminal.has(record.state)&&!this.host.store.nativeDeliveries.pendingRecovery(runId)||!this.host.accepting())return Promise.resolve(this.host.store.nativeDeliveries.status(runId));
+    const pending=this.active.get(runId);if(pending)return pending;if(terminal.has(record.state)&&!this.host.store.nativeDeliveries.pendingRecovery(runId)||!this.host.accepting())return Promise.resolve(this.status(runId));
     const work=withRunUsage(receipt=>this.host.store.modelUsage.external(runId,receipt),()=>this.execute(runId,description.item,automatic),{runId,phase:'rendering'}).finally(()=>this.active.delete(runId));this.active.set(runId,work);return work;
   }
   requestRecovery(runId:string,input:unknown){
     if(!this.host.accepting())throw new Error('HOST_NOT_READY');
     const description=this.host.describe(runId);if(!description?.item)throw new Error('MESSAGE_REQUIRED');
     this.host.validateRecovery(runId);
-    const receipt=this.host.store.nativeDeliveries.requestRecovery(runId,input);this.host.flush();
+    const receipt=this.host.store.nativeDeliveries.requestRecovery(runId,input,this.deliveryCounts(runId));this.host.flush();
     const schedule=()=>{if(this.host.accepting()&&this.host.store.nativeDeliveries.pendingRecovery(runId))void this.request(runId).catch(error=>{
       if(this.host.accepting()){this.host.store.nativeDeliveries.settleRecovery(runId,receipt.requestId,code(error));this.host.flush();}
     });};
@@ -85,41 +87,38 @@ export class NativeTaskDelivery {
     return receipt;
   }
   activate(){for(const runId of this.host.store.nativeDeliveryCandidates())if(this.host.describe(runId)?.autoDeliver)void this.request(runId,true).catch(()=>{});
-    for(const runId of this.host.store.nativeDeliveries.pendingRecoveries())void this.request(runId).catch(error=>{const pending=this.host.store.nativeDeliveries.pendingRecovery(runId);if(pending){this.host.store.nativeDeliveries.settleRecovery(runId,pending.requestId,code(error));this.host.flush();}});}
+    for(const runId of this.host.store.nativeDeliveries.pendingRecoveries())void this.request(runId).catch(error=>{const pending=this.host.store.nativeDeliveries.pendingRecovery(runId);if(pending){this.host.store.nativeDeliveries.settleRecovery(runId,pending.requestId,code(error));this.host.flush();}});
+    for(const runId of this.host.store.statusNoticeCandidates())void this.progress(runId).catch(()=>{});
+  }
   async whenIdle(){while(this.active.size||this.notices.size)await Promise.allSettled([...this.active.values(),...this.notices.values()]);}
   get pending(){return this.active.size+this.notices.size;}
+  status(runId:string){
+    let counts:unknown;try{counts=this.deliveryCounts(runId);}catch{counts={unavailable:true};}
+    const status=this.host.store.nativeDeliveries.status(runId,counts);
+    if(status?.recovery.available)try{this.host.validateRecovery(runId);}catch{return {...status,recovery:{...status.recovery,available:false,reason:'DELIVERY_SOURCE_UNAVAILABLE'}};}
+    return status;
+  }
+  deliveryCounts(runId:string){const row=this.host.store.nativeDeliveries.get(runId),description=this.host.describe(runId);if(!row||!description)return null;
+    const channel=description.item?this.host.channel(description.item):this.host.activityChannel?.(row.anchor.target);
+    const progress=channel?.capability.deliveryProgress?.('native-delivery:'+row.id);
+    return progress&&progress.total!==undefined&&progress.sending!==undefined&&progress.receiptIds?{total:progress.total,confirmed:progress.confirmed,pending:progress.pending,sending:progress.sending,unknown:progress.unknown,receiptIds:[...progress.receiptIds]}:null;
+  }
   progress(runId:string):Promise<import('@dafeiyu/contracts').Json>{const existing=this.notices.get(runId);if(existing)return existing;const work=withRunUsage(receipt=>this.host.store.modelUsage.external(runId,receipt),()=>this.statusNotice(runId),{runId,phase:'feedback'}).finally(()=>this.notices.delete(runId));this.notices.set(runId,work);return work;}
-  private failureSummary(code:string|null):string{switch(code){case 'MODEL_INCOMPLETE':return '模型本轮没有正常收尾，不能据此认定平台连接失败';case 'MODEL_TRANSPORT':case 'MODEL_HTTP_503':return '模型连接暂时失败，已经重试当前请求；之前执行的工具回执仍保留';case 'SOURCE_VALIDATION_FAILED':case 'SOURCE_STALE':return '执行中引用的资料失效，需要重新核对后再继续';case 'SEGMENT_LIMIT_REACHED':case 'READING_CONTEXT_CAPACITY':return '该历史运行触及旧版阅读限制，不能据此判断当前平台连接';case 'CAPACITY_EXCEEDED':return '待执行任务的队列暂时已满，不能据此判断模型上下文或平台连接';case 'MODEL_CONTEXT_CAPACITY':return '模型实际共享窗口不足，工作已保存，须从有效检查点接续或分块读取';default:return '任务执行中断，已经完成的工作仍保留';}}
   private async statusNotice(runId:string):Promise<import('@dafeiyu/contracts').Json>{
-    const source=this.host.feedbackSource(runId);if(!source||this.host.signal.aborted)return {status:'not-sent',code:'STATUS_SOURCE_UNAVAILABLE'};
-    const channel=this.host.channel(source.item);if(!channel)return {status:'not-sent',code:'STATUS_CHANNEL_UNAVAILABLE'};
-    const signal=AbortSignal.any([this.host.signal,channel.signal,AbortSignal.timeout(this.host.ctx.dafeiyu.phaseTimeouts().feedback)]);
-    const guard=()=>{signal.throwIfAborted();const current=this.host.feedbackSource(runId);if(!current||current.state!==source.state||this.host.channel(source.item)?.identity!==channel.identity)throw new Error('SOURCE_STALE');};
-    const failed=source.state==='failed',noticeId=`${runId}-${source.state}`,failure=failed?{code:source.error??'EXECUTION_FAILED',summary:this.failureSummary(source.error),completed:source.operations.filter(op=>op.state==='finished'&&op.status==='succeeded').length,unknown:source.operations.filter(op=>op.effects==='unknown').length}:null;
-    let invoked=false;
-    try{guard();const persona=this.host.persona(source.item,runId,signal,guard),result=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,noticeId,persona.text,persona.items,
-      {target:source.item.message.conversation,taskId:source.taskId,runId,inboundId:source.item.id,question:failed?'向原会话说明这次卡在哪里、已经做到什么、接下来怎么办。':'向原会话说明本次工作当前有必要了解的状态。',taskState:source.state,evidence:[{id:'STATE',kind:'reported',text:JSON.stringify({state:source.state,error:source.error,failure,operations:source.operations,scope:'program-status-only',note:'仅是程序状态，不包含工具正文，也不代表目标满足。不要说任务已完成或结果已发送；不要输出内部错误码。'})}]},signal,()=>{guard();persona.guard();},32000,this.host.ctx.dafeiyu.contextBudget().maxTokens);
-      let feedbackId:string|undefined;
-      try{feedbackId=this.host.feedback?.queue({workItemId:runId,route:source.item.route,kind:'must-know',text:result.text,dueAt:new Date().toISOString(),
-        sourceMessageId:source.item.id,taskId:source.taskId,runId,intentVersion:this.host.store.get(runId).definition.intentVersion}).id;}catch{/* Status delivery remains authoritative if the ledger write fails. */}
-      const feedbackDeliveryId=feedbackId?`feedback:${feedbackId}:direct`:undefined;
-      if(feedbackId&&feedbackDeliveryId){try{if(this.host.feedback?.claim(feedbackId,source.item.route,feedbackDeliveryId)===null)return {status:'unknown' as const,code:'FEEDBACK_ALREADY_CLAIMED'};}catch{return {status:'unknown' as const,code:'FEEDBACK_CLAIM_FAILED'};}}
-      const receipt=await this.host.enqueue(source.item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'task-status:'+noticeId,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text:result.text},signal,()=>{guard();persona.guard();});});
-      this.host.notice({item:source.item,text:result.text,deliveryId:'task-status:'+noticeId,status:receipt.status,kind:failed?'failure':'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{code:receipt.code})});
-      if(feedbackId&&feedbackDeliveryId){try{this.host.feedback?.settle(feedbackId,source.item.route,feedbackDeliveryId,receipt.status,receipt.status==='sent'?receipt.receiptId:undefined,receipt.status==='sent'?undefined:receipt.code);}catch{/* The sent notice above is still the continuity record. */}}
-      invoked=true;this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status});this.host.flush();return z.json().parse(receipt);
-    }catch{
-      if(invoked)return {status:'unknown',code:'STATUS_EVENT_FAILED'};
-      try{guard();const text=failed?'我这边卡住了，任务先停在当前进度；已经完成的部分和记录都还在，我换个办法再继续。':'我这边暂时停一下，已经完成的部分和记录都还在。';
-        const receipt=await this.host.enqueue(source.item.route,async()=>{guard();return channel.capability.deliver({id:`task-status-fallback:${runId}:${source.state}`,conversation:source.item.message.conversation,sourceMessageId:source.item.message.id,text},signal,()=>guard());});
-        this.host.notice({item:source.item,text,deliveryId:`task-status-fallback:${runId}:${source.state}`,status:receipt.status,kind:failed?'failure':'progress',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{code:receipt.code})});
-        this.host.store.appendExecutionEvent(runId,'task.feedback',{status:receipt.status,fallback:true});this.host.flush();return z.json().parse(receipt);
-      }catch{return {status:'not-sent',code:'STATUS_NOT_SENT'};}
-    }
+    if(!this.host.accepting()||!this.host.feedback)return {status:'not-sent',code:'STATUS_LEDGER_UNAVAILABLE'};
+    const source=this.host.feedbackSource(runId);if(!source)return {status:'not-sent',code:'STATUS_SOURCE_UNAVAILABLE'};
+    const progress=this.host.progressView(runId),text=taskFailureNotice(progress);
+    if(!text)return {status:'not-sent',code:'STATUS_NOTICE_NOT_REQUIRED'};
+    const record=this.host.feedback.queue({workItemId:runId,route:source.item.route,kind:'must-know',text,
+      sourceMessageId:source.item.id,taskId:source.taskId,runId,intentVersion:this.host.store.get(runId).definition.intentVersion,
+      dueAt:new Date().toISOString(),statusVersion:progress.version});
+    await this.host.dispatchFeedback();
+    const current=this.host.feedback.pending(source.item.route,Date.now(),true).find(row=>row.id===record.id);
+    return {feedbackId:record.id,state:current?.state??'unavailable',statusVersion:progress.version};
   }
   close(){this.unregister();}
   private async execute(runId:string,item:PendingMessage|null,notify:boolean){const release=await this.host.acquire(),deadlineAt=performance.now()+this.host.timeoutMs,recovery=this.host.store.nativeDeliveries.pendingRecovery(runId);let recoveryError:string|null=null,stage='source-admission',invoked=false,signal=AbortSignal.any([this.host.signal,AbortSignal.timeout(this.host.timeoutMs)]),mediaAccess:MediaReplyAccess|undefined,mediaId:string|undefined,media:MediaPort|undefined;
-    try{let record=this.host.store.nativeDeliveries.get(runId)!;if(terminal.has(record.state)&&!recovery)return this.host.store.nativeDeliveries.status(runId);
+    try{let record=this.host.store.nativeDeliveries.get(runId)!;if(terminal.has(record.state)&&!recovery)return this.status(runId);
       if(!this.host.accepting())throw new Error('DELIVERY_HOST_QUIESCING');
       const access=await this.host.access(runId),provider=this.host.expression(),target=record.anchor.target,route=conversationKey(access.execution.view.scope.agentId,target),channelAt=()=>item?this.host.channel(item):this.host.activityChannel?.(target)??null,channel=channelAt();
       if(!provider?.ready()||!channel?.capability.deliverTaskResult)throw new Error('DEPENDENCY_UNAVAILABLE');
@@ -128,13 +127,13 @@ export class NativeTaskDelivery {
       if(nativeDeliveryHash(record.anchor)!==nativeDeliveryHash(access.anchor)||item&&route!==item.route)throw new Error('DELIVERY_BINDING_CONFLICT');
       stage='packet-prepare';const packet=NativeExpressionPacketSchema.parse(record.material?provider.open(access,record.material.packetId):provider.prepare(access));
       if(nativeDeliveryHash(packet.anchor)!==nativeDeliveryHash(record.anchor))throw new Error('DELIVERY_BINDING_CONFLICT');
-      const guardMaterial=()=>{signal.throwIfAborted();if(!this.host.accepting())throw new Error('DELIVERY_HOST_QUIESCING');access.guard();if(this.host.expression()!==provider||!provider.ready()||channelAt()?.identity!==channel.identity)throw new Error('DEPENDENCY_UNAVAILABLE');
+      const guardMaterial=()=>{signal.throwIfAborted();if(!this.host.accepting())throw new Error('DELIVERY_HOST_QUIESCING');if(recovery)this.host.validateRecovery(runId);access.guard();if(this.host.expression()!==provider||!provider.ready()||channelAt()?.identity!==channel.identity)throw new Error('DEPENDENCY_UNAVAILABLE');
         if(provider.open(access,packet.id).sourceStamp!==packet.sourceStamp||Date.parse(record.anchor.expiresAt)<=Date.now())throw new Error('SOURCE_STALE');};
       stage='persona-prepare';const persona=item?this.host.persona(item,record.id,signal,guardMaterial):this.host.activityPersona?.(runId,signal,guardMaterial);if(!persona)throw new Error('DEPENDENCY_UNAVAILABLE');
       const model=this.host.model(),material={packetId:packet.id,sourceStamp:packet.sourceStamp,foundationHash:persona.foundationHash,personaHash:persona.stamp,modelHash:nativeDeliveryHash(model),...(packet.media?{mediaStamp:packet.media.sourceStamp}:{})};
       const guard=()=>{persona.guard();if(nativeDeliveryHash(this.host.model())!==material.modelHash)throw new Error('SOURCE_STALE');};guard();
       if(recovery){if(nativeDeliveryHash(record.material)!==nativeDeliveryHash(material))throw new Error('SOURCE_STALE');
-        if(record.state!=='ready')record=this.host.store.nativeDeliveries.beginRecovery(runId,recovery.requestId);this.host.flush();}
+        if(record.state!=='ready')record=this.host.store.nativeDeliveries.beginRecovery(runId,recovery.requestId,this.deliveryCounts(runId));this.host.flush();}
       if(record.state==='accepted'){
         this.host.store.nativeDeliveries.start(runId,material);this.host.flush();
         const completed=this.host.store.get(runId);
@@ -172,17 +171,21 @@ export class NativeTaskDelivery {
         const sendMedia=channel.capability.deliverMedia.bind(channel.capability);
         const draft=media.replyDraft(runId);if(!draft||draft.id!==packet.media.draftId||draft.version!==packet.media.draftVersion)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaAccess=await this.host.mediaAccess(draft.authority,reply,signal);
         const manifest=await media.finalizeReply(mediaAccess);if(!manifest)throw new Error('MEDIA_DRAFT_AUTHORITY_MISMATCH');mediaId=manifest.id;const authorized=()=>{guard();mediaAccess!.guard();if(this.host.media()!==media)throw new Error('SOURCE_STALE');media!.validateReply!(mediaAccess!,manifest.id);};authorized();
-        result=await this.host.enqueue(route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();authorized();};check();this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
-          return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),sending,check,position=>{check();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));});
+        result=await this.host.enqueue(route,async()=>{const sending=AbortSignal.any([signal,AbortSignal.timeout(this.host.sendTimeoutMs)]),check=()=>{sending.throwIfAborted();authorized();};
+          try{check();}catch{return {status:'not-sent' as const,code:'SOURCE_STALE'};}
+          this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;
+          try{return resultSchema.parse(await sendMedia(structuredClone({...reply,media:manifest}),sending,check,position=>{check();return media!.readReplyPart!(mediaAccess!,manifest.id,position);}));}
+          catch{return {status:'unknown' as const,code:'MEDIA_DELIVERY_UNKNOWN'};}});
       }else{result=await this.host.enqueue(route,async()=>{
         const writeBudget=new AbortController(),sending=AbortSignal.any([signal,writeBudget.signal]),check=()=>{sending.throwIfAborted();guard();};let timer:ReturnType<typeof setTimeout>|undefined,remaining=this.host.sendTimeoutMs,active=false;
+        try{check();}catch{return {status:'not-sent' as const,code:'SOURCE_STALE'};}
         const begin=()=>{check();if(active||remaining<=0||deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');
           if(!invoked){this.host.store.nativeDeliveries.sending(runId);this.host.flush();}if(deadlineAt-performance.now()<remaining)throw new Error('DELIVERY_BUDGET_EXHAUSTED');
           const started=performance.now();timer=setTimeout(()=>writeBudget.abort(new DOMException('Task result write timed out','TimeoutError')),remaining);active=true;invoked=true;let ended=false;
           return ()=>{if(ended)return;ended=true;if(timer)clearTimeout(timer);timer=undefined;remaining=Math.max(0,remaining-(performance.now()-started));active=false;};};
         this.host.store.appendExecutionEvent(runId,'native.delivery.preflight',{deferredWriteBudget:true,writeTimeoutMs:this.host.sendTimeoutMs});this.host.flush();
-        try{const outcome=resultSchema.parse(await sendTaskResult(reply,record.anchor,sending,check,begin));
-          if(!invoked&&outcome.status!=='not-sent'){if(this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;throw new Error('DELIVERY_DISPATCH_NOT_NOTIFIED');}return outcome;
+        try{let outcome:z.infer<typeof resultSchema>;try{outcome=resultSchema.parse(await sendTaskResult(reply,record.anchor,sending,check,begin));}catch{outcome={status:'unknown',code:'DELIVERY_TRANSPORT_UNKNOWN'};}
+          if(!invoked&&outcome.status!=='not-sent'){if(this.host.store.nativeDeliveries.get(runId)?.state==='ready')this.host.store.nativeDeliveries.sending(runId);this.host.flush();invoked=true;return {status:'unknown' as const,code:'DELIVERY_DISPATCH_NOT_NOTIFIED'};}return outcome;
         }finally{if(timer)clearTimeout(timer);}
       });}
       const progress=!item&&!packet.media?channel.capability.deliveryProgress?.(reply.id):null;
@@ -200,24 +203,16 @@ export class NativeTaskDelivery {
       else if(record&&!terminal.has(record.state)){
         if(!this.host.accepting()&&record.state==='ready'&&!invoked){/* Sealed and definitely not dispatched: startup can send this exact body. */}
         else if(signal.aborted||!this.host.accepting())this.host.store.nativeDeliveries.interrupt(runId);else this.host.store.nativeDeliveries.reject(runId,code(error));}
-    }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');}catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
+    }finally{try{if(mediaAccess&&mediaId&&media?.settleReply){const state=this.host.store.nativeDeliveries.get(runId)?.state;try{
+        const pending=this.host.store.nativeDeliveries.recoveryView(runId,true,this.deliveryCounts(runId));
+        if(pending.available&&pending.phase==='sending')this.host.store.appendExecutionEvent(runId,'native.delivery.media-pending',{manifestId:mediaId,reason:'known-unsent-parts'});
+        else media.settleReply(mediaAccess,mediaId,state==='sent'?'sent':state==='uncertain'||state==='partial'?'unknown':'blocked');
+      }catch{this.host.store.nativeDeliveries.mediaSettlementPending(runId,mediaId);}}}
       finally{if(mediaAccess)media?.releaseReply?.(mediaAccess);mediaAccess?.release();release();if(recovery&&this.host.accepting()&&!this.host.signal.aborted)this.host.store.nativeDeliveries.settleRecovery(runId,recovery.requestId,recoveryError);this.host.flush();}}
     const status=this.host.store.nativeDeliveries.get(runId);if(item&&notify&&status&&['rejected','interrupted','not-sent'].includes(status.state))await withUsageContext({runId,phase:'feedback'},()=>this.feedback(item,runId));
-    return this.host.store.nativeDeliveries.status(runId);
+    return this.status(runId);
   }
-  private async feedback(item:PendingMessage,runId:string){
-    if(this.host.signal.aborted||!this.host.accepting())return;
-    const row=this.host.store.nativeDeliveries.get(runId),channel=this.host.channel(item);if(!row||!channel||row.error==='SOURCE_STALE')return;const sendAttempted=this.host.store.nativeDeliveries.sendAttempted(runId);
-    const signal=AbortSignal.any([this.host.signal,channel.signal,AbortSignal.timeout(30000)]);
-    const guard=()=>{signal.throwIfAborted();const description=this.host.describe(runId);if(!description||description.item?.id!==item.id||this.host.channel(item)?.identity!==channel.identity||this.host.store.nativeDeliveries.get(runId)?.version!==row.version)throw new Error('SOURCE_STALE');};
-    try{guard();const persona=this.host.persona(item,row.id,signal,guard),message=await renderPublicProgress(this.host.ctx,this.host.model(),this.host.cwd,row.id,persona.text,persona.items,
-      {target:row.anchor.target,taskId:row.anchor.taskId,runId,inboundId:item.id,question:'向原会话说明本次任务的实际交付状态及当前限制。',taskState:row.state,
-        evidence:[{id:'STATUS',kind:'reported',text:JSON.stringify({state:row.state,error:row.error,resultWasSent:false,sendAttempted,workPreserved:true,
-          phase:sendAttempted?'transport':row.error?.startsWith('DELIVERY_VERIFICATION_')||row.error==='DELIVERY_UNFAITHFUL'?'verification':'pre-send',
-          note:sendAttempted?'发送渠道确认未送达；内部工作保留。仅说明状态，不复述草稿。':'回复在发送前被拒绝或中断，未尝试发送，不能描述为已发送但回执不明。须先解决核验或准备失败并重新核验，不能建议直接重发未核验草稿。内部工作保留；仅说明状态，不复述草稿。'})}]},signal,()=>{guard();persona.guard();},32000,this.host.ctx.dafeiyu.contextBudget().maxTokens);
-      const receipt=await this.host.enqueue(item.route,async()=>{guard();persona.guard();return channel.capability.deliver({id:'native-status:'+row.id,conversation:row.anchor.target,sourceMessageId:item.message.id,text:message.text},signal,()=>{guard();persona.guard();});});
-      this.host.notice({item,text:message.text,deliveryId:'native-status:'+row.id,status:receipt.status,kind:'failure',...(receipt.status==='sent'?{receiptId:receipt.receiptId}:{code:receipt.code})});
-      this.host.store.appendExecutionEvent(runId,'native.delivery.feedback',{status:receipt.status});this.host.flush();
-    }catch{/* The original delivery state remains authoritative; never resend its rejected body. */}
+  private async feedback(_item:PendingMessage,runId:string){
+    try{await this.statusNotice(runId);}catch{/* A durable claim, if created, remains authoritative. No alternate sender. */}
   }
 }

@@ -9,7 +9,7 @@ export const managementDefinitions=[
       {
         "id": "tasks",
         "title": "任务详情",
-        "description": "执行结果与交付分别显示。生成或核验中断可请求继续交付，仍核对当前授权与来源；暂停与取消通过运行引擎提交。",
+        "description": "目标判断、执行阶段和实际交付使用同一进度视图。可恢复的生成、核验及确定未发部分可继续；未知回执不自动重发。",
         "fields": [],
         "panel": "tasks"
       },

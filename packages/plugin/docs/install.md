@@ -123,7 +123,7 @@ npm install --prefix $deployDir --omit=dev --ignore-scripts --no-audit --no-fund
 
 ## 8. 升级与回退
 
-当前 B站库为 v6，运行库为 v5，活动库和媒体库均为 v4。新建库直接创建当前版本。已存在的受支持旧库使用：
+当前 B站库为 v6，运行库为 v6，活动库和媒体库均为 v4。新建库直接创建当前版本。已存在的受支持旧库使用：
 
 ```powershell
 & $nodeExe "$deployDir/bin/dafeiyu.mjs" migrate --settings $settingsFile
@@ -143,7 +143,7 @@ npm install --prefix $deployDir --omit=dev --ignore-scripts --no-audit --no-fund
 
 ## 0.28 升级与长任务
 
-当前版本使用 API 8 与 runtime 数据库 v5；B站数据库为 v6。0.28.8 的生成/核验恢复复用现有事件表，已有 v5 不需结构升级，扩展须随包统一更新。其它受支持旧库仍使用发布包的显式迁移命令：迁移会检查身份、数据库完整性和占用，备份后逐表核对行数与内容摘要。不得直接修改 `user_version`。回退须同时恢复备份程序、配置和匹配数据库。
+当前版本使用 API 9 与 runtime 数据库 v6；B站数据库为 v6。0.28.9 复用现有状态及事件记录，增加任务与运行事件查询索引，并以 runtime v6 阻止旧程序误读新增发送恢复记录。已有 v5 及其它受支持旧库必须使用发布包的显式迁移命令，扩展随包统一更新。迁移会检查身份、数据库完整性和占用，备份后逐表核对行数与内容摘要。不得直接修改 `user_version`。回退须同时恢复备份程序、配置和匹配数据库。
 
 安装配置只保留一个模型容量入口：`contextCapacity: {"maxTokens": 1000000}`。阅读阶段用 `dsh_tool_list` 查参数，`dsh_tool_read` 执行宿主允许的只读工具，`dsh_result_read` 续读已有结果；本阶段不会取得 shell 或安装权限。已有任务的补充、确认和进度询问使用意图入口关联原任务，不把“可以”建立为新目标。
 

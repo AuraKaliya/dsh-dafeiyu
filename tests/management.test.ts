@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {ManagementRequestSchema,API_VERSION,OBSERVATION_EVIDENCE_RULES} from '@dafeiyu/contracts';
+import {ManagementRequestSchema,API_VERSION,OBSERVATION_EVIDENCE_RULES,TASK_PROGRESS_RULE} from '@dafeiyu/contracts';
 import {ManagementSettings} from '../packages/plugin/lib/management-settings.js';
 import {managementModules} from '../packages/plugin/lib/management-catalog.js';
 import {promptCatalog} from '../packages/plugin/lib/prompt-catalog.js';
@@ -20,6 +20,7 @@ test('management has one strict protocol and source-owned single-purpose groups'
   assert.equal(new Set(paths).size,paths.length);assert.ok(managementModules.some(module=>module.id==='bilibili'));
   assert.ok(paths.includes('contextCapacity.maxTokens'),'The unified million-token capacity must be editable in the management UI');
   assert.ok(promptCatalog.some(prompt=>prompt.id==='dafeiyu-execution-rules'&&prompt.text.includes('上下文快照')));
+  assert.ok(promptCatalog.some(prompt=>prompt.id==='dafeiyu-execution-rules'&&prompt.text.includes(TASK_PROGRESS_RULE)));
   assert.equal(promptCatalog.find(prompt=>prompt.id==='dafeiyu-observation-limits')?.text,OBSERVATION_EVIDENCE_RULES);
   assert.equal(promptCatalog.find(prompt=>prompt.id==='DELIVERY_VERIFICATION_INSTRUCTIONS')?.text,DELIVERY_VERIFICATION_INSTRUCTIONS);
 });

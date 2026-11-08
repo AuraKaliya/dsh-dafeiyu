@@ -9,7 +9,7 @@ import {eventFor} from '@dafeiyu/journal';
 import type {Journal,NewEvent} from '@dafeiyu/journal';
 import {DshRunError} from './runtime.js';
 import type {DshRuntime} from './runtime.js';
-import {renderConversationRecovery,decidePendingReplies} from './conversation-recovery.js';
+import {decidePendingReplies} from './conversation-recovery.js';
 import {renderPublicProgress} from './target-renderer.js';
 import {prepareReplySources,prepareCapturedReplySources} from './reply-sources.js';
 import {runtimeHash} from './runtime-store.js';
@@ -104,14 +104,8 @@ export class ConversationCoordinator {
     const signal=AbortSignal.any([this.controller.signal,channel.signal,AbortSignal.timeout(60000)]),id=randomUUID();
     const guard=()=>{signal.throwIfAborted();if(!this.accepting||this.deliveryChannel(item)?.identity!==channel.identity||this.journal.messageRecalled({agentId:this.config.agentId,route:item.route},item.message.id))throw new Error('SOURCE_STALE');this.messageProcessingSignal(item.id)?.throwIfAborted();};
     try{guard();}catch{return;}
-    const events=this.journal.eventsForTrace(item.route,item.id),operations=events.filter(e=>e.type==='operation.started').map(e=>({id:e.operationId,action:typeof e.data.action==='string'?e.data.action:'unknown',state:events.findLast(end=>end.operationId===e.operationId&&end.type!=='operation.started')?.type??'unknown'}));
     this.journal.append(this.event(item,'recovery.notice.started',{noticeId:id,code:failure,phase:'recovery'}));
-    let text=`【系统状态】刚才的处理未完成（${failure}），进度和已有操作记录已保存；没有自动重做已执行的操作。`,fallback=true,next='wait';
-    try{const persona=this.targetPersona(item,id,signal,guard),renderSignal=AbortSignal.any([signal,AbortSignal.timeout(20000)]);
-      const failedRun=this.runStore?.findRequest('conversation',item.id)?.runId;
-      const decision=await withUsageContext({...(failedRun?{runId:failedRun}:{}),phase:'recovery'},()=>renderConversationRecovery(this.ctx,this.recoveryModel(),this.config.dataDir,id,persona.text,persona.items,{question:item.message.mainText??item.message.text,failureCode:failure,operations,originalTurn:'failed',automaticReplay:false},renderSignal,()=>{guard();persona.guard();}));
-      text=decision.message;next=decision.next;fallback=false;
-    }catch{if(signal.aborted)return;}
+    const text='刚才的对话处理未完成，进度和已有操作记录已保存。'+(/MODEL_/.test(failure)?'本次模型调用未成功。':'')+'我没有因这次故障自动重做已有操作；恢复后可以继续。',fallback=true,next='wait';
     try{guard();}catch{return;}this.journal.append(this.event(item,'recovery.notice.prepared',{noticeId:id,next,fallback}));
     this.journal.append(this.event(item,'recovery.notice.sending',{noticeId:id}));
     try{const result=await channel.capability.deliver({id:`recovery-notice:${item.id}`,conversation:item.message.conversation,sourceMessageId:item.message.id,text},signal,guard);

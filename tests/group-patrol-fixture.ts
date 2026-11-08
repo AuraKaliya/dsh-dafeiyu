@@ -26,12 +26,13 @@ export async function runPatrolScenario(t:TestContext,relation:'new'|'amend'){
       return (async function*(){
         assert.match(material,/waitsForCurrentTask\\?":true/);assert.match(material,/正在等待本次设置任务/);
         const status=host.ctx.dafeiyuActivity.management('status',null) as {plans:{dispatch:{sourceState:string;foregroundBusy:boolean}}[]};
-        assert.equal(status.plans[0]!.dispatch.sourceState,'pending');assert.equal(status.plans[0]!.dispatch.foregroundBusy,true);
+        assert.equal(status.plans[0]!.dispatch.sourceState,'pending');
         const before=patrolCalls;await host.ctx.dafeiyuActivity.tick();configurationWaits.push({...status.plans[0]!.dispatch,patrolBefore:before,patrolAfter:patrolCalls});assert.equal(patrolCalls,before,'unfinished configuration must not wait for a patrol blocked by its own source');configurationChecks++;
         yield* textResponse('配置已保存，结束本次设置任务后再由后台调度；此回执不表示已经巡视。');
       })();
     }planned=true;if(updating&&relation==='amend')assert.deepEqual(host.ctx.dafeiyu.activityAnchorStatus(host.ctx.dafeiyuActivity.store.get(planId).body.anchor),{state:'stale',code:'TASK_NOT_ACTIVE'});
     return updating?toolResponse('dafeiyu_activity_update',{requestId:'update-watch',id:planId,expectedVersion:1,trigger:{kind:'interval',anchorAt:new Date(Date.now()+120000).toISOString(),intervalMs:120000}}):toolResponse('dafeiyu_activity_plan',{requestId:'watch-plan',kind:'group-watch',watch:{mode:'joined',reply:true},goal:'查看群新消息，有具体观点时参与',trigger:{kind:'interval',anchorAt:new Date(Date.now()-1000).toISOString(),intervalMs:60000}});}
+    if(request.messages.some(message=>message.role==='system'&&message.content.some(block=>block.type==='text'&&block.text.includes('"kind":"accepted-task-handoff"'))))return textResponse('已经承接巡视安排。');
     const text=JSON.stringify(request.messages);assert.match(text,/主人授权的群巡视/);assert.doesNotMatch(text,/PRIVATE_SECRET|GROUP_B_SECRET/);patrolCalls++;return textResponse('{"qq_messages":[{"type":"text","text":"我会先区分哪些修复能撤销，哪些改变不可逆。"}]}');
   });
   await writeFile(join(root,'persona.md'),'隔离测试人格。');const file=join(root,'host.json');

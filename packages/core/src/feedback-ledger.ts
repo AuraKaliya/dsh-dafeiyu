@@ -22,6 +22,8 @@ export interface FeedbackInput {
   /** For worth-sharing/progress: after this the item is no longer worth saying. */
   readonly expiresAt?: string;
   readonly sourceEventId?: string;
+  /** Program-owned task status identity. Repeated observation must not create another notice. */
+  readonly statusVersion?: string;
 }
 
 export interface FeedbackRecord extends FeedbackInput {
@@ -30,6 +32,7 @@ export interface FeedbackRecord extends FeedbackInput {
   readonly createdAt: string;
   readonly attempts: number;
   readonly deliveryId?: string;
+  readonly receiptId?: string;
 }
 
 const inputSchema = z.strictObject({
@@ -44,6 +47,7 @@ const inputSchema = z.strictObject({
   dueAt: z.iso.datetime({offset: true}).optional(),
   expiresAt: z.iso.datetime({offset: true}).optional(),
   sourceEventId: z.uuid().optional(),
+  statusVersion: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 });
 const queuedSchema = inputSchema.extend({id: z.uuid(), createdAt: z.iso.datetime({offset: true})});
 const terminalSchema = z.strictObject({feedbackId: z.uuid(), deliveryId: z.string().min(1).max(300).optional(), receiptId: z.string().min(1).max(300).optional()});
@@ -66,8 +70,8 @@ export class FeedbackLedger {
     const input = inputSchema.parse({...raw, text: redactContent(raw.text).value.slice(0, 4000)});
     if (!input.text) throw new Error('FEEDBACK_EMPTY');
     if (input.kind === 'must-know' && !input.dueAt) throw new Error('FEEDBACK_DUE_REQUIRED');
-    const existing = this.pending(input.route, this.now(), true).find(item => (item.state === 'pending' || item.state === 'sending') &&
-      item.workItemId === input.workItemId && item.kind === input.kind && hash(item.text) === hash(input.text));
+    const existing = this.pending(input.route, this.now(), true).find(item => item.workItemId === input.workItemId && item.kind === input.kind &&
+      (input.statusVersion!==undefined?item.statusVersion===input.statusVersion:(item.state === 'pending' || item.state === 'sending') && hash(item.text) === hash(input.text)));
     if (existing) return existing;
     const record: FeedbackRecord = {
       id: randomUUID(),
@@ -85,6 +89,7 @@ export class FeedbackLedger {
       ...(input.dueAt ? {dueAt: input.dueAt} : {}),
       ...(input.expiresAt ? {expiresAt: input.expiresAt} : {}),
       ...(input.sourceEventId ? {sourceEventId: input.sourceEventId} : {}),
+      ...(input.statusVersion ? {statusVersion: input.statusVersion} : {}),
     };
     this.append(record.id, {
       route: record.route,
@@ -105,6 +110,7 @@ export class FeedbackLedger {
         ...(record.dueAt ? {dueAt: record.dueAt} : {}),
         ...(record.expiresAt ? {expiresAt: record.expiresAt} : {}),
         ...(record.sourceEventId ? {sourceEventId: record.sourceEventId} : {}),
+        ...(record.statusVersion ? {statusVersion: record.statusVersion} : {}),
       },
     });
     return record;
@@ -133,6 +139,7 @@ export class FeedbackLedger {
           ...(data.dueAt ? {dueAt: data.dueAt} : {}),
           ...(data.expiresAt ? {expiresAt: data.expiresAt} : {}),
           ...(data.sourceEventId ? {sourceEventId: data.sourceEventId} : {}),
+          ...(data.statusVersion ? {statusVersion: data.statusVersion} : {}),
         });
         continue;
       }
@@ -169,7 +176,7 @@ export class FeedbackLedger {
       if (!parsed.success) continue;
       const record = records.get(parsed.data.feedbackId);
       if (!record) continue;
-      if (event.type === 'feedback.sent') records.set(record.id, {...record, state: 'sent', ...(parsed.data.deliveryId ? {deliveryId: parsed.data.deliveryId} : {})});
+      if (event.type === 'feedback.sent') records.set(record.id, {...record, state: 'sent', ...(parsed.data.deliveryId ? {deliveryId: parsed.data.deliveryId} : {}),...(parsed.data.receiptId?{receiptId:parsed.data.receiptId}:{})});
       else if (event.type === 'feedback.expired') records.set(record.id, {...record, state: 'expired'});
       else if (event.type === 'feedback.superseded') records.set(record.id, {...record, state: 'superseded'});
     }
@@ -208,12 +215,19 @@ export class FeedbackLedger {
 
   /** Settle a claimed delivery by its actual outcome. unknown never returns to pending. */
   settle(id: string, route: string, deliveryId: string, outcome: 'sent' | 'not-sent' | 'unknown', receiptId?: string, code?: string): void {
+    const record=this.pending(route,this.now(),true).find(row=>row.id===id);
+    if(record?.state==='sent')return;
+    if(!record||!['sending','unknown'].includes(record.state)||record.deliveryId!==deliveryId)throw new Error('FEEDBACK_CLAIM_MISMATCH');
+    if(outcome==='sent'&&!receiptId)throw new Error('FEEDBACK_RECEIPT_REQUIRED');
     if (outcome === 'sent') this.markSent(id, deliveryId, route, receiptId);
     else if (outcome === 'not-sent') this.release(id, route, code ?? 'NOT_SENT');
     else this.markUnknown(id, deliveryId, route, code ?? 'DELIVERY_UNKNOWN');
   }
 
   markUnknown(id: string, deliveryId: string, route: string, code: string): void {
+    const record=this.pending(route,this.now(),true).find(row=>row.id===id);
+    if(!record||record.state==='sent'||record.state==='unknown')return;
+    if(record.state!=='sending'||record.deliveryId!==deliveryId)throw new Error('FEEDBACK_CLAIM_MISMATCH');
     this.append(randomUUID(), {route, traceId: id, operationId: id, type: 'feedback.unknown',
       data: {feedbackId: id, deliveryId, code: code.slice(0, 120)}});
   }
@@ -231,11 +245,15 @@ export class FeedbackLedger {
   unknownRecords(): FeedbackRecord[] {
     return this.routes().flatMap(route => this.pending(route, this.now(), true)).filter(record => record.state === 'unknown');
   }
+  recoverSending():void {
+    for(const route of this.routes())for(const record of this.pending(route,this.now(),true))if(record.state==='sending'&&record.deliveryId)
+      this.markUnknown(record.id,record.deliveryId,route,'PROCESS_INTERRUPTED');
+  }
 
   /** A definite not-sent result returns the obligation to pending for a later attempt. */
   release(id: string, route: string, reason: string): void {
     const record = this.pending(route, this.now(), true).find(item => item.id === id);
-    if (!record) return;
+    if (!record||['sent','expired','superseded'].includes(record.state)) return;
     this.append(randomUUID(), {route, traceId: id, operationId: id, type: 'feedback.released',
       data: {feedbackId: id, reason: reason.slice(0, 120), attempt: Math.max(1, record.attempts)}});
   }
@@ -253,7 +271,7 @@ export class FeedbackLedger {
   }
 
   private terminal(id: string, route: string, type: string, data: Record<string, string>): void {
-    z.uuid().parse(id);
+    z.uuid().parse(id);terminalSchema.parse(data);
     this.append(randomUUID(), {route, traceId: id, operationId: id, type, data});
   }
 

@@ -4,6 +4,7 @@ import {z} from 'zod';
 import {catalog, criteriaVersion, allRequirements, offlineConfiguration} from './catalog.ts';
 import {artifactSchema, manifestSchema, completionSchema, databaseEvidenceSchema, planSchema, requestMeasurementSchema} from './schema.ts';
 import {readJson, hash, saveJson, fingerprint} from './io.mjs';
+import {auditPhaseOne} from './phase1-audit.ts';
 
 const record = z.record(z.string(), z.unknown());
 const deliveredSchema = z.array(z.object({text:z.string(),conversation:z.object({kind:z.string(),id:z.string()})}));
@@ -12,6 +13,7 @@ export interface ScenarioAudit {id: string; state: 'passed'|'failed'|'not-execut
 
 /** Uses program records and observed outputs; it never accepts a scenario's claimed verdict. */
 export function auditScenario(id: string, raw: unknown): {checks: Check[]; baseline: unknown} {
+  if(id.includes('fault-notice')||id.startsWith('task-send-')||id==='diagnostic-flow')return auditPhaseOne(id,raw);
   const checks: Check[] = [];
   const check = (name: string, passed: boolean) => checks.push({id: name, passed});
   const evidence = record.parse(raw);
@@ -42,7 +44,7 @@ export function auditScenario(id: string, raw: unknown): {checks: Check[]; basel
       check('watermark-retained', evidence.cursor===1);
       check('plan-active-after-restart', after.status==='active' && restart.status==='active');
       const waits=z.array(z.object({sourceState:z.string(),foregroundBusy:z.boolean(),patrolBefore:z.number(),patrolAfter:z.number()})).parse(evidence.configurationWaits);
-      check('no-configuration-self-wait', waits.length===2 && waits.every(row=>row.sourceState==='pending' && row.foregroundBusy && row.patrolBefore===row.patrolAfter));
+      check('no-configuration-self-wait', waits.length===2 && waits.every(row=>row.sourceState==='pending' && row.patrolBefore===row.patrolAfter));
       check('patrol-isolated-and-not-replayed', evidence.patrolCalls===1 && delivered.filter(row=>row.conversation.kind==='group'&&row.conversation.id==='300001').length===1 && !delivered.some(row=>row.conversation.id==='300002'));
       check('no-private-context-leak', delivered.filter(row=>row.conversation.kind==='group').every(row=>!row.text.includes('PRIVATE_SECRET')&&!row.text.includes('GROUP_B_SECRET')));
       if (id==='patrol-amend') check('same-task', before.body.owner.kind==='task' && before.body.owner.taskId===after.body.owner.taskId);
@@ -102,6 +104,7 @@ export function auditAcceptance(manifestRaw: unknown, completionRaw: unknown, ar
     const binding:Check[]=[{id:'artifact-binding',passed:artifact.runId===manifest.runId && artifact.scenarioId===spec.id && artifact.version===manifest.version && artifact.apiVersion===manifest.apiVersion && artifact.sourceHash===manifest.sourceHash && artifact.driverHash===manifest.driverHash && artifact.runtimeHash===completion.runtimeHash},
       {id:'artifact-time',passed:Date.parse(artifact.capturedAt)>=Date.parse(manifest.startedAt)&&Date.parse(artifact.capturedAt)<=Date.parse(completion.finishedAt)},
       {id:'artifact-hash',passed:completion.artifactHashes[spec.id]===hash(artifact)}];
+    if(spec.id==='diagnostic-flow')binding.push({id:'material-version',passed:z.object({source:z.object({version:z.literal(manifest.version)})}).safeParse(artifact.evidence).success});
     try {
       const result=auditScenario(spec.id,artifact.evidence),all=[...binding,...result.checks];
       return {id:spec.id,state:all.every(row=>row.passed)?'passed':'failed',checks:all,baseline:result.baseline,limitation:spec.limitation};

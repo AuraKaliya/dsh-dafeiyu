@@ -12,7 +12,7 @@ import { NativeDeliveryStore } from './native-delivery-store.js';
 import {UsageLedger} from './usage-ledger.js';
 
 export const RUNTIME_APPLICATION_ID = 0x44465232;
-export const RUNTIME_SCHEMA_VERSION = 5;
+export const RUNTIME_SCHEMA_VERSION = 6;
 const key = z.string().regex(/^[a-zA-Z0-9._:-]{1,160}$/), hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const shareSchema=z.strictObject({id:z.uuid(),runId:z.uuid(),target:ConversationSchema,policyHash:hashSchema,notBefore:z.number().int().nonnegative(),expiresAt:z.iso.datetime(),createdAt:z.iso.datetime()});
 export const RuntimeIdentitySchema = z.strictObject({ agentId: z.string().min(1).max(100), profileId: key });
@@ -215,6 +215,8 @@ export class RuntimeStore {
     return this.db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key WHERE r.rowid IN (SELECT max(rowid) FROM runs WHERE json_extract(definition,'$.taskId') IS NOT NULL GROUP BY json_extract(definition,'$.taskId')) AND json_extract(q.body,'$.messageSource.conversation.channel')=? AND json_extract(q.body,'$.messageSource.conversation.account')=? AND json_extract(q.body,'$.messageSource.conversation.kind')=? AND json_extract(q.body,'$.messageSource.conversation.id')=? ORDER BY r.rowid DESC LIMIT ? OFFSET ?")
       .all(scene.channel,scene.account,scene.kind,scene.id,limit,offset).map(row=>this.get(string(row.id)));}
   nativeDeliveryCandidates():string[]{this.open();return this.db.prepare("SELECT r.id FROM runs r JOIN execution_requests q ON q.id=r.request_key LEFT JOIN native_deliveries d ON d.run_id=r.id WHERE r.state IN ('completed','waiting') AND (json_extract(q.body,'$.messageSource.schemaVersion')=1 OR EXISTS(SELECT 1 FROM native_share_requests s WHERE s.run_id=r.id)) AND (d.id IS NULL OR d.state IN ('accepted','ready')) ORDER BY r.rowid").all().map(row=>string(row.id));}
+  statusNoticeCandidates():string[]{this.open();return this.db.prepare("SELECT DISTINCT r.id FROM runtime_outbox o JOIN runs r ON r.id=json_extract(o.body,'$.runId') LEFT JOIN native_deliveries d ON d.run_id=r.id WHERE json_extract(o.body,'$.type')='task.status.notice-required' AND json_extract(o.body,'$.data.runVersion')=r.version AND (json_extract(o.body,'$.data.deliveryVersion') IS NULL OR json_extract(o.body,'$.data.deliveryVersion')=d.version)").all().map(row=>string(row.id));}
+  latestTaskRun(taskId:string):string|null{this.open();const row=this.db.prepare("SELECT id FROM runs WHERE json_extract(definition,'$.taskId')=? ORDER BY rowid DESC LIMIT 1").get(z.uuid().parse(taskId));return row?string(row.id):null;}
   session(keyValue:string):string {key.parse(keyValue);return this.transaction(()=>{const old=this.db.prepare('SELECT session_id FROM execution_sessions WHERE session_key=?').get(keyValue);if(old)return string(old.session_id);const id=`dafeiyu-task-${randomUUID()}`;this.db.prepare('INSERT INTO execution_sessions VALUES(?,?)').run(keyValue,id);return id;});}
   transition(id:string,expectedVersion:number,to:RunState,error:string|null=null):StoredRun{if(to==='running'||to==='completed')throw new Error('USE_DEDICATED_TRANSITION');return this.transaction(()=>this.transitionInside(id,expectedVersion,to,error));}
   private transitionInside(id:string,version:number,to:RunState,error:string|null=null):StoredRun {

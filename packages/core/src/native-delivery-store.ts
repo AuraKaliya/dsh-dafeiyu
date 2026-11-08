@@ -1,7 +1,7 @@
 import { createHash,randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { TaskResultAnchorSchema,DeliveryRecoveryRequestSchema,DeliveryRecoveryReceiptSchema,DELIVERY_MAX_DRAFTS,NativeVerificationFeedbackSchema } from '@dafeiyu/contracts';
+import { TaskResultAnchorSchema,DeliveryRecoveryRequestSchema,DeliveryRecoveryReceiptSchema,DELIVERY_MAX_DRAFTS,NativeVerificationFeedbackSchema,TaskDeliveryCountsSchema } from '@dafeiyu/contracts';
 import type { Json,TaskResultAnchor,Conversation,DeliveryRecoveryView } from '@dafeiyu/contracts';
 const canonical=(value:Json):string=>value===null||typeof value!=='object'?JSON.stringify(value):Array.isArray(value)?`[${value.map(canonical).join(',')}]`:`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key]!)}`).join(',')}}`;
 export const nativeDeliveryHash=(value:unknown)=>createHash('sha256').update(canonical(z.json().parse(value))).digest('hex');
@@ -27,14 +27,23 @@ export class NativeDeliveryStore {
   pendingRecovery(runId:string){const settled=new Set(this.events(runId,'native.delivery.recovery.settled').map(row=>row.requestId));
     return this.events(runId,'native.delivery.recovery.requested').map(data=>DeliveryRecoveryReceiptSchema.parse(data)).find(row=>!settled.has(row.requestId))??null;}
   pendingRecoveries(){return this.list().flatMap(row=>this.pendingRecovery(row.runId)?[row.runId]:[]);}
-  recoveryView(runId:string,ignorePending=false):DeliveryRecoveryView {
+  recoveryView(runId:string,ignorePending=false,transport:unknown=null):DeliveryRecoveryView {
     const row=this.get(runId),work=this.work(runId),pending=this.pendingRecovery(runId);
-    const phase=work.candidate?'verification' as const:'rendering' as const;
+    const sendPhase=!!row&&['not-sent','partial'].includes(row.state),counts=TaskDeliveryCountsSchema.safeParse(transport);
+    const phase=sendPhase?'sending' as const:work.candidate?'verification' as const:'rendering' as const;
     let reason:string|null=null;
-    if(!row||row.anchor.kind!=='task-result'||!['rejected','interrupted'].includes(row.state))reason='DELIVERY_RECOVERY_STATE';
-    else if(this.sendAttempted(runId)||row.credential||row.renderRef)reason='DELIVERY_RECOVERY_AFTER_DISPATCH';
+    if(!row||row.anchor.kind!=='task-result'||!['rejected','interrupted','not-sent','partial'].includes(row.state))reason='DELIVERY_RECOVERY_STATE';
     else if(!row.material)reason='DELIVERY_RECOVERY_MATERIAL_MISSING';
     else if(Date.parse(row.anchor.expiresAt)<=Date.now())reason='DELIVERY_RECOVERY_EXPIRED';
+    else if(sendPhase){
+      if(!row.credential||!row.renderRef||!row.body)reason='DELIVERY_RECOVERY_NOT_APPROVED';
+      else if(transport!==null&&!counts.success)reason='DELIVERY_RECEIPTS_INVALID';
+      else if(counts.success&&(counts.data.unknown>0||counts.data.sending>0))reason='DELIVERY_EFFECT_UNCERTAIN';
+      else if(counts.success&&counts.data.pending===0)reason='DELIVERY_NO_PENDING_PARTS';
+      else if(row.state==='partial'&&!counts.success)reason='DELIVERY_PART_RECEIPTS_REQUIRED';
+      else try{this.verifyCredential(runId);}catch{reason='DELIVERY_CREDENTIAL_INVALID';}
+    }
+    else if(this.sendAttempted(runId)||row.credential||row.renderRef)reason='DELIVERY_RECOVERY_AFTER_DISPATCH';
     else if(!work.candidate&&work.draftCount>=DELIVERY_MAX_DRAFTS)reason='DELIVERY_REPAIR_EXHAUSTED';
     else if(!['NATIVE_DELIVERY_FAILED','MODEL_INCOMPLETE','DEPENDENCY_UNAVAILABLE','DELIVERY_RENDER_TIMEOUT','DELIVERY_RENDER_ALREADY_EXISTS','PROCESS_INTERRUPTED','DELIVERY_CANCELLED',
       'DELIVERY_VERIFICATION_TIMEOUT','DELIVERY_VERIFICATION_MODEL_ERROR','DELIVERY_VERIFICATION_ABORTED','DELIVERY_VERIFICATION_INVALID_RESULT','DELIVERY_VERIFICATION_MAX_TOKENS'].includes(row.error??''))reason='DELIVERY_RECOVERY_FAILURE_NOT_RETRYABLE';
@@ -42,23 +51,23 @@ export class NativeDeliveryStore {
     const last=this.events(runId,'native.delivery.recovery.settled').at(-1);
     return {available:reason===null,phase:reason===null?phase:null,reason,pendingRequestId:pending?.requestId??null,lastError:typeof last?.error==='string'?last.error:null,draftCount:work.draftCount};
   }
-  requestRecovery(runId:string,raw:unknown){const input=DeliveryRecoveryRequestSchema.parse(raw);return this.atomic(()=>{
+  requestRecovery(runId:string,raw:unknown,transport:unknown=null){const input=DeliveryRecoveryRequestSchema.parse(raw);return this.atomic(()=>{
     const prior=this.recoveryReceipt(runId,input.requestId);
     if(prior){if(prior.expectedVersion!==input.expectedVersion)throw new Error('IDEMPOTENCY_CONFLICT');return prior;}
     const row=this.get(runId);if(!row||row.version!==input.expectedVersion)throw new Error('DELIVERY_RECOVERY_VERSION_CONFLICT');
-    const view=this.recoveryView(runId);if(!view.available||!view.phase)throw new Error(view.reason??'DELIVERY_RECOVERY_DENIED');
-    const receipt=DeliveryRecoveryReceiptSchema.parse({...input,runId,deliveryId:row.id,phase:view.phase,requestedAt:new Date().toISOString()});
+    const view=this.recoveryView(runId,false,transport);if(!view.available||!view.phase)throw new Error(view.reason??'DELIVERY_RECOVERY_DENIED');
+    const receipt=DeliveryRecoveryReceiptSchema.parse({...input,runId,deliveryId:row.id,phase:view.phase,transportCounts:view.phase==='sending'?transport:null,requestedAt:new Date().toISOString()});
     this.event(runId,'native.delivery.recovery.requested',receipt);return receipt;
   });}
-  beginRecovery(runId:string,requestId:string){return this.atomic(()=>{
+  beginRecovery(runId:string,requestId:string,transport:unknown=null){return this.atomic(()=>{
     const pending=this.pendingRecovery(runId),row=this.get(runId);
     if(!row||pending?.requestId!==requestId)throw new Error('DELIVERY_RECOVERY_REQUEST_MISSING');
     const started=this.events(runId,'native.delivery.recovery.started').some(value=>value.requestId===requestId);
     if(!started&&row.version!==pending.expectedVersion)throw new Error('DELIVERY_RECOVERY_VERSION_CONFLICT');
-    const view=this.recoveryView(runId,true);if(!view.available)throw new Error(view.reason??'DELIVERY_RECOVERY_DENIED');
+    const view=this.recoveryView(runId,true,transport);if(!view.available)throw new Error(view.reason??'DELIVERY_RECOVERY_DENIED');
     // Preserve the failure, material, candidate, anchor and original Run. Only the stage advances.
-    this.event(runId,'native.delivery.recovery.started',{requestId,from:row.state,previousVersion:row.version,previousError:row.error,phase:view.phase});
-    return this.advance(runId,row.state,view.phase==='verification'?'verifying':'rendering');
+    this.event(runId,'native.delivery.recovery.started',{requestId,from:row.state,previousVersion:row.version,previousError:row.error,phase:view.phase,transportCounts:view.phase==='sending'?z.json().parse(transport):null});
+    return this.advance(runId,row.state,view.phase==='sending'?'ready':view.phase==='verification'?'verifying':'rendering');
   });}
   settleRecovery(runId:string,requestId:string,error:string|null=null){this.atomic(()=>{
     const pending=this.pendingRecovery(runId);if(pending?.requestId!==requestId)return;
@@ -96,5 +105,5 @@ export class NativeDeliveryStore {
   counts(){const values=new Map(this.db.prepare('SELECT state,count(*) AS n FROM native_deliveries GROUP BY state').all().map(row=>[stateSchema.parse(row.state),Number(row.n)])),sum=(states:readonly NativeDeliveryState[])=>states.reduce((n,state)=>n+(values.get(state)??0),0);
     return {total:[...values.values()].reduce((a,b)=>a+b,0),pending:sum(['accepted','rendering','verifying','ready','sending']),sent:sum(['sent']),partial:sum(['partial']),uncertain:sum(['uncertain']),blocked:sum(['not-sent','rejected','interrupted'])};}
   mediaSettlementPending(runId:string,manifestId:string){z.uuid().parse(manifestId);this.atomic(()=>{const row=this.get(runId);if(!row)throw new Error('DELIVERY_STATE_CONFLICT');this.event(runId,'native.delivery.media-settlement-pending',{manifestId,state:row.state});});}
-  status(runId:string){const row=this.get(runId);return row?{deliveryId:row.id,runId:row.runId,taskId:row.anchor.taskId,state:row.state,version:row.version,receiptId:row.receipt,error:row.error,recovery:this.recoveryView(runId)}:null;}
+  status(runId:string,transport:unknown=null){const row=this.get(runId);return row?{deliveryId:row.id,runId:row.runId,taskId:row.anchor.taskId,state:row.state,version:row.version,receiptId:row.receipt,error:row.error,recovery:this.recoveryView(runId,false,transport)}:null;}
 }

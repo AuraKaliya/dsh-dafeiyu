@@ -40,14 +40,71 @@ module.exports = __toCommonJS(index_exports);
 // packages/core/client/management.js
 var import_react = __toESM(require("react"), 1);
 var h = import_react.default.createElement;
+function TaskProgressSummary({ progress }) {
+  if (!progress) return null;
+  return h(
+    "section",
+    { className: "df-task-progress" },
+    h("p", null, "\u76EE\u6807\uFF1A" + progress.labels.goal),
+    h("p", null, "\u6267\u884C\uFF1A" + progress.labels.execution),
+    h("p", null, "\u4EA4\u4ED8\uFF1A" + progress.labels.delivery),
+    progress.delivery.counts && h("p", null, "\u7ED3\u679C\u5206\u6BB5\uFF1A\u5DF2\u786E\u8BA4 " + progress.delivery.counts.confirmed + " / " + progress.delivery.counts.total + "\uFF0C\u5F85\u53D1\u9001 " + progress.delivery.counts.pending + "\uFF0C\u56DE\u6267\u672A\u77E5 " + progress.delivery.counts.unknown + "\u3002"),
+    progress.blocked.reason && h("p", null, progress.blocked.reason),
+    progress.next.label && h("p", null, progress.next.label),
+    progress.facts.plans.length > 0 && h("p", null, "\u5DF2\u53D6\u5F97\u8BA1\u5212\u914D\u7F6E\u4FDD\u5B58\u56DE\u6267\uFF1B\u914D\u7F6E\u4FDD\u5B58\u4E0D\u4EE3\u8868\u540E\u53F0\u5DF2\u7ECF\u6267\u884C\u3002"),
+    progress.facts.inspection.catalogCalls + progress.facts.inspection.dispatchCalls + progress.facts.inspection.failedCalls > 0 && h(
+      "p",
+      null,
+      "\u5DE5\u5177\u76EE\u5F55\u67E5\u8BE2 " + progress.facts.inspection.catalogCalls + " \u6B21\uFF0C\u5B9E\u9645\u5BBF\u4E3B\u5DE5\u5177\u8C03\u7528 " + progress.facts.inspection.dispatchCalls + " \u6B21\uFF0C\u5DF2\u53D6\u5F97\u7ED3\u679C " + progress.facts.inspection.resultReads + " \u9875\uFF1B\u7ED3\u679C\u4E0E\u7ED3\u8BBA\u4ECD\u9700\u5BF9\u5E94\u3002"
+    ),
+    progress.facts.inspection.failedCommands > 0 && h("p", null, "\u6709 " + progress.facts.inspection.failedCommands + " \u6B21\u547D\u4EE4\u8FD4\u56DE\u5931\u8D25\uFF0C\u4E0D\u80FD\u636E\u6B64\u5BA3\u79F0\u68C0\u67E5\u6210\u529F\u3002")
+  );
+}
 function TaskPanel({ call, perform, ui: { Button: Button2, Detail: Detail2 } }) {
   const [rows, setRows] = import_react.default.useState(null), [offset, setOffset] = import_react.default.useState(0), [detail, setDetail] = import_react.default.useState(null);
   const load = async () => setRows(await call("list", { offset }));
-  return h("div", null, h(Button2, { onClick: () => perform(load) }, "\u8BFB\u53D6\u4EFB\u52A1\u5217\u8868"), ...(rows ?? []).map((row) => h("article", { key: row.id, className: "df-record" }, h("strong", null, row.id), h("p", null, `${row.state} \xB7 ${row.updatedAt}`), h(Button2, { onClick: () => perform(async () => setDetail(await call("detail", { id: row.id }))) }, "\u67E5\u770B\u8BE6\u60C5"))), rows?.length === 0 && h("p", null, "\u5F53\u524D\u6CA1\u6709\u4EFB\u52A1\u8BB0\u5F55\u3002"), h("div", { className: "df-actions" }, h(Button2, { disabled: offset === 0, onClick: () => setOffset(Math.max(0, offset - 50)) }, "\u4E0A\u4E00\u9875"), h("span", null, `\u8D77\u59CB\u8BB0\u5F55 ${offset + 1}\uFF0C\u70B9\u51FB\u8BFB\u53D6\u5237\u65B0`), h(Button2, { disabled: (rows?.length ?? 0) < 50, onClick: () => setOffset(offset + 50) }, "\u4E0B\u4E00\u9875")), detail && h("div", { className: "df-editor" }, h("h3", null, "\u4EFB\u52A1\u8BE6\u60C5"), ...[["\u6982\u51B5", detail.run], ["\u6267\u884C\u8BB0\u5F55\u4E0E\u56DE\u6267", detail.operations], ["\u4E1A\u52A1\u7ED3\u679C\uFF08\u4E0D\u4EE3\u8868\u5DF2\u6838\u9A8C\u6216\u9001\u8FBE\uFF09", detail.result ?? "\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u4E1A\u52A1\u7ED3\u679C"], ["\u7ED3\u679C\u4EA4\u4ED8", detail.delivery ?? "\u5C1A\u672A\u521B\u5EFA\u4EA4\u4ED8\u8BB0\u5F55"], ["\u81EA\u4E3B\u53CD\u601D", detail.experience ?? "\u6CA1\u6709\u5BF9\u5E94\u7684\u660E\u786E\u53CD\u601D\u8BB0\u5F55"], ["\u7528\u91CF\u8BB0\u5F55", detail.usage ?? "\u7528\u91CF\u5F85\u6838\u5B9E"], ["\u4E0A\u4E0B\u6587\u4E0E\u68C0\u67E5\u70B9", detail.status]].map(([title, value]) => h(Detail2, { key: title, title, value })), h("div", { className: "df-actions" }, ...(detail.allowedActions ?? []).map((action) => h(Button2, { key: action, onClick: () => perform(async () => {
-    await call(action, { id: detail.run.id, expectedVersion: action === "resume-delivery" ? detail.delivery.version : detail.run.version, requestId: crypto.randomUUID() });
-    setDetail(await call("detail", { id: detail.run.id }));
-    await load();
-  }) }, { pause: "\u8BF7\u6C42\u6682\u505C", cancel: "\u8BF7\u6C42\u53D6\u6D88", resume: "\u4ECE\u68C0\u67E5\u70B9\u7EE7\u7EED", "resume-delivery": "\u7EE7\u7EED\u751F\u6210\u6216\u6838\u9A8C\u7ED3\u679C" }[action]))), h(Button2, { onClick: () => setDetail(null) }, "\u6536\u8D77\u8BE6\u60C5")));
+  const actionLabels = { pause: "\u8BF7\u6C42\u6682\u505C", cancel: "\u8BF7\u6C42\u53D6\u6D88", resume: "\u4ECE\u68C0\u67E5\u70B9\u7EE7\u7EED", "resume-delivery": "\u7EE7\u7EED\u7ED3\u679C\u4EA4\u4ED8" };
+  return h(
+    "div",
+    null,
+    h(Button2, { onClick: () => perform(load) }, "\u8BFB\u53D6\u4EFB\u52A1\u5217\u8868"),
+    ...(rows ?? []).map((row) => h(
+      "article",
+      { key: row.id, className: "df-record" },
+      h("strong", null, row.id),
+      row.progress ? h(TaskProgressSummary, { progress: row.progress }) : h("p", null, "\u5BF9\u8BDD\u6267\u884C\u8BB0\u5F55 \xB7 " + row.state + " \xB7 " + row.updatedAt),
+      h(Button2, { onClick: () => perform(async () => setDetail(await call("detail", { id: row.id }))) }, "\u67E5\u770B\u8BE6\u60C5")
+    )),
+    rows?.length === 0 && h("p", null, "\u5F53\u524D\u6CA1\u6709\u4EFB\u52A1\u8BB0\u5F55\u3002"),
+    h(
+      "div",
+      { className: "df-actions" },
+      h(Button2, { disabled: offset === 0, onClick: () => setOffset(Math.max(0, offset - 50)) }, "\u4E0A\u4E00\u9875"),
+      h("span", null, "\u8D77\u59CB\u8BB0\u5F55 " + (offset + 1) + "\uFF0C\u70B9\u51FB\u8BFB\u53D6\u5237\u65B0"),
+      h(Button2, { disabled: (rows?.length ?? 0) < 50, onClick: () => setOffset(offset + 50) }, "\u4E0B\u4E00\u9875")
+    ),
+    detail && h(
+      "div",
+      { className: "df-editor" },
+      h("h3", null, "\u4EFB\u52A1\u8BE6\u60C5"),
+      h(TaskProgressSummary, { progress: detail.progress }),
+      ...[
+        ["\u6982\u51B5", detail.run],
+        ["\u6267\u884C\u8BB0\u5F55\u4E0E\u56DE\u6267", detail.operations],
+        ["\u4E1A\u52A1\u7ED3\u679C\uFF08\u4E0D\u4EE3\u8868\u5DF2\u6838\u9A8C\u6216\u9001\u8FBE\uFF09", detail.result ?? "\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u4E1A\u52A1\u7ED3\u679C"],
+        ["\u7ED3\u679C\u4EA4\u4ED8", detail.delivery ?? "\u5C1A\u672A\u521B\u5EFA\u4EA4\u4ED8\u8BB0\u5F55"],
+        ["\u81EA\u4E3B\u53CD\u601D", detail.experience ?? "\u6CA1\u6709\u5BF9\u5E94\u7684\u660E\u786E\u53CD\u601D\u8BB0\u5F55"],
+        ["\u7528\u91CF\u8BB0\u5F55", detail.usage ?? "\u7528\u91CF\u5F85\u6838\u5B9E"],
+        ["\u4E0A\u4E0B\u6587\u4E0E\u68C0\u67E5\u70B9", detail.status]
+      ].map(([title, value]) => h(Detail2, { key: title, title, value })),
+      h("div", { className: "df-actions" }, ...(detail.allowedActions ?? []).map((action) => h(Button2, { key: action, onClick: () => perform(async () => {
+        await call(action, { id: detail.run.id, expectedVersion: action === "resume-delivery" ? detail.delivery.version : detail.run.version, requestId: crypto.randomUUID() });
+        setDetail(await call("detail", { id: detail.run.id }));
+        await load();
+      }) }, actionLabels[action]))),
+      h(Button2, { onClick: () => setDetail(null) }, "\u6536\u8D77\u8BE6\u60C5")
+    )
+  );
 }
 var managementPanels = [{ id: "tasks", component: TaskPanel }];
 
@@ -644,7 +701,7 @@ function createManagementApp(request) {
     const [view, setView] = import_react8.default.useState(null), [tab, setTab] = import_react8.default.useState("overview"), [selected, setSelected] = import_react8.default.useState(null), [busy, setBusy] = import_react8.default.useState(false), [notice, setNotice] = import_react8.default.useState(""), [drafts, setDrafts] = import_react8.default.useState({}), [foundation, setFoundation] = import_react8.default.useState(null);
     const describeSequence = import_react8.default.useRef(createSequenceGuard());
     const send = (body) => request(body).then(unwrapResponse);
-    const invoke = async (body) => send({ apiVersion: 8, ...body });
+    const invoke = async (body) => send({ apiVersion: 9, ...body });
     const refresh = async () => {
       const token = describeSequence.current.issue();
       const value = await invoke({ kind: "describe" });
@@ -15231,7 +15288,7 @@ async function apply(ctx) {
       throw new Error(result.error.code);
     return JSON.parse(result.value);
   };
-  const App = createManagementApp((body) => request({ apiVersion: 8, ...body }));
+  const App = createManagementApp((body) => request({ apiVersion: 9, ...body }));
   ctx.effect(() => {
     const style = document.createElement("style");
     style.textContent = style_default;

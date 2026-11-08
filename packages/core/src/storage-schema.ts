@@ -45,4 +45,10 @@ CREATE TRIGGER message_intent_retain BEFORE DELETE ON message_intents BEGIN SELE
 export function createStorageSchemaV3(db:DatabaseSync):void {createStorageSchemaV2(db);addIntentReceiptsSchema(db);}
 export function addActivitySharesSchema(db:DatabaseSync):void {db.exec('CREATE TABLE native_share_requests(id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),dedupe_key TEXT NOT NULL UNIQUE,body TEXT NOT NULL);');}
 export function createStorageSchemaV4(db:DatabaseSync):void {createStorageSchemaV3(db);addActivitySharesSchema(db);}
-export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV4(db);addModelUsageSchema(db);}
+export function createStorageSchemaV5(db:DatabaseSync):void {createStorageSchemaV4(db);addModelUsageSchema(db);}
+/** v6 also fences the expanded persisted delivery/notification contracts from older readers. */
+export function addTaskStatusIndexes(db:DatabaseSync):void {db.exec(`
+CREATE INDEX runtime_outbox_run_type ON runtime_outbox(json_extract(body,'$.runId'),json_extract(body,'$.type'),ordinal);
+CREATE INDEX runtime_runs_task ON runs(json_extract(definition,'$.taskId'));
+`);}
+export function createStorageSchema(db:DatabaseSync):void {createStorageSchemaV5(db);addTaskStatusIndexes(db);}

@@ -94,3 +94,11 @@ test('a definite not-sent result returns to pending and stops after three attemp
     rmSync(root,{recursive:true,force:true});
   }
 });
+
+test('a thrown channel result becomes unknown rather than an alternate send',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'dafeiyu-feedback-throw-')),journal=new Journal(join(root,'journal.sqlite'));
+  try{const ledger=new FeedbackLedger(journal,'fixture',()=>1000),record=ledger.queue({workItemId:'task',route:'route',kind:'must-know',text:'任务中断',dueAt:'1970-01-01T00:00:00.000Z'});let calls=0;
+    const dispatcher=new FeedbackDispatcher({ledger,target:()=>({} as FeedbackTarget),deliver:async()=>{calls++;throw new Error('unconfirmed transport');},sent:()=>{},pressure:()=>({interactiveActive:0,interactiveWaiting:0})});
+    await dispatcher.dispatch();await dispatcher.dispatch();assert.equal(calls,1);assert.equal(ledger.unknownRecords()[0]?.id,record.id);
+  }finally{journal.close();rmSync(root,{recursive:true,force:true});}
+});

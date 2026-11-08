@@ -85,3 +85,14 @@ test('must-know feedback requires a due time',()=>{
     rmSync(root,{recursive:true,force:true});
   }
 });
+
+test('program status is idempotent after sent or unknown and interrupted claims recover as unknown',()=>{
+  const root=mkdtempSync(join(tmpdir(),'dafeiyu-status-feedback-')),journal=new Journal(join(root,'journal.sqlite'));
+  try{const ledger=new FeedbackLedger(journal,'fixture',()=>3000),input={workItemId:'task',route:'route',kind:'must-know' as const,text:'结果尚未交付',dueAt:'1970-01-01T00:00:01.000Z',statusVersion:'a'.repeat(64)};
+    const first=ledger.queue(input);ledger.claim(first.id,'route','send-1');ledger.recoverSending();
+    assert.equal(ledger.unknownRecords()[0]?.id,first.id);assert.equal(ledger.queue(input).id,first.id);assert.equal(ledger.claim(first.id,'route','send-2'),null);
+    ledger.markSent(first.id,'send-1','route','receipt');assert.equal(ledger.queue(input).id,first.id);
+    ledger.release(first.id,'route','LATE_FAILURE');assert.equal(ledger.pending('route').length,0);
+    assert.notEqual(ledger.queue({...input,statusVersion:'b'.repeat(64)}).id,first.id);
+  }finally{journal.close();rmSync(root,{recursive:true,force:true});}
+});

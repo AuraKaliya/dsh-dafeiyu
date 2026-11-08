@@ -42,7 +42,8 @@ export class FeedbackDispatcher {
         claimed=this.ports.ledger.claim(record.id,record.route,deliveryId);
       }catch{continue;}
       if(claimed===null)continue;
-      const result=await this.ports.deliver(record,target,deliveryId);
+      let result:DeliveryResult;
+      try{result=await this.ports.deliver(record,target,deliveryId);}catch{result={status:'unknown',code:'FEEDBACK_DELIVERY_UNKNOWN'};}
       this.ports.ledger.settle(record.id,record.route,deliveryId,result.status,
         result.status==='sent'?result.receiptId:undefined,result.status==='sent'?undefined:result.code);
       if(result.status==='sent'){

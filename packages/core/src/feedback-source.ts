@@ -6,6 +6,7 @@ export interface FeedbackSourcePorts {
   readonly journal:Pick<Journal,'get'|'messageRecalled'>;
   readonly repository:Pick<TaskRepositoryPort,'readState'>;
   readonly agentId:string;
+  statusVersion?(runId:string):string|null;
 }
 
 /** The original inbound and task epoch authorize a delayed feedback send. */
@@ -17,8 +18,9 @@ export function feedbackSourceCurrent(record:FeedbackRecord,ports:FeedbackSource
     if(ports.journal.messageRecalled({agentId:ports.agentId,route:record.route},item.message.id))return false;
     if(record.taskId&&record.intentVersion!==undefined){
       const task=ports.repository.readState(ports.agentId,record.taskId);
-      if(task.epoch!==record.intentVersion)return false;
+      if(task.epoch!==record.intentVersion||task.status!=='active')return false;
     }
+    if(record.statusVersion&&(!record.runId||ports.statusVersion?.(record.runId)!==record.statusVersion))return false;
     return true;
   }catch{return false;}
 }

@@ -1,6 +1,6 @@
 {
   "name": "@dafeiyu/server-runtime",
-  "version": "0.28.8",
+  "version": "0.28.9",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
@@ -23,12 +23,12 @@
     "dafeiyu-server": "./bin/dafeiyu-server.mjs"
   },
   "dependencies": {
-    "@dafeiyu/host": "0.28.8",
-    "@dafeiyu/server-executor": "0.28.8",
-    "@dafeiyu/qq": "0.28.8",
-    "@dafeiyu/contracts": "0.28.8",
+    "@dafeiyu/host": "0.28.9",
+    "@dafeiyu/server-executor": "0.28.9",
+    "@dafeiyu/qq": "0.28.9",
+    "@dafeiyu/contracts": "0.28.9",
     "zod": "4.4.3",
-    "@dafeiyu/bilibili": "0.28.8"
+    "@dafeiyu/bilibili": "0.28.9"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5",

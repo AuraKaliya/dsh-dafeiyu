@@ -4,7 +4,7 @@ import {mkdtemp,readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {RuntimeStore,RUNTIME_APPLICATION_ID} from '@dafeiyu/core/runtime-store';
+import {RuntimeStore,RUNTIME_APPLICATION_ID,RUNTIME_SCHEMA_VERSION} from '@dafeiyu/core/runtime-store';
 import {inspectRuntimeMigration,migrateRuntimeStorage} from '@dafeiyu/core';
 import {taskScopeKey} from '@dafeiyu/contracts';
 import {createStorageSchemaV4} from '../packages/core/lib/storage-schema.js';
@@ -47,6 +47,6 @@ test('runtime v4 migration preserves existing rows and starts new accounting wit
   createStorageSchemaV4(db);db.exec(`PRAGMA application_id=${RUNTIME_APPLICATION_ID}; PRAGMA user_version=4`);
   db.prepare('INSERT INTO runtime_metadata VALUES(1,?)').run(JSON.stringify(identity));const intent=randomUUID();db.prepare('INSERT INTO message_intents VALUES(?,?,?,?,NULL)').run(intent,'route','{}','a'.repeat(64));db.close();
   const before=await readFile(file);assert.throws(()=>migrateRuntimeStorage(file,{...identity,agentId:'other'},backup),/IDENTITY_MISMATCH/);assert.deepEqual(await readFile(file),before);
-  const result=migrateRuntimeStorage(file,identity,backup);assert.equal(result.version,5);assert.equal(result.verified?.find(row=>row.table==='message_intents')?.count,1);assert.equal(inspectRuntimeMigration(backup,identity).version,4);
+  const result=migrateRuntimeStorage(file,identity,backup);assert.equal(result.version,RUNTIME_SCHEMA_VERSION);assert.equal(result.verified?.find(row=>row.table==='message_intents')?.count,1);assert.equal(inspectRuntimeMigration(backup,identity).version,4);
   assert.equal(migrateRuntimeStorage(file,identity,join(root,'unused.sqlite')).migrated,false);const current=new RuntimeStore(file,identity);try{assert.equal(current.modelUsage.summary().calls,0);assert.equal(current.modelUsage.summary().legacyHistory,'not-reconstructed');}finally{current.close();}
 });

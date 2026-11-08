@@ -27,6 +27,11 @@ npm run test:acceptance -- --out .runtime/acceptance/my-first-run
 | video-reading | 八条合成视频资料与阅读记录 | 同 Task、记录数量、读取次数、上下文及请求账本 | 没有真实字幕、画面或音轨，不代表完整观看 |
 | delivery-render-recovery | 生成故障后管理入口恢复 | 同任务与交付、持久请求、业务读取一次、最终送达 | 有效材料内的发送前恢复，不覆盖过期续期 |
 | delivery-verifier-recovery | 核验故障后主人 retry | 同候选及证据、生成不重做、重启不重复发送 | 脚本核验，不证明真实语义可靠性 |
+| fault-notice / execution-fault-notice | 交付或执行失败后的系统通知 | 原目标、持久通知回执、零额外通知模型调用 | 业务请求仍使用脚本模型 |
+| fault-notice-unknown | 通知渠道抛异常 | 未知回执、一次尝试、没有备用重发 | 不证明用户实际收到 |
+| task-send-text / task-send-media | 文字或文档附件部分发送后接续 | 原批准正文/媒体、剩余分段、无重复获取与模型调用 | 隔离渠道与合成文档 |
+| task-send-not-sent / task-send-unknown | 确定未发与未知效果对照 | 仅确定未发恢复，未知不重发 | 未查询真实平台回执 |
+| diagnostic-flow | DSH 诊断到交付 | 读取当前实际源码、返回字节与摘要、目标判断及回执分开 | 隔离 DSH 端口，不是实际桌面权限验收 |
 
 场景及判据在 `catalog.ts`、`audit.ts` 中版本管理。运行输出的 `passed` 只表示这个离线子集；`releaseAccepted` 始终为 `false`，全部业务要求的最终验收仍单列为未执行。
 
@@ -87,6 +92,8 @@ node scripts/acceptance/replay-verifier.ts <响应档案.json> <新的报告.jso
 
 ## 继续开发
 
-第 1 轮的生成失败和核验失败位于 `native-delivery-interruption.test.ts` 与 `native-verification-interruption.test.ts`。0.28.8 已将原 `R1.1 known gap` 现状刻画改为成功恢复回归，核对同 Task/Run/交付 ID、实际业务读取不重复和最终送达。恢复取消、撤权、三稿上限及受理后停机另有独立测试进程。判据版本已更新为 `corrective-offline-2`，包含七个离线场景。
+第 1 轮的生成失败和核验失败位于 `native-delivery-interruption.test.ts` 与 `native-verification-interruption.test.ts`。0.28.8 已将原 `R1.1 known gap` 改为成功恢复回归。0.28.9 再加入统一状态、系统通知、文字/媒体发送接续及实际源码诊断，判据为 `corrective-offline-3`，包含十五个离线场景。取消、撤权、三稿上限和真实进程退出另有回归，不能用测试数量替代需求覆盖。
+
+本版修正一项验收器误拒：配置任务尚未结束时，必须等待来源任务，但前台确认此时可以已结束。审计继续检查 sourceState=pending、调度未提前执行、原计划 ID/版本/水位；不再把 foregroundBusy 必须为 true 当作业务条件。已补“前台空闲但来源仍 pending 可接受”和“仅前台忙碌不能替代来源 pending”的正反例。
 
 完整真实故事、真实核验采集、视频补读和故障恢复的独立证据适配、真实模型费用基线及两小时驱动仍待后续工作项完成。当前离线结果不能替代这些退出条件。

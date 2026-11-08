@@ -168,7 +168,8 @@ export class DafeiyuService extends Service {
   private closedModelUsage:ReturnType<RuntimeStore['modelUsage']['summary']>|null=null;
   deliverMessageTaskResult(runId:string){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.request(runId);}
   resumeMessageTaskDelivery(runId:string,input:unknown){if(!this.nativeTaskDelivery)throw new Error('DEPENDENCY_UNAVAILABLE');return this.nativeTaskDelivery.requestRecovery(runId,input);}
-  messageTaskDeliveryStatus(runId:string){return this.runStore?.nativeDeliveries.status(runId)??null;}
+  messageTaskDeliveryStatus(runId:string){return this.nativeTaskDelivery?.status(runId)??this.runStore?.nativeDeliveries.status(runId)??null;}
+  taskProgress(runId:string){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.progressView(runId);}
   taskDeliveryBusy(){return !!this.nativeTaskDelivery?.pending;}
   reconcileCapabilityChange(raw:unknown){if(!this.executions||this.taskDeliveryBusy())return {accepted:false,resumedRunId:null};return this.executions.reconcileCapabilityChange(raw);}
   private nativeExpressionPort:NativeExpressionPort|undefined;
@@ -317,7 +318,7 @@ export class DafeiyuService extends Service {
         return {status:'succeeded',effects:'none',completeness:'complete',data:z.json().parse({...catalog,details}),sources:[],receipts:[]};
       }},{id:'dafeiyu_task_outcome',version:'1',description:'说明当前任务应等待还是完成。定期巡视计划已保存时，可以完成创建计划的任务，后续由计划独立触发；不要为了等下一轮把创建任务卡在能力缺失状态。requiredCapabilities只填尚未提供的具体工具名，不能填已有能力或协议标签。这条决定不代表操作成功或消息送达。',effects:'local-write',scope:'task',
         inputSchema:TaskDispositionSchema,outputSchema:z.json(),
-        execute:async(input,context)=>{if(!this.executions)throw new Error('DEPENDENCY_UNAVAILABLE');return {status:'succeeded',effects:'confirmed',completeness:'complete',data:this.executions.setDisposition(context,input),sources:[],receipts:[]};}
+        execute:async(input,context)=>{if(!this.executions)throw new Error('DEPENDENCY_UNAVAILABLE');return {status:'succeeded',effects:'confirmed',completeness:'complete',data:z.json().parse(this.executions.setDisposition(context,input)),sources:[],receipts:[]};}
       },{id:'dafeiyu_task_review',version:'1',description:'按需复核当前工作的草案与实际操作，获得有局限的建议。是否采纳、继续、等待和留下什么想法仍由你决定；不会自动修改任务或人格。',scope:'task',effects:'read',inputSchema:z.strictObject({proposal:z.string().trim().min(1).max(16000)}),outputSchema:z.json(),
         execute:async(input,context)=>{if(!this.executions)throw new Error('DEPENDENCY_UNAVAILABLE');return {status:'succeeded',effects:'none',completeness:'complete',data:await this.executions.review(context,input),sources:[],receipts:[]};}
       }]});
@@ -368,7 +369,7 @@ export class DafeiyuService extends Service {
     if(!channel?.active||!channel.extension.channels?.some(c=>c.channel===binding.channel&&c.account===binding.account))throw new Error('SCOPE_DENIED');
     return this.executions.bindMessageTasks({...binding,active:()=>channel.active&&binding.active()});}
   submitMessageTask(context:ExecutionContext,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.submitMessageTask(context,pluginId,input);}
-  messageTaskStatus(context:ExecutionContext,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');const status=this.executions.messageTaskStatus(context,pluginId,input);return 'runId'in status?{...status,delivery:this.messageTaskDeliveryStatus(status.runId)}:{...status,items:status.items.map(item=>({...item,delivery:this.messageTaskDeliveryStatus(item.runId)}))};}
+  messageTaskStatus(context:ExecutionContext,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.messageTaskStatus(context,pluginId,input);}
   controlMessageTask(context:ExecutionContext,pluginId:string,input:unknown){if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');return this.executions.controlMessageTask(context,pluginId,input);}
   capabilityManifest(){return {features:[...new Set([...this.features(),...this.registry.providedFeatures()])],actions:this.registry.actions().map(action=>({id:action.id,owner:action.owner,pluginVersion:action.pluginVersion,version:action.version,effects:action.effects,scope:action.scope}))};}
   private configuredCapabilities(){return {features:this.capabilityManifest().features.sort(),actions:[
@@ -521,12 +522,15 @@ export class DafeiyuService extends Service {
     this.executions=new ExecutionCoordinator({agentId:this.config.agentId,store,journal:this.journal,runtime:this.runtime,registry:this.registry,scheduler:this.scheduler,options,personas:this.personas,
       activitySharing:()=>this.activitySharingState(),
       resumeDelivery:(runId,input)=>this.resumeMessageTaskDelivery(runId,input),
+      deliveryCounts:runId=>this.nativeTaskDelivery?.deliveryCounts(runId)??null,
+      deliveryState:runId=>this.messageTaskDeliveryStatus(runId),
       isOwnerMessage:item=>this.ownerDirectories(item).length>0,messageResources:item=>this.ownerQueryResources(item),channelDescription:id=>this.conversations.deliveryChannel(this.journal.get(id))?.capability.description??'',repository:()=>this.repositoryPort,memory:()=>this.executionMemoryPort,experience:()=>this.experienceMemory,accepting:()=>this.accepting,assertAccepting:()=>this.assertAccepting(),persona:()=>this.persona(),model:this.analysisModelRoute(),
       turnTimeoutMs:this.config.turnTimeoutMs,taskTimeoutMs:this.config.taskTimeoutMs,reviewTimeoutMs:this.config.phaseTimeouts.review,context:this.config.context,signal:this.controller.signal,messageSignal:id=>this.conversations.messageProcessingSignal(id),media:()=>this.mediaPort,projectConversation:()=>this.conversationRuns!.project(),progress:id=>this.nativeTaskDelivery?.progress(id)??Promise.resolve(null),settled:id=>{if(this.runStore?.get(id).state==='failed')void this.nativeTaskDelivery?.progress(id).catch(()=>{});else void this.nativeTaskDelivery?.request(id,true).catch(()=>{});}});
     this.nativeTaskDelivery=new NativeTaskDelivery({ctx:this.ctx,store,contexts:this.contexts,cwd:this.config.dataDir,signal:this.controller.signal,timeoutMs:NATIVE_RENDER_ATTEMPTS*(this.config.phaseTimeouts.render+this.config.phaseTimeouts.verification)+this.config.deliveryTimeoutMs,sendTimeoutMs:this.config.deliveryTimeoutMs,
       admitActivityShare:runId=>{const pressure=this.activityPressure(),policy=this.activitySharingState();return !!policy&&pressure.foregroundWaiting+pressure.foregroundRuns===0&&store.prepareActivityShare(runId,policy.policyHash,policy.cooldownMs);},
       describe:id=>this.executions!.describeMessageResult(id),access:id=>this.executions!.nativeResultAccess(id),expression:()=>this.nativeExpressionPort,accepting:()=>this.accepting,flush:()=>this.executions!.flushEvents(),
       validateRecovery:id=>this.executions!.validateDeliveryRecovery(id),
+      progressView:id=>this.executions!.progressView(id),dispatchFeedback:()=>this.dispatchFeedback(),
       feedbackSource:id=>this.executions!.feedbackSource(id),
       feedback:this.feedback,
       model:()=>({provider:this.config.provider,model:this.config.model,...(this.config.reasoningEffort?{reasoningEffort:ReasoningEffortId(this.config.reasoningEffort)}:{})}),
@@ -539,6 +543,7 @@ export class DafeiyuService extends Service {
   }
   async recoverExecutions():Promise<void>{if(!this.executions)throw new Error('EXECUTION_NOT_CONFIGURED');if(this.gate.state!=='registered')throw new Error('SERVICE_LIFECYCLE_CONFLICT');this.executions.recover();await this.conversationRuns?.recover();this.executionRecovered=true;this.migrateFeedback();}
   private migrateFeedback():void{
+    this.feedback.recoverSending();
     for(const record of this.feedback.legacyPending()){
       const source=this.executions?.feedbackSourceForRun(record.workItemId);
       try{
@@ -561,7 +566,8 @@ export class DafeiyuService extends Service {
   bindFeedbackReceipts(port:FeedbackReceiptPort){if(this.feedbackReceipts)throw new Error('DUPLICATE_PROVIDER');this.feedbackReceipts=port;return ()=>{if(this.feedbackReceipts===port)this.feedbackReceipts=undefined;};}
   private feedbackSourceCurrent(record:import('./feedback-ledger.js').FeedbackRecord):boolean {
     if(!this.repositoryPort)return false;
-    return feedbackSourceCurrent(record,{journal:this.journal,repository:this.repositoryPort,agentId:this.config.agentId});
+    return feedbackSourceCurrent(record,{journal:this.journal,repository:this.repositoryPort,agentId:this.config.agentId,
+      statusVersion:runId=>{try{return this.executions?.feedbackSource(runId)?this.executions.progressView(runId).version:null;}catch{return null;}}});
   }
   private reconcileNoticeReceipts():void{
     for(const record of this.feedback.unknownRecords()){
@@ -586,7 +592,7 @@ export class DafeiyuService extends Service {
     }
   }
   async dispatchFeedback(now=Date.now()):Promise<number>{
-    if(!this.executions||!this.repositoryPort)return 0;
+    if(!this.executions||!this.repositoryPort||!this.accepting)return 0;
     await this.reconcileFeedback();
     const dispatcher=this.feedbackDispatcher??=new FeedbackDispatcher({
       ledger:this.feedback,
@@ -601,8 +607,10 @@ export class DafeiyuService extends Service {
           const signal=AbortSignal.any([this.controller.signal,target.channel.signal,AbortSignal.timeout(30_000)]);
           const guard=()=>{signal.throwIfAborted();this.assertAccepting();if(!this.feedbackSourceCurrent(record)||this.conversations.deliveryChannel(target.item)?.identity!==target.channel.identity)throw new Error('SOURCE_STALE');};
           const reply:Reply={id:deliveryId,conversation:target.item.message.conversation,sourceMessageId:target.item.message.id,text:record.text};
-          invoked=true;
-          return await this.conversations.enqueueTaskDelivery(record.route,()=>target.channel.capability.deliver(reply,signal,guard));
+          return await this.conversations.enqueueTaskDelivery(record.route,async()=>{
+            try{guard();}catch{return {status:'not-sent' as const,code:'FEEDBACK_SOURCE_UNAVAILABLE'};}
+            invoked=true;try{return await target.channel.capability.deliver(reply,signal,guard);}catch{return {status:'unknown' as const,code:'FEEDBACK_DELIVERY_UNKNOWN'};}
+          });
         }catch{return invoked?{status:'unknown' as const,code:'FEEDBACK_DELIVERY_UNKNOWN'}:{status:'not-sent' as const,code:'FEEDBACK_DISPATCH_FAILED'};}
       },
       sent:(record,target,result,deliveryId)=>{

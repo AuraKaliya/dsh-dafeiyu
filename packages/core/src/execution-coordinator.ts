@@ -1,4 +1,5 @@
 import {withRunUsage} from './usage.js';
+import {buildTaskProgress} from './task-progress.js';
 import {ActivityPlanReceiptSchema,TaskDispositionSchema} from '@dafeiyu/contracts';
 import {stageHandoff} from './context-handoff.js';
 import {readingStage} from './reading-stage.js';
@@ -57,6 +58,8 @@ interface Dependencies {
   messageSignal?:(inboundId:string)=>AbortSignal|undefined;
   settled?:(runId:string)=>void;
   progress?:(runId:string)=>Promise<Json>;
+  deliveryCounts?:(runId:string)=>unknown;
+  deliveryState?:(runId:string)=>ReturnType<RuntimeStore['nativeDeliveries']['status']>;
   resumeDelivery?:(runId:string,input:import('@dafeiyu/contracts').DeliveryRecoveryRequest)=>import('@dafeiyu/contracts').DeliveryRecoveryReceipt;
   media?:()=>import('@dafeiyu/contracts').MediaPort|undefined;
 }
@@ -251,7 +254,7 @@ export class ExecutionCoordinator {
   private messageTaskState(taskId:string,run:StoredRun,relation:string,extra:Record<string,import('@dafeiyu/contracts').Json>={}){
     const task=this.repository().readState(this.d.agentId,taskId);
     return {accepted:false,relation,taskId,runId:run.id,taskState:task.status,runState:run.state,version:task.version,intentVersion:task.epoch,
-      goal:task.goal,error:run.error,phase:this.d.store.phaseStatus(run.id),review:this.reviewStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),...extra};
+      goal:task.goal,error:run.error,phase:this.d.store.phaseStatus(run.id),review:this.reviewStatus(run.id),delivery:this.deliveryState(run.id),progress:this.progressView(run.id),...extra};
   }
   submitMessageTask(context:ExecutionContext,pluginId:string,raw:unknown):Json {
     const {binding,item}=this.messageAuthority(context,pluginId,true),input=MessageTaskSubmitSchema.parse(raw);
@@ -299,13 +302,13 @@ export class ExecutionCoordinator {
       const task=this.repository().readState(this.d.agentId,taskId);
       if(relation==='status')return finish(z.json().parse(this.messageTaskState(taskId,target,relation,{note:'只查询状态，未重试或排队。'})));
       if(!plan.revise&&(task.status==='completed'||target.state==='completed')){
-        const delivery=this.d.store.nativeDeliveries.status(target.id);
+        const delivery=this.deliveryState(target.id);
         if(['continue','retry'].includes(relation)&&delivery?.recovery.available&&this.d.resumeDelivery){
           const recovery=this.d.resumeDelivery(target.id,{requestId:runtimeHash(['delivery-recovery',plan.inboundId]),expectedVersion:delivery.version});
           return finish(z.json().parse(this.messageTaskState(taskId,target,relation,{accepted:true,reusedTask:true,deliveryRecovery:recovery,note:'已受理原成果的交付接续；不重新执行业务，尚不表示已核验或送达。'})));
         }
         this.d.store.appendExecutionEvent(target.id,'task.intent.decision',{relation,inboundId:plan.inboundId,messageHash:plan.messageHash,taskId,decision:'not-rerun',reason:'completed'});this.flushEvents();
-        return finish(z.json().parse(this.messageTaskState(taskId,target,relation,{alreadyCompleted:task.status==='completed',resultPending:task.status==='active',decisionRecorded:true,note:'已有完成的运行；本次确认不重复执行或交付。'})));
+        return finish(z.json().parse(this.messageTaskState(taskId,target,relation,{alreadyCompleted:task.status==='completed',executionEnded:target.state==='completed',resultPending:this.progressView(target.id).delivery.state!=='sent',decisionRecorded:true,note:'已有结束的运行；目标判断、执行结束和送达分别见progress，本次确认不重复执行或交付。'})));
       }
       const active=this.d.store.list(['accepted','queued','running','cancelling']).find(run=>run.definition.taskId===taskId);
       if(active&&!plan.revise)return finish(z.json().parse(this.messageTaskState(taskId,active,relation,{note:'同一任务正在执行，未重复排队。'})));
@@ -351,6 +354,7 @@ export class ExecutionCoordinator {
     this.validateMessageSource(source);this.validateMessageAncestors(run);
     const task=this.repository().readState(this.d.agentId,run.definition.taskId!);
     if(task.status!=='active'||task.epoch!==run.definition.intentVersion)throw new Error('SOURCE_STALE');
+    if(this.d.store.latestTaskRun(task.id)!==run.id)throw new Error('RUN_SUPERSEDED');
   }
   async nativeResultAccess(id:string):Promise<NativeExpressionAccess>{const run=this.d.store.get(z.uuid().parse(id));if(run.definition.scope.kind!=='task'||!['completed','waiting'].includes(run.state)||run.state==='completed'&&!run.result)throw new Error('RESULT_UNAVAILABLE');
     const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
@@ -451,13 +455,13 @@ export class ExecutionCoordinator {
     for(const run of this.d.store.latestConversationTasks(scene,offset,limit)){try{
       const saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;if(!source||run.definition.scope.kind!=='task'||run.state==='cancelled')continue;
       this.validateMessageSource(source);const task=this.repository().readState(this.d.agentId,run.definition.taskId!);if(task.status==='completed'||task.epoch!==run.definition.intentVersion)continue;
-      const reviewed=z.object({review:TaskReviewSchema}).safeParse(this.d.store.readInput(run.id,'task-review')),delivery=this.d.store.nativeDeliveries.status(run.id);
+      const reviewed=z.object({review:TaskReviewSchema}).safeParse(this.d.store.readInput(run.id,'task-review')),delivery=this.deliveryState(run.id);
       if(run.state==='completed'&&delivery?.state==='sent')continue;
       const operations=this.d.store.operations(run.id);const goal=source.kind==='explicit-task'?task.goal:'本会话关联的自主探索；内部目标不在此处展开',label=Array.from(goal).slice(0,96).join('');
       const data=z.json().parse({kind:'current-responsibility',taskId:task.id,runId:run.id,intentVersion:task.epoch,state:run.state,taskState:task.status,
         goalLabel:label,goalCoverage:{shown:Array.from(label).length,total:Array.from(goal).length},review:reviewed.success?reviewed.data.review.goalStatus:null,
         unfinished:reviewed.success?reviewed.data.review.unfinished.length:null,confirmedOperationRecords:operations.filter(operation=>operation.outcome?.effects==='confirmed').length,unknownEffectRecords:operations.filter(operation=>operation.outcome?.effects==='unknown'||!operation.outcome&&run.state!=='running').length,delivery:delivery?.state??null,asOf:run.updatedAt,
-        note:'本会话任务的时点索引；完整目标和约束以任务记录为准，运行结束不等于已完成或送达。需要时查询任务状态；本索引不创建新承诺。'});
+        progress:this.progressView(run.id),note:'本会话任务的时点索引；完整目标和约束以任务记录为准，运行结束不等于已完成或送达。需要时查询任务状态；本索引不创建新承诺。'});
       // A dated status remains a valid historical observation after the task progresses; message authority is still live.
       const guard=()=>{this.validateMessageSource(source);};
       result.push({id:task.id,version:runtimeHash(data),data,proof:{runId:run.id,taskId:task.id,sourceHash:runtimeHash(source)},guard});
@@ -469,7 +473,16 @@ export class ExecutionCoordinator {
     const run=runs.find(run=>run.definition.taskId===input.taskId);if(!run)throw new Error('SCOPE_DENIED');return this.messageTaskStatusRecord(run,input.taskId);}
   private messageTaskStatusRecord(run:StoredRun,taskId:string){
     const task=this.repository().readState(this.d.agentId,taskId),intent=this.messageIntent(run),motivation=this.motivation(run).kind;return {taskId,runId:run.id,state:run.state,version:run.version,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,title:motivation==='self-exploration'?'自主探索':task.title,goal:motivation==='self-exploration'?'内部探索目标；分享内容另经目标范围核验':task.goal,motivation,
-      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',phase:this.d.store.phaseStatus(run.id),review:this.reviewStatus(run.id),delivery:this.d.store.nativeDeliveries.status(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+      resultCurrent:task.status==='active'&&task.epoch===run.definition.intentVersion&&run.state==='completed',phase:this.d.store.phaseStatus(run.id),review:this.reviewStatus(run.id),delivery:this.deliveryState(run.id),progress:this.progressView(run.id),blocking:intent?.blocking??false,objections:intent?.events.filter(event=>event.kind==='objection').map(event=>({id:event.id,category:event.category,blocking:event.blocking,resolved:intent.events.some(resolved=>resolved.resolves===event.id)}))??[]};}
+  private deliveryState(runId:string){return this.d.deliveryState?.(runId)??this.d.store.nativeDeliveries.status(runId);}
+  progressView(runId:string){const run=this.d.store.get(runId);if(!run.definition.taskId)throw new Error('TASK_REQUIRED');
+    let counts:unknown;try{counts=this.d.deliveryCounts?.(runId);}catch{/* Unavailable channel counts cannot become confirmed receipts. */}
+    const task=this.repository().readState(this.d.agentId,run.definition.taskId);let intentState:'clear'|'blocked'|'unavailable'='clear';
+    if(run.snapshot&&task.status==='active'&&task.epoch===run.definition.intentVersion)try{intentState=this.messageIntent(run)?.blocking?'blocked':'clear';}catch{intentState='unavailable';}
+    return buildTaskProgress({run,task,latestRunId:this.d.store.latestTaskRun(task.id)??run.id,intentState,review:this.d.store.readInput(runId,'task-review'),
+      disposition:this.d.store.readInput(runId,'agent-disposition'),phase:this.d.store.phaseStatus(runId),checkpoints:this.d.store.checkpoints(runId).length,
+      delivery:this.deliveryState(runId),counts,operations:this.d.store.operations(runId)});
+  }
   feedbackSource(runId:string){const run=this.d.store.get(runId),saved=savedSchema.parse(this.d.store.request(run.requestKey).payload),source=saved.messageSource;
     if(!source||source.kind!=='explicit-task'||!['qq','local-owner'].includes(source.conversation.channel)||run.definition.scope.kind!=='task')return null;
     const {item}=this.validateMessageSource(source),task=this.repository().readState(this.d.agentId,run.definition.taskId!);
@@ -512,7 +525,7 @@ export class ExecutionCoordinator {
     try {
     if(input.action==='resume'){
       const task=this.repository().readState(this.d.agentId,input.taskId);if(task.version!==input.expectedVersion||task.status!=='active'||task.epoch!==run.definition.intentVersion)throw new Error('VERSION_CONFLICT');
-      const delivery=this.d.store.nativeDeliveries.status(run.id);
+      const delivery=this.deliveryState(run.id);
       if(run.state==='completed'&&delivery?.recovery.available&&this.d.resumeDelivery){
         const recovery=this.d.resumeDelivery(run.id,{requestId:runtimeHash([control.id,'delivery-recovery']),expectedVersion:delivery.version});
         const result=z.json().parse({accepted:true,taskId:task.id,action:input.action,taskVersion:task.version,intentVersion:task.epoch,taskState:task.status,runId:run.id,deliveryRecovery:recovery});
@@ -625,20 +638,21 @@ export class ExecutionCoordinator {
   private resolve(producer:string,ref:RunRef){const authority=this.refs.get(ref);if(authority?.producer!==producer)throw new Error('SCOPE_DENIED');return this.d.store.get(authority.id);}
   private resolveTask(producer:string,ref:TaskRef){const authority=this.tasks.get(ref);if(authority?.producer!==producer)throw new Error('SCOPE_DENIED');return authority.id;}
   async management(action:string,raw:unknown){
-    if(action==='list'){const input=z.strictObject({offset:z.number().int().nonnegative().default(0)}).parse(raw);return this.d.store.list().reverse().slice(input.offset,input.offset+50).map(run=>({id:run.id,taskId:run.definition.taskId,state:run.state,version:run.version,createdAt:run.createdAt,updatedAt:run.updatedAt,error:run.error,origin:run.definition.origin.kind}));}
+    if(action==='list'){const input=z.strictObject({offset:z.number().int().nonnegative().default(0)}).parse(raw);return this.d.store.list().reverse().slice(input.offset,input.offset+50).map(run=>({id:run.id,taskId:run.definition.taskId,state:run.state,version:run.version,createdAt:run.createdAt,updatedAt:run.updatedAt,error:run.error,origin:run.definition.origin.kind,progress:run.definition.taskId?this.progressView(run.id):null}));}
     const input=z.strictObject({id:z.uuid(),requestId:z.uuid().optional(),expectedVersion:z.number().int().positive().optional()}).parse(raw),run=this.d.store.get(input.id);
     if(!run.definition.taskId){if(action==='detail')return {run,operations:this.d.store.operations(run.id).slice(-100),allowedActions:[]};throw new Error('MANAGEMENT_TASK_REQUIRED');}
     const producer=this.d.store.request(run.requestKey).producer,port=this.producer(producer),ref=port.restoreRun(run.id),status=port.status(ref);
     if(action==='detail'){
       let result:string|null=null;try{result=await port.readResult(ref);}catch{}
-      let delivery=this.d.store.nativeDeliveries.status(run.id);
+      let delivery=this.deliveryState(run.id);
       if(delivery?.recovery.available)try{this.validateDeliveryRecovery(run.id);}catch(error){delivery={...delivery,recovery:{...delivery.recovery,available:false,reason:safeCode(error)}};}
-      return {run,status,result,delivery,usage:this.d.store.usage(run.id),operations:this.d.store.operations(run.id),allowedActions:delivery?.recovery.available?['resume-delivery']:run.state==='running'?['pause','cancel']:['accepted','queued'].includes(run.state)?['cancel']:run.state==='waiting'&&status.checkpoints.length?['resume']:[]};
+      const progress=this.progressView(run.id);
+      return {run,status,result,delivery,progress,usage:this.d.store.usage(run.id),operations:this.d.store.operations(run.id),allowedActions:run.state==='running'?['pause','cancel']:['accepted','queued'].includes(run.state)?['cancel']:progress.next.action==='resume-delivery'?['resume-delivery']:progress.next.action==='resume-task'?['resume']:[]};
     }
     if(action==='resume-delivery'){if(!input.requestId||!input.expectedVersion||!this.d.resumeDelivery)throw new Error('MANAGEMENT_REVISION_CONFLICT');return this.d.resumeDelivery(run.id,{requestId:input.requestId,expectedVersion:input.expectedVersion});}
     if(!input.requestId||input.expectedVersion!==run.version)throw new Error('MANAGEMENT_REVISION_CONFLICT');
     if(action==='pause'||action==='cancel')return this.control(producer,run,{requestId:input.requestId,expectedVersion:input.expectedVersion,reason:'主人在管理中心请求'+action},action);
-    if(action==='resume'){const checkpoint=status.checkpoints.at(-1);if(!checkpoint)throw new Error('CHECKPOINT_REQUIRED');const task=port.openTask(run.definition.taskId),state=port.taskState(task);return port.resume(task,{requestId:input.requestId,expectedVersion:state.version,taskId:task.id,policyId:run.definition.policyId,parentRunId:run.id,checkpointId:checkpoint});}
+    if(action==='resume'){if(this.progressView(run.id).next.action!=='resume-task')throw new Error('TASK_RESUME_NOT_AVAILABLE');const checkpoint=status.checkpoints.at(-1);if(!checkpoint)throw new Error('CHECKPOINT_REQUIRED');const task=port.openTask(run.definition.taskId),state=port.taskState(task);return port.resume(task,{requestId:input.requestId,expectedVersion:state.version,taskId:task.id,policyId:run.definition.policyId,parentRunId:run.id,checkpointId:checkpoint});}
     throw new Error('MANAGEMENT_ACTION_INVALID');
   }
   producer(raw:string,options?:unknown){const producer=ProducerSchema.parse(raw),declared=z.strictObject({motivation:MotivationSchema}).optional().parse(options);
@@ -812,7 +826,12 @@ export class ExecutionCoordinator {
     if(task.status!=='active'||('taskId'in input&&task.version!==input.expectedVersion))return this.d.store.transition(run.id,run.version,'failed','TASK_NOT_ACTIVE');
     return run;
   }
-  recover():void{this.d.store.recover();this.d.store.nativeDeliveries.recover();for(const request of this.d.store.pendingRequests())if(savedSchema.safeParse(request.payload).success)this.accept(request.id);this.flushEvents();}
+  recover():void{
+    const interrupted=new Set([...this.d.store.list(['running','cancelling']).filter(run=>run.definition.taskId).map(run=>run.id),...this.d.store.nativeDeliveries.list(['rendering','verifying','sending']).map(row=>row.runId)]);
+    this.d.store.recover();this.d.store.nativeDeliveries.recover();
+    for(const runId of interrupted)this.d.store.appendExecutionEvent(runId,'task.status.notice-required',{runVersion:this.d.store.get(runId).version,deliveryVersion:this.d.store.nativeDeliveries.get(runId)?.version??null});
+    for(const request of this.d.store.pendingRequests())if(savedSchema.safeParse(request.payload).success)this.accept(request.id);this.flushEvents();
+  }
   activate():void{for(const pending of this.d.store.pendingMessageIntents()){try{this.applyMessageIntent(MessageIntentPlanSchema.parse(pending.body));}catch(error){this.d.store.finishMessageIntent(pending.inboundId,{accepted:false,reason:safeCode(error),note:'恢复意图时权限或任务版本已变化，保留原记录供核对。'});}}this.resumeSegments();this.resumeInterruptedReadings();for(const run of this.d.store.list(['accepted','queued']))if(run.definition.scope.kind==='task')this.schedule(run);}
   private resumeInterruptedReadings(){
     for(const run of this.d.store.list(['interrupted'])){
@@ -836,7 +855,7 @@ export class ExecutionCoordinator {
       return {inboundId:source.inboundId,taskId:run.definition.taskId,intentVersion:run.definition.intentVersion};}catch{return null;}
   }
   private status(run:StoredRun){return {id:run.id,taskId:run.definition.taskId,state:run.state,version:run.version,result:run.result,error:run.error,
-    checkpoints:this.d.store.checkpoints(run.id),operations:this.d.store.operations(run.id).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))};}
+    checkpoints:this.d.store.checkpoints(run.id),progress:run.definition.taskId?this.progressView(run.id):null,operations:this.d.store.operations(run.id).map(op=>({id:op.id,action:op.action,state:op.state,status:op.outcome?.status??null,effects:op.outcome?.effects??null,receipts:op.outcome?.receipts??[]}))};}
   private control(producer:string,run:StoredRun,raw:unknown,mode:'cancel'|'pause'|'yield'){
     const input=RunControlSchema.parse(raw),request=this.d.store.prepareRequest(`control:${producer}`,input.requestId,{kind:'control',runId:run.id,mode,...input});
     if(request.runId)return this.status(this.d.store.get(request.runId));
@@ -996,7 +1015,7 @@ export class ExecutionCoordinator {
         if(review)this.d.store.bindInput(id,'task-review',this.d.store.readInput(id,'task-review:'+review.id));
         const waiting=memory?.intent(access).blocking||decision?.next==='wait';
         run=this.d.store.get(id);
-        this.d.store.appendExecutionEvent(id,'task.stage',{phase:waiting?'waiting':'delivery',decision:decision??{next:'complete',reason:'Agent returned its final response'},at:new Date().toISOString()});
+        this.d.store.appendExecutionEvent(id,'task.stage',{phase:waiting?'waiting':'delivery',decision:z.json().parse(decision??{next:'complete',reason:'Agent returned its final response'}),at:new Date().toISOString()});
         if(waiting)this.d.store.waitWithResult(id,run.version,result.resultRef,memory?.intent(access).blocking?'TASK_OBJECTION_UNRESOLVED':decision?.requiredCapabilities.length?'TASK_CAPABILITY_CHANGE_PENDING':'TASK_WAITING');
         else this.d.store.complete(id,run.version,result.resultRef);
       }catch(error){run=this.d.store.get(id);
